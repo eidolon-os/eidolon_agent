@@ -1,0 +1,36 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+*.egg-info
+.coverage
+.coverage.*
+agent_history.gif
+static/browser_history/*.gif
+
+# Virtual environments
+.venv
+venv/
+.venv-langgraph-new
+venv-langgraph-new/
+
+# Environment variables
+.env
+
+# user conf
+conf.yaml
+
+.idea/
+.langgraph_api/
+.DS_Store
+
+# coverage report
+coverage.xml
+coverage/
+.DS_Store
+logs/
+*.log
+app/SQLlite/SQLGen.db
+
+data/
