@@ -16,12 +16,24 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
+
+
+def _expand_all_paths(obj: object) -> None:
+    """Recursively expand ``~`` in all Path fields of a pydantic model tree."""
+    if not isinstance(obj, BaseModel):
+        return
+    for name in obj.model_fields:
+        v = getattr(obj, name, None)
+        if isinstance(v, Path):
+            object.__setattr__(obj, name, v.expanduser())
+        elif isinstance(v, BaseModel):
+            _expand_all_paths(v)
 
 # ---------------------------------------------------------------------------
 # Section models
@@ -170,9 +182,9 @@ class PairingSettings(BaseModel):
 class RuntimeSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    log_dir: Path = Path("~/eidolon/logs").expanduser()
-    run_dir: Path = Path("~/eidolon/run").expanduser()
-    debug_dir: Path = Path("~/eidolon/debug").expanduser()
+    log_dir: Path = Path("~/eidolon/logs")
+    run_dir: Path = Path("~/eidolon/run")
+    debug_dir: Path = Path("~/eidolon/debug")
     warmup_enabled: bool = True
     recover_active_instances: bool = True
     drain_timeout_s: int = 30
@@ -246,6 +258,11 @@ class Settings(BaseSettings):
     pairing: PairingSettings = Field(default_factory=PairingSettings)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
     turn: TurnSettings = Field(default_factory=TurnSettings)
+
+    @model_validator(mode="after")
+    def _expand_tilde_paths(self) -> Settings:
+        _expand_all_paths(self)
+        return self
 
     @classmethod
     def settings_customise_sources(

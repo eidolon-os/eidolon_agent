@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from pathlib import Path
 
 from sqlalchemy import select
 
@@ -32,7 +31,7 @@ async def main(conv_id: str) -> None:
     if not rows:
         print(f"no messages for {conv_id} in {settings.sqlite.path}")
         return
-    for msg, turn in rows:
+    for msg, _turn in rows:
         ts = msg.created_at.isoformat(timespec="seconds")
         print(f"[{ts}] {msg.role:>9}: {msg.content}")
     await engine.dispose()
