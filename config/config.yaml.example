@@ -38,7 +38,7 @@ llm:
   models:
     - name: openai/deepseek-v4-flash
       api_key: "1234"
-      api_base: http://mopai.geni.dyxnet.com.cn/
+      api_base: http://mopai.geni.dyxnet.com.cn/v1
   default_model: openai/deepseek-v4-flash
 
 workstation:

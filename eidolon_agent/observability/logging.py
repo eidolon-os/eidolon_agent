@@ -52,3 +52,6 @@ def configure_logging(settings: ObservabilitySettings) -> None:
     for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "fastapi", "grpc", "sqlalchemy"):
         logging.getLogger(name).handlers = [_InterceptHandler()]
         logging.getLogger(name).propagate = False
+    # LiteLLM emits noisy DEBUG (cost-map lookups for unmapped models, retry traces).
+    for name in ("LiteLLM", "litellm", "litellm.utils", "litellm.cost_calculator"):
+        logging.getLogger(name).setLevel(logging.WARNING)
