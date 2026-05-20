@@ -58,7 +58,7 @@ def _unauthenticated(msg: str):
     async def _abort(request, context):  # type: ignore[no-untyped-def]
         await context.abort(grpc.StatusCode.UNAUTHENTICATED, msg)
 
-    return grpc.aio.unary_unary_rpc_method_handler(_abort)
+    return grpc.unary_unary_rpc_method_handler(_abort)
 
 
 # Lightweight contextvar-based scope so servicers can grab the verified Identity

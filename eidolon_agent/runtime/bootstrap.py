@@ -44,7 +44,7 @@ from eidolon_agent.context.providers import (
     RealtimeSignalProvider,
 )
 from eidolon_agent.dispatch import NatsWorkstationClient, TaskClassifier
-from eidolon_agent.events import InMemoryEventBus, InMemoryKVStore, NatsEventBus, NatsKVStore
+from eidolon_agent.events import NatsEventBus, NatsKVStore
 from eidolon_agent.events.nats_bus import ensure_buckets
 from eidolon_agent.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.history import HistoryFanout, HistoryManager
@@ -82,13 +82,8 @@ _log = logging.getLogger(__name__)
 async def build_application(
     *,
     settings: Settings | None = None,
-    use_inmem_nats: bool = False,
 ) -> Container:
-    """Construct and connect everything. Idempotent within a single process.
-
-    Pass ``use_inmem_nats=True`` in dev / tests to skip the NATS server and use
-    the in-memory bus (handy for first-run before infra is up).
-    """
+    """Construct and connect everything. Idempotent within a single process."""
     settings = settings or load_settings()
     container = Container(settings=settings)
 
@@ -106,16 +101,11 @@ async def build_application(
     container.sqlite_engine = engine
     container.session_factory = session_factory
 
-    if use_inmem_nats:
-        bus: object = InMemoryEventBus()
-        container.event_bus = bus
-        container.kv_buckets = {name: InMemoryKVStore(name) for name in settings.nats.kv_buckets}
-    else:
-        nats_bus = NatsEventBus(settings.nats.url, creds_path=str(settings.nats.creds_path) if settings.nats.creds_path else None)
-        await nats_bus.connect()
-        await ensure_buckets(nats_bus, settings.nats.kv_buckets)
-        container.event_bus = nats_bus
-        container.kv_buckets = {name: NatsKVStore(nats_bus, name) for name in settings.nats.kv_buckets}
+    nats_bus = NatsEventBus(settings.nats.url, creds_path=str(settings.nats.creds_path) if settings.nats.creds_path else None)
+    await nats_bus.connect()
+    await ensure_buckets(nats_bus, settings.nats.kv_buckets)
+    container.event_bus = nats_bus
+    container.kv_buckets = {name: NatsKVStore(nats_bus, name) for name in settings.nats.kv_buckets}
     cache_kv = container.kv_buckets.get("EIDOLON_CACHE")
     revocation_kv = container.kv_buckets.get("DEVICE_REVOCATIONS")
 

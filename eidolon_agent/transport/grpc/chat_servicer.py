@@ -91,11 +91,12 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
 
             start = frame.start
             try:
-                agent = self._registry.resolve_for_caller(
+                inst = self._registry.resolve_for_caller(
                     tenant_id=identity.tenant_id,
                     user_id=identity.user_id,
-                    instance_id=identity.agent_instance_id,
-                ).agent
+                    instance_id=None,
+                )
+                agent = inst.agent
             except NotFoundError as exc:
                 await context.abort(grpc.StatusCode.FAILED_PRECONDITION, exc.message)
 
@@ -107,7 +108,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     identity=Identity(
                         tenant_id=identity.tenant_id,
                         user_id=identity.user_id,
-                        agent_instance_id=identity.agent_instance_id,
+                        agent_instance_id=inst.instance_id,
                         device_id=identity.device_id,
                     ),
                     caller_kind=CallerKind.LIVEKIT_VOICE,  # most chat traffic; web overrides via metadata in future
@@ -147,11 +148,12 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         identity = current_identity()
         if identity is None:
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "no identity")
-        agent = self._registry.resolve_for_caller(
+        inst = self._registry.resolve_for_caller(
             tenant_id=identity.tenant_id,
             user_id=identity.user_id,
-            instance_id=identity.agent_instance_id,
-        ).agent
+            instance_id=None,
+        )
+        agent = inst.agent
         ti = TurnInput(
             turn_id=request.turn_id or uuid.uuid4().hex,
             conversation_id=request.conversation_id,
@@ -160,7 +162,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 identity=Identity(
                     tenant_id=identity.tenant_id,
                     user_id=identity.user_id,
-                    agent_instance_id=identity.agent_instance_id,
+                    agent_instance_id=inst.instance_id,
                 ),
                 caller_kind=CallerKind.WEB_CHAT,
                 trace_id=uuid.uuid4().hex,

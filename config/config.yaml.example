@@ -36,10 +36,10 @@ sqlite:
 # Full list: https://docs.litellm.ai/docs/providers
 llm:
   models:
-    - name: deepseek-v4-flash
+    - name: openai/deepseek-v4-flash
       api_key: "1234"
       api_base: http://mopai.geni.dyxnet.com.cn/
-  default_model: deepseek-v4-flash
+  default_model: openai/deepseek-v4-flash
 
 workstation:
   transport: nats

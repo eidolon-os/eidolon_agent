@@ -21,7 +21,6 @@ _log = logging.getLogger(__name__)
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="eidolon-agent")
-    parser.add_argument("--use-inmem-nats", action="store_true", help="skip NATS; use in-memory bus")
     parser.add_argument("--http-only", action="store_true", help="serve HTTP only (skip gRPC)")
     args = parser.parse_args(argv)
     return asyncio.run(_run(args))
@@ -29,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
 
 async def _run(args) -> int:  # type: ignore[no-untyped-def]
     settings = load_settings()
-    container = await build_application(settings=settings, use_inmem_nats=args.use_inmem_nats)
+    container = await build_application(settings=settings)
 
     stop = asyncio.Event()
     install_shutdown_handlers(stop)

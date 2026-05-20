@@ -73,7 +73,7 @@ class PairingTokenVerifier:
         device_id = payload.get("device_id")
         if not device_id:
             raise UnauthenticatedError("token missing device_id")
-        if self._kv is not None and await self._kv.get(f"revoked:{device_id}"):
+        if self._kv is not None and await self._kv.get(f"revoked.{device_id}"):
             raise TokenRevokedError(f"device revoked: {device_id}")
         return VerifiedDevice(
             device_id=device_id,

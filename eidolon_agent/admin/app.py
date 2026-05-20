@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from eidolon_agent.admin.routers import agents, devices, personas
+from eidolon_agent.admin.routers import agents, chat_test, devices, personas
 from eidolon_agent.admin.routers import pairing as pairing_router
 from eidolon_agent.config.settings import Settings
 
@@ -42,6 +42,7 @@ def build_admin_app(
         allow_credentials=False,
     )
 
+    app.state.settings = settings
     app.state.agent_registry = agent_registry
     app.state.pairing = pairing
     app.state.template_registry = template_registry
@@ -51,6 +52,7 @@ def build_admin_app(
     app.include_router(devices.router, prefix="/api/admin", tags=["devices"])
     app.include_router(personas.router, prefix="/api/admin", tags=["personas"])
     app.include_router(pairing_router.router, prefix="/api/admin", tags=["pairing"])
+    app.include_router(chat_test.router, prefix="/api/admin", tags=["chat-test"])
 
     if settings.http.serve_admin_web_dist:
         dist = Path(settings.http.admin_web_dist_path)
