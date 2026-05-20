@@ -1,0 +1,55 @@
+"""Tiny DI container — a typed bag of singletons.
+
+We intentionally avoid a heavyweight DI framework. The container holds
+everything constructed during bootstrap so feature modules can grab their
+collaborators without import cycles.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class Container:
+    """Heterogeneous service registry. Fields are populated by the bootstrap."""
+
+    settings: object | None = None
+    event_bus: object | None = None
+    kv_buckets: dict[str, object] = field(default_factory=dict)
+
+    sqlite_engine: object | None = None
+    session_factory: object | None = None
+
+    template_registry: object | None = None
+    overlay_store: object | None = None
+    persona_resolver: object | None = None
+    evolution_planner: object | None = None
+
+    history_manager: object | None = None
+    history_fanout: object | None = None
+    mind_service: object | None = None
+    signal_bus: object | None = None
+    signal_fuser: object | None = None
+    crisis_handler: object | None = None
+    input_guardrail: object | None = None
+    output_guardrail: object | None = None
+    triage_classifier: object | None = None
+    proactive_engine: object | None = None
+
+    tool_registry: object | None = None
+    tool_dispatcher: object | None = None
+
+    llm_router: object | None = None
+    memory_port: object | None = None
+    dispatch_port: object | None = None
+
+    agent_registry: object | None = None
+    pairing_coordinator: object | None = None
+    pairing_verifier: object | None = None
+
+    grpc_server: object | None = None
+    http_app: object | None = None
+    admin_app: object | None = None
+
+    extras: dict[str, object] = field(default_factory=dict)

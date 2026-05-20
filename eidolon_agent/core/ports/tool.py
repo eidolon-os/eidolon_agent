@@ -1,0 +1,39 @@
+"""ToolPort — a callable capability the LLM can invoke."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
+
+from eidolon_agent.core.types.identity import CallerContext
+from eidolon_agent.core.types.tool import ToolCall, ToolResult, ToolSchema
+
+
+@dataclass(slots=True)
+class ToolInvocationContext:
+    """Per-call context provided by the dispatcher."""
+
+    caller: CallerContext
+    turn_id: str
+    dry_run: bool = False
+
+
+@runtime_checkable
+class ToolPort(Protocol):
+    """A registered tool."""
+
+    @property
+    def schema(self) -> ToolSchema: ...
+
+    async def invoke(
+        self,
+        call: ToolCall,
+        *,
+        ctx: ToolInvocationContext,
+    ) -> ToolResult:
+        """Execute. MUST NOT raise on user-level failures — return ``ok=False``.
+
+        Exceptions are reserved for programmer errors (bugs, invariant violations).
+        Permission errors and timeouts should be wrapped in :class:`ToolResult`.
+        """
+        ...

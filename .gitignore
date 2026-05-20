@@ -1,36 +1,56 @@
-# Python-generated files
+# Python
 __pycache__/
-*.py[oc]
+*.py[cod]
+*.egg-info/
+.eggs/
 build/
 dist/
-*.egg-info
+*.so
+
+# Virtual envs
+.venv/
+.env
+env/
+venv/
+
+# Tooling
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
 .coverage
 .coverage.*
-agent_history.gif
-static/browser_history/*.gif
-
-# Virtual environments
-.venv
-venv/
-.venv-langgraph-new
-venv-langgraph-new/
-
-# Environment variables
-.env
-
-# user conf
-conf.yaml
-
-.idea/
-.langgraph_api/
-.DS_Store
-
-# coverage report
+htmlcov/
 coverage.xml
 coverage/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
 .DS_Store
+
+# Runtime artifacts
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 logs/
 *.log
-app/SQLlite/SQLGen.db
 
-data/
+# Generated gRPC stubs (regenerated from .proto on build)
+eidolon_agent/transport/grpc/proto/*_pb2.py
+eidolon_agent/transport/grpc/proto/*_pb2.pyi
+eidolon_agent/transport/grpc/proto/*_pb2_grpc.py
+
+# admin_web
+node_modules/
+admin_web/dist/
+
+# Persona overlays may contain PII; tracked separately by deployment policy
+personas/overlays/
+
+# Local secrets / config overrides
+conf.yaml
+settings.local.yaml
+
+# Stray literal ~ dir (created by Path("~") without expanduser)
+~/

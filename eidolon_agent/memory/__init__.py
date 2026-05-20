@@ -1,6 +1,11 @@
-"""记忆模块：抽象层与 Mem0 实现，通过依赖注入使用."""
+"""Adapter for the external eidolon-memory service.
 
-from eidolon_agent.memory.base import BaseMemoryProvider, MemorySearchResult
-from eidolon_agent.memory.mem0_provider import Mem0Provider
+Reads go through MCP Streamable HTTP (per-user agent_runner port).
+Writes go through NATS JetStream on ``agent.memory.conversation.turn.<user_id>``.
+Explicit KG mutations go through ``agent.memory.cmd.<user_id>``.
+"""
 
-__all__ = ["BaseMemoryProvider", "MemorySearchResult", "Mem0Provider"]
+from eidolon_agent.memory.port_adapter import EidolonMemoryPort
+from eidolon_agent.memory.strategy import MemoryStrategy
+
+__all__ = ["EidolonMemoryPort", "MemoryStrategy"]

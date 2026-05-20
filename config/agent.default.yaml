@@ -1,0 +1,62 @@
+# eidolon-agent default settings (dev).
+#
+# All configuration — including secrets — lives here.
+# Copy to settings.local.yaml for environment-specific overrides
+# (or set EIDOLON_AGENT_SETTINGS_YAML to point elsewhere).
+
+env: dev
+
+grpc:
+  tcp_host: 127.0.0.1
+  tcp_port: 50051
+  uds_path: ~/eidolon/run/eidolon-agent.sock
+
+http:
+  host: 127.0.0.1
+  port: 8080
+  admin_port: 8081
+  cors_origins:
+    - http://127.0.0.1:5281
+
+nats:
+  url: nats://127.0.0.1:4222
+
+memory:
+  endpoints:
+    - user_id: default
+      mcp_url: http://127.0.0.1:8030/mcp
+  recall_timeout_s: 0.3
+
+sqlite:
+  path: ~/eidolon/history/eidolon_agent.sqlite3
+  enable_wal: true
+
+# Model names follow LiteLLM convention.
+# Full list: https://docs.litellm.ai/docs/providers
+llm:
+  models:
+    - name: deepseek-v4-flash
+      api_key: "1234"
+      api_base: http://mopai.geni.dyxnet.com.cn/
+  default_model: deepseek-v4-flash
+
+workstation:
+  transport: nats
+
+persona:
+  templates_dir: personas/templates
+  overlays_dir: personas/overlays
+
+observability:
+  log_level: INFO
+  log_json: true
+  log_dir: ~/eidolon/logs
+
+pairing:
+  jwt_secret: ""
+  jwt_algorithm: HS256
+
+runtime:
+  log_dir: ~/eidolon/logs
+  run_dir: ~/eidolon/run
+  debug_dir: ~/eidolon/debug
