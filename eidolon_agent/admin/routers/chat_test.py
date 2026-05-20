@@ -1,12 +1,15 @@
-"""Admin: gRPC chat test — full pairing + ChatOnce flow via real gRPC."""
+"""Admin: gRPC chat test — full pairing + Chat bidi stream via real gRPC."""
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import uuid
 
 import grpc
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from eidolon_agent.transport.grpc.proto import pb, pbg
@@ -23,25 +26,16 @@ class ChatTestRequest(BaseModel):
     text: str = ""
 
 
-class ChatTestResponse(BaseModel):
-    turn_id: str
-    assistant_text: str
-    triage: str
-    latency_first_delta_ms: int
-    user_id: str
-
-
-@router.post("/chat/test", response_model=ChatTestResponse)
+@router.post("/chat/test")
 async def chat_test(body: ChatTestRequest, request: Request):
-    """Full gRPC round-trip: pairing → auth → ChatOnce → response.
+    """Stream a turn over the real gRPC Chat bidi path, exposed as SSE.
 
-    Exercises the same path as a real LiveKit / device caller.
+    Same code path as a LiveKit caller: pairing → ExchangePairingCode → Chat.
     """
     settings = request.app.state.settings
     pairing = request.app.state.pairing
     registry = request.app.state.agent_registry
 
-    # Ensure agent instance exists.
     from eidolon_agent.core.errors import ConflictError
 
     try:
@@ -53,21 +47,18 @@ async def chat_test(body: ChatTestRequest, request: Request):
     except ConflictError:
         pass
 
-    # Issue pairing code.
     rec = await pairing.issue_code(
         tenant_id=body.tenant_id,
         user_id=body.user_id,
         default_template_id=body.template_id,
         issued_by_actor="admin-chat-test",
     )
-
     target = f"{settings.grpc.tcp_host}:{settings.grpc.tcp_port}"
 
-    try:
-        async with grpc.aio.insecure_channel(target) as channel:
+    async def _stream():
+        channel = grpc.aio.insecure_channel(target)
+        try:
             stub = pbg.EidolonAgentStub(channel)
-
-            # Exchange pairing code → device token.
             exch = await stub.ExchangePairingCode(
                 pb.ExchangeRequest(
                     pairing_code=rec.code,
@@ -75,26 +66,50 @@ async def chat_test(body: ChatTestRequest, request: Request):
                     device_name="Admin Chat Test",
                 )
             )
-            metadata = [("authorization", f"Bearer {exch.device_token}")]
+            yield _sse("status", {"message": "paired", "user_id": exch.user_id})
 
-            # ChatOnce — unary RPC, same auth + TurnEngine path.
-            resp = await stub.ChatOnce(
-                pb.ChatOnceRequest(
-                    turn_id=uuid.uuid4().hex,
-                    conversation_id=f"admin-test-{uuid.uuid4().hex[:8]}",
-                    text=body.text,
-                ),
-                metadata=metadata,
+            done_event = asyncio.Event()
+
+            async def _requests():
+                yield pb.ChatRequest(
+                    start=pb.StartTurn(
+                        turn_id=uuid.uuid4().hex,
+                        conversation_id=f"admin-test-{uuid.uuid4().hex[:8]}",
+                        text=body.text,
+                    )
+                )
+                # Hold the request stream open until the response stream emits
+                # DONE/ERROR; otherwise the server's `async for frame` keeps
+                # waiting indefinitely.
+                await done_event.wait()
+
+            stream = stub.Chat(
+                _requests(),
+                metadata=(("authorization", f"Bearer {exch.device_token}"),),
             )
+            try:
+                async for ev in stream:
+                    kind = pb.TurnEvent.Kind.Name(ev.kind)
+                    data = dict(ev.data) if ev.data else {}
+                    yield _sse("event", {
+                        "turn_id": ev.turn_id,
+                        "seq": ev.seq,
+                        "kind": kind,
+                        "data": data,
+                    })
+                    if kind in ("DONE", "ERROR"):
+                        done_event.set()
+                        break
+            finally:
+                done_event.set()  # unblock _requests() if we exit early
+        except grpc.aio.AioRpcError as exc:
+            _log.warning("chat test gRPC error: %s", exc.details())
+            yield _sse("event", {"kind": "ERROR", "data": {"message": exc.details()}})
+        finally:
+            await channel.close()
 
-        return ChatTestResponse(
-            turn_id=resp.turn_id,
-            assistant_text=resp.assistant_text,
-            triage=resp.triage,
-            latency_first_delta_ms=resp.latency_first_delta_ms,
-            user_id=exch.user_id,
-        )
+    return StreamingResponse(_stream(), media_type="text/event-stream")
 
-    except grpc.aio.AioRpcError as exc:
-        _log.error("chat test gRPC error: %s", exc.details())
-        raise HTTPException(status_code=502, detail=exc.details()) from exc
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"

@@ -47,11 +47,20 @@ def configure_logging(settings: ObservabilitySettings) -> None:
         retention="14 days",
         enqueue=True,
     )
-    # Bridge stdlib
-    logging.basicConfig(handlers=[_InterceptHandler()], level=settings.log_level, force=True)
-    for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "fastapi", "grpc", "sqlalchemy"):
-        logging.getLogger(name).handlers = [_InterceptHandler()]
-        logging.getLogger(name).propagate = False
-    # LiteLLM emits noisy DEBUG (cost-map lookups for unmapped models, retry traces).
-    for name in ("LiteLLM", "litellm", "litellm.utils", "litellm.cost_calculator"):
-        logging.getLogger(name).setLevel(logging.WARNING)
+    # Bridge stdlib → loguru via a single root handler. Child loggers propagate
+    # to root, so do NOT also attach handlers per-logger (that duplicates lines).
+    root = logging.getLogger()
+    root.handlers = [_InterceptHandler()]
+    root.setLevel(settings.log_level)
+    # Quiet noisy third-party libs.
+    noisy = {
+        "sqlalchemy.engine": logging.WARNING,  # per-cursor DEBUG dump
+        "uvicorn.access": logging.INFO,
+        # LiteLLM cost-map lookups for unmapped models trace at DEBUG every call.
+        "LiteLLM": logging.WARNING,
+        "litellm": logging.WARNING,
+        "litellm.utils": logging.WARNING,
+        "litellm.cost_calculator": logging.WARNING,
+    }
+    for name, level in noisy.items():
+        logging.getLogger(name).setLevel(level)
