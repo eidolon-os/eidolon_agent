@@ -1,8 +1,9 @@
-# eidolon-agent default settings (dev).
+# eidolon-agent configuration template.
 #
-# All configuration — including secrets — lives here.
-# Copy to settings.local.yaml for environment-specific overrides
-# (or set EIDOLON_AGENT_SETTINGS_YAML to point elsewhere).
+# Copy this file to config/config.yaml and edit for your environment:
+#   cp config/config.yaml.example config/config.yaml
+#
+# config.yaml is git-ignored and is the only file the agent loads at runtime.
 
 env: dev
 

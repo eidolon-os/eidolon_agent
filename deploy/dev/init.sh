@@ -40,6 +40,12 @@ rm -f eidolon_agent/transport/grpc/proto/eidolon_pb2_grpc.py.bak
 info "alembic upgrade head"
 .venv/bin/alembic upgrade head >/dev/null
 
+# Config file
+if [ ! -f config/config.yaml ]; then
+  cp config/config.yaml.example config/config.yaml
+  info "created config/config.yaml from template — edit as needed"
+fi
+
 # Runtime dirs
 mkdir -p "${HOME}/eidolon/run" "${HOME}/eidolon/logs" "${HOME}/eidolon/debug" "${HOME}/eidolon/history"
 

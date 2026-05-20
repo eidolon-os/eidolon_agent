@@ -48,9 +48,8 @@ admin_web/dist/
 # Persona overlays may contain PII; tracked separately by deployment policy
 personas/overlays/
 
-# Local secrets / config overrides
-conf.yaml
-settings.local.yaml
+# Local config (copied from config/config.yaml.example)
+config/config.yaml
 
 # Stray literal ~ dir (created by Path("~") without expanduser)
 ~/

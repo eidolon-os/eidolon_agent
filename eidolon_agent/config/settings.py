@@ -1,11 +1,7 @@
 """Process-level settings.
 
-Loading precedence (highest → lowest):
-1. YAML at ``$EIDOLON_AGENT_SETTINGS_YAML`` (if set)
-2. ``./config/agent.default.yaml`` (if present)
-3. Field defaults in this file
-
-All configuration — including secrets — lives in the YAML config file.
+Loads ``config/config.yaml`` (or the path in ``$EIDOLON_AGENT_SETTINGS_YAML``).
+Copy ``config/config.yaml.example`` to ``config/config.yaml`` before first run.
 """
 
 from __future__ import annotations
@@ -285,7 +281,7 @@ class Settings(BaseSettings):
 # Loaders
 # ---------------------------------------------------------------------------
 
-_DEFAULT_YAML_PATH = Path("config/agent.default.yaml")
+_CONFIG_PATH = Path("config/config.yaml")
 
 
 def _resolve_yaml_path() -> Path | None:
@@ -295,17 +291,16 @@ def _resolve_yaml_path() -> Path | None:
         if not p.exists():
             raise FileNotFoundError(f"EIDOLON_AGENT_SETTINGS_YAML points to missing file: {p}")
         return p
-    if _DEFAULT_YAML_PATH.exists():
-        return _DEFAULT_YAML_PATH
+    if _CONFIG_PATH.exists():
+        return _CONFIG_PATH
     return None
 
 
 def load_settings(*, yaml_path: Path | None = None) -> Settings:
     """Construct a Settings instance.
 
-    By default the YAML path is resolved from
-    ``$EIDOLON_AGENT_SETTINGS_YAML`` or ``config/agent.default.yaml``. Tests can
-    override by passing ``yaml_path`` or by setting the env var.
+    Loads ``config/config.yaml`` by default.  Tests can override by passing
+    ``yaml_path`` or by setting ``$EIDOLON_AGENT_SETTINGS_YAML``.
     """
     if yaml_path is not None:
         os.environ["EIDOLON_AGENT_SETTINGS_YAML"] = str(yaml_path)
