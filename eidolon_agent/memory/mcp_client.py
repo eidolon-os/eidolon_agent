@@ -11,8 +11,10 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from typing import Any
 
 from eidolon_agent.core.errors import MemoryUnavailableError
+from eidolon_agent.memory.discovery import MemoryRoutingTable
 
 _log = logging.getLogger(__name__)
 
@@ -34,13 +36,21 @@ class McpUserSession:
             if self._session is not None:
                 return self._session
             try:
+                from mcp.client import streamable_http as streamable_http_mod
                 from mcp.client.session import ClientSession
-                from mcp.client.streamable_http import streamablehttp_client
             except ImportError as exc:
                 raise MemoryUnavailableError("mcp client not installed") from exc
 
+            streamable_http_client = getattr(
+                streamable_http_mod,
+                "streamable_http_client",
+                None,
+            ) or getattr(streamable_http_mod, "streamablehttp_client", None)
+            if streamable_http_client is None:
+                raise MemoryUnavailableError("mcp streamable http client not available")
+
             headers = {"Authorization": f"Bearer {self._token}"} if self._token else None
-            self._client_cm = streamablehttp_client(self._url, headers=headers)
+            self._client_cm = streamable_http_client(self._url, headers=headers)
             read, write, _ = await self._client_cm.__aenter__()
             self._session = ClientSession(read, write)
             await self._session.__aenter__()
@@ -53,14 +63,15 @@ class McpUserSession:
             result = await session.call_tool(name, arguments)
         except Exception as exc:
             raise MemoryUnavailableError(f"MCP call {name} failed: {exc}") from exc
-        # MCP returns a CallToolResult with content blocks; we extract JSON text if present.
-        for block in result.content or []:
-            if getattr(block, "type", None) == "text":
-                try:
-                    return json.loads(block.text)  # type: ignore[attr-defined]
-                except (json.JSONDecodeError, AttributeError):
-                    return {"raw": getattr(block, "text", "")}
-        return {}
+        decoded = _decode_call_tool_result(result)
+        if isinstance(decoded, dict):
+            return decoded
+        if isinstance(decoded, list):
+            return {"records": decoded}
+        return {"result": decoded}
+
+    def matches(self, *, mcp_url: str, bearer_token: str | None) -> bool:
+        return self._url == mcp_url and self._token == bearer_token
 
     async def close(self) -> None:
         if self._session is not None:
@@ -77,35 +88,97 @@ class McpUserSession:
             self._client_cm = None
 
 
+def _decode_call_tool_result(result: Any) -> Any:
+    if getattr(result, "isError", False):
+        parts: list[str] = []
+        for block in getattr(result, "content", None) or []:
+            text = getattr(block, "text", None)
+            if text:
+                parts.append(text)
+        raise MemoryUnavailableError("MCP tool error: " + (" | ".join(parts) or "unknown"))
+
+    structured = getattr(result, "structuredContent", None)
+    if structured is not None:
+        return _unwrap_fastmcp_result(structured)
+
+    # MCP returns a CallToolResult with content blocks; extract JSON text if present.
+    for block in getattr(result, "content", None) or []:
+        if getattr(block, "type", None) == "text":
+            text = getattr(block, "text", "")
+            try:
+                return _unwrap_fastmcp_result(json.loads(text))
+            except (json.JSONDecodeError, TypeError):
+                return {"raw": text}
+    return {}
+
+
+def _unwrap_fastmcp_result(payload: Any) -> Any:
+    if isinstance(payload, dict) and set(payload) == {"result"}:
+        return payload["result"]
+    return payload
+
+
 class McpClientPool:
     """user_id → :class:`McpUserSession`. One session per user, lazy."""
 
-    def __init__(self, *, endpoints: dict[str, str], bearer_tokens: dict[str, str] | None = None) -> None:
-        self._endpoints = endpoints
-        self._tokens = bearer_tokens or {}
+    def __init__(
+        self,
+        *,
+        routes: MemoryRoutingTable | None = None,
+        endpoints: dict[str, str] | None = None,
+        bearer_tokens: dict[str, str] | None = None,
+    ) -> None:
+        if routes is None:
+            from eidolon_agent.config.settings import MemoryEndpoint, NatsSettings
+
+            routes = MemoryRoutingTable.from_static(
+                endpoints=[
+                    MemoryEndpoint(
+                        user_id=user_id,
+                        mcp_url=mcp_url,
+                        bearer_token=(bearer_tokens or {}).get(user_id),
+                    )
+                    for user_id, mcp_url in (endpoints or {}).items()
+                ],
+                nats=NatsSettings(),
+            )
+        self._routes = routes
         self._sessions: dict[str, McpUserSession] = {}
         self._lock = asyncio.Lock()
 
     async def session_for(self, user_id: str) -> McpUserSession:
+        route = await self._routes.route_for(user_id)
+        if route is None:
+            await self._close_user_session(user_id)
+            raise MemoryUnavailableError(f"no reachable MCP endpoint for user {user_id}")
         async with self._lock:
             sess = self._sessions.get(user_id)
-            if sess is None:
-                url = self._endpoints.get(user_id)
-                if url is None:
-                    raise MemoryUnavailableError(f"no MCP endpoint for user {user_id}")
-                sess = McpUserSession(url, bearer_token=self._tokens.get(user_id))
-                self._sessions[user_id] = sess
+            if sess is not None and sess.matches(
+                mcp_url=route.mcp_url,
+                bearer_token=route.bearer_token,
+            ):
+                return sess
+            if sess is not None:
+                await sess.close()
+            sess = McpUserSession(route.mcp_url, bearer_token=route.bearer_token)
+            self._sessions[user_id] = sess
             return sess
+
+    async def _close_user_session(self, user_id: str) -> None:
+        async with self._lock:
+            sess = self._sessions.pop(user_id, None)
+        if sess is not None:
+            await sess.close()
 
     async def close_all(self) -> None:
         async with self._lock:
-            for s in self._sessions.values():
-                await s.close()
+            sessions = list(self._sessions.values())
             self._sessions.clear()
+        for s in sessions:
+            await s.close()
 
     async def health(self) -> bool:
-        # Cheap: succeeds if any endpoint configured. Real check would ping MCP.
-        return bool(self._endpoints)
+        return await self._routes.endpoint_count() > 0
 
 
 @asynccontextmanager

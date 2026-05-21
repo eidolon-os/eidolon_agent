@@ -13,9 +13,17 @@ class MemoryRecallProvider:
     default_weight = SegmentWeight.HIGH
     soft_timeout_s = 0.25  # eidolon-memory has its own 300ms hard budget
 
-    def __init__(self, memory_port=None, *, default_top_k: int = 5) -> None:
+    def __init__(
+        self,
+        memory_port=None,
+        *,
+        default_top_k: int = 5,
+        soft_timeout_s: float | None = None,
+    ) -> None:
         self._mem = memory_port
         self._top_k = default_top_k
+        if soft_timeout_s is not None:
+            self.soft_timeout_s = soft_timeout_s
 
     async def provide(self, ctx: ProviderContext) -> list[ContextSegment]:
         if self._mem is None or not ctx.turn_input.text:

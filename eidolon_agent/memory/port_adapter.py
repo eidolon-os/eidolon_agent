@@ -6,6 +6,7 @@ default) so back-to-back identical queries during one turn don't hit MCP twice.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -48,9 +49,12 @@ class EidolonMemoryPort:
     ) -> list[MemoryHit]:
         session = await self._pool.session_for(user_id)
         try:
-            raw = await session.call_tool(
-                "eidolon_memory_search",
-                {"query": query, "top_k": top_k},
+            raw = await asyncio.wait_for(
+                session.call_tool(
+                    "eidolon_memory_search",
+                    {"query": query, "top_k": top_k},
+                ),
+                timeout=timeout_s,
             )
         except Exception:
             _log.exception("memory search failed for user=%s", user_id)
@@ -75,14 +79,18 @@ class EidolonMemoryPort:
 
         session = await self._pool.session_for(user_id)
         try:
-            raw = await session.call_tool(
-                "eidolon_memory_recall_context",
-                {
-                    "query": query,
-                    "top_k": plan.semantic_k,
-                    "voice": plan.voice,
-                    "include_kg": True,
-                },
+            raw = await asyncio.wait_for(
+                session.call_tool(
+                    "eidolon_memory_recall_context",
+                    {
+                        "query": query,
+                        "top_k": plan.semantic_k,
+                        "voice": plan.voice,
+                        "include_kg": True,
+                        "include_sensitive_kg": False,
+                    },
+                ),
+                timeout=timeout_s,
             )
         except Exception:
             _log.exception("memory recall failed for user=%s", user_id)
@@ -146,6 +154,9 @@ class EidolonMemoryPort:
 
     async def health(self) -> bool:
         return await self._pool.health()
+
+    async def close(self) -> None:
+        await self._pool.close_all()
 
 
 def _records_to_hits(records: list[dict]) -> list[MemoryHit]:

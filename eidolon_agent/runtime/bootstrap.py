@@ -50,6 +50,7 @@ from eidolon_agent.guardrails import CrisisHandler, InputGuardrail, OutputGuardr
 from eidolon_agent.history import HistoryFanout, HistoryManager
 from eidolon_agent.hooks import HookExecutor
 from eidolon_agent.memory import EidolonMemoryPort
+from eidolon_agent.memory.discovery import build_initial_memory_routes
 from eidolon_agent.memory.mcp_client import McpClientPool
 from eidolon_agent.memory.nats_pub import MemoryNatsPublisher
 from eidolon_agent.mind import MindStateService
@@ -94,14 +95,23 @@ async def build_application(
     # 2. container -------------------------------------------------------------
     # (already created above)
 
-    # 3. SQLite + NATS ---------------------------------------------------------
+    # 3. SQLite + memory discovery + NATS -------------------------------------
     engine = create_engine(settings.sqlite)
     await ensure_schema(engine)
     session_factory = create_session_factory(engine)
     container.sqlite_engine = engine
     container.session_factory = session_factory
 
-    nats_bus = NatsEventBus(settings.nats.url, creds_path=str(settings.nats.creds_path) if settings.nats.creds_path else None)
+    memory_routes, effective_nats_url, memory_refresher = await build_initial_memory_routes(
+        memory=settings.memory,
+        nats=settings.nats,
+    )
+    container.extras["memory_routes"] = memory_routes
+
+    nats_bus = NatsEventBus(
+        effective_nats_url,
+        creds_path=str(settings.nats.creds_path) if settings.nats.creds_path else None,
+    )
     await nats_bus.connect()
     await ensure_buckets(nats_bus, settings.nats.kv_buckets)
     container.event_bus = nats_bus
@@ -110,20 +120,16 @@ async def build_application(
     revocation_kv = container.kv_buckets.get("DEVICE_REVOCATIONS")
 
     # 4. Memory MCP probe ------------------------------------------------------
-    mem_pool = McpClientPool(
-        endpoints={e.user_id: e.mcp_url for e in settings.memory.endpoints},
-        bearer_tokens={
-            e.user_id: e.bearer_token
-            for e in settings.memory.endpoints
-            if e.bearer_token
-        },
-    )
-    mem_pub = MemoryNatsPublisher(event_bus=container.event_bus)
+    mem_pool = McpClientPool(routes=memory_routes)
+    mem_pub = MemoryNatsPublisher(event_bus=container.event_bus, routes=memory_routes)
     memory_port = EidolonMemoryPort(
         pool=mem_pool, publisher=mem_pub, cache_kv=cache_kv,
         cache_ttl_s=settings.memory.recall_cache_ttl_s,
     )
     container.memory_port = memory_port
+    if memory_refresher is not None:
+        memory_refresher.start()
+        container.extras["memory_discovery_refresher"] = memory_refresher
 
     # 5 + 6. Persona templates + overlays --------------------------------------
     tpl_reg = PersonaTemplateRegistry(
@@ -142,7 +148,7 @@ async def build_application(
 
     # 7-10. Cross-cutting services --------------------------------------------
     history = HistoryManager()
-    fanout = HistoryFanout(event_bus=container.event_bus)
+    fanout = HistoryFanout(event_bus=container.event_bus, memory_routes=memory_routes)
     mind = MindStateService()
     sig_bus = SignalBus()
     sig_fuser = SignalFuser(sig_bus)
@@ -292,7 +298,10 @@ def _build_turn_engine(
 
     persona_p = PersonaContextProvider(resolver=container.persona_resolver, instance_locator=locator)
     history_p = HistoryProvider(history_manager=container.history_manager, window=20)
-    memory_p = MemoryRecallProvider(memory_port=container.memory_port)
+    memory_p = MemoryRecallProvider(
+        memory_port=container.memory_port,
+        soft_timeout_s=container.settings.memory.recall_timeout_s,
+    )
     mind_p = MindStateProvider(mind_service=container.mind_service)
     realtime_p = RealtimeSignalProvider(signal_fuser=None)
     compiler = ContextCompiler(

@@ -23,6 +23,9 @@ nats:
   url: nats://127.0.0.1:4222
 
 memory:
+  discovery_url: http://127.0.0.1:8010/api/discovery/agent-routing
+  discovery_token_env: EIDOLON_MEMORY_ADMIN_TOKEN
+  discovery_refresh_s: 30
   endpoints:
     - user_id: default
       mcp_url: http://127.0.0.1:8030/mcp

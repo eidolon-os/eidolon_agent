@@ -77,6 +77,11 @@ async def _run(args) -> int:  # type: ignore[no-untyped-def]
             _log.warning("server failed to drain in time")
     if grpc_task is not None:
         grpc_task.cancel()
+    refresher = container.extras.get("memory_discovery_refresher")
+    if refresher is not None:
+        await refresher.stop()
+    if container.memory_port is not None and hasattr(container.memory_port, "close"):
+        await container.memory_port.close()
     return 0
 
 
