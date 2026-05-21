@@ -55,11 +55,8 @@ uv sync --extra dev
 # 启动本地 NATS（JetStream）
 ./deploy/dev/run_nats.sh start
 
-# 启动 eidolon-agent（gRPC:50051 + HTTP:8080）
+# 启动 eidolon-agent（gRPC:50051 + HTTP:8080）+ admin web（Vite dev :5281）
 ./deploy/dev/run_all.sh start
-
-# 启动 admin web（Vite dev :5281）
-./admin/run_all.sh start
 
 # 端到端模拟 LiveKit 调用
 python scripts/livekit_sim.py

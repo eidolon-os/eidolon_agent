@@ -51,4 +51,4 @@ mkdir -p "${HOME}/eidolon/run" "${HOME}/eidolon/logs" "${HOME}/eidolon/debug" "$
 
 info "done. Next:"
 echo "  ./deploy/dev/run_nats.sh start"
-echo "  ./deploy/dev/run_all.sh start"
+echo "  ./deploy/dev/run_all.sh start    # agent + admin web"
