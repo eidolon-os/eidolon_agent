@@ -8,10 +8,13 @@ exposed for admin / debugging.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
+
+import httpx
 
 from eidolon_agent.core.errors import MemoryUnavailableError
 from eidolon_agent.memory.discovery import MemoryRoutingTable
@@ -27,6 +30,7 @@ class McpUserSession:
         self._token = bearer_token
         self._session = None
         self._client_cm = None
+        self._http_client: httpx.AsyncClient | None = None
         self._lock = asyncio.Lock()
 
     async def _ensure(self):  # type: ignore[no-untyped-def]
@@ -50,7 +54,18 @@ class McpUserSession:
                 raise MemoryUnavailableError("mcp streamable http client not available")
 
             headers = {"Authorization": f"Bearer {self._token}"} if self._token else None
-            self._client_cm = streamable_http_client(self._url, headers=headers)
+            if "headers" in inspect.signature(streamable_http_client).parameters:
+                self._client_cm = streamable_http_client(self._url, headers=headers)
+            else:
+                self._http_client = httpx.AsyncClient(
+                    headers=headers,
+                    follow_redirects=True,
+                    trust_env=False,
+                )
+                self._client_cm = streamable_http_client(
+                    self._url,
+                    http_client=self._http_client,
+                )
             read, write, _ = await self._client_cm.__aenter__()
             self._session = ClientSession(read, write)
             await self._session.__aenter__()
@@ -86,6 +101,12 @@ class McpUserSession:
             except Exception:
                 pass
             self._client_cm = None
+        if self._http_client is not None:
+            try:
+                await self._http_client.aclose()
+            except Exception:
+                pass
+            self._http_client = None
 
 
 def _decode_call_tool_result(result: Any) -> Any:
