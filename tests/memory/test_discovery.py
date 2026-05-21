@@ -8,6 +8,7 @@ from eidolon_agent.config.settings import MemoryEndpoint, NatsSettings
 from eidolon_agent.memory.discovery import DiscoveryResponse, MemoryRoutingTable
 from eidolon_agent.memory.mcp_client import _decode_call_tool_result
 from eidolon_agent.memory.nats_pub import MemoryNatsPublisher
+from eidolon_agent.memory.port_adapter import EidolonMemoryPort
 
 
 @pytest.mark.asyncio
@@ -150,3 +151,49 @@ def test_mcp_decode_text_json():
     result = SimpleNamespace(isError=False, structuredContent=None, content=[block])
 
     assert _decode_call_tool_result(result) == {"context": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_recall_context_calls_mcp_directly():
+    class Session:
+        async def call_tool(self, name, arguments):
+            assert name == "eidolon_memory_recall_context"
+            return {
+                "context": "铁锤是一只狗。",
+                "records": [
+                    {
+                        "key": "pet_铁锤",
+                        "value": "铁锤是一只狗。",
+                        "metadata": {"similarity": 0.9},
+                    }
+                ],
+            }
+
+    class Pool:
+        async def session_for(self, user_id):
+            assert user_id == "alice"
+            return Session()
+
+        async def close_all(self):
+            pass
+
+        async def health(self):
+            return True
+
+    from eidolon_agent.core.types.memory import MemoryQueryPlan
+
+    port = EidolonMemoryPort(
+        pool=Pool(),
+        publisher=MemoryNatsPublisher(event_bus=object()),
+    )
+
+    context, hits, degraded = await port.recall_context(
+        "alice",
+        "铁锤是什么",
+        plan=MemoryQueryPlan(semantic_k=3),
+        timeout_s=1.0,
+    )
+
+    assert degraded is False
+    assert context == "铁锤是一只狗。"
+    assert hits and hits[0].content == "铁锤是一只狗。"

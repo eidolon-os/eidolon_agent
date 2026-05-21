@@ -96,17 +96,15 @@ class MemoryEndpoint(BaseModel):
 class MemorySettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # Prefer runtime discovery from eidolon-memory Admin HTTP. Static endpoints
+    # Prefer runtime discovery from eidolon-memory Discovery HTTP. Static endpoints
     # remain as a local fallback and for tests; the agent never reads memory
     # service config files.
     discovery_url: str | None = None
-    discovery_token_env: str = "EIDOLON_MEMORY_ADMIN_TOKEN"
+    discovery_token_env: str = ""
     discovery_refresh_s: int = 30
     discovery_timeout_s: float = 2.0
     endpoints: list[MemoryEndpoint] = Field(default_factory=list)
     recall_timeout_s: float = 0.2  # eidolon-memory has a 300ms hard budget
-    recall_cache_ttl_s: int = 30
-    recall_cache_max_items: int = 1024
 
 
 class SqliteSettings(BaseModel):

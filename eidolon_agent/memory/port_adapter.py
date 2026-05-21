@@ -1,14 +1,8 @@
-"""Combined :class:`MemoryPort` adapter — MCP for reads, NATS for writes.
-
-Includes a tiny KV-backed cache for ``recall_context`` results (30s TTL by
-default) so back-to-back identical queries during one turn don't hit MCP twice.
-"""
+"""Combined :class:`MemoryPort` adapter — MCP for reads, NATS for writes."""
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import logging
 
 from eidolon_agent.core.types.memory import (
@@ -29,13 +23,9 @@ class EidolonMemoryPort:
         *,
         pool: McpClientPool,
         publisher: MemoryNatsPublisher,
-        cache_kv=None,  # optional KVStore for read-result caching
-        cache_ttl_s: int = 30,
     ) -> None:
         self._pool = pool
         self._pub = publisher
-        self._cache = cache_kv
-        self._cache_ttl = cache_ttl_s
 
     async def search(
         self,
@@ -69,14 +59,6 @@ class EidolonMemoryPort:
         plan: MemoryQueryPlan,
         timeout_s: float = 0.2,
     ) -> tuple[str, list[MemoryHit], bool]:
-        cache_key = f"recall:{user_id}:{_hash_query(query, plan)}"
-        if self._cache is not None:
-            cached = await self._cache.get(cache_key)
-            if cached:
-                data = json.loads(cached.decode())
-                hits = _records_to_hits(data.get("records") or [])
-                return data.get("context", ""), hits, False
-
         session = await self._pool.session_for(user_id)
         try:
             raw = await asyncio.wait_for(
@@ -97,12 +79,6 @@ class EidolonMemoryPort:
             return "", [], True
         context = raw.get("context", "") or ""
         hits = _records_to_hits(raw.get("records") or [])
-        if self._cache is not None:
-            await self._cache.put(
-                cache_key,
-                json.dumps(raw, default=str).encode(),
-                ttl_s=self._cache_ttl,
-            )
         return context, hits, False
 
     async def write_turn(
@@ -175,10 +151,3 @@ def _records_to_hits(records: list[dict]) -> list[MemoryHit]:
         except (ValueError, TypeError):
             continue
     return hits
-
-
-def _hash_query(query: str, plan: MemoryQueryPlan) -> str:
-    h = hashlib.sha256()
-    h.update(query.encode())
-    h.update(repr((plan.semantic_k, plan.episodic_k, plan.voice)).encode())
-    return h.hexdigest()[:16]

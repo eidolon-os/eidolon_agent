@@ -123,8 +123,8 @@ async def build_application(
     mem_pool = McpClientPool(routes=memory_routes)
     mem_pub = MemoryNatsPublisher(event_bus=container.event_bus, routes=memory_routes)
     memory_port = EidolonMemoryPort(
-        pool=mem_pool, publisher=mem_pub, cache_kv=cache_kv,
-        cache_ttl_s=settings.memory.recall_cache_ttl_s,
+        pool=mem_pool,
+        publisher=mem_pub,
     )
     container.memory_port = memory_port
     if memory_refresher is not None:
