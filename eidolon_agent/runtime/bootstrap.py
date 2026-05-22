@@ -38,7 +38,6 @@ from eidolon_agent.config.settings import Settings, load_settings
 from eidolon_agent.context.compiler import ContextCompiler
 from eidolon_agent.context.providers import (
     HistoryProvider,
-    MindStateProvider,
     PersonasContextProvider,
     RealtimeSignalProvider,
 )
@@ -52,7 +51,6 @@ from eidolon_agent.memory import EidolonMemoryPort
 from eidolon_agent.memory.discovery import build_initial_memory_routes
 from eidolon_agent.memory.mcp_client import McpClientPool
 from eidolon_agent.memory.nats_pub import MemoryNatsPublisher
-from eidolon_agent.mind import MindStateService
 from eidolon_agent.observability import configure_logging
 from eidolon_agent.observability.tracing import configure_tracing
 from eidolon_agent.persistence import (
@@ -70,7 +68,7 @@ from eidolon_agent.proactive import ProactiveEngine
 from eidolon_agent.runtime.container import Container
 from eidolon_agent.signals import SignalBus, SignalFuser
 from eidolon_agent.tools import ToolDispatcher, ToolRegistry
-from eidolon_agent.tools.builtin import EmitEventTool, GetTimeTool, SetMoodTool
+from eidolon_agent.tools.builtin import EmitEventTool, GetTimeTool
 from eidolon_agent.transport.grpc import GrpcServer
 from eidolon_agent.transport.grpc.chat_servicer import EidolonAgentServicer
 from eidolon_agent.transport.http import build_http_app
@@ -142,18 +140,17 @@ async def build_application(
         audit_port=NullPersonaAuditPort(),
         memory_timeout_s=settings.memory.recall_timeout_s,
     )
+    await personas_service.start()
     container.persona_instance_store = instance_store
     container.personas_service = personas_service
 
     # 7-10. Cross-cutting services --------------------------------------------
     history = HistoryManager()
     fanout = HistoryFanout(event_bus=container.event_bus, memory_routes=memory_routes)
-    mind = MindStateService()
     sig_bus = SignalBus()
     sig_fuser = SignalFuser(sig_bus)
     container.history_manager = history
     container.history_fanout = fanout
-    container.mind_service = mind
     container.signal_bus = sig_bus
     container.signal_fuser = sig_fuser
     container.crisis_handler = CrisisHandler(event_bus=container.event_bus)
@@ -165,7 +162,6 @@ async def build_application(
     # 9. Tools -----------------------------------------------------------------
     tool_registry = ToolRegistry()
     tool_registry.register(GetTimeTool())
-    tool_registry.register(SetMoodTool(mind_service=mind))
     tool_registry.register(EmitEventTool(event_bus=container.event_bus))
     idemp_kv = container.kv_buckets.get("EIDOLON_TOOL_IDEMP")
     tool_dispatcher = ToolDispatcher(tool_registry, idempotency_store=idemp_kv)
@@ -230,6 +226,7 @@ async def build_application(
         pairing=pairing,
         signals_bus=sig_bus,
         proactive_bus=container.event_bus,
+        personas_service=personas_service,
     )
     grpc_server = GrpcServer(
         servicer=servicer,
@@ -303,10 +300,9 @@ def _build_turn_engine(
         instance_locator=locator,
     )
     history_p = HistoryProvider(history_manager=container.history_manager, window=20)
-    mind_p = MindStateProvider(mind_service=container.mind_service)
     realtime_p = RealtimeSignalProvider(signal_fuser=None)
     compiler = ContextCompiler(
-        [persona_p, history_p, mind_p, realtime_p],
+        [persona_p, history_p, realtime_p],
         max_token_budget=container.settings.turn.max_token_budget,
     )
     return TurnEngine(
@@ -322,6 +318,8 @@ def _build_turn_engine(
         crisis=container.crisis_handler,
         dispatch_port=container.dispatch_port,
         event_bus=container.event_bus,
+        personas_service=container.personas_service,
+        persona_template_id=template_id,
         max_tool_iters=container.settings.turn.max_tool_iters,
         taboos_provider=lambda: tuple(),
     )

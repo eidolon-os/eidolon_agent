@@ -80,6 +80,8 @@ async def _run(args) -> int:  # type: ignore[no-untyped-def]
     refresher = container.extras.get("memory_discovery_refresher")
     if refresher is not None:
         await refresher.stop()
+    if container.personas_service is not None and hasattr(container.personas_service, "stop"):
+        await container.personas_service.stop()
     if container.memory_port is not None and hasattr(container.memory_port, "close"):
         await container.memory_port.close()
     return 0

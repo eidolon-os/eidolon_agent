@@ -12,7 +12,6 @@ from eidolon_agent.brain.llm.fake import FakeLLM
 from eidolon_agent.context.compiler import ContextCompiler
 from eidolon_agent.context.providers import (
     HistoryProvider,
-    MindStateProvider,
     PersonasContextProvider,
 )
 from eidolon_agent.dispatch.classifier import TaskClassifier
@@ -20,7 +19,6 @@ from eidolon_agent.events import InMemoryEventBus, InMemoryKVStore
 from eidolon_agent.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.history import HistoryFanout, HistoryManager
 from eidolon_agent.hooks import HookExecutor
-from eidolon_agent.mind import MindStateService
 from eidolon_agent.personas import (
     PersonaInstanceStore,
     PersonasService,
@@ -76,7 +74,6 @@ async def turn_engine_factory(personas_service, event_bus):
         from eidolon_agent.agent.turn import TurnEngine
 
         history = HistoryManager()
-        mind = MindStateService()
         fanout = HistoryFanout(event_bus=event_bus)
         tools = ToolRegistry()
         tools.register(GetTimeTool())
@@ -93,7 +90,6 @@ async def turn_engine_factory(personas_service, event_bus):
                     instance_locator=loc,
                 ),
                 HistoryProvider(history_manager=history, window=20),
-                MindStateProvider(mind_service=mind),
             ],
             max_token_budget=2000,
         )
@@ -110,6 +106,8 @@ async def turn_engine_factory(personas_service, event_bus):
             crisis=CrisisHandler(event_bus=event_bus),
             dispatch_port=dispatch_port,
             event_bus=event_bus,
+            personas_service=personas_service,
+            persona_template_id="caretaker_jiezhi",
         )
 
     return _factory

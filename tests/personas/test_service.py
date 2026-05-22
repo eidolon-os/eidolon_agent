@@ -70,6 +70,34 @@ async def test_compile_prompt_uses_style_mapping(personas_service):
 
 
 @pytest.mark.asyncio
+async def test_get_snapshot_and_compile_prompt_include_runtime_state(personas_service):
+    await personas_service.create_instance(
+        tenant_id="t",
+        user_id="u",
+        instance_id="i-snapshot",
+        template_id="caretaker_jiezhi",
+    )
+    await personas_service.update_runtime_state(
+        instance_id="i-snapshot",
+        emotion="joy",
+        emotion_delta=0.7,
+    )
+    snapshot = await personas_service.get_snapshot(
+        tenant_id="t",
+        user_id="u",
+        instance_id="i-snapshot",
+    )
+    assert "心情不错" in snapshot.prompt_hint
+    compiled = await personas_service.compile_prompt(
+        tenant_id="t",
+        user_id="u",
+        instance_id="i-snapshot",
+        user_text="你好",
+    )
+    assert "当前人格状态：心情不错" in compiled.system_prompt
+
+
+@pytest.mark.asyncio
 async def test_memory_adapter_relation_policy(personas_service):
     await personas_service.create_instance(
         tenant_id="t",

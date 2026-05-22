@@ -26,8 +26,7 @@ eidolon_agent/
 ├── brain/            # LLM Provider 适配 + Router + 流
 ├── memory/           # MCP read + NATS write
 ├── history/          # 中心化对话历史 + fanout
-├── mind/             # 心智状态（Mood/Energy/Attention/Bond）
-├── persona/          # Template + Overlay + Resolver + Evolution
+├── personas/         # 人格模板/实例/当前状态/异步进化/Prompt 编译
 ├── tools/            # Tool 注册 + 并行调度
 ├── dispatch/         # 复杂任务转发到工作站智能体
 ├── hooks/            # 生命周期钩子

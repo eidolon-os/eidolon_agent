@@ -19,16 +19,24 @@ from eidolon_agent.personas.ports import (
     PersonaLLMPort,
     PersonaMemoryPort,
 )
+from eidolon_agent.personas.proactive_policy import PersonaProactivePolicy
 from eidolon_agent.personas.registry import PersonaTemplateRegistry
+from eidolon_agent.personas.runtime_state import PersonaRuntimeStateStore
+from eidolon_agent.personas.signal_adapter import PersonaSignalAdapter
 from eidolon_agent.personas.types import (
     CompiledPersona,
     PersonaEvolutionEvent,
     PersonaEvolutionResult,
     PersonaInstance,
+    PersonaInteractionEvent,
     PersonaMockResult,
+    PersonaProactiveDecision,
+    PersonaSignalInput,
+    PersonaSnapshot,
     PersonaTemplate,
     PersonaTemplateSummary,
 )
+from eidolon_agent.personas.worker import PersonaEvolutionWorker
 
 
 class PersonasService:
@@ -40,6 +48,10 @@ class PersonasService:
         compiler: PersonaCompiler | None = None,
         memory_adapter: PersonaMemoryAdapter | None = None,
         evolution: PersonaEvolutionEngine | None = None,
+        runtime_state: PersonaRuntimeStateStore | None = None,
+        signal_adapter: PersonaSignalAdapter | None = None,
+        proactive_policy: PersonaProactivePolicy | None = None,
+        worker: PersonaEvolutionWorker | None = None,
         memory_port: PersonaMemoryPort | None = None,
         llm_port: PersonaLLMPort | None = None,
         event_port: PersonaEventPort | None = None,
@@ -51,11 +63,27 @@ class PersonasService:
         self._compiler = compiler or PersonaCompiler()
         self._memory_adapter = memory_adapter or PersonaMemoryAdapter()
         self._evolution = evolution or PersonaEvolutionEngine()
+        self._runtime = runtime_state or PersonaRuntimeStateStore()
+        self._signal_adapter = signal_adapter or PersonaSignalAdapter()
+        self._proactive = proactive_policy or PersonaProactivePolicy()
         self._memory = memory_port
         self._llm = llm_port
         self._events = event_port or NullPersonaEventPort()
         self._audit = audit_port or NullPersonaAuditPort()
         self._memory_timeout_s = memory_timeout_s
+        self._worker = worker or PersonaEvolutionWorker(
+            instances=self._instances,
+            runtime_state=self._runtime,
+            evolution=self._evolution,
+            audit_port=self._audit,
+            event_port=self._events,
+        )
+
+    async def start(self) -> None:
+        await self._worker.start()
+
+    async def stop(self) -> None:
+        await self._worker.stop()
 
     async def list_templates(self) -> list[PersonaTemplateSummary]:
         return self._registry.list_templates()
@@ -104,6 +132,27 @@ class PersonasService:
                 template_id=template_id,
             )
 
+    async def get_snapshot(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        instance_id: str,
+        template_id: str | None = None,
+    ) -> PersonaSnapshot:
+        instance = await self.get_instance(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            instance_id=instance_id,
+            template_id=template_id,
+        )
+        runtime_state = await self._runtime.snapshot(instance_id=instance_id)
+        return PersonaSnapshot(
+            instance=instance,
+            runtime_state=runtime_state,
+            prompt_hint=runtime_state.to_prompt_hint(),
+        )
+
     async def compile_prompt(
         self,
         *,
@@ -115,12 +164,13 @@ class PersonasService:
         realtime: dict | None = None,
         dry_run_memory: list[MemoryHit] | None = None,
     ) -> CompiledPersona:
-        instance = await self.get_instance(
+        snapshot = await self.get_snapshot(
             tenant_id=tenant_id,
             user_id=user_id,
             instance_id=instance_id,
             template_id=template_id,
         )
+        instance = snapshot.instance
         formatted_context = ""
         hits: list[MemoryHit] = []
         degraded = False
@@ -150,8 +200,58 @@ class PersonasService:
         return self._compiler.compile(
             instance=instance,
             adapted_memory=adapted,
+            runtime_state=snapshot.runtime_state,
             realtime=realtime,
         )
+
+    async def update_runtime_state(
+        self,
+        *,
+        instance_id: str,
+        emotion: str | None = None,
+        emotion_delta: float = 0.0,
+        energy_level: float | None = None,
+        attention_target=None,
+        focus_score: float | None = None,
+    ):
+        return await self._runtime.update(
+            instance_id=instance_id,
+            emotion=emotion,
+            emotion_delta=emotion_delta,
+            energy_level=energy_level,
+            attention_target=attention_target,
+            focus_score=focus_score,
+        )
+
+    async def submit_interaction(self, event: PersonaInteractionEvent) -> None:
+        normalized = (
+            event
+            if event.created_at is not None
+            else event.model_copy(update={"created_at": datetime.now(timezone.utc)})
+        )
+        self._worker.submit(normalized)
+
+    async def submit_signal(self, signal: PersonaSignalInput) -> None:
+        update = self._signal_adapter.to_runtime_update(signal)
+        if not update:
+            return
+        await self._runtime.update(instance_id=signal.instance_id, **update)
+
+    async def propose_proactive(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        instance_id: str,
+        template_id: str | None = None,
+    ) -> PersonaProactiveDecision | None:
+        snapshot = await self.get_snapshot(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            instance_id=instance_id,
+            template_id=template_id,
+        )
+        return self._proactive.propose(snapshot=snapshot)
 
     async def evolve(
         self,
@@ -192,6 +292,25 @@ class PersonasService:
                 {"reason": "evolution", "changes": result.model_dump(mode="json")["changes"]},
             )
         return result
+
+    async def evolve_now(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        instance_id: str,
+        events: list[PersonaEvolutionEvent],
+        dry_run: bool = False,
+        template_id: str | None = None,
+    ) -> PersonaEvolutionResult:
+        return await self.evolve(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            instance_id=instance_id,
+            events=events,
+            dry_run=dry_run,
+            template_id=template_id,
+        )
 
     async def mock_memory_trigger(
         self,
@@ -239,6 +358,9 @@ class PersonasService:
             )
         return PersonaMockResult(compiled=compiled, evolution=evolution)
 
+    async def drain_evolution_queue(self) -> None:
+        await self._worker.join()
+
 
 async def build_default_personas_service(
     *,
@@ -261,4 +383,3 @@ async def build_default_personas_service(
         audit_port=audit_port,
         memory_timeout_s=memory_timeout_s,
     )
-

@@ -7,6 +7,7 @@ from eidolon_agent.personas.types import (
     BehavioralKnob,
     CompiledPersona,
     PersonaInstance,
+    PersonaRuntimeState,
 )
 
 
@@ -16,6 +17,7 @@ class PersonaCompiler:
         *,
         instance: PersonaInstance,
         adapted_memory: AdaptedMemoryContext | None = None,
+        runtime_state: PersonaRuntimeState | None = None,
         realtime: dict | None = None,
     ) -> CompiledPersona:
         adapted_memory = adapted_memory or AdaptedMemoryContext()
@@ -26,9 +28,12 @@ class PersonaCompiler:
         identity_block = _identity_block(instance)
         style_block, trace = _style_block(instance, effective_knobs)
         memory_block = _memory_block(adapted_memory)
+        runtime_state_block = _runtime_state_block(runtime_state)
         realtime_block = _realtime_block(realtime)
 
         parts = [identity_block, style_block]
+        if runtime_state_block:
+            parts.append(runtime_state_block)
         if memory_block:
             parts.append(memory_block)
         if realtime_block:
@@ -40,6 +45,7 @@ class PersonaCompiler:
             identity_block=identity_block,
             style_block=style_block,
             memory_block=memory_block,
+            runtime_state_block=runtime_state_block,
             transient_knobs={
                 key: knob.current for key, knob in effective_knobs.items()
                 if key in adapted_memory.transient_knob_adjustments
@@ -98,6 +104,15 @@ def _memory_block(adapted_memory: AdaptedMemoryContext) -> str:
     return "\n".join(lines)
 
 
+def _runtime_state_block(runtime_state: PersonaRuntimeState | None) -> str:
+    if runtime_state is None:
+        return ""
+    hint = runtime_state.to_prompt_hint()
+    if not hint:
+        return ""
+    return "当前人格状态：" + hint
+
+
 def _realtime_block(realtime: dict | None) -> str:
     if not realtime:
         return ""
@@ -121,4 +136,3 @@ def _apply_transient_adjustments(
         current = min(knob.max, max(knob.min, knob.current + delta))
         out[name] = knob.model_copy(update={"current": current})
     return out
-

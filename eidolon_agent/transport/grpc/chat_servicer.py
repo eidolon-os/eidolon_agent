@@ -32,11 +32,13 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         pairing: PairingCoordinator,
         signals_bus,
         proactive_bus,  # EventBus
+        personas_service=None,
     ) -> None:
         self._registry = agent_registry
         self._pairing = pairing
         self._signals = signals_bus
         self._bus = proactive_bus
+        self._personas = personas_service
 
     # ---- Pairing (public RPC, no auth) --------------------------------------
 
@@ -197,6 +199,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
 
         from eidolon_agent.core.types.signal import RealtimeSignal, SignalModality
 
+        identity = current_identity()
         try:
             modality = SignalModality(request.signal.modality)
         except ValueError:
@@ -209,6 +212,28 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
             raw=struct_to_dict(request.signal.raw),
         )
         await self._signals.publish(request.session_id, sig)
+        if self._personas is not None and identity is not None:
+            try:
+                inst = self._registry.resolve_for_caller(
+                    tenant_id=identity.tenant_id,
+                    user_id=identity.user_id,
+                    instance_id=None,
+                )
+                from eidolon_agent.personas.types import PersonaSignalInput
+
+                await self._personas.submit_signal(
+                    PersonaSignalInput(
+                        tenant_id=identity.tenant_id,
+                        user_id=identity.user_id,
+                        instance_id=inst.instance_id,
+                        dominant_emotion=request.signal.label,
+                        emotion_confidence=float(request.signal.confidence),
+                        presence=_presence_from_signal(request.signal.modality, request.signal.label),
+                        confidence_overall=float(request.signal.confidence),
+                    )
+                )
+            except Exception:
+                _log.exception("submit persona signal failed")
         return pb.Ack(accepted=True)
 
     # ---- SubscribeProactive ------------------------------------------------
@@ -243,3 +268,11 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 yield ev
         finally:
             await unsub()
+
+
+def _presence_from_signal(modality: str, label: str) -> str:
+    if modality != "ambient":
+        return "present"
+    if label in {"away", "distracted", "present"}:
+        return label
+    return "present"

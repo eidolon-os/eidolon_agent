@@ -20,6 +20,26 @@ async def test_simple_turn_emits_state_delta_done(turn_engine_factory):
 
 
 @pytest.mark.asyncio
+async def test_turn_submits_persona_interaction(turn_engine_factory, personas_service):
+    engine = turn_engine_factory()
+    _events = [ev async for ev in engine.run(make_turn_input("你好"))]
+    await personas_service._worker.drain_once()
+    snapshot = await personas_service.get_snapshot(
+        tenant_id="t",
+        user_id="alice",
+        instance_id="inst-test",
+    )
+    assert "注意力在用户身上" in snapshot.prompt_hint
+
+
+def test_persona_state_is_not_exposed_as_tool(turn_engine_factory):
+    engine = turn_engine_factory()
+    tool_names = {schema.name for schema in engine._tool_schemas()}
+    assert "set_mood" not in tool_names
+    assert "set_persona_state" not in tool_names
+
+
+@pytest.mark.asyncio
 async def test_crisis_turn_skips_normal_flow(turn_engine_factory):
     engine = turn_engine_factory()
     events = [ev async for ev in engine.run(make_turn_input("我不想活了"))]

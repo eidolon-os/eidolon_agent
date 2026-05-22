@@ -31,14 +31,6 @@ from eidolon_agent.core.types.memory import (
     MemoryWritePolicy,
 )
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
-from eidolon_agent.core.types.mind import (
-    Attention,
-    AttentionTarget,
-    Bond,
-    Energy,
-    MindState,
-    MoodVector,
-)
 from eidolon_agent.core.types.signal import RealtimeSignal, SignalDigest, SignalModality
 from eidolon_agent.core.types.tool import Permission, ToolCall, ToolResult, ToolSchema
 from eidolon_agent.core.types.turn import (
@@ -84,13 +76,6 @@ __all__ = [  # noqa: RUF022 - grouped by domain rather than alphabetical for rea
     # messages
     "ChatMessage",
     "MessageRole",
-    # mind
-    "Attention",
-    "AttentionTarget",
-    "Bond",
-    "Energy",
-    "MindState",
-    "MoodVector",
     # signal
     "RealtimeSignal",
     "SignalDigest",

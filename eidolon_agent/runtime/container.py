@@ -26,7 +26,6 @@ class Container:
 
     history_manager: object | None = None
     history_fanout: object | None = None
-    mind_service: object | None = None
     signal_bus: object | None = None
     signal_fuser: object | None = None
     crisis_handler: object | None = None

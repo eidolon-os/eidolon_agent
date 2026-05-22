@@ -29,6 +29,7 @@ class PersonasContextProvider:
             instance_id=instance_id,
             template_id=template_id,
             user_text=ti.text or "",
+            realtime=_realtime_dict(ti.realtime),
         )
         return [
             ContextSegment(
@@ -42,3 +43,15 @@ class PersonasContextProvider:
             )
         ]
 
+
+def _realtime_dict(digest) -> dict | None:  # type: ignore[no-untyped-def]
+    if digest is None:
+        return None
+    return {
+        "dominant_emotion": digest.dominant_emotion,
+        "emotion_confidence": digest.emotion_confidence,
+        "speech_rate": digest.speech_rate,
+        "presence": digest.presence,
+        "confidence_overall": digest.confidence_overall,
+        "notable_events": list(digest.notable_events),
+    }

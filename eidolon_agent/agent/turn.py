@@ -56,6 +56,7 @@ from eidolon_agent.guardrails.output_filter import OutputGuardrail
 from eidolon_agent.history.fanout import HistoryFanout
 from eidolon_agent.history.manager import HistoryManager
 from eidolon_agent.hooks.executor import HookExecutor
+from eidolon_agent.personas.types import PersonaInteractionEvent
 from eidolon_agent.tools.dispatcher import ToolDispatcher
 
 _log = logging.getLogger(__name__)
@@ -84,6 +85,8 @@ class TurnEngine:
         crisis: CrisisHandler,
         dispatch_port=None,  # DispatchPort, optional
         event_bus=None,
+        personas_service=None,
+        persona_template_id: str | None = None,
         max_tool_iters: int = 4,
         taboos_provider=lambda: (),  # () -> tuple[str, ...]
     ) -> None:
@@ -99,6 +102,8 @@ class TurnEngine:
         self._crisis = crisis
         self._dispatch = dispatch_port
         self._bus = event_bus
+        self._personas = personas_service
+        self._persona_template_id = persona_template_id
         self._max_tool_iters = max_tool_iters
         self._taboos_provider = taboos_provider
 
@@ -285,6 +290,12 @@ class TurnEngine:
                 assistant_text=final_text,
                 timestamp_iso=started_at.isoformat(),
             )
+            await self._submit_persona_interaction(
+                ti=ti,
+                kind="turn_completed",
+                user_text=ti.text or "",
+                assistant_text=final_text,
+            )
 
             await fsm.transition(FSMState.REFLECTING)
             await fsm.transition(FSMState.IDLE)
@@ -402,6 +413,12 @@ class TurnEngine:
                 break
         # Persist user turn + holding utterance; final summary is a separate proactive turn.
         await self._persist_messages(ti, ti.text or "", holding)
+        await self._submit_persona_interaction(
+            ti=ti,
+            kind="turn_completed",
+            user_text=ti.text or "",
+            assistant_text=holding,
+        )
         yield TurnEvent.done(
             ti.turn_id, seq.next(), TurnStatus.HANDED_OFF, time.time(), task_id=handle.task_id
         )
@@ -437,6 +454,31 @@ class TurnEngine:
                     metadata={"is_private": is_private} if is_private else {},
                 ),
             )
+
+    async def _submit_persona_interaction(
+        self,
+        *,
+        ti: TurnInput,
+        kind: str,
+        user_text: str,
+        assistant_text: str,
+    ) -> None:
+        if self._personas is None:
+            return
+        try:
+            await self._personas.submit_interaction(
+                PersonaInteractionEvent(
+                    tenant_id=ti.caller.tenant_id,
+                    user_id=ti.caller.user_id,
+                    instance_id=ti.caller.agent_instance_id or "",
+                    template_id=self._persona_template_id,
+                    kind=kind,
+                    user_text=user_text,
+                    assistant_text=assistant_text,
+                )
+            )
+        except Exception:
+            _log.exception("submit persona interaction failed")
 
 
 class _SeqGen:

@@ -19,7 +19,6 @@ class SegmentType(str, Enum):
     SOUL = "soul"  # evolving soul markdown
     MEMORY = "memory"  # long-term recall
     HISTORY = "history"  # recent turns
-    MINDSTATE = "mindstate"  # mood/energy/attention/bond — natural language hint
     REALTIME = "realtime"  # current signals (emotion/prosody/vision)
     TOOL_HINT = "tool_hint"  # short notes about available tools
     USER_INPUT = "user_input"  # current user message
