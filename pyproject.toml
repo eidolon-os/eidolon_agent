@@ -70,6 +70,7 @@ dev = [
     "pytest-cov>=5.0.0",
     "grpcio-tools>=1.62.0",
     "types-PyYAML>=6.0.12",
+    "import-linter>=2.0",
 ]
 
 [project.scripts]
@@ -115,4 +116,40 @@ testpaths = ["tests"]
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning:google.*",
+]
+
+# ---------------------------------------------------------------------------
+# import-linter: enforces the layered architecture.
+# Run: `.venv/bin/lint-imports`.
+# Contracts grow phase by phase (see plans/1-eidolon-agent...md).
+# ---------------------------------------------------------------------------
+
+[tool.importlinter]
+root_package = "eidolon_agent"
+
+[[tool.importlinter.contracts]]
+name = "core has zero sibling-module dependencies"
+type = "forbidden"
+source_modules = ["eidolon_agent.core"]
+forbidden_modules = [
+    "eidolon_agent.admin",
+    "eidolon_agent.agent",
+    "eidolon_agent.brain",
+    "eidolon_agent.config",
+    "eidolon_agent.context",
+    "eidolon_agent.dispatch",
+    "eidolon_agent.events",
+    "eidolon_agent.guardrails",
+    "eidolon_agent.history",
+    "eidolon_agent.hooks",
+    "eidolon_agent.memory",
+    "eidolon_agent.observability",
+    "eidolon_agent.persistence",
+    "eidolon_agent.personas",
+    "eidolon_agent.proactive",
+    "eidolon_agent.runtime",
+    "eidolon_agent.session",
+    "eidolon_agent.signals",
+    "eidolon_agent.tools",
+    "eidolon_agent.transport",
 ]

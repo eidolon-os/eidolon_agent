@@ -26,7 +26,6 @@ from eidolon_agent.core.ports.persistence import (
     ChatMessageRepository,
     ConversationRepository,
     DeviceRepository,
-    EvolutionHistoryRepository,
     UnitOfWork,
 )
 from eidolon_agent.core.ports.tool import ToolPort
@@ -39,7 +38,6 @@ __all__ = [
     "DispatchPort",
     "EventBus",
     "EventHandler",
-    "EvolutionHistoryRepository",
     "HookEvent",
     "HookOutcome",
     "HookPayload",

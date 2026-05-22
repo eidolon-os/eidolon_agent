@@ -46,6 +46,24 @@ class PersonaAuditPort(Protocol):
         ...
 
 
+@runtime_checkable
+class PersonaEvolutionRepository(Protocol):
+    """SQLite-backed repository for evolution history.
+
+    Lives in the personas module (not core/ports) because its signature
+    references the persona-domain type ``PersonaEvolutionResult``. Concrete
+    impl is wired by ``infra/persistence`` (currently ``persistence/``).
+    """
+
+    async def record(self, result: PersonaEvolutionResult) -> None: ...
+
+    async def list_for_instance(
+        self, instance_id: str, *, limit: int = 50
+    ) -> list[PersonaEvolutionResult]: ...
+
+    async def get(self, delta_id: str) -> PersonaEvolutionResult | None: ...
+
+
 class NullPersonaEventPort:
     async def publish_persona_updated(self, instance_id: str, payload: dict) -> None:
         return None

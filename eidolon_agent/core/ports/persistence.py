@@ -11,7 +11,6 @@ from typing import Protocol, runtime_checkable
 
 from eidolon_agent.core.types.messages import ChatMessage
 from eidolon_agent.core.types.turn import TurnResult
-from eidolon_agent.personas.types import PersonaEvolutionResult
 
 
 @runtime_checkable
@@ -69,24 +68,17 @@ class DeviceRepository(Protocol):
 
 
 @runtime_checkable
-class EvolutionHistoryRepository(Protocol):
-    async def record(self, result: PersonaEvolutionResult) -> None: ...
-
-    async def list_for_instance(
-        self, instance_id: str, *, limit: int = 50
-    ) -> list[PersonaEvolutionResult]: ...
-
-    async def get(self, delta_id: str) -> PersonaEvolutionResult | None: ...
-
-
-@runtime_checkable
 class UnitOfWork(Protocol):
-    """Transactional scope. Use as ``async with uow: ...``."""
+    """Transactional scope. Use as ``async with uow: ...``.
+
+    Only core-typed repositories are declared here. Domain-specific repos
+    (e.g. ``PersonaEvolutionRepository`` in ``personas.ports``) are attached
+    by concrete implementations and accessed via the concrete type.
+    """
 
     chat_messages: ChatMessageRepository
     conversations: ConversationRepository
     devices: DeviceRepository
-    evolution_history: EvolutionHistoryRepository
 
     async def __aenter__(self) -> UnitOfWork: ...
     async def __aexit__(self, exc_type, exc, tb) -> None: ...
