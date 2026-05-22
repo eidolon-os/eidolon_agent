@@ -116,6 +116,28 @@ asyncio_mode = "auto"
 # and co-located with each module under eidolon_agent/<layer>/<module>/tests/.
 testpaths = ["tests", "eidolon_agent"]
 python_files = ["test_*.py"]
+# Coverage is opt-in: run `pytest --cov` to measure. We do not yet enforce
+# a minimum gate — Phase 4 of the test plan sets that once gaps are filled.
+
+[tool.coverage.run]
+source = ["eidolon_agent"]
+omit = [
+    "*/tests/*",
+    "*/_pb2*",
+    "eidolon_agent/app/transport/grpc/proto/*",
+]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+show_missing = true
+skip_empty = true
+precision = 1
 markers = [
     "unit: pure unit test — mocks all external collaborators",
     "functional: module-level test — in-memory adapters allowed (FakeLLM, InMemoryEventBus, in-mem SQLite)",
