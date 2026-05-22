@@ -22,8 +22,14 @@ async def test_simple_turn_emits_state_delta_done(turn_engine_factory):
 
 @pytest.mark.asyncio
 async def test_turn_submits_persona_interaction(turn_engine_factory, personas_service):
+    import asyncio as _asyncio
+
     engine = turn_engine_factory()
     _events = [ev async for ev in engine.run(make_turn_input("你好"))]
+    # _post_turn runs as a fire-and-forget task after DONE is yielded.
+    await _asyncio.sleep(0)  # let create_task fire
+    await _asyncio.sleep(0)  # let it run through await points
+    await _asyncio.sleep(0)
     await personas_service._worker.drain_once()
     snapshot = await personas_service.get_snapshot(
         tenant_id="t",

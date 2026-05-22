@@ -31,7 +31,6 @@ from datetime import datetime, timezone
 from eidolon_agent.core.errors import GuardrailBlockedError, TurnCancelledError
 from eidolon_agent.core.ports.llm import LLMPort
 from eidolon_agent.core.ports.tool import ToolInvocationContext
-from eidolon_agent.core.types.dispatch import ExternalTask, ProgressKind
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.llm import LLMFinishReason
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
@@ -45,8 +44,9 @@ from eidolon_agent.core.types.turn import (
     TurnInput,
     TurnStatus,
 )
+from eidolon_agent.domain.agent.triage import TaskClassifier
+from eidolon_agent.domain.agent.workstation import submit_to_workstation
 from eidolon_agent.domain.context.compiler import ContextCompiler
-from eidolon_agent.domain.dispatch.classifier import TaskClassifier
 from eidolon_agent.domain.guardrails.crisis import CrisisHandler
 from eidolon_agent.domain.guardrails.input_filter import InputGuardrail, SafetyAction
 from eidolon_agent.domain.guardrails.output_filter import OutputGuardrail
@@ -78,7 +78,6 @@ class TurnEngine:
         input_guardrail: InputGuardrail,
         output_guardrail: OutputGuardrail,
         crisis: CrisisHandler,
-        dispatch_port=None,  # DispatchPort, optional
         event_bus=None,
         personas_service=None,
         persona_template_id: str | None = None,
@@ -94,7 +93,6 @@ class TurnEngine:
         self._input_g = input_guardrail
         self._output_g = output_guardrail
         self._crisis = crisis
-        self._dispatch = dispatch_port
         self._bus = event_bus
         self._personas = personas_service
         self._persona_template_id = persona_template_id
@@ -154,7 +152,7 @@ class TurnEngine:
             yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.THINKING, time.time())
 
             # ---- COMPLEX_LONG branch ---------------------------------------
-            if triage_kind is TriageKind.COMPLEX_LONG and self._dispatch is not None:
+            if triage_kind is TriageKind.COMPLEX_LONG and self._bus is not None:
                 async for ev in self._handle_complex(ti, seq, t0):
                     yield ev
                 first_delta_ms = first_delta_ms or int((time.monotonic() - t0) * 1000)
@@ -242,24 +240,7 @@ class TurnEngine:
                 final_text = "（让我换个说法）" + final_text
                 yield TurnEvent.delta(ti.turn_id, seq.next(), "（让我换个说法）", time.time())
 
-            # ---- Persist + fanout ------------------------------------------
-            await self._persist_messages(ti, ti.text or "", final_text)
-            await self._fanout.publish_turn(
-                tenant_id=ti.caller.tenant_id,
-                user_id=ti.caller.user_id,
-                session_id=ti.session_id,
-                turn_id=ti.turn_id,
-                user_text=ti.text or "",
-                assistant_text=final_text,
-                timestamp_iso=started_at.isoformat(),
-            )
-            await self._submit_persona_interaction(
-                ti=ti,
-                kind="turn_completed",
-                user_text=ti.text or "",
-                assistant_text=final_text,
-            )
-
+            # ---- Yield DONE FIRST, then handle post-turn in background ----
             yield TurnEvent.done(
                 ti.turn_id,
                 seq.next(),
@@ -267,6 +248,11 @@ class TurnEngine:
                 time.time(),
                 triage=triage_kind.value,
                 first_delta_ms=first_delta_ms,
+            )
+
+            # User has their answer; persistence + fanout can take their time.
+            asyncio.create_task(  # noqa: RUF006 — fire-and-forget by design
+                self._post_turn(ti, final_text, started_at)
             )
 
         except asyncio.CancelledError:
@@ -312,6 +298,12 @@ class TurnEngine:
         seq: _SeqGen,
         t0: float,
     ) -> AsyncIterator[TurnEvent]:
+        """Fire-and-forget workstation handoff.
+
+        We publish to NATS, emit a holding utterance + HANDOFF event, then
+        return. Progress flows independently through whatever subscriber the
+        workstation service publishes to — not back through this Turn stream.
+        """
         yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.SPEAKING, time.time())
         holding = "好的，我让工作站去帮你做。"
         yield TurnEvent.delta(ti.turn_id, seq.next(), holding, time.time())
@@ -322,36 +314,18 @@ class TurnEngine:
             data={"intent": "complex_long"},
             ts=time.time(),
         )
-        task = ExternalTask(
-            id=uuid.uuid4().hex,
-            tenant_id=ti.caller.tenant_id,
-            user_id=ti.caller.user_id,
-            natural_language=ti.text or "",
-        )
-        try:
-            handle = await self._dispatch.submit(task)
-        except Exception as exc:
-            yield TurnEvent.error(ti.turn_id, seq.next(), "dispatch_failed", str(exc), time.time())
+        task_id = await submit_to_workstation(self._bus, ti)
+        if not task_id:
+            yield TurnEvent.error(ti.turn_id, seq.next(), "dispatch_failed", "workstation unavailable", time.time())
             yield TurnEvent.done(ti.turn_id, seq.next(), TurnStatus.ERRORED, time.time())
             return
         yield TurnEvent(
             turn_id=ti.turn_id,
             seq=seq.next(),
             kind=TurnEventKind.HANDOFF,
-            data={"task_id": handle.task_id, "progress_subject": handle.progress_subject},
+            data={"task_id": task_id, "progress_subject": Topics.workstation_progress(task_id)},
             ts=time.time(),
         )
-        async for progress in self._dispatch.stream_progress(handle):
-            yield TurnEvent(
-                turn_id=ti.turn_id,
-                seq=seq.next(),
-                kind=TurnEventKind.PROGRESS,
-                data={"task_id": progress.task_id, "kind": progress.kind.value, "note": progress.note},
-                ts=time.time(),
-            )
-            if progress.kind in {ProgressKind.SUCCESS, ProgressKind.FAILURE, ProgressKind.CANCELLED}:
-                break
-        # Persist user turn + holding utterance; final summary is a separate proactive turn.
         await self._persist_messages(ti, ti.text or "", holding)
         await self._submit_persona_interaction(
             ti=ti,
@@ -360,8 +334,44 @@ class TurnEngine:
             assistant_text=holding,
         )
         yield TurnEvent.done(
-            ti.turn_id, seq.next(), TurnStatus.HANDED_OFF, time.time(), task_id=handle.task_id
+            ti.turn_id, seq.next(), TurnStatus.HANDED_OFF, time.time(), task_id=task_id
         )
+
+    async def _post_turn(
+        self,
+        ti: TurnInput,
+        assistant_text: str,
+        started_at: datetime,
+    ) -> None:
+        """Background work that runs AFTER DONE was yielded.
+
+        Errors here never reach the user; logged + swallowed.
+        """
+        try:
+            await self._persist_messages(ti, ti.text or "", assistant_text)
+        except Exception:
+            _log.exception("post-turn: persist failed")
+        try:
+            await self._fanout.publish_turn(
+                tenant_id=ti.caller.tenant_id,
+                user_id=ti.caller.user_id,
+                session_id=ti.session_id,
+                turn_id=ti.turn_id,
+                user_text=ti.text or "",
+                assistant_text=assistant_text,
+                timestamp_iso=started_at.isoformat(),
+            )
+        except Exception:
+            _log.exception("post-turn: fanout failed")
+        try:
+            await self._submit_persona_interaction(
+                ti=ti,
+                kind="turn_completed",
+                user_text=ti.text or "",
+                assistant_text=assistant_text,
+            )
+        except Exception:
+            _log.exception("post-turn: persona interaction failed")
 
     async def _persist_messages(
         self,

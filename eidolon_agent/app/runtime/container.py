@@ -37,7 +37,6 @@ class Container:
 
     llm_router: object | None = None
     memory_port: object | None = None
-    dispatch_port: object | None = None
 
     agent_registry: object | None = None
     pairing_coordinator: object | None = None

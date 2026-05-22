@@ -4,7 +4,7 @@
 import pytest
 
 from eidolon_agent.core.types.turn import TriageKind
-from eidolon_agent.domain.dispatch.classifier import TaskClassifier
+from eidolon_agent.domain.agent.triage import TaskClassifier
 
 pytestmark = pytest.mark.unit
 

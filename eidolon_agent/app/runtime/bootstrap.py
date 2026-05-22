@@ -29,9 +29,9 @@ from eidolon_agent.app.transport.pairing import PairingCoordinator, PairingToken
 from eidolon_agent.config.settings import Settings, load_settings
 from eidolon_agent.domain.agent.companion import CompanionAgent
 from eidolon_agent.domain.agent.registry import AgentRegistry, AgentTemplate
+from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.agent.turn import TurnEngine
 from eidolon_agent.domain.context.compiler import ContextCompiler
-from eidolon_agent.domain.dispatch import NatsWorkstationClient, TaskClassifier
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.domain.history import HistoryFanout, HistoryManager
 from eidolon_agent.domain.personas import (
@@ -153,14 +153,10 @@ async def build_application(
     llm_router = _build_llm_router(settings)
     container.llm_router = llm_router
 
-    # 12. Dispatch (workstation) ----------------------------------------------
-    if settings.workstation.transport == "nats":
-        container.dispatch_port = NatsWorkstationClient(
-            container.event_bus,
-            request_timeout_s=settings.workstation.request_timeout_s,
-        )
+    # (Workstation dispatch is now a one-line NATS publish from the Turn
+    # pipeline; see domain/agent/workstation.py. No long-lived client to wire.)
 
-    # 13. Pairing --------------------------------------------------------------
+    # 8. Pairing ---------------------------------------------------------------
     jwt_secret = settings.pairing.jwt_secret
     if not jwt_secret:
         jwt_secret = _generate_persisted_secret(Path(settings.runtime.run_dir) / "jwt-secret")
@@ -293,7 +289,6 @@ def _build_turn_engine(
         input_guardrail=container.input_guardrail,
         output_guardrail=container.output_guardrail,
         crisis=container.crisis_handler,
-        dispatch_port=container.dispatch_port,
         event_bus=container.event_bus,
         personas_service=container.personas_service,
         persona_template_id=template_id,

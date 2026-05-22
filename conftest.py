@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.context.compiler import ContextCompiler
-from eidolon_agent.domain.dispatch.classifier import TaskClassifier
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.domain.history import HistoryFanout, HistoryManager
 from eidolon_agent.domain.personas import (
@@ -65,7 +65,7 @@ async def personas_service(canonical_template_registry, persona_instance_store):
 async def turn_engine_factory(personas_service, event_bus):
     """Builds a minimal TurnEngine for tests."""
 
-    def _factory(*, llm=None, dispatch_port=None):
+    def _factory(*, llm=None):
         from eidolon_agent.domain.agent.turn import TurnEngine
 
         history = HistoryManager()
@@ -95,7 +95,6 @@ async def turn_engine_factory(personas_service, event_bus):
             input_guardrail=InputGuardrail(),
             output_guardrail=OutputGuardrail(),
             crisis=CrisisHandler(event_bus=event_bus),
-            dispatch_port=dispatch_port,
             event_bus=event_bus,
             personas_service=personas_service,
             persona_template_id="caretaker_jiezhi",
