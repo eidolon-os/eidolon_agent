@@ -104,12 +104,6 @@ class TurnTimeoutError(TurnError):
     code = "eidolon.turn_timeout"
 
 
-class SlowConsumerError(TurnError):
-    """The streaming peer is consuming events slower than we can produce."""
-
-    code = "eidolon.slow_consumer"
-
-
 # --- Persona / evolution ------------------------------------------------------
 
 
@@ -161,7 +155,6 @@ __all__ = [
     "PersonaError",
     "QuotaExceededError",
     "RateLimitedError",
-    "SlowConsumerError",
     "TokenRevokedError",
     "ToolError",
     "ToolPermissionError",
