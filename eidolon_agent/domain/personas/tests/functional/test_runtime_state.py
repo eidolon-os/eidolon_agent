@@ -7,6 +7,7 @@ import pytest
 from eidolon_agent.domain.personas.runtime_state import PersonaRuntimeStateStore
 from eidolon_agent.domain.personas.types import AttentionTarget, MoodVector, PersonaRuntimeState
 
+pytestmark = pytest.mark.functional
 
 @pytest.mark.asyncio
 async def test_runtime_state_updates_and_prompts():

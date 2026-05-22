@@ -14,6 +14,7 @@ from eidolon_agent.infra.persistence import (
     ensure_schema,
 )
 
+pytestmark = pytest.mark.functional
 
 @pytest.fixture
 async def uow_factory():

@@ -1,8 +1,12 @@
 """TriageKind classifier coverage."""
 
+
+import pytest
+
 from eidolon_agent.core.types.turn import TriageKind
 from eidolon_agent.domain.dispatch.classifier import TaskClassifier
 
+pytestmark = pytest.mark.unit
 
 def test_simple_default():
     c = TaskClassifier()

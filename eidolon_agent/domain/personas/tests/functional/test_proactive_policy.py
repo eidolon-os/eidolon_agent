@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.functional
 
 @pytest.mark.asyncio
 async def test_proactive_policy_returns_decision_for_close_persona(personas_service):

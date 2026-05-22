@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import make_turn_input
+from tests.helpers import make_turn_input
 
+pytestmark = pytest.mark.functional
 
 @pytest.mark.asyncio
 async def test_simple_turn_emits_state_delta_done(turn_engine_factory):

@@ -5,6 +5,7 @@ import pytest
 from eidolon_agent.domain.personas.signal_adapter import PersonaSignalAdapter
 from eidolon_agent.domain.personas.types import AttentionTarget, PersonaSignalInput
 
+pytestmark = pytest.mark.functional
 
 def test_signal_adapter_ignores_low_confidence():
     update = PersonaSignalAdapter().to_runtime_update(

@@ -7,8 +7,9 @@ import pytest
 from eidolon_agent.core.ports.context import ProviderContext
 from eidolon_agent.core.types.context import ContextSegment, SegmentType, SegmentWeight
 from eidolon_agent.domain.context.compiler import ContextCompiler
-from tests.conftest import make_turn_input
+from tests.helpers import make_turn_input
 
+pytestmark = pytest.mark.functional
 
 class _Stub:
     def __init__(self, name, weight, tokens, delay_s=0.0):

@@ -10,6 +10,7 @@ from eidolon_agent.infra.memory.mcp_client import _decode_call_tool_result
 from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
 from eidolon_agent.infra.memory.port_adapter import EidolonMemoryPort
 
+pytestmark = pytest.mark.unit
 
 @pytest.mark.asyncio
 async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):

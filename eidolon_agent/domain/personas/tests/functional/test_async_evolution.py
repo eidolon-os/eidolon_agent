@@ -4,6 +4,7 @@ import pytest
 
 from eidolon_agent.domain.personas.types import PersonaInteractionEvent
 
+pytestmark = pytest.mark.functional
 
 @pytest.mark.asyncio
 async def test_submit_interaction_is_nonblocking_and_worker_evolves(personas_service):

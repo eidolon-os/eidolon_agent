@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from eidolon_agent.app.admin import build_admin_app
 from eidolon_agent.config.settings import Settings
 
+pytestmark = pytest.mark.integration
 
 @pytest.mark.asyncio
 async def test_admin_personas_external_interface(

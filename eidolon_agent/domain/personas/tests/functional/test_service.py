@@ -14,6 +14,7 @@ from eidolon_agent.domain.personas.evolution import PersonaEvolutionEngine
 from eidolon_agent.domain.personas.memory_adapter import PersonaMemoryAdapter
 from eidolon_agent.domain.personas.types import PersonaEvolutionEvent
 
+pytestmark = pytest.mark.functional
 
 @pytest.mark.asyncio
 async def test_registry_loads_canonical_template(canonical_template_registry):

@@ -112,7 +112,16 @@ ignore = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+# Discover tests both at the project root (cross-cutting / integration / arch)
+# and co-located with each module under eidolon_agent/<layer>/<module>/tests/.
+testpaths = ["tests", "eidolon_agent"]
+python_files = ["test_*.py"]
+markers = [
+    "unit: pure unit test — mocks all external collaborators",
+    "functional: module-level test — in-memory adapters allowed (FakeLLM, InMemoryEventBus, in-mem SQLite)",
+    "integration: cross-module / cross-layer test (still in-process, no real network/NATS/LLM)",
+    "smoke: requires real external service (NATS, LLM endpoint); skipped in default CI",
+]
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning:google.*",

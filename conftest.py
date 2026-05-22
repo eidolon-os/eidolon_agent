@@ -113,20 +113,4 @@ async def turn_engine_factory(personas_service, event_bus):
     return _factory
 
 
-def make_turn_input(text: str = "你好"):
-    from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
-    from eidolon_agent.core.types.turn import TurnInput, TurnTrigger
-
-    return TurnInput(
-        turn_id="t1",
-        conversation_id="c1",
-        session_id="s1",
-        caller=CallerContext(
-            identity=Identity(tenant_id="t", user_id="alice", agent_instance_id="inst-test"),
-            caller_kind=CallerKind.WEB_CHAT,
-            trace_id="tr",
-            request_id="rq",
-        ),
-        trigger=TurnTrigger.USER_UTTERANCE,
-        text=text,
-    )
+# Non-fixture test helpers (e.g. make_turn_input) live in tests.helpers.

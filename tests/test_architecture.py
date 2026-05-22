@@ -49,6 +49,10 @@ def test_no_cross_layer_deep_imports() -> None:
     for py in ROOT.rglob("*.py"):
         if "__pycache__" in str(py) or "_pb2" in py.name:
             continue
+        # Module-local test files (under <module>/tests/) may freely import
+        # their own module's internals — that is exactly what unit tests do.
+        if "/tests/" in str(py).replace("\\", "/"):
+            continue
         src_mod = ".".join(py.with_suffix("").relative_to(ROOT.parent).parts)
         if src_mod in _WIRING_EXEMPT:
             continue
