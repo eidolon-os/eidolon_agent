@@ -51,6 +51,8 @@ class ContextCompiler:
         )
 
         # ---- Persona system prompt (always present) -------------------------
+        # Pass dry_run_memory=[] to skip PersonasService's own memory recall;
+        # we own memory on the hot path and append it once below.
         persona = await self._personas.compile_prompt(
             tenant_id=ti.caller.tenant_id,
             user_id=ti.caller.user_id,
@@ -58,6 +60,7 @@ class ContextCompiler:
             template_id=template_id,
             user_text=ti.text or "",
             realtime=_realtime_dict(ti.realtime),
+            dry_run_memory=[],
         )
         system_parts: list[str] = [persona.system_prompt]
 

@@ -74,7 +74,7 @@ dev = [
 ]
 
 [project.scripts]
-eidolon-agent = "eidolon_agent.runtime.cli:main"
+eidolon-agent = "eidolon_agent.app.runtime.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
