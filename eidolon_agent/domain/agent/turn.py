@@ -1,11 +1,10 @@
 """TurnEngine — runs a single Turn end-to-end and yields TurnEvents.
 
-This is the heart of the whole architecture. Everything else exists to feed
-this pipeline:
+This is the heart of the whole architecture. Hot path:
 
-    PRE_TURN → triage → compile → PRE_LLM → LLM.stream
-      ├── on tool_call: PRE_TOOL → dispatch → POST_TOOL → continue
-      └── POST_LLM → persist → fanout → POST_TURN
+    input_guardrail → triage → compile → LLM.stream
+      └── on tool_call: dispatch → continue
+    → output_guardrail → DONE
 
 Three Triage outcomes diverge:
 
@@ -30,7 +29,6 @@ from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
 from eidolon_agent.core.errors import GuardrailBlockedError, TurnCancelledError
-from eidolon_agent.core.ports.hooks import HookEvent, HookOutcome, HookPayload
 from eidolon_agent.core.ports.llm import LLMPort
 from eidolon_agent.core.ports.tool import ToolInvocationContext
 from eidolon_agent.core.types.dispatch import ExternalTask, ProgressKind
@@ -47,7 +45,6 @@ from eidolon_agent.core.types.turn import (
     TurnInput,
     TurnStatus,
 )
-from eidolon_agent.domain.agent.fsm import TurnFSM
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.dispatch.classifier import TaskClassifier
 from eidolon_agent.domain.guardrails.crisis import CrisisHandler
@@ -55,7 +52,6 @@ from eidolon_agent.domain.guardrails.input_filter import InputGuardrail, SafetyA
 from eidolon_agent.domain.guardrails.output_filter import OutputGuardrail
 from eidolon_agent.domain.history.fanout import HistoryFanout
 from eidolon_agent.domain.history.manager import HistoryManager
-from eidolon_agent.domain.hooks.executor import HookExecutor
 from eidolon_agent.domain.personas.types import PersonaInteractionEvent
 from eidolon_agent.domain.tools.dispatcher import ToolDispatcher
 
@@ -65,7 +61,7 @@ _log = logging.getLogger(__name__)
 class TurnEngine:
     """Per-instance Turn runner.
 
-    One engine instance per AgentInstance (so hooks/tools/history are scoped).
+    One engine instance per AgentInstance (so tools/history are scoped).
     Multiple concurrent Turns are supported but the engine is stateless beyond
     its injected collaborators — concurrency is handled by the asyncio runtime.
     """
@@ -76,7 +72,6 @@ class TurnEngine:
         compiler: ContextCompiler,
         llm: LLMPort,
         tool_dispatcher: ToolDispatcher,
-        hook_executor: HookExecutor,
         history: HistoryManager,
         fanout: HistoryFanout,
         triage: TaskClassifier,
@@ -93,7 +88,6 @@ class TurnEngine:
         self._compiler = compiler
         self._llm = llm
         self._tools = tool_dispatcher
-        self._hooks = hook_executor
         self._history = history
         self._fanout = fanout
         self._triage = triage
@@ -109,7 +103,6 @@ class TurnEngine:
 
     async def run(self, ti: TurnInput) -> AsyncIterator[TurnEvent]:
         """Run a single Turn. Yields TurnEvents until DONE or ERROR."""
-        fsm = TurnFSM()
         seq = _SeqGen()
         started_at = datetime.now(timezone.utc)
         t0 = time.monotonic()
@@ -118,21 +111,9 @@ class TurnEngine:
         status = TurnStatus.OK
         assistant_text_parts: list[str] = []
         usage_in = usage_out = 0
-        model_used: str | None = None
         error_code: str | None = None
 
         try:
-            # ---- PRE_TURN hooks (rate limit, audit, etc.) -------------------
-            pre_turn_payload = HookPayload(event=HookEvent.PRE_TURN, data={"turn_input": ti})
-            pre_res = await self._hooks.run(HookEvent.PRE_TURN, pre_turn_payload)
-            if pre_res.outcome is HookOutcome.ABORT:
-                yield TurnEvent.error(
-                    ti.turn_id, seq.next(), "pre_turn_abort", pre_res.reason or "aborted", time.time()
-                )
-                status = TurnStatus.ERRORED
-                error_code = "pre_turn_abort"
-                return
-
             # ---- Input guardrail --------------------------------------------
             verdict = self._input_g.check(ti.text)
             if verdict.action is SafetyAction.ESCALATE:
@@ -141,7 +122,6 @@ class TurnEngine:
                     user_id=ti.caller.user_id,
                     locale=ti.caller.locale,
                 )
-                await fsm.force(FSMState.SPEAKING)
                 yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.SPEAKING, time.time())
                 yield TurnEvent.delta(ti.turn_id, seq.next(), crisis.text, time.time())
                 yield TurnEvent.done(
@@ -171,13 +151,11 @@ class TurnEngine:
 
             # ---- Triage -----------------------------------------------------
             triage_kind = self._triage.classify(ti.text)
-            await fsm.transition(FSMState.LISTENING)
-            await fsm.transition(FSMState.THINKING)
             yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.THINKING, time.time())
 
             # ---- COMPLEX_LONG branch ---------------------------------------
             if triage_kind is TriageKind.COMPLEX_LONG and self._dispatch is not None:
-                async for ev in self._handle_complex(ti, fsm, seq, t0):
+                async for ev in self._handle_complex(ti, seq, t0):
                     yield ev
                 first_delta_ms = first_delta_ms or int((time.monotonic() - t0) * 1000)
                 status = TurnStatus.HANDED_OFF
@@ -186,16 +164,9 @@ class TurnEngine:
             # ---- Compile context -------------------------------------------
             compiled = await self._compiler.compile(ti)
 
-            # ---- PRE_LLM hooks ---------------------------------------------
-            pre_llm_data = {"messages": list(compiled.messages), "tools": []}
-            await self._hooks.run(
-                HookEvent.PRE_LLM, HookPayload(event=HookEvent.PRE_LLM, data=pre_llm_data)
-            )
-
             # ---- LLM stream (with tool loop) -------------------------------
-            messages = pre_llm_data["messages"]
-            tools = pre_llm_data["tools"] or self._tool_schemas()
-            await fsm.transition(FSMState.SPEAKING)
+            messages = list(compiled.messages)
+            tools = self._tool_schemas()
             yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.SPEAKING, time.time())
 
             iters = 0
@@ -264,15 +235,8 @@ class TurnEngine:
                     continue  # loop the LLM again with tool results in context
                 break
 
-            # ---- POST_LLM hooks --------------------------------------------
-            post_llm = HookPayload(
-                event=HookEvent.POST_LLM,
-                data={"text": "".join(assistant_text_parts)},
-            )
-            await self._hooks.run(HookEvent.POST_LLM, post_llm)
-
             # ---- Output guardrail ------------------------------------------
-            final_text = post_llm.data.get("text", "")
+            final_text = "".join(assistant_text_parts)
             out_v = self._output_g.check(output_text=final_text, taboos=self._taboos_provider())
             if out_v.action is SafetyAction.SOFTEN:
                 # Crude soften: prefix; production would re-prompt LLM.
@@ -297,8 +261,6 @@ class TurnEngine:
                 assistant_text=final_text,
             )
 
-            await fsm.transition(FSMState.REFLECTING)
-            await fsm.transition(FSMState.IDLE)
             yield TurnEvent.done(
                 ti.turn_id,
                 seq.next(),
@@ -323,25 +285,6 @@ class TurnEngine:
             error_code = "internal"
             yield TurnEvent.error(ti.turn_id, seq.next(), error_code, str(exc), time.time())
         finally:
-            # POST_TURN hooks (audit, metrics)
-            try:
-                await self._hooks.run(
-                    HookEvent.POST_TURN,
-                    HookPayload(
-                        event=HookEvent.POST_TURN,
-                        data={
-                            "turn_input": ti,
-                            "status": status.value,
-                            "triage": triage_kind.value,
-                            "model": model_used,
-                            "tokens_in": usage_in,
-                            "tokens_out": usage_out,
-                            "first_delta_ms": first_delta_ms,
-                        },
-                    ),
-                )
-            except Exception:
-                _log.exception("POST_TURN hooks failed")
             if self._bus is not None:
                 try:
                     await self._bus.publish(
@@ -362,16 +305,14 @@ class TurnEngine:
     # ---- helpers -------------------------------------------------------------
 
     def _tool_schemas(self) -> list:
-        return [t for t in self._tools._registry.list_schemas()]
+        return list(self._tools._registry.list_schemas())
 
     async def _handle_complex(
         self,
         ti: TurnInput,
-        fsm: TurnFSM,
         seq: _SeqGen,
         t0: float,
     ) -> AsyncIterator[TurnEvent]:
-        await fsm.transition(FSMState.SPEAKING)
         yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.SPEAKING, time.time())
         holding = "好的，我让工作站去帮你做。"
         yield TurnEvent.delta(ti.turn_id, seq.next(), holding, time.time())

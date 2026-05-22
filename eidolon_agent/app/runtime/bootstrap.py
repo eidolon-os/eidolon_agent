@@ -1,25 +1,17 @@
-"""Bootstrap — the 15-step start-up sequence that wires the whole process.
+"""Bootstrap — startup sequence that wires the whole process.
 
-This is the only place that knows the concrete dependency graph. Tests can
-replace any step by passing pre-built collaborators in via ``overrides``.
+This is the only place that knows the concrete dependency graph. Steps:
 
-Step list (matches the plan):
-
-1.  init logging / tracing / metrics
+1.  init logging
 2.  build DI container
 3.  connect SQLite, NATS (+ KV buckets ensure)
 4.  probe memory MCP endpoints
-5.  PersonaTemplateRegistry.load_all + watcher
-6.  PersonaInstanceStore bootstrap
-7.  AgentRegistry.bootstrap (recover instances)
-8.  NATS subscribers (memory.event / workstation.progress / persona.evolution.proposed)
-9.  Register builtin hooks / tools / providers
-10. ProactiveEngine start
-11. SessionManager bootstrap (deferred)
-12. Pairing coordinator + token verifier
-13. gRPC server start
-14. HTTP server start (FastAPI)
-15. signal ready
+5.  Personas registry + per-user instance store
+6.  Cross-cutting services (history, signals, guardrails, triage)
+7.  Tools + LLM router + dispatch
+8.  Pairing coordinator + token verifier
+9.  AgentRegistry with instance factory closure
+10. gRPC + HTTP + Admin transport servers
 """
 
 from __future__ import annotations
@@ -47,15 +39,13 @@ from eidolon_agent.domain.context.providers import (
 from eidolon_agent.domain.dispatch import NatsWorkstationClient, TaskClassifier
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.domain.history import HistoryFanout, HistoryManager
-from eidolon_agent.domain.hooks import HookExecutor
 from eidolon_agent.domain.personas import (
     PersonaInstanceStore,
     PersonasService,
     PersonaTemplateRegistry,
 )
 from eidolon_agent.domain.personas.ports import NullPersonaAuditPort, PersonaEventPort
-from eidolon_agent.domain.proactive import ProactiveEngine
-from eidolon_agent.domain.signals import SignalBus, SignalFuser
+from eidolon_agent.domain.signals import SignalBus
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import EmitEventTool, GetTimeTool
 from eidolon_agent.infra.events import NatsEventBus, NatsKVStore
@@ -67,7 +57,6 @@ from eidolon_agent.infra.memory.discovery import build_initial_memory_routes
 from eidolon_agent.infra.memory.mcp_client import McpClientPool
 from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
 from eidolon_agent.infra.observability import configure_logging
-from eidolon_agent.infra.observability.tracing import configure_tracing
 from eidolon_agent.infra.persistence import (
     create_engine,
     create_session_factory,
@@ -85,9 +74,8 @@ async def build_application(
     settings = settings or load_settings()
     container = Container(settings=settings)
 
-    # 1. logging / tracing / metrics ------------------------------------------
+    # 1. logging ----------------------------------------------------------------
     configure_logging(settings.observability)
-    configure_tracing(settings.observability)
 
     # 2. container -------------------------------------------------------------
     # (already created above)
@@ -144,20 +132,17 @@ async def build_application(
     container.persona_instance_store = instance_store
     container.personas_service = personas_service
 
-    # 7-10. Cross-cutting services --------------------------------------------
+    # 7. Cross-cutting services -----------------------------------------------
     history = HistoryManager()
     fanout = HistoryFanout(event_bus=container.event_bus, memory_routes=memory_routes)
     sig_bus = SignalBus()
-    sig_fuser = SignalFuser(sig_bus)
     container.history_manager = history
     container.history_fanout = fanout
     container.signal_bus = sig_bus
-    container.signal_fuser = sig_fuser
     container.crisis_handler = CrisisHandler(event_bus=container.event_bus)
     container.input_guardrail = InputGuardrail()
     container.output_guardrail = OutputGuardrail()
     container.triage_classifier = TaskClassifier()
-    container.proactive_engine = ProactiveEngine(event_bus=container.event_bus)
 
     # 9. Tools -----------------------------------------------------------------
     tool_registry = ToolRegistry()
@@ -309,7 +294,6 @@ def _build_turn_engine(
         compiler=compiler,
         llm=container.llm_router,
         tool_dispatcher=container.tool_dispatcher,
-        hook_executor=HookExecutor(),
         history=container.history_manager,
         fanout=container.history_fanout,
         triage=container.triage_classifier,

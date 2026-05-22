@@ -26,6 +26,7 @@ async def test_publish_then_subscribe_does_not_replay() -> None:
     await bus.publish(Event(subject="a.b", payload={"k": 1}, source="t"))
     await bus.subscribe("a.b", _h)
     await bus.publish(Event(subject="a.b", payload={"k": 2}, source="t"))
+    await asyncio.sleep(0)
     # Only the second event reaches the subscriber.
     assert [e.payload["k"] for e in received] == [2]
 
@@ -54,8 +55,10 @@ async def test_unsubscribe_stops_delivery() -> None:
 
     unsub = await bus.subscribe("a.b", _h)
     await bus.publish(Event(subject="a.b", payload={"k": 1}, source="t"))
+    await asyncio.sleep(0)
     await unsub()
     await bus.publish(Event(subject="a.b", payload={"k": 2}, source="t"))
+    await asyncio.sleep(0)
     assert len(received) == 1
 
 

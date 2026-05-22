@@ -15,7 +15,6 @@ from eidolon_agent.domain.context.providers import (
 from eidolon_agent.domain.dispatch.classifier import TaskClassifier
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.domain.history import HistoryFanout, HistoryManager
-from eidolon_agent.domain.hooks import HookExecutor
 from eidolon_agent.domain.personas import (
     PersonaInstanceStore,
     PersonasService,
@@ -97,7 +96,6 @@ async def turn_engine_factory(personas_service, event_bus):
             compiler=compiler,
             llm=LLMRouter(providers={"fake": llm or FakeLLM()}, default="fake"),
             tool_dispatcher=dispatcher,
-            hook_executor=HookExecutor(),
             history=history,
             fanout=fanout,
             triage=TaskClassifier(),

@@ -19,7 +19,6 @@ from eidolon_agent.domain.personas.ports import (
     PersonaLLMPort,
     PersonaMemoryPort,
 )
-from eidolon_agent.domain.personas.proactive_policy import PersonaProactivePolicy
 from eidolon_agent.domain.personas.registry import PersonaTemplateRegistry
 from eidolon_agent.domain.personas.runtime_state import PersonaRuntimeStateStore
 from eidolon_agent.domain.personas.signal_adapter import PersonaSignalAdapter
@@ -30,7 +29,6 @@ from eidolon_agent.domain.personas.types import (
     PersonaInstance,
     PersonaInteractionEvent,
     PersonaMockResult,
-    PersonaProactiveDecision,
     PersonaSignalInput,
     PersonaSnapshot,
     PersonaTemplate,
@@ -50,7 +48,6 @@ class PersonasService:
         evolution: PersonaEvolutionEngine | None = None,
         runtime_state: PersonaRuntimeStateStore | None = None,
         signal_adapter: PersonaSignalAdapter | None = None,
-        proactive_policy: PersonaProactivePolicy | None = None,
         worker: PersonaEvolutionWorker | None = None,
         memory_port: PersonaMemoryPort | None = None,
         llm_port: PersonaLLMPort | None = None,
@@ -65,7 +62,6 @@ class PersonasService:
         self._evolution = evolution or PersonaEvolutionEngine()
         self._runtime = runtime_state or PersonaRuntimeStateStore()
         self._signal_adapter = signal_adapter or PersonaSignalAdapter()
-        self._proactive = proactive_policy or PersonaProactivePolicy()
         self._memory = memory_port
         self._llm = llm_port
         self._events = event_port or NullPersonaEventPort()
@@ -236,22 +232,6 @@ class PersonasService:
         if not update:
             return
         await self._runtime.update(instance_id=signal.instance_id, **update)
-
-    async def propose_proactive(
-        self,
-        *,
-        tenant_id: str,
-        user_id: str,
-        instance_id: str,
-        template_id: str | None = None,
-    ) -> PersonaProactiveDecision | None:
-        snapshot = await self.get_snapshot(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            instance_id=instance_id,
-            template_id=template_id,
-        )
-        return self._proactive.propose(snapshot=snapshot)
 
     async def evolve(
         self,

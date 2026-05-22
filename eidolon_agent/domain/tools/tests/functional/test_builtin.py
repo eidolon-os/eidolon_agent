@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from eidolon_agent.core.types.tool import ToolCall
@@ -58,6 +60,7 @@ async def test_emit_event_publishes_to_bus(event_bus, caller_ctx) -> None:
         [_call("emit_event", {"subject": "agent.test.fired", "payload": {"k": "v"}})],
         ctx=caller_ctx,
     )
+    await asyncio.sleep(0)
     assert res.ok
     assert len(received) == 1
     assert received[0].payload == {"k": "v"}

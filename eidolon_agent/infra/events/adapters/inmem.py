@@ -45,9 +45,12 @@ class InMemoryEventBus:
 
     async def publish(self, event: Event, *, persistent: bool = False) -> None:
         # Persistence is a no-op in-process; we just deliver to subscribers.
+        # Handlers run concurrently via ``asyncio.create_task`` so one slow
+        # handler can't stall the others. This matches NATS semantics: publish
+        # returns when the event has been *scheduled*, not consumed. Tests that
+        # need delivery to complete should ``await asyncio.sleep(0)``.
         targets: list[_Subscription] = []
         async with self._lock:
-            # Group queue_group entries — only one delivery per group per event.
             seen_groups: set[str] = set()
             for sub in self._subs:
                 if not _matches(sub.pattern, event.subject):
@@ -58,12 +61,9 @@ class InMemoryEventBus:
                     seen_groups.add(sub.queue_group)
                 targets.append(sub)
         for sub in targets:
-            # Errors in handlers must not affect other subscribers.
-            try:
-                await sub.handler(event)
-            except Exception:
-                # Swallow — production would log via structured logger.
-                pass
+            # Fire-and-forget by design; tests use `await asyncio.sleep(0)` to
+            # let handlers run before asserting.
+            asyncio.create_task(_safe_invoke(sub.handler, event))  # noqa: RUF006
 
     async def subscribe(
         self,
@@ -102,6 +102,17 @@ class InMemoryEventBus:
 
     async def health(self) -> bool:
         return True
+
+
+async def _safe_invoke(
+    handler: Callable[[Event], Awaitable[None]], event: Event
+) -> None:
+    """Errors in handlers must not propagate to publisher or other subscribers."""
+    try:
+        await handler(event)
+    except Exception:
+        # Swallow — production would log via structured logger.
+        pass
 
 
 # ---------------------------------------------------------------------------

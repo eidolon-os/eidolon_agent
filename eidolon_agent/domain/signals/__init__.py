@@ -1,6 +1,5 @@
-"""Realtime signal fusion."""
+"""Realtime signal ring buffer (lightweight, fed by gRPC PushSignal)."""
 
 from eidolon_agent.domain.signals.bus import SignalBus
-from eidolon_agent.domain.signals.fuser import SignalFuser
 
-__all__ = ["SignalBus", "SignalFuser"]
+__all__ = ["SignalBus"]

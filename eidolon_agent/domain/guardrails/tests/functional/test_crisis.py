@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from eidolon_agent.domain.guardrails import CrisisHandler
@@ -28,6 +30,7 @@ async def test_crisis_publishes_audit_event(event_bus) -> None:
     await event_bus.subscribe("agent.guardrail.crisis.inst-42", _handler)
     handler = CrisisHandler(event_bus=event_bus)
     await handler.handle(instance_id="inst-42", user_id="alice")
+    await asyncio.sleep(0)
     assert len(received) == 1
     assert received[0].payload["user_id"] == "alice"
     assert received[0].payload["locale"] == "zh-CN"

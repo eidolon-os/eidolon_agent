@@ -27,12 +27,10 @@ class Container:
     history_manager: object | None = None
     history_fanout: object | None = None
     signal_bus: object | None = None
-    signal_fuser: object | None = None
     crisis_handler: object | None = None
     input_guardrail: object | None = None
     output_guardrail: object | None = None
     triage_classifier: object | None = None
-    proactive_engine: object | None = None
 
     tool_registry: object | None = None
     tool_dispatcher: object | None = None

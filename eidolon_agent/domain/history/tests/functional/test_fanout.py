@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from eidolon_agent.domain.history import HistoryFanout
@@ -36,6 +38,7 @@ async def test_publish_turn_emits_memory_event(event_bus) -> None:
         assistant_text="嗨",
         timestamp_iso="2026-05-22T10:00:00Z",
     )
+    await asyncio.sleep(0)
     assert len(received) == 1
     payload = received[0].payload
     assert payload["user_id"] == "alice"
@@ -64,6 +67,7 @@ async def test_publish_turn_uses_route_resolver_when_provided(event_bus) -> None
         assistant_text="hello",
         timestamp_iso="2026-05-22T10:00:00Z",
     )
+    await asyncio.sleep(0)
     assert len(received) == 1
 
 
@@ -85,6 +89,7 @@ async def test_publish_turn_emits_emotion_when_payload_given(event_bus) -> None:
         timestamp_iso="2026-05-22T10:00:00Z",
         emotion_payload={"valence": -0.4},
     )
+    await asyncio.sleep(0)
     assert len(received) == 1
     assert received[0].payload["emotion"]["valence"] == -0.4
 
