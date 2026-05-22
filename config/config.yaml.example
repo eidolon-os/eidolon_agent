@@ -48,8 +48,9 @@ workstation:
   transport: nats
 
 persona:
-  templates_dir: personas/templates
-  overlays_dir: personas/overlays
+  templates_dir: eidolon_agent/personas/templates
+  instances_dir: ~/eidolon/personas/instances
+  auto_evolution_enabled: true
 
 observability:
   log_level: INFO

@@ -21,10 +21,8 @@ class Container:
     sqlite_engine: object | None = None
     session_factory: object | None = None
 
-    template_registry: object | None = None
-    overlay_store: object | None = None
-    persona_resolver: object | None = None
-    evolution_planner: object | None = None
+    persona_instance_store: object | None = None
+    personas_service: object | None = None
 
     history_manager: object | None = None
     history_fanout: object | None = None

@@ -13,7 +13,7 @@ from eidolon_agent.context.compiler import ContextCompiler
 from eidolon_agent.context.providers import (
     HistoryProvider,
     MindStateProvider,
-    PersonaContextProvider,
+    PersonasContextProvider,
 )
 from eidolon_agent.dispatch.classifier import TaskClassifier
 from eidolon_agent.events import InMemoryEventBus, InMemoryKVStore
@@ -21,9 +21,9 @@ from eidolon_agent.guardrails import CrisisHandler, InputGuardrail, OutputGuardr
 from eidolon_agent.history import HistoryFanout, HistoryManager
 from eidolon_agent.hooks import HookExecutor
 from eidolon_agent.mind import MindStateService
-from eidolon_agent.persona import (
-    PersonaOverlayStore,
-    PersonaResolver,
+from eidolon_agent.personas import (
+    PersonaInstanceStore,
+    PersonasService,
     PersonaTemplateRegistry,
 )
 from eidolon_agent.tools import ToolDispatcher, ToolRegistry
@@ -49,24 +49,27 @@ async def kv():
 
 
 @pytest.fixture
-async def template_registry():
-    reg = PersonaTemplateRegistry(Path("personas/templates"), watch=False)
+async def canonical_template_registry():
+    reg = PersonaTemplateRegistry(Path("eidolon_agent/personas/templates"))
     await reg.load_all()
     return reg
 
 
 @pytest.fixture
-def overlay_store(tmp_path):
-    return PersonaOverlayStore(tmp_path / "overlays")
+def persona_instance_store(tmp_path):
+    return PersonaInstanceStore(tmp_path / "instances")
 
 
 @pytest.fixture
-async def resolver(template_registry, overlay_store, kv):
-    return PersonaResolver(template_registry, overlay_store, kv_store=kv)
+async def personas_service(canonical_template_registry, persona_instance_store):
+    return PersonasService(
+        registry=canonical_template_registry,
+        instances=persona_instance_store,
+    )
 
 
 @pytest.fixture
-async def turn_engine_factory(template_registry, overlay_store, resolver, event_bus):
+async def turn_engine_factory(personas_service, event_bus):
     """Builds a minimal TurnEngine for tests."""
 
     def _factory(*, llm=None, dispatch_port=None):
@@ -85,7 +88,10 @@ async def turn_engine_factory(template_registry, overlay_store, resolver, event_
 
         compiler = ContextCompiler(
             [
-                PersonaContextProvider(resolver=resolver, instance_locator=loc),
+                PersonasContextProvider(
+                    personas_service=personas_service,
+                    instance_locator=loc,
+                ),
                 HistoryProvider(history_manager=history, window=20),
                 MindStateProvider(mind_service=mind),
             ],

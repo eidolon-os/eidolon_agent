@@ -10,7 +10,7 @@ Step list (matches the plan):
 3.  connect SQLite, NATS (+ KV buckets ensure)
 4.  probe memory MCP endpoints
 5.  PersonaTemplateRegistry.load_all + watcher
-6.  PersonaOverlayStore bootstrap
+6.  PersonaInstanceStore bootstrap
 7.  AgentRegistry.bootstrap (recover instances)
 8.  NATS subscribers (memory.event / workstation.progress / persona.evolution.proposed)
 9.  Register builtin hooks / tools / providers
@@ -38,9 +38,8 @@ from eidolon_agent.config.settings import Settings, load_settings
 from eidolon_agent.context.compiler import ContextCompiler
 from eidolon_agent.context.providers import (
     HistoryProvider,
-    MemoryRecallProvider,
     MindStateProvider,
-    PersonaContextProvider,
+    PersonasContextProvider,
     RealtimeSignalProvider,
 )
 from eidolon_agent.dispatch import NatsWorkstationClient, TaskClassifier
@@ -61,12 +60,12 @@ from eidolon_agent.persistence import (
     create_session_factory,
     ensure_schema,
 )
-from eidolon_agent.persona import (
-    EvolutionPlanner,
-    PersonaOverlayStore,
-    PersonaResolver,
+from eidolon_agent.personas import (
+    PersonaInstanceStore,
+    PersonasService,
     PersonaTemplateRegistry,
 )
+from eidolon_agent.personas.ports import NullPersonaAuditPort, PersonaEventPort
 from eidolon_agent.proactive import ProactiveEngine
 from eidolon_agent.runtime.container import Container
 from eidolon_agent.signals import SignalBus, SignalFuser
@@ -116,7 +115,6 @@ async def build_application(
     await ensure_buckets(nats_bus, settings.nats.kv_buckets)
     container.event_bus = nats_bus
     container.kv_buckets = {name: NatsKVStore(nats_bus, name) for name in settings.nats.kv_buckets}
-    cache_kv = container.kv_buckets.get("EIDOLON_CACHE")
     revocation_kv = container.kv_buckets.get("DEVICE_REVOCATIONS")
 
     # 4. Memory MCP probe ------------------------------------------------------
@@ -131,20 +129,21 @@ async def build_application(
         memory_refresher.start()
         container.extras["memory_discovery_refresher"] = memory_refresher
 
-    # 5 + 6. Persona templates + overlays --------------------------------------
-    tpl_reg = PersonaTemplateRegistry(
-        Path(settings.persona.templates_dir),
-        event_bus=container.event_bus,
-        watch=settings.persona.watch_enabled,
+    # 5 + 6. Personas templates + per-user instance copies ---------------------
+    tpl_reg = PersonaTemplateRegistry(Path(settings.persona.templates_dir))
+    await tpl_reg.load_all()
+    instance_store = PersonaInstanceStore(Path(settings.persona.instances_dir))
+    personas_service = PersonasService(
+        registry=tpl_reg,
+        instances=instance_store,
+        memory_port=memory_port,
+        llm_port=None,
+        event_port=_PersonasEventAdapter(container.event_bus),
+        audit_port=NullPersonaAuditPort(),
+        memory_timeout_s=settings.memory.recall_timeout_s,
     )
-    await tpl_reg.start()
-    overlay_store = PersonaOverlayStore(Path(settings.persona.overlays_dir))
-    resolver = PersonaResolver(tpl_reg, overlay_store, kv_store=cache_kv)
-    evolution = EvolutionPlanner(tpl_reg, overlay_store, resolver, event_bus=container.event_bus)
-    container.template_registry = tpl_reg
-    container.overlay_store = overlay_store
-    container.persona_resolver = resolver
-    container.evolution_planner = evolution
+    container.persona_instance_store = instance_store
+    container.personas_service = personas_service
 
     # 7-10. Cross-cutting services --------------------------------------------
     history = HistoryManager()
@@ -217,7 +216,11 @@ async def build_application(
     # Register one default template per loaded persona.
     for tpl in tpl_reg.list_all():
         agent_registry.register_template(
-            AgentTemplate(template_id=tpl.template_id, name=tpl.name, description=tpl.description)
+            AgentTemplate(
+                template_id=tpl.metadata.template_id,
+                name=tpl.metadata.name,
+                description=tpl.metadata.description,
+            )
         )
     container.agent_registry = agent_registry
 
@@ -245,8 +248,7 @@ async def build_application(
         settings=settings,
         agent_registry=agent_registry,
         pairing=pairing,
-        template_registry=tpl_reg,
-        overlay_store=overlay_store,
+        personas_service=personas_service,
     )
     container.http_app = http_app
     container.admin_app = admin_app
@@ -296,16 +298,15 @@ def _build_turn_engine(
     def locator(_tenant_id: str, _user_id: str, _conv_id: str):
         return (instance_id, template_id)
 
-    persona_p = PersonaContextProvider(resolver=container.persona_resolver, instance_locator=locator)
-    history_p = HistoryProvider(history_manager=container.history_manager, window=20)
-    memory_p = MemoryRecallProvider(
-        memory_port=container.memory_port,
-        soft_timeout_s=container.settings.memory.recall_timeout_s,
+    persona_p = PersonasContextProvider(
+        personas_service=container.personas_service,
+        instance_locator=locator,
     )
+    history_p = HistoryProvider(history_manager=container.history_manager, window=20)
     mind_p = MindStateProvider(mind_service=container.mind_service)
     realtime_p = RealtimeSignalProvider(signal_fuser=None)
     compiler = ContextCompiler(
-        [persona_p, history_p, memory_p, mind_p, realtime_p],
+        [persona_p, history_p, mind_p, realtime_p],
         max_token_budget=container.settings.turn.max_token_budget,
     )
     return TurnEngine(
@@ -334,3 +335,37 @@ def _generate_persisted_secret(path: Path) -> str:
     path.write_text(secret, encoding="utf-8")
     path.chmod(0o600)
     return secret
+
+
+class _PersonasEventAdapter(PersonaEventPort):
+    def __init__(self, event_bus) -> None:
+        self._bus = event_bus
+
+    async def publish_persona_updated(self, instance_id: str, payload: dict) -> None:
+        if self._bus is None:
+            return
+        from eidolon_agent.core.types.event import Event
+        from eidolon_agent.events.topics import Topics
+
+        await self._bus.publish(
+            Event(
+                subject=Topics.persona_overlay_updated(instance_id),
+                payload=payload,
+                source="personas.service",
+            )
+        )
+
+    async def publish_evolution_applied(self, instance_id: str, payload: dict) -> None:
+        if self._bus is None:
+            return
+        from eidolon_agent.core.types.event import Event
+        from eidolon_agent.events.topics import Topics
+
+        await self._bus.publish(
+            Event(
+                subject=Topics.evolution_applied(instance_id),
+                payload=payload,
+                source="personas.service",
+            ),
+            persistent=True,
+        )

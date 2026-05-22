@@ -25,8 +25,7 @@ def build_admin_app(
     settings: Settings,
     agent_registry,
     pairing,
-    template_registry,
-    overlay_store,
+    personas_service=None,
 ) -> FastAPI:
     app = FastAPI(
         title="eidolon-agent admin",
@@ -45,8 +44,7 @@ def build_admin_app(
     app.state.settings = settings
     app.state.agent_registry = agent_registry
     app.state.pairing = pairing
-    app.state.template_registry = template_registry
-    app.state.overlay_store = overlay_store
+    app.state.personas_service = personas_service
 
     app.include_router(agents.router, prefix="/api/admin", tags=["agents"])
     app.include_router(devices.router, prefix="/api/admin", tags=["devices"])

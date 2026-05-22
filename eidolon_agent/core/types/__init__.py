@@ -39,16 +39,6 @@ from eidolon_agent.core.types.mind import (
     MindState,
     MoodVector,
 )
-from eidolon_agent.core.types.persona import (
-    Big5,
-    CompanionProfile,
-    EvolutionDelta,
-    EvolutionPolicy,
-    PersonaOverlay,
-    PersonaTemplate,
-    SkillRef,
-    SpeechStyle,
-)
 from eidolon_agent.core.types.signal import RealtimeSignal, SignalDigest, SignalModality
 from eidolon_agent.core.types.tool import Permission, ToolCall, ToolResult, ToolSchema
 from eidolon_agent.core.types.turn import (
@@ -101,15 +91,6 @@ __all__ = [  # noqa: RUF022 - grouped by domain rather than alphabetical for rea
     "Energy",
     "MindState",
     "MoodVector",
-    # persona
-    "Big5",
-    "CompanionProfile",
-    "EvolutionDelta",
-    "EvolutionPolicy",
-    "PersonaOverlay",
-    "PersonaTemplate",
-    "SkillRef",
-    "SpeechStyle",
     # signal
     "RealtimeSignal",
     "SignalDigest",

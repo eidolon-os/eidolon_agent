@@ -8,13 +8,13 @@ service.
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
-from eidolon_agent.core.types.persona import EvolutionDelta
 from eidolon_agent.core.types.turn import TurnResult
 from eidolon_agent.persistence.models import (
     ChatMessageRow,
@@ -23,6 +23,7 @@ from eidolon_agent.persistence.models import (
     EvolutionHistoryRow,
     TurnRow,
 )
+from eidolon_agent.personas.types import PersonaEvolutionResult
 
 
 def _message_to_row(turn_id: str, m: ChatMessage) -> ChatMessageRow:
@@ -203,27 +204,28 @@ class SqlEvolutionHistoryRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def record(self, delta: EvolutionDelta) -> None:
+    async def record(self, result: PersonaEvolutionResult) -> None:
+        now = datetime.now(timezone.utc)
         self._session.add(
             EvolutionHistoryRow(
-                id=delta.id,
-                instance_id=delta.instance_id,
-                from_overlay_version=delta.from_overlay_version,
-                to_overlay_version=delta.to_overlay_version,
-                proposed_by=delta.proposed_by,
-                rationale=delta.rationale,
-                delta=json.loads(json.dumps(delta.changed_fields, default=str)),
-                requires_human_approval=delta.requires_human_approval,
-                approved_by=delta.approved_by,
-                applied_at=delta.applied_at,
-                rolled_back_at=delta.rolled_back_at,
-                git_commit=delta.git_commit,
+                id=uuid.uuid4().hex,
+                instance_id=result.instance_id,
+                from_overlay_version=0,
+                to_overlay_version=0,
+                proposed_by="personas",
+                rationale=result.rationale,
+                delta=json.loads(result.model_dump_json()),
+                requires_human_approval=False,
+                approved_by=None,
+                applied_at=now if result.applied else None,
+                rolled_back_at=None,
+                git_commit=None,
             )
         )
 
     async def list_for_instance(
         self, instance_id: str, *, limit: int = 50
-    ) -> list[EvolutionDelta]:
+    ) -> list[PersonaEvolutionResult]:
         rows = (
             await self._session.execute(
                 select(EvolutionHistoryRow)
@@ -234,25 +236,18 @@ class SqlEvolutionHistoryRepository:
         ).scalars().all()
         return [_row_to_evolution(r) for r in rows]
 
-    async def get(self, delta_id: str) -> EvolutionDelta | None:
+    async def get(self, delta_id: str) -> PersonaEvolutionResult | None:
         row = await self._session.get(EvolutionHistoryRow, delta_id)
         return _row_to_evolution(row) if row is not None else None
 
 
-def _row_to_evolution(r: EvolutionHistoryRow) -> EvolutionDelta:
-    return EvolutionDelta(
-        id=r.id,
+def _row_to_evolution(r: EvolutionHistoryRow) -> PersonaEvolutionResult:
+    if isinstance(r.delta, dict) and "instance_id" in r.delta:
+        return PersonaEvolutionResult.model_validate(r.delta)
+    return PersonaEvolutionResult(
         instance_id=r.instance_id,
-        from_overlay_version=r.from_overlay_version,
-        to_overlay_version=r.to_overlay_version,
-        changed_fields=r.delta or {},
+        applied=r.applied_at is not None,
         rationale=r.rationale,
-        proposed_by=r.proposed_by,  # type: ignore[arg-type]
-        requires_human_approval=r.requires_human_approval,
-        approved_by=r.approved_by,
-        applied_at=r.applied_at,
-        rolled_back_at=r.rolled_back_at,
-        git_commit=r.git_commit,
     )
 
 

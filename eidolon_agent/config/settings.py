@@ -24,7 +24,7 @@ def _expand_all_paths(obj: object) -> None:
     """Recursively expand ``~`` in all Path fields of a pydantic model tree."""
     if not isinstance(obj, BaseModel):
         return
-    for name in obj.model_fields:
+    for name in type(obj).model_fields:
         v = getattr(obj, name, None)
         if isinstance(v, Path):
             object.__setattr__(obj, name, v.expanduser())
@@ -148,9 +148,10 @@ class WorkstationSettings(BaseModel):
 class PersonaSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    templates_dir: Path = Path("personas/templates")
-    overlays_dir: Path = Path("personas/overlays")
+    templates_dir: Path = Path("eidolon_agent/personas/templates")
+    instances_dir: Path = Path("~/eidolon/personas/instances")
     watch_enabled: bool = True
+    auto_evolution_enabled: bool = True
 
 
 class ObservabilitySettings(BaseModel):

@@ -10,8 +10,8 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from eidolon_agent.core.types.messages import ChatMessage
-from eidolon_agent.core.types.persona import EvolutionDelta
 from eidolon_agent.core.types.turn import TurnResult
+from eidolon_agent.personas.types import PersonaEvolutionResult
 
 
 @runtime_checkable
@@ -70,13 +70,13 @@ class DeviceRepository(Protocol):
 
 @runtime_checkable
 class EvolutionHistoryRepository(Protocol):
-    async def record(self, delta: EvolutionDelta) -> None: ...
+    async def record(self, result: PersonaEvolutionResult) -> None: ...
 
     async def list_for_instance(
         self, instance_id: str, *, limit: int = 50
-    ) -> list[EvolutionDelta]: ...
+    ) -> list[PersonaEvolutionResult]: ...
 
-    async def get(self, delta_id: str) -> EvolutionDelta | None: ...
+    async def get(self, delta_id: str) -> PersonaEvolutionResult | None: ...
 
 
 @runtime_checkable
