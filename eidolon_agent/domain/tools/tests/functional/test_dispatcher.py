@@ -38,27 +38,29 @@ async def test_dispatch_returns_results_in_input_order(stub_tool_factory, caller
     assert all(r.ok for r in results)
 
 
-async def test_side_effect_tools_run_after_pure_ones(stub_tool_factory, caller_ctx) -> None:
+async def test_calls_run_strictly_in_submission_order(stub_tool_factory, caller_ctx) -> None:
+    """Sequential dispatcher: tools run one at a time in input order regardless
+    of side-effect flag. (Replaced earlier parallel-with-serial-tail semantics.)"""
     order: list[str] = []
 
-    async def pure_invoke(call, ctx):
-        await asyncio.sleep(0.02)  # finish before serial
-        order.append(f"pure:{call.id}")
-        return ToolResult(call_id=call.id, name="pure", ok=True, content={})
+    async def slow_invoke(call, ctx):
+        await asyncio.sleep(0.02)
+        order.append(f"{call.name}:{call.id}")
+        return ToolResult(call_id=call.id, name=call.name, ok=True, content={})
 
-    async def side_invoke(call, ctx):
-        order.append(f"side:{call.id}")
-        return ToolResult(call_id=call.id, name="side", ok=True, content={})
+    async def fast_invoke(call, ctx):
+        order.append(f"{call.name}:{call.id}")
+        return ToolResult(call_id=call.id, name=call.name, ok=True, content={})
 
     reg = ToolRegistry()
-    reg.register(stub_tool_factory("pure", side_effect=False, invoke=pure_invoke))
-    reg.register(stub_tool_factory("side", side_effect=True, invoke=side_invoke))
+    reg.register(stub_tool_factory("slow", side_effect=False, invoke=slow_invoke))
+    reg.register(stub_tool_factory("fast", side_effect=True, invoke=fast_invoke))
     disp = ToolDispatcher(reg)
-    # Submit side BEFORE pure; dispatcher still must defer side until pure resolves.
+    # 'slow' is submitted first → must complete before 'fast' runs.
     await disp.dispatch_batch(
-        [_call("side", "s1"), _call("pure", "p1")], ctx=caller_ctx
+        [_call("slow", "s1"), _call("fast", "f1")], ctx=caller_ctx
     )
-    assert order.index("pure:p1") < order.index("side:s1")
+    assert order == ["slow:s1", "fast:f1"]
 
 
 async def test_timeout_returns_error(stub_tool_factory, caller_ctx) -> None:

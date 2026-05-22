@@ -1,28 +1,18 @@
-"""Concurrent context compiler.
+"""Direct prompt compilation — no pluggable providers, no budget pruning.
 
-Design notes:
-- All providers run in ``asyncio.gather`` with per-provider soft timeouts.
-- Late or failing providers are tagged degraded; never raise out of compile.
-- Pruning order: drop low-weight segments first; never drop CRITICAL.
-- The output ``messages`` list is the *final* sequence that goes to the LLM,
-  including the system block synthesised from non-USER_INPUT segments.
+The hot path is fixed: persona prompt + memory recall + realtime digest as a
+single system message, recent history as user/assistant messages, current
+user input as the trailing user message. If a future segment is needed it
+goes here, not behind an abstraction.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import time
 import uuid
 from datetime import datetime, timezone
 
-from eidolon_agent.core.ports.context import ContextProvider, ProviderContext
-from eidolon_agent.core.types.context import (
-    CompiledContext,
-    ContextSegment,
-    SegmentType,
-    SegmentWeight,
-)
+from eidolon_agent.core.types.memory import MemoryQueryPlan
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnInput
 
@@ -30,142 +20,122 @@ _log = logging.getLogger(__name__)
 
 
 class ContextCompiler:
+    """Assemble the LLM message list for a Turn.
+
+    Locator returns ``(instance_id, template_id)`` for a tenant/user/conv
+    triple. Memory port is optional — when omitted, memory recall is skipped.
+    """
+
     def __init__(
         self,
-        providers: list[ContextProvider],
         *,
-        max_token_budget: int = 6000,
+        personas_service,
+        instance_locator,
+        history_manager,
+        memory_port=None,
+        history_window: int = 20,
+        memory_timeout_s: float = 0.2,
+        memory_top_k: int = 5,
     ) -> None:
-        self._providers = providers
-        self._budget = max_token_budget
+        self._personas = personas_service
+        self._locator = instance_locator
+        self._history = history_manager
+        self._memory = memory_port
+        self._history_window = history_window
+        self._memory_timeout_s = memory_timeout_s
+        self._memory_top_k = memory_top_k
 
-    async def compile(self, turn_input: TurnInput) -> CompiledContext:
-        ctx = ProviderContext(
-            turn_input=turn_input,
-            now_ms=int(time.time() * 1000),
-            token_budget_hint=self._budget,
+    async def compile(self, ti: TurnInput) -> list[ChatMessage]:
+        instance_id, template_id = self._locator(
+            ti.caller.tenant_id, ti.caller.user_id, ti.conversation_id
         )
 
-        # ---- Run providers concurrently with soft per-provider timeouts -----
+        # ---- Persona system prompt (always present) -------------------------
+        persona = await self._personas.compile_prompt(
+            tenant_id=ti.caller.tenant_id,
+            user_id=ti.caller.user_id,
+            instance_id=instance_id,
+            template_id=template_id,
+            user_text=ti.text or "",
+            realtime=_realtime_dict(ti.realtime),
+        )
+        system_parts: list[str] = [persona.system_prompt]
 
-        async def _run(p: ContextProvider) -> tuple[str, list[ContextSegment] | None, str | None]:
+        # ---- Memory recall (best-effort, with timeout) ----------------------
+        if self._memory is not None and ti.text:
             try:
-                segs = await asyncio.wait_for(p.provide(ctx), timeout=p.soft_timeout_s)
-                return p.name, segs, None
-            except asyncio.TimeoutError:
-                _log.warning("provider %s soft-timeout (%.2fs)", p.name, p.soft_timeout_s)
-                return p.name, None, "timeout"
-            except Exception as exc:
-                _log.exception("provider %s raised", p.name)
-                return p.name, None, f"error:{type(exc).__name__}"
-
-        results = await asyncio.gather(*[_run(p) for p in self._providers])
-
-        segments: list[ContextSegment] = []
-        degraded: list[str] = []
-        for name, segs, err in results:
-            if err is not None:
-                degraded.append(name)
-                continue
-            if segs:
-                segments.extend(segs)
-
-        # ---- Always include the current user input ---------------------------
-        user_text = turn_input.text or ""
-        if user_text:
-            segments.append(
-                ContextSegment(
-                    type=SegmentType.USER_INPUT,
-                    weight=SegmentWeight.CRITICAL,
-                    content=user_text,
-                    tokens=_estimate_tokens(user_text),
-                    source="compiler.user_input",
+                plan = MemoryQueryPlan(
+                    episodic_query=ti.text,
+                    semantic_query=ti.text,
+                    episodic_k=3,
+                    semantic_k=self._memory_top_k,
+                    voice=ti.caller.caller_kind.value == "livekit_voice",
                 )
-            )
+                formatted, _hits, _degraded = await self._memory.recall_context(
+                    user_id=ti.caller.user_id,
+                    query=ti.text,
+                    plan=plan,
+                    timeout_s=self._memory_timeout_s,
+                )
+                if formatted:
+                    system_parts.append(f"[MEMORY]\n{formatted}")
+            except Exception:
+                _log.exception("memory recall failed; continuing without")
 
-        # ---- Sort by weight desc, prune until budget fits --------------------
-        segments.sort(key=lambda s: (-int(s.weight), s.source))
-        total = sum(s.tokens for s in segments)
-        pruned = 0
-        while total > self._budget and segments:
-            # find the lowest-weight non-critical segment
-            for i in range(len(segments) - 1, -1, -1):
-                if segments[i].weight is not SegmentWeight.CRITICAL:
-                    total -= segments[i].tokens
-                    del segments[i]
-                    pruned += 1
-                    break
-            else:
-                # all remaining are CRITICAL — accept overrun
-                break
+        # ---- Realtime digest (signals from voice pipeline) ------------------
+        if ti.realtime is not None:
+            line = _realtime_line(ti.realtime)
+            if line:
+                system_parts.append(f"（实时信号：{line}）")
 
-        messages = _assemble_messages(segments)
-        return CompiledContext(
-            segments=tuple(segments),
-            messages=tuple(messages),
-            total_tokens=total,
-            budget=self._budget,
-            pruned_count=pruned,
-            degraded_providers=tuple(degraded),
+        # ---- Assemble messages ---------------------------------------------
+        now = datetime.now(timezone.utc)
+        history = await self._history.recent_window(
+            conversation_id=ti.conversation_id, window=self._history_window
         )
-
-
-def _assemble_messages(segments: list[ContextSegment]) -> list[ChatMessage]:
-    """Convert segments → flat ChatMessage list ready for the LLM.
-
-    The mapping is intentionally simple: all non-USER_INPUT / non-HISTORY
-    segments are concatenated into a single ``system`` block; ``HISTORY``
-    segments are split into individual messages (their content is JSON-encoded
-    ChatMessage tuples produced by the HistoryProvider); ``USER_INPUT`` becomes
-    the trailing user message.
-    """
-    now = datetime.now(timezone.utc)
-    system_parts: list[str] = []
-    history: list[ChatMessage] = []
-    user_input: ChatMessage | None = None
-
-    for seg in segments:
-        if seg.type is SegmentType.USER_INPUT:
-            user_input = ChatMessage(
-                id=uuid.uuid4().hex,
-                role=MessageRole.USER,
-                content=seg.content,
-                created_at=now,
-            )
-        elif seg.type is SegmentType.HISTORY:
-            # HistoryProvider must encode messages JSON-line-by-line; we tolerate
-            # raw text by treating it as a single assistant turn.
-            for line in seg.content.splitlines():
-                if not line:
-                    continue
-                history.append(
-                    ChatMessage(
-                        id=uuid.uuid4().hex,
-                        role=MessageRole.ASSISTANT,
-                        content=line,
-                        created_at=now,
-                    )
-                )
-        else:
-            label = seg.type.value.upper()
-            system_parts.append(f"[{label}]\n{seg.content}")
-
-    out: list[ChatMessage] = []
-    if system_parts:
-        out.append(
+        out: list[ChatMessage] = [
             ChatMessage(
                 id=uuid.uuid4().hex,
                 role=MessageRole.SYSTEM,
                 content="\n\n".join(system_parts),
                 created_at=now,
+            ),
+            *history,
+        ]
+        if ti.text:
+            out.append(
+                ChatMessage(
+                    id=uuid.uuid4().hex,
+                    role=MessageRole.USER,
+                    content=ti.text,
+                    created_at=now,
+                )
             )
-        )
-    out.extend(history)
-    if user_input is not None:
-        out.append(user_input)
-    return out
+        return out
 
 
-def _estimate_tokens(text: str) -> int:
-    """Cheap heuristic: 1 token ≈ 3 chars for mixed zh/en. Replaced by tokenizer later."""
-    return max(1, len(text) // 3)
+def _realtime_dict(digest) -> dict | None:  # type: ignore[no-untyped-def]
+    if digest is None:
+        return None
+    return {
+        "dominant_emotion": digest.dominant_emotion,
+        "emotion_confidence": digest.emotion_confidence,
+        "speech_rate": digest.speech_rate,
+        "presence": digest.presence,
+        "confidence_overall": digest.confidence_overall,
+        "notable_events": list(digest.notable_events),
+    }
+
+
+def _realtime_line(digest) -> str:  # type: ignore[no-untyped-def]
+    """Compact one-line summary of a SignalDigest."""
+    parts: list[str] = []
+    if digest.dominant_emotion:
+        parts.append(f"{digest.dominant_emotion}({digest.emotion_confidence:.2f})")
+    if digest.speech_rate:
+        parts.append(f"语速{digest.speech_rate}")
+    if digest.presence and digest.presence != "present":
+        parts.append(digest.presence)
+    if digest.notable_events:
+        parts.extend(digest.notable_events)
+    return " | ".join(parts)

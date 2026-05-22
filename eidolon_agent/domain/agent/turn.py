@@ -162,10 +162,9 @@ class TurnEngine:
                 return
 
             # ---- Compile context -------------------------------------------
-            compiled = await self._compiler.compile(ti)
+            messages = await self._compiler.compile(ti)
 
             # ---- LLM stream (with tool loop) -------------------------------
-            messages = list(compiled.messages)
             tools = self._tool_schemas()
             yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.SPEAKING, time.time())
 

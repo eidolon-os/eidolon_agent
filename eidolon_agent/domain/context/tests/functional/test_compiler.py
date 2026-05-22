@@ -1,75 +1,149 @@
-"""ContextCompiler: pruning, concurrent providers, degraded reporting."""
+"""ContextCompiler — direct prompt assembly.
 
-import asyncio
+No more pluggable providers; tests verify the fixed shape:
+  [system: persona + memory + realtime] + [history] + [user_input]
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
-from eidolon_agent.core.ports.context import ProviderContext
-from eidolon_agent.core.types.context import ContextSegment, SegmentType, SegmentWeight
+from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.domain.context.compiler import ContextCompiler
+from eidolon_agent.domain.history.manager import HistoryManager
 from tests.helpers import make_turn_input
 
 pytestmark = pytest.mark.functional
 
-class _Stub:
-    def __init__(self, name, weight, tokens, delay_s=0.0):
-        self.name = name
-        self.segment_type = SegmentType.HISTORY
-        self.default_weight = weight
-        self.soft_timeout_s = 0.1
-        self._tokens = tokens
-        self._delay = delay_s
 
-    async def provide(self, ctx: ProviderContext):
-        if self._delay:
-            await asyncio.sleep(self._delay)
-        return [
-            ContextSegment(
-                type=self.segment_type,
-                weight=self.default_weight,
-                content=f"{self.name}-payload",
-                tokens=self._tokens,
-                source=self.name,
-            )
-        ]
+class _StubPersonas:
+    """Minimal PersonasService stand-in returning a canned system prompt."""
+
+    def __init__(self, prompt: str = "[PERSONA]\nyou are an assistant") -> None:
+        self._prompt = prompt
+        self.calls: list[dict] = []
+
+    async def compile_prompt(self, **kwargs):
+        self.calls.append(kwargs)
+        return SimpleNamespace(system_prompt=self._prompt, debug_trace=())
 
 
-@pytest.mark.asyncio
-async def test_pruning_drops_lowest_weight_first():
-    c = ContextCompiler(
-        providers=[
-            _Stub("low", SegmentWeight.LOW, 80),
-            _Stub("hi", SegmentWeight.HIGH, 80),
-            _Stub("crit", SegmentWeight.CRITICAL, 80),
-        ],
-        max_token_budget=200,
+class _StubMemory:
+    """Memory port stub used by recall integration tests."""
+
+    def __init__(self, formatted: str = "", *, degraded: bool = False) -> None:
+        self._formatted = formatted
+        self._degraded = degraded
+        self.calls: list[dict] = []
+
+    async def recall_context(self, *, user_id, query, plan, timeout_s):
+        self.calls.append({"user_id": user_id, "query": query})
+        return self._formatted, [], self._degraded
+
+
+def _locator(_t, _u, _c):
+    return ("inst-test", "tpl-x")
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+async def test_assembles_system_history_user_in_order() -> None:
+    history = HistoryManager()
+    await history.append(
+        conversation_id="c1",
+        message=ChatMessage(
+            id=uuid.uuid4().hex,
+            role=MessageRole.USER,
+            content="earlier-q",
+            created_at=_now(),
+        ),
     )
-    result = await c.compile(make_turn_input(""))
-    sources = {s.source for s in result.segments}
-    assert "crit" in sources and "hi" in sources
-    assert "low" not in sources
-    assert result.pruned_count == 1
-
-
-@pytest.mark.asyncio
-async def test_soft_timeout_marks_degraded():
-    class _Slow(_Stub):
-        soft_timeout_s = 0.02
-
-    c = ContextCompiler(providers=[_Slow("slow", SegmentWeight.HIGH, 10, delay_s=0.5)])
-    result = await c.compile(make_turn_input("hi"))
-    assert "slow" in result.degraded_providers
-
-
-@pytest.mark.asyncio
-async def test_critical_segments_preserved_over_budget():
-    c = ContextCompiler(
-        providers=[
-            _Stub("c1", SegmentWeight.CRITICAL, 100),
-            _Stub("c2", SegmentWeight.CRITICAL, 100),
-        ],
-        max_token_budget=50,
+    await history.append(
+        conversation_id="c1",
+        message=ChatMessage(
+            id=uuid.uuid4().hex,
+            role=MessageRole.ASSISTANT,
+            content="earlier-a",
+            created_at=_now(),
+        ),
     )
-    result = await c.compile(make_turn_input(""))
-    assert len(result.segments) == 2  # nothing dropped — all critical
-    assert result.total_tokens > 50
+
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas("[PERSONA]\nhi"),
+        instance_locator=_locator,
+        history_manager=history,
+        memory_port=None,
+    )
+    msgs = await compiler.compile(make_turn_input("当前问题"))
+
+    assert [m.role for m in msgs] == [
+        MessageRole.SYSTEM,
+        MessageRole.USER,       # earlier-q
+        MessageRole.ASSISTANT,  # earlier-a
+        MessageRole.USER,       # current
+    ]
+    assert "[PERSONA]" in msgs[0].content
+    assert msgs[-1].content == "当前问题"
+
+
+async def test_persona_locator_args_match_turn_input() -> None:
+    personas = _StubPersonas()
+    compiler = ContextCompiler(
+        personas_service=personas,
+        instance_locator=lambda t, u, c: (f"{t}/{u}", "tpl"),
+        history_manager=HistoryManager(),
+    )
+    ti = make_turn_input("hi")
+    # Override caller fields via direct attribute (TurnInput is frozen, so this
+    # just sanity-checks the default args go through).
+    await compiler.compile(ti)
+    call = personas.calls[0]
+    assert call["user_id"] == ti.caller.user_id
+    assert call["instance_id"] == f"{ti.caller.tenant_id}/{ti.caller.user_id}"
+    assert call["template_id"] == "tpl"
+    assert call["user_text"] == "hi"
+
+
+async def test_memory_recall_appended_when_port_present() -> None:
+    memory = _StubMemory(formatted="prior_episode_summary")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=memory,
+    )
+    msgs = await compiler.compile(make_turn_input("帮我回忆一下"))
+    assert "[MEMORY]\nprior_episode_summary" in msgs[0].content
+    assert memory.calls and memory.calls[0]["query"] == "帮我回忆一下"
+
+
+async def test_memory_failure_does_not_break_turn() -> None:
+    class _Boom:
+        async def recall_context(self, **_):
+            raise RuntimeError("upstream broken")
+
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=_Boom(),
+    )
+    # Should NOT raise; system message is still produced.
+    msgs = await compiler.compile(make_turn_input("hi"))
+    assert msgs[0].role is MessageRole.SYSTEM
+
+
+async def test_empty_text_skips_trailing_user_message() -> None:
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+    )
+    msgs = await compiler.compile(make_turn_input(""))
+    assert msgs[-1].role is MessageRole.SYSTEM  # only system, no user

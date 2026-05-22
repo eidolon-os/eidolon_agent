@@ -8,10 +8,6 @@ from pathlib import Path
 import pytest
 
 from eidolon_agent.domain.context.compiler import ContextCompiler
-from eidolon_agent.domain.context.providers import (
-    HistoryProvider,
-    PersonasContextProvider,
-)
 from eidolon_agent.domain.dispatch.classifier import TaskClassifier
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.domain.history import HistoryFanout, HistoryManager
@@ -83,14 +79,11 @@ async def turn_engine_factory(personas_service, event_bus):
             return ("inst-test", "caretaker_jiezhi")
 
         compiler = ContextCompiler(
-            [
-                PersonasContextProvider(
-                    personas_service=personas_service,
-                    instance_locator=loc,
-                ),
-                HistoryProvider(history_manager=history, window=20),
-            ],
-            max_token_budget=2000,
+            personas_service=personas_service,
+            instance_locator=loc,
+            history_manager=history,
+            memory_port=None,
+            history_window=20,
         )
         return TurnEngine(
             compiler=compiler,

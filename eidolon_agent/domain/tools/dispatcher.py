@@ -1,9 +1,8 @@
-"""Parallel-with-serial-tail tool dispatcher.
+"""Sequential tool dispatcher.
 
-Side-effect-free tools (``side_effect=False``) run concurrently. Side-effect
-tools run serially in submission order, AFTER all parallel tools resolve. This
-keeps "look at state then change state" workflows deterministic without
-sacrificing the common-case parallelism win.
+A turn invokes 1-2 tools per round at most; parallelism doesn't help when the
+LLM call dominates wall-clock. Sequential keeps "look at state then change
+state" workflows deterministic by construction.
 
 Idempotency is enforced via NATS KV (``EIDOLON_TOOL_IDEMP`` bucket) when the
 tool declares an ``idempotency_key_template``.
@@ -12,6 +11,7 @@ tool declares an ``idempotency_key_template``.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from string import Template
 
@@ -39,63 +39,47 @@ class ToolDispatcher:
         *,
         ctx: ToolInvocationContext,
     ) -> list[ToolResult]:
-        """Run a batch. Returns results in the SAME order as ``calls``."""
-        parallel_idx: list[int] = []
-        parallel_tasks: list[asyncio.Task[ToolResult]] = []
-        serial_idx: list[int] = []
-        results: list[ToolResult | None] = [None] * len(calls)
-
-        for i, call in enumerate(calls):
-            try:
-                tool = self._registry.get(call.name)
-            except Exception as exc:
-                results[i] = ToolResult(
-                    call_id=call.id,
-                    name=call.name,
-                    ok=False,
-                    error_code="tool_not_found",
-                    error_message=str(exc),
-                )
-                continue
-            try:
-                self._check_permissions(tool)
-            except ToolPermissionError as exc:
-                results[i] = ToolResult(
-                    call_id=call.id,
-                    name=call.name,
-                    ok=False,
-                    error_code=exc.code,
-                    error_message=exc.message,
-                )
-                continue
-            if tool.schema.side_effect:
-                serial_idx.append(i)
-            else:
-                parallel_idx.append(i)
-                parallel_tasks.append(
-                    asyncio.create_task(self._invoke_one(tool, call, ctx=ctx))
-                )
-
-        # Parallel phase
-        if parallel_tasks:
-            done_results = await asyncio.gather(*parallel_tasks, return_exceptions=True)
-            for idx, res in zip(parallel_idx, done_results, strict=True):
-                results[idx] = self._normalize_result(calls[idx], res)
-
-        # Serial phase
-        for idx in serial_idx:
-            call = calls[idx]
-            tool = self._registry.get(call.name)
-            try:
-                res = await self._invoke_one(tool, call, ctx=ctx)
-            except Exception as exc:
-                res = exc
-            results[idx] = self._normalize_result(call, res)
-
-        # No None should remain.
-        return [r for r in results if r is not None]
+        """Run calls one after another. Order preserved."""
+        out: list[ToolResult] = []
+        for call in calls:
+            out.append(await self._dispatch_one(call, ctx=ctx))
+        return out
 
     # ---- Internals -----------------------------------------------------------
+
+    async def _dispatch_one(
+        self, call: ToolCall, *, ctx: ToolInvocationContext
+    ) -> ToolResult:
+        try:
+            tool = self._registry.get(call.name)
+        except Exception as exc:
+            return ToolResult(
+                call_id=call.id,
+                name=call.name,
+                ok=False,
+                error_code="tool_not_found",
+                error_message=str(exc),
+            )
+        try:
+            self._check_permissions(tool)
+        except ToolPermissionError as exc:
+            return ToolResult(
+                call_id=call.id,
+                name=call.name,
+                ok=False,
+                error_code=exc.code,
+                error_message=exc.message,
+            )
+        try:
+            return await self._invoke_one(tool, call, ctx=ctx)
+        except Exception as exc:
+            return ToolResult(
+                call_id=call.id,
+                name=call.name,
+                ok=False,
+                error_code=getattr(exc, "code", ToolError.code),
+                error_message=str(exc),
+            )
 
     async def _invoke_one(
         self,
@@ -109,9 +93,6 @@ class ToolDispatcher:
         if idemp_key is not None and self._idemp is not None:
             cached = await self._idemp.get(idemp_key)
             if cached is not None:
-                # Stored as raw JSON; deserialize lazily
-                import json
-
                 payload = json.loads(cached.decode())
                 return ToolResult(
                     call_id=call.id,
@@ -136,14 +117,7 @@ class ToolDispatcher:
                 latency_ms=int((time.monotonic() - start) * 1000),
             )
 
-        # Cache idempotent successful result
-        if (
-            idemp_key is not None
-            and self._idemp is not None
-            and result.ok
-        ):
-            import json
-
+        if idemp_key is not None and self._idemp is not None and result.ok:
             await self._idemp.put(
                 idemp_key,
                 json.dumps({"ok": True, "content": result.content}, default=str).encode(),
@@ -175,25 +149,3 @@ class ToolDispatcher:
             )
         except Exception:
             return None
-
-    @staticmethod
-    def _normalize_result(call: ToolCall, res) -> ToolResult:  # type: ignore[no-untyped-def]
-        if isinstance(res, ToolResult):
-            return res
-        if isinstance(res, Exception):
-            err = res
-            return ToolResult(
-                call_id=call.id,
-                name=call.name,
-                ok=False,
-                error_code=getattr(err, "code", ToolError.code),
-                error_message=str(err),
-            )
-        # Unexpected return — wrap defensively
-        return ToolResult(
-            call_id=call.id,
-            name=call.name,
-            ok=False,
-            error_code="tool_invalid_return",
-            error_message=f"tool returned {type(res).__name__}",
-        )

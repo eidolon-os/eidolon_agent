@@ -12,12 +12,6 @@ may import the submodule directly when they want a narrower surface.
 
 from __future__ import annotations
 
-from eidolon_agent.core.types.context import (
-    CompiledContext,
-    ContextSegment,
-    SegmentType,
-    SegmentWeight,
-)
 from eidolon_agent.core.types.dispatch import DispatchHandle, ExternalTask, Progress, ProgressKind
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
@@ -46,11 +40,6 @@ from eidolon_agent.core.types.turn import (
 )
 
 __all__ = [  # noqa: RUF022 - grouped by domain rather than alphabetical for readability
-    # context
-    "CompiledContext",
-    "ContextSegment",
-    "SegmentType",
-    "SegmentWeight",
     # dispatch
     "DispatchHandle",
     "ExternalTask",

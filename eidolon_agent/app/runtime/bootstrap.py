@@ -31,11 +31,6 @@ from eidolon_agent.domain.agent.companion import CompanionAgent
 from eidolon_agent.domain.agent.registry import AgentRegistry, AgentTemplate
 from eidolon_agent.domain.agent.turn import TurnEngine
 from eidolon_agent.domain.context.compiler import ContextCompiler
-from eidolon_agent.domain.context.providers import (
-    HistoryProvider,
-    PersonasContextProvider,
-    RealtimeSignalProvider,
-)
 from eidolon_agent.domain.dispatch import NatsWorkstationClient, TaskClassifier
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.domain.history import HistoryFanout, HistoryManager
@@ -275,20 +270,18 @@ def _build_turn_engine(
     instance_id: str,
     template_id: str,
 ) -> TurnEngine:
-    """Construct a per-instance TurnEngine with provider closures."""
+    """Construct a per-instance TurnEngine with collaborator closures."""
 
     def locator(_tenant_id: str, _user_id: str, _conv_id: str):
         return (instance_id, template_id)
 
-    persona_p = PersonasContextProvider(
+    compiler = ContextCompiler(
         personas_service=container.personas_service,
         instance_locator=locator,
-    )
-    history_p = HistoryProvider(history_manager=container.history_manager, window=20)
-    realtime_p = RealtimeSignalProvider(signal_fuser=None)
-    compiler = ContextCompiler(
-        [persona_p, history_p, realtime_p],
-        max_token_budget=container.settings.turn.max_token_budget,
+        history_manager=container.history_manager,
+        memory_port=container.memory_port,
+        history_window=20,
+        memory_timeout_s=container.settings.memory.recall_timeout_s,
     )
     return TurnEngine(
         compiler=compiler,
