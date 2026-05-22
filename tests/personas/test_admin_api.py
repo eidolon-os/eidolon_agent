@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from eidolon_agent.admin import build_admin_app
+from eidolon_agent.app.admin import build_admin_app
 from eidolon_agent.config.settings import Settings
 
 

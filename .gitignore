@@ -37,9 +37,9 @@ logs/
 *.log
 
 # Generated gRPC stubs (regenerated from .proto on build)
-eidolon_agent/transport/grpc/proto/*_pb2.py
-eidolon_agent/transport/grpc/proto/*_pb2.pyi
-eidolon_agent/transport/grpc/proto/*_pb2_grpc.py
+eidolon_agent/app/transport/grpc/proto/*_pb2.py
+eidolon_agent/app/transport/grpc/proto/*_pb2.pyi
+eidolon_agent/app/transport/grpc/proto/*_pb2_grpc.py
 
 # admin_web
 node_modules/

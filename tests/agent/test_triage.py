@@ -1,7 +1,7 @@
 """TriageKind classifier coverage."""
 
 from eidolon_agent.core.types.turn import TriageKind
-from eidolon_agent.dispatch.classifier import TaskClassifier
+from eidolon_agent.domain.dispatch.classifier import TaskClassifier
 
 
 def test_simple_default():

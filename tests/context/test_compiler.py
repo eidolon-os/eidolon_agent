@@ -4,9 +4,9 @@ import asyncio
 
 import pytest
 
-from eidolon_agent.context.compiler import ContextCompiler
 from eidolon_agent.core.ports.context import ProviderContext
 from eidolon_agent.core.types.context import ContextSegment, SegmentType, SegmentWeight
+from eidolon_agent.domain.context.compiler import ContextCompiler
 from tests.conftest import make_turn_input
 
 

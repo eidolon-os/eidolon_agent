@@ -83,7 +83,7 @@ include = ["eidolon_agent*"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-extend-exclude = ["eidolon_agent/transport/grpc/proto/*_pb2*"]
+extend-exclude = ["eidolon_agent/app/transport/grpc/proto/*_pb2*"]
 
 [tool.ruff.lint]
 select = [
@@ -127,57 +127,55 @@ filterwarnings = [
 [tool.importlinter]
 root_package = "eidolon_agent"
 
+# L0 — core/: pure types & protocols. Zero sibling deps.
 [[tool.importlinter.contracts]]
 name = "core has zero sibling-module dependencies"
 type = "forbidden"
 source_modules = ["eidolon_agent.core"]
 forbidden_modules = [
-    "eidolon_agent.admin",
-    "eidolon_agent.agent",
-    "eidolon_agent.config",
-    "eidolon_agent.context",
-    "eidolon_agent.dispatch",
-    "eidolon_agent.guardrails",
-    "eidolon_agent.history",
-    "eidolon_agent.hooks",
+    "eidolon_agent.app",
+    "eidolon_agent.domain",
     "eidolon_agent.infra",
-    "eidolon_agent.personas",
-    "eidolon_agent.proactive",
-    "eidolon_agent.runtime",
-    "eidolon_agent.session",
-    "eidolon_agent.signals",
-    "eidolon_agent.tools",
-    "eidolon_agent.transport",
 ]
 
-# Domain layer (everything that isn't infra/admin/transport/runtime/config/core)
-# may not depend on infra/. Cross only through core/ports/.
-# Known leaks are listed under `ignore_imports` as a Phase 4 punch list —
-# each will be replaced by a port declared in the domain module.
+# L1 — domain/: business logic. May import core/ only.
+# Known leaks are listed under `ignore_imports` as the Phase 4 punch list —
+# each will be replaced by a port declared in the domain module itself.
 [[tool.importlinter.contracts]]
-name = "domain modules do not import infra"
+name = "domain modules do not import infra or app"
 type = "forbidden"
-source_modules = [
-    "eidolon_agent.agent",
-    "eidolon_agent.context",
-    "eidolon_agent.dispatch",
-    "eidolon_agent.guardrails",
-    "eidolon_agent.history",
-    "eidolon_agent.hooks",
-    "eidolon_agent.personas",
-    "eidolon_agent.proactive",
-    "eidolon_agent.signals",
-    "eidolon_agent.tools",
+source_modules = ["eidolon_agent.domain"]
+forbidden_modules = [
+    "eidolon_agent.infra",
+    "eidolon_agent.app",
 ]
-forbidden_modules = ["eidolon_agent.infra"]
 ignore_imports = [
     # Phase 4: domain modules read NATS topic constants directly.
-    # Replace with EventTopics port / event publisher abstraction.
-    "eidolon_agent.agent.turn -> eidolon_agent.infra.events.topics",
-    "eidolon_agent.dispatch.workstation_client -> eidolon_agent.infra.events.topics",
-    "eidolon_agent.history.fanout -> eidolon_agent.infra.events.topics",
-    "eidolon_agent.proactive.engine -> eidolon_agent.infra.events.topics",
+    # Replace with an EventTopics port / event publisher abstraction.
+    "eidolon_agent.domain.agent.turn -> eidolon_agent.infra.events.topics",
+    "eidolon_agent.domain.dispatch.workstation_client -> eidolon_agent.infra.events.topics",
+    "eidolon_agent.domain.history.fanout -> eidolon_agent.infra.events.topics",
+    "eidolon_agent.domain.proactive.engine -> eidolon_agent.infra.events.topics",
     # Phase 4: history.fanout reaches into memory discovery internals.
     # Replace with a HistoryFanoutSink port in domain/history/ports.py.
-    "eidolon_agent.history.fanout -> eidolon_agent.infra.memory.discovery",
+    "eidolon_agent.domain.history.fanout -> eidolon_agent.infra.memory.discovery",
+]
+
+# L2 — infra/: adapters. Must not depend on app/. May reference domain TYPES
+# when implementing a domain-owned port (see Phase 1 of the refactor plan).
+[[tool.importlinter.contracts]]
+name = "infra modules do not import app"
+type = "forbidden"
+source_modules = ["eidolon_agent.infra"]
+forbidden_modules = ["eidolon_agent.app"]
+
+# Allow infra → domain TYPE imports only. Anything beyond types (services,
+# registries, etc.) would invert the layer and is forbidden.
+[[tool.importlinter.contracts]]
+name = "infra imports of domain are limited to type modules"
+type = "forbidden"
+source_modules = ["eidolon_agent.infra"]
+forbidden_modules = ["eidolon_agent.domain"]
+ignore_imports = [
+    "eidolon_agent.infra.persistence.repositories -> eidolon_agent.domain.personas.types",
 ]

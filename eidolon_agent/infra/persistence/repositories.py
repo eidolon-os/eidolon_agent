@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnResult
+from eidolon_agent.domain.personas.types import PersonaEvolutionResult
 from eidolon_agent.infra.persistence.models import (
     ChatMessageRow,
     ConversationRow,
@@ -23,7 +24,6 @@ from eidolon_agent.infra.persistence.models import (
     EvolutionHistoryRow,
     TurnRow,
 )
-from eidolon_agent.personas.types import PersonaEvolutionResult
 
 
 def _message_to_row(turn_id: str, m: ChatMessage) -> ChatMessageRow:

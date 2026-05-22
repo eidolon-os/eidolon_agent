@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from eidolon_agent.personas.types import PersonaInteractionEvent
+from eidolon_agent.domain.personas.types import PersonaInteractionEvent
 
 
 @pytest.mark.asyncio

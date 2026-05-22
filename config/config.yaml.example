@@ -48,7 +48,7 @@ workstation:
   transport: nats
 
 persona:
-  templates_dir: eidolon_agent/personas/templates
+  templates_dir: eidolon_agent/domain/personas/templates
   instances_dir: ~/eidolon/personas/instances
   auto_evolution_enabled: true
 

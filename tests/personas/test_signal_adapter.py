@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from eidolon_agent.personas.signal_adapter import PersonaSignalAdapter
-from eidolon_agent.personas.types import AttentionTarget, PersonaSignalInput
+from eidolon_agent.domain.personas.signal_adapter import PersonaSignalAdapter
+from eidolon_agent.domain.personas.types import AttentionTarget, PersonaSignalInput
 
 
 def test_signal_adapter_ignores_low_confidence():

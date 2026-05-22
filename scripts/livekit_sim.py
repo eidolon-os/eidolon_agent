@@ -26,7 +26,7 @@ import httpx
 # Make the in-repo proto package importable without installing the wheel.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from eidolon_agent.transport.grpc.proto import pb, pbg
+from eidolon_agent.app.transport.grpc.proto import pb, pbg
 
 
 async def main(text: str, http_base: str, grpc_target: str) -> None:

@@ -6,13 +6,13 @@ import pytest
 
 from eidolon_agent.core.errors import EvolutionGuardError, ValidationError
 from eidolon_agent.core.types.memory import MemoryHit, MemoryKind
-from eidolon_agent.personas import (
+from eidolon_agent.domain.personas import (
     PersonaInstanceStore,
     PersonaTemplateRegistry,
 )
-from eidolon_agent.personas.evolution import PersonaEvolutionEngine
-from eidolon_agent.personas.memory_adapter import PersonaMemoryAdapter
-from eidolon_agent.personas.types import PersonaEvolutionEvent
+from eidolon_agent.domain.personas.evolution import PersonaEvolutionEngine
+from eidolon_agent.domain.personas.memory_adapter import PersonaMemoryAdapter
+from eidolon_agent.domain.personas.types import PersonaEvolutionEvent
 
 
 @pytest.mark.asyncio

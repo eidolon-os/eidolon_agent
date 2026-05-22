@@ -27,15 +27,15 @@ uv sync --extra dev >/dev/null
 
 info "regenerate gRPC stubs"
 .venv/bin/python -m grpc_tools.protoc \
-  -I eidolon_agent/transport/grpc/proto \
-  --python_out=eidolon_agent/transport/grpc/proto \
-  --grpc_python_out=eidolon_agent/transport/grpc/proto \
-  --pyi_out=eidolon_agent/transport/grpc/proto \
-  eidolon_agent/transport/grpc/proto/eidolon.proto
+  -I eidolon_agent/app/transport/grpc/proto \
+  --python_out=eidolon_agent/app/transport/grpc/proto \
+  --grpc_python_out=eidolon_agent/app/transport/grpc/proto \
+  --pyi_out=eidolon_agent/app/transport/grpc/proto \
+  eidolon_agent/app/transport/grpc/proto/eidolon.proto
 # patch generated import to be package-relative
 sed -i.bak 's/^import eidolon_pb2 as eidolon__pb2/from . import eidolon_pb2 as eidolon__pb2/' \
-  eidolon_agent/transport/grpc/proto/eidolon_pb2_grpc.py
-rm -f eidolon_agent/transport/grpc/proto/eidolon_pb2_grpc.py.bak
+  eidolon_agent/app/transport/grpc/proto/eidolon_pb2_grpc.py
+rm -f eidolon_agent/app/transport/grpc/proto/eidolon_pb2_grpc.py.bak
 
 info "alembic upgrade head"
 .venv/bin/alembic upgrade head >/dev/null

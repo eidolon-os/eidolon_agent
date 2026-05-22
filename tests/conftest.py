@@ -7,25 +7,25 @@ from pathlib import Path
 
 import pytest
 
-from eidolon_agent.context.compiler import ContextCompiler
-from eidolon_agent.context.providers import (
+from eidolon_agent.domain.context.compiler import ContextCompiler
+from eidolon_agent.domain.context.providers import (
     HistoryProvider,
     PersonasContextProvider,
 )
-from eidolon_agent.dispatch.classifier import TaskClassifier
-from eidolon_agent.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
-from eidolon_agent.history import HistoryFanout, HistoryManager
-from eidolon_agent.hooks import HookExecutor
-from eidolon_agent.infra.events import InMemoryEventBus, InMemoryKVStore
-from eidolon_agent.infra.llm import LLMRouter
-from eidolon_agent.infra.llm.providers.fake import FakeLLM
-from eidolon_agent.personas import (
+from eidolon_agent.domain.dispatch.classifier import TaskClassifier
+from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
+from eidolon_agent.domain.history import HistoryFanout, HistoryManager
+from eidolon_agent.domain.hooks import HookExecutor
+from eidolon_agent.domain.personas import (
     PersonaInstanceStore,
     PersonasService,
     PersonaTemplateRegistry,
 )
-from eidolon_agent.tools import ToolDispatcher, ToolRegistry
-from eidolon_agent.tools.builtin import EmitEventTool, GetTimeTool
+from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
+from eidolon_agent.domain.tools.builtin import EmitEventTool, GetTimeTool
+from eidolon_agent.infra.events import InMemoryEventBus, InMemoryKVStore
+from eidolon_agent.infra.llm import LLMRouter
+from eidolon_agent.infra.llm.providers.fake import FakeLLM
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ async def kv():
 
 @pytest.fixture
 async def canonical_template_registry():
-    reg = PersonaTemplateRegistry(Path("eidolon_agent/personas/templates"))
+    reg = PersonaTemplateRegistry(Path("eidolon_agent/domain/personas/templates"))
     await reg.load_all()
     return reg
 
@@ -71,7 +71,7 @@ async def turn_engine_factory(personas_service, event_bus):
     """Builds a minimal TurnEngine for tests."""
 
     def _factory(*, llm=None, dispatch_port=None):
-        from eidolon_agent.agent.turn import TurnEngine
+        from eidolon_agent.domain.agent.turn import TurnEngine
 
         history = HistoryManager()
         fanout = HistoryFanout(event_bus=event_bus)

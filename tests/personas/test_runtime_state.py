@@ -4,8 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from eidolon_agent.personas.runtime_state import PersonaRuntimeStateStore
-from eidolon_agent.personas.types import AttentionTarget, MoodVector, PersonaRuntimeState
+from eidolon_agent.domain.personas.runtime_state import PersonaRuntimeStateStore
+from eidolon_agent.domain.personas.types import AttentionTarget, MoodVector, PersonaRuntimeState
 
 
 @pytest.mark.asyncio

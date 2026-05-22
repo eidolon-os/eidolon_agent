@@ -148,7 +148,7 @@ class WorkstationSettings(BaseModel):
 class PersonaSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    templates_dir: Path = Path("eidolon_agent/personas/templates")
+    templates_dir: Path = Path("eidolon_agent/domain/personas/templates")
     instances_dir: Path = Path("~/eidolon/personas/instances")
     watch_enabled: bool = True
     auto_evolution_enabled: bool = True
