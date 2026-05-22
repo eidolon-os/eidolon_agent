@@ -139,8 +139,6 @@ forbidden_modules = [
 ]
 
 # L1 — domain/: business logic. May import core/ only.
-# Known leaks are listed under `ignore_imports` as the Phase 4 punch list —
-# each will be replaced by a port declared in the domain module itself.
 [[tool.importlinter.contracts]]
 name = "domain modules do not import infra or app"
 type = "forbidden"
@@ -148,17 +146,6 @@ source_modules = ["eidolon_agent.domain"]
 forbidden_modules = [
     "eidolon_agent.infra",
     "eidolon_agent.app",
-]
-ignore_imports = [
-    # Phase 4: domain modules read NATS topic constants directly.
-    # Replace with an EventTopics port / event publisher abstraction.
-    "eidolon_agent.domain.agent.turn -> eidolon_agent.infra.events.topics",
-    "eidolon_agent.domain.dispatch.workstation_client -> eidolon_agent.infra.events.topics",
-    "eidolon_agent.domain.history.fanout -> eidolon_agent.infra.events.topics",
-    "eidolon_agent.domain.proactive.engine -> eidolon_agent.infra.events.topics",
-    # Phase 4: history.fanout reaches into memory discovery internals.
-    # Replace with a HistoryFanoutSink port in domain/history/ports.py.
-    "eidolon_agent.domain.history.fanout -> eidolon_agent.infra.memory.discovery",
 ]
 
 # L2 — infra/: adapters. Must not depend on app/. May reference domain TYPES

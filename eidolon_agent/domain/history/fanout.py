@@ -10,14 +10,19 @@ from __future__ import annotations
 import logging
 
 from eidolon_agent.core.types.event import Event
-from eidolon_agent.infra.events.topics import Topics
-from eidolon_agent.infra.memory.discovery import MemoryRoutingTable
+from eidolon_agent.core.types.topics import Topics
+from eidolon_agent.domain.history.ports import MemoryTurnSubjectResolver
 
 _log = logging.getLogger(__name__)
 
 
 class HistoryFanout:
-    def __init__(self, *, event_bus=None, memory_routes: MemoryRoutingTable | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        event_bus=None,
+        memory_routes: MemoryTurnSubjectResolver | None = None,
+    ) -> None:
         self._bus = event_bus
         self._memory_routes = memory_routes
 

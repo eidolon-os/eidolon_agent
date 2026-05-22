@@ -343,7 +343,7 @@ class _PersonasEventAdapter(PersonaEventPort):
         if self._bus is None:
             return
         from eidolon_agent.core.types.event import Event
-        from eidolon_agent.infra.events.topics import Topics
+        from eidolon_agent.core.types.topics import Topics
 
         await self._bus.publish(
             Event(
@@ -357,7 +357,7 @@ class _PersonasEventAdapter(PersonaEventPort):
         if self._bus is None:
             return
         from eidolon_agent.core.types.event import Event
-        from eidolon_agent.infra.events.topics import Topics
+        from eidolon_agent.core.types.topics import Topics
 
         await self._bus.publish(
             Event(

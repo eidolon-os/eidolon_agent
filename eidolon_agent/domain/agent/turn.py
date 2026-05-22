@@ -38,6 +38,7 @@ from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.llm import LLMFinishReason
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.tool import ToolCall
+from eidolon_agent.core.types.topics import Topics
 from eidolon_agent.core.types.turn import (
     FSMState,
     TriageKind,
@@ -57,7 +58,6 @@ from eidolon_agent.domain.history.manager import HistoryManager
 from eidolon_agent.domain.hooks.executor import HookExecutor
 from eidolon_agent.domain.personas.types import PersonaInteractionEvent
 from eidolon_agent.domain.tools.dispatcher import ToolDispatcher
-from eidolon_agent.infra.events.topics import Topics
 
 _log = logging.getLogger(__name__)
 

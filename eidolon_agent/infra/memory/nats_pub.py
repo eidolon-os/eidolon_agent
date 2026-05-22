@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from eidolon_agent.core.types.event import Event
-from eidolon_agent.infra.events.topics import Topics
+from eidolon_agent.core.types.topics import Topics
 from eidolon_agent.infra.memory.discovery import MemoryRoutingTable
 
 _log = logging.getLogger(__name__)

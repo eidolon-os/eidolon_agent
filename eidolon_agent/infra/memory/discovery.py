@@ -16,7 +16,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from eidolon_agent.config.settings import MemoryEndpoint, MemorySettings, NatsSettings
-from eidolon_agent.infra.events.topics import Topics
+from eidolon_agent.core.types.topics import Topics
 
 _log = logging.getLogger(__name__)
 

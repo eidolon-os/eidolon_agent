@@ -13,8 +13,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from eidolon_agent.core.types.event import Event
+from eidolon_agent.core.types.topics import Topics
 from eidolon_agent.domain.proactive.throttler import ProactiveThrottler
-from eidolon_agent.infra.events.topics import Topics
 
 _log = logging.getLogger(__name__)
 
