@@ -34,18 +34,9 @@ async def chat_test(body: ChatTestRequest, request: Request):
     """
     settings = request.app.state.settings
     pairing = request.app.state.pairing
-    registry = request.app.state.agent_registry
 
-    from eidolon_agent.core.errors import ConflictError
-
-    try:
-        await registry.start_instance(
-            template_id=body.template_id,
-            tenant_id=body.tenant_id,
-            user_id=body.user_id,
-        )
-    except ConflictError:
-        pass
+    # The registry creates the agent lazily on the first Chat RPC; nothing
+    # to do here besides issuing the pairing code.
 
     rec = await pairing.issue_code(
         tenant_id=body.tenant_id,

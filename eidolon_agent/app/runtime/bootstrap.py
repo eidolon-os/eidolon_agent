@@ -184,9 +184,13 @@ async def build_application(
         )
         return CompanionAgent(instance_id=inst.instance_id, turn_engine=engine)
 
-    agent_registry = AgentRegistry(instance_factory=_build_companion)
-    # Register one default template per loaded persona.
-    for tpl in tpl_reg.list_all():
+    templates = list(tpl_reg.list_all())
+    default_template_id = templates[0].metadata.template_id if templates else ""
+    agent_registry = AgentRegistry(
+        instance_factory=_build_companion,
+        default_template_id=default_template_id,
+    )
+    for tpl in templates:
         agent_registry.register_template(
             AgentTemplate(
                 template_id=tpl.metadata.template_id,

@@ -93,10 +93,10 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
 
             start = frame.start
             try:
-                inst = self._registry.resolve_for_caller(
+                inst = await self._registry.resolve_for_caller(
                     tenant_id=identity.tenant_id,
                     user_id=identity.user_id,
-                    instance_id=None,
+                    template_id=identity.default_template_id or None,
                 )
                 agent = inst.agent
             except NotFoundError as exc:
@@ -150,10 +150,10 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         identity = current_identity()
         if identity is None:
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "no identity")
-        inst = self._registry.resolve_for_caller(
+        inst = await self._registry.resolve_for_caller(
             tenant_id=identity.tenant_id,
             user_id=identity.user_id,
-            instance_id=None,
+            template_id=identity.default_template_id or None,
         )
         agent = inst.agent
         ti = TurnInput(
@@ -214,10 +214,10 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         await self._signals.publish(request.session_id, sig)
         if self._personas is not None and identity is not None:
             try:
-                inst = self._registry.resolve_for_caller(
+                inst = await self._registry.resolve_for_caller(
                     tenant_id=identity.tenant_id,
                     user_id=identity.user_id,
-                    instance_id=None,
+                    template_id=identity.default_template_id or None,
                 )
                 from eidolon_agent.domain.personas.types import PersonaSignalInput
 

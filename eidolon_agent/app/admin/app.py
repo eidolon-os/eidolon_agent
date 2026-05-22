@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from eidolon_agent.app.admin.routers import agents, chat_test, devices, personas
+from eidolon_agent.app.admin.routers import chat_test, devices, personas
 from eidolon_agent.app.admin.routers import pairing as pairing_router
 from eidolon_agent.config.settings import Settings
 
@@ -46,7 +46,6 @@ def build_admin_app(
     app.state.pairing = pairing
     app.state.personas_service = personas_service
 
-    app.include_router(agents.router, prefix="/api/admin", tags=["agents"])
     app.include_router(devices.router, prefix="/api/admin", tags=["devices"])
     app.include_router(personas.router, prefix="/api/admin", tags=["personas"])
     app.include_router(pairing_router.router, prefix="/api/admin", tags=["pairing"])

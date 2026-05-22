@@ -1,9 +1,17 @@
-"""SQLAlchemy 2.0 ORM models.
+"""SQLAlchemy 2.0 ORM models — only what we actively read/write.
 
-Schema is intentionally narrow: each table maps to one concept in the
-architecture (conversation, turn, message, instance, device, audit, etc).
-JSON columns are used sparingly — strongly-typed columns are preferred so
-queries and dashboards can rely on them.
+Five tables remain after the Phase 4 simplification pass:
+    conversations / turns / chat_messages — conversation event source
+    devices                                — pairing & revocation
+    evolution_history                      — persona evolution audit
+
+Dropped (see migrations/versions/...drop_unused_tables.py):
+    tenants, users, agent_instances        — never written; multi-tenancy
+                                             primitives now live entirely in
+                                             memory + config
+    pairing_codes                          — coordinator keeps codes in memory
+    audit_log                              — no admin actions audit-logged yet
+    publish_outbox                         — outbox unused; rely on JetStream
 """
 
 from __future__ import annotations
@@ -34,58 +42,6 @@ class Base(DeclarativeBase):
     type_annotation_map: dict[type, type] = {  # noqa: RUF012 - SQLAlchemy reads this once at class build
         dict: JSON,
     }
-
-
-# ---------------------------------------------------------------------------
-# Tenants & users — minimal multi-tenancy primitives
-# ---------------------------------------------------------------------------
-
-
-class TenantRow(Base):
-    __tablename__ = "tenants"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    name: Mapped[str] = mapped_column(String(128))
-    region: Mapped[str | None] = mapped_column(String(32))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
-    metadata_: Mapped[dict | None] = mapped_column("metadata", JSON)
-    # Resource quotas
-    max_concurrent_streams: Mapped[int] = mapped_column(Integer, default=16)
-    max_agent_instances: Mapped[int] = mapped_column(Integer, default=10)
-
-
-class UserRow(Base):
-    __tablename__ = "users"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    tenant_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("tenants.id", ondelete="RESTRICT"), index=True
-    )
-    display_name: Mapped[str] = mapped_column(String(128))
-    locale: Mapped[str] = mapped_column(String(16), default="zh-CN")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
-
-
-# ---------------------------------------------------------------------------
-# Agent lifecycle
-# ---------------------------------------------------------------------------
-
-
-class AgentInstanceRow(Base):
-    __tablename__ = "agent_instances"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
-    user_id: Mapped[str] = mapped_column(String(64), index=True)
-    template_id: Mapped[str] = mapped_column(String(128), index=True)
-    template_version: Mapped[int] = mapped_column(Integer)
-    overlay_version: Mapped[int] = mapped_column(Integer, default=1)
-    nickname_alias: Mapped[str | None] = mapped_column(String(64))
-    status: Mapped[str] = mapped_column(
-        String(16), default="active"
-    )  # active|stopped|degraded
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
-    last_active_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +132,7 @@ class ChatMessageRow(Base):
 
 
 # ---------------------------------------------------------------------------
-# Devices & pairing
+# Devices
 # ---------------------------------------------------------------------------
 
 
@@ -194,34 +150,9 @@ class DeviceRow(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
-class PairingCodeRow(Base):
-    __tablename__ = "pairing_codes"
-
-    code: Mapped[str] = mapped_column(String(16), primary_key=True)
-    tenant_id: Mapped[str] = mapped_column(String(64))
-    user_id: Mapped[str] = mapped_column(String(64))
-    default_template_id: Mapped[str | None] = mapped_column(String(128))
-    issued_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
-    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
-    used_at: Mapped[datetime | None] = mapped_column(DateTime)
-    issued_by_actor: Mapped[str] = mapped_column(String(64))
-
-
 # ---------------------------------------------------------------------------
-# Audit & evolution
+# Persona evolution audit
 # ---------------------------------------------------------------------------
-
-
-class AuditLogRow(Base):
-    __tablename__ = "audit_log"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, index=True)
-    actor: Mapped[str] = mapped_column(String(64))  # admin user id or "system"
-    action: Mapped[str] = mapped_column(String(64), index=True)
-    target: Mapped[str | None] = mapped_column(String(128))
-    tenant_id: Mapped[str | None] = mapped_column(String(64), index=True)
-    payload: Mapped[dict | None] = mapped_column("payload", JSON)
 
 
 class EvolutionHistoryRow(Base):
@@ -242,32 +173,11 @@ class EvolutionHistoryRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, index=True)
 
 
-class TokenUsageOutboxRow(Base):
-    """Out-of-band publish outbox for NATS turn fanout when NATS is degraded."""
-
-    __tablename__ = "publish_outbox"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    subject: Mapped[str] = mapped_column(String(128))
-    payload: Mapped[dict] = mapped_column("payload", JSON)
-    headers: Mapped[dict | None] = mapped_column("headers", JSON)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, index=True)
-    sent_at: Mapped[datetime | None] = mapped_column(DateTime)
-    attempts: Mapped[int] = mapped_column(Integer, default=0)
-    last_error: Mapped[str | None] = mapped_column(Text)
-
-
 __all__ = [
-    "AgentInstanceRow",
-    "AuditLogRow",
     "Base",
     "ChatMessageRow",
     "ConversationRow",
     "DeviceRow",
     "EvolutionHistoryRow",
-    "PairingCodeRow",
-    "TenantRow",
-    "TokenUsageOutboxRow",
     "TurnRow",
-    "UserRow",
 ]

@@ -33,6 +33,7 @@ class _StubIdentity:
     tenant_id: str = "t"
     user_id: str = "alice"
     device_id: str | None = "dev-1"
+    default_template_id: str | None = None
 
 
 def _make_context() -> MagicMock:
@@ -121,7 +122,7 @@ async def test_chat_once_returns_assembled_assistant_text() -> None:
         ),
     ]
     registry = MagicMock()
-    registry.resolve_for_caller = MagicMock(
+    registry.resolve_for_caller = AsyncMock(
         return_value=SimpleNamespace(
             instance_id="inst-1", agent=_scripted_agent(events)
         )
