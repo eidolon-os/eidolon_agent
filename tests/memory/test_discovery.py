@@ -5,10 +5,10 @@ from types import SimpleNamespace
 import pytest
 
 from eidolon_agent.config.settings import MemoryEndpoint, NatsSettings
-from eidolon_agent.memory.discovery import DiscoveryResponse, MemoryRoutingTable
-from eidolon_agent.memory.mcp_client import _decode_call_tool_result
-from eidolon_agent.memory.nats_pub import MemoryNatsPublisher
-from eidolon_agent.memory.port_adapter import EidolonMemoryPort
+from eidolon_agent.infra.memory.discovery import DiscoveryResponse, MemoryRoutingTable
+from eidolon_agent.infra.memory.mcp_client import _decode_call_tool_result
+from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
+from eidolon_agent.infra.memory.port_adapter import EidolonMemoryPort
 
 
 @pytest.mark.asyncio

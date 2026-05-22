@@ -18,7 +18,7 @@ from eidolon_agent.core.types.dispatch import (
     Progress,
     ProgressKind,
 )
-from eidolon_agent.events.topics import Topics
+from eidolon_agent.infra.events.topics import Topics
 
 _log = logging.getLogger(__name__)
 _TERMINAL = {ProgressKind.SUCCESS, ProgressKind.FAILURE, ProgressKind.CANCELLED}

@@ -49,13 +49,13 @@ from eidolon_agent.core.types.turn import (
     TurnStatus,
 )
 from eidolon_agent.dispatch.classifier import TaskClassifier
-from eidolon_agent.events.topics import Topics
 from eidolon_agent.guardrails.crisis import CrisisHandler
 from eidolon_agent.guardrails.input_filter import InputGuardrail, SafetyAction
 from eidolon_agent.guardrails.output_filter import OutputGuardrail
 from eidolon_agent.history.fanout import HistoryFanout
 from eidolon_agent.history.manager import HistoryManager
 from eidolon_agent.hooks.executor import HookExecutor
+from eidolon_agent.infra.events.topics import Topics
 from eidolon_agent.personas.types import PersonaInteractionEvent
 from eidolon_agent.tools.dispatcher import ToolDispatcher
 

@@ -5,7 +5,7 @@ Writes go through NATS JetStream on ``agent.memory.conversation.turn.<user_id>``
 Explicit KG mutations go through ``agent.memory.cmd.<user_id>``.
 """
 
-from eidolon_agent.memory.port_adapter import EidolonMemoryPort
-from eidolon_agent.memory.strategy import MemoryStrategy
+from eidolon_agent.infra.memory.port_adapter import EidolonMemoryPort
+from eidolon_agent.infra.memory.strategy import MemoryStrategy
 
 __all__ = ["EidolonMemoryPort", "MemoryStrategy"]

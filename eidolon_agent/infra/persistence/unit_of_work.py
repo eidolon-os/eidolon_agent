@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from eidolon_agent.persistence.repositories import (
+from eidolon_agent.infra.persistence.repositories import (
     SqlChatMessageRepository,
     SqlConversationRepository,
     SqlDeviceRepository,

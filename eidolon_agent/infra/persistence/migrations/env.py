@@ -15,7 +15,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from eidolon_agent.config.settings import load_settings
-from eidolon_agent.persistence.models import Base
+from eidolon_agent.infra.persistence.models import Base
 
 config = context.config
 if config.config_file_name is not None:

@@ -134,17 +134,13 @@ source_modules = ["eidolon_agent.core"]
 forbidden_modules = [
     "eidolon_agent.admin",
     "eidolon_agent.agent",
-    "eidolon_agent.brain",
     "eidolon_agent.config",
     "eidolon_agent.context",
     "eidolon_agent.dispatch",
-    "eidolon_agent.events",
     "eidolon_agent.guardrails",
     "eidolon_agent.history",
     "eidolon_agent.hooks",
-    "eidolon_agent.memory",
-    "eidolon_agent.observability",
-    "eidolon_agent.persistence",
+    "eidolon_agent.infra",
     "eidolon_agent.personas",
     "eidolon_agent.proactive",
     "eidolon_agent.runtime",
@@ -152,4 +148,36 @@ forbidden_modules = [
     "eidolon_agent.signals",
     "eidolon_agent.tools",
     "eidolon_agent.transport",
+]
+
+# Domain layer (everything that isn't infra/admin/transport/runtime/config/core)
+# may not depend on infra/. Cross only through core/ports/.
+# Known leaks are listed under `ignore_imports` as a Phase 4 punch list —
+# each will be replaced by a port declared in the domain module.
+[[tool.importlinter.contracts]]
+name = "domain modules do not import infra"
+type = "forbidden"
+source_modules = [
+    "eidolon_agent.agent",
+    "eidolon_agent.context",
+    "eidolon_agent.dispatch",
+    "eidolon_agent.guardrails",
+    "eidolon_agent.history",
+    "eidolon_agent.hooks",
+    "eidolon_agent.personas",
+    "eidolon_agent.proactive",
+    "eidolon_agent.signals",
+    "eidolon_agent.tools",
+]
+forbidden_modules = ["eidolon_agent.infra"]
+ignore_imports = [
+    # Phase 4: domain modules read NATS topic constants directly.
+    # Replace with EventTopics port / event publisher abstraction.
+    "eidolon_agent.agent.turn -> eidolon_agent.infra.events.topics",
+    "eidolon_agent.dispatch.workstation_client -> eidolon_agent.infra.events.topics",
+    "eidolon_agent.history.fanout -> eidolon_agent.infra.events.topics",
+    "eidolon_agent.proactive.engine -> eidolon_agent.infra.events.topics",
+    # Phase 4: history.fanout reaches into memory discovery internals.
+    # Replace with a HistoryFanoutSink port in domain/history/ports.py.
+    "eidolon_agent.history.fanout -> eidolon_agent.infra.memory.discovery",
 ]

@@ -7,18 +7,18 @@ from pathlib import Path
 
 import pytest
 
-from eidolon_agent.brain import LLMRouter
-from eidolon_agent.brain.llm.fake import FakeLLM
 from eidolon_agent.context.compiler import ContextCompiler
 from eidolon_agent.context.providers import (
     HistoryProvider,
     PersonasContextProvider,
 )
 from eidolon_agent.dispatch.classifier import TaskClassifier
-from eidolon_agent.events import InMemoryEventBus, InMemoryKVStore
 from eidolon_agent.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.history import HistoryFanout, HistoryManager
 from eidolon_agent.hooks import HookExecutor
+from eidolon_agent.infra.events import InMemoryEventBus, InMemoryKVStore
+from eidolon_agent.infra.llm import LLMRouter
+from eidolon_agent.infra.llm.providers.fake import FakeLLM
 from eidolon_agent.personas import (
     PersonaInstanceStore,
     PersonasService,

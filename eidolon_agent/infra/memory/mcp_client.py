@@ -17,7 +17,7 @@ from typing import Any
 import httpx
 
 from eidolon_agent.core.errors import MemoryUnavailableError
-from eidolon_agent.memory.discovery import MemoryRoutingTable
+from eidolon_agent.infra.memory.discovery import MemoryRoutingTable
 
 _log = logging.getLogger(__name__)
 

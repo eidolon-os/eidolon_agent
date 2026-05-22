@@ -4,7 +4,7 @@ Revision ID: 0001_initial
 Revises:
 Create Date: 2026-05-20 00:00:00 UTC
 
-Mirrors :mod:`eidolon_agent.persistence.models`. Future migrations should be
+Mirrors :mod:`eidolon_agent.infra.persistence.models`. Future migrations should be
 generated via ``alembic revision --autogenerate``; this initial one is
 hand-written so a fresh repo can ``alembic upgrade head`` without an existing DB.
 """

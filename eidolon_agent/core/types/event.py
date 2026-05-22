@@ -1,6 +1,6 @@
 """Generic event envelope for the internal EventBus.
 
-Subjects (topic names) are centralized in :mod:`eidolon_agent.events.topics`.
+Subjects (topic names) are centralized in :mod:`eidolon_agent.infra.events.topics`.
 The payload is intentionally a free-form dict — the bus is transport, not a
 type system. Strongly-typed wrappers live next to producers/consumers.
 """

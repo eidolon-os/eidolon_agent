@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnResult
-from eidolon_agent.persistence.models import (
+from eidolon_agent.infra.persistence.models import (
     ChatMessageRow,
     ConversationRow,
     DeviceRow,

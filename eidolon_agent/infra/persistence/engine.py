@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import StaticPool
 
 from eidolon_agent.config.settings import SqliteSettings
-from eidolon_agent.persistence.models import Base
+from eidolon_agent.infra.persistence.models import Base
 
 
 def _build_url(path: Path | str) -> str:

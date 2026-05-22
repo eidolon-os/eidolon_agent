@@ -11,8 +11,8 @@ import asyncio
 from sqlalchemy import select
 
 from eidolon_agent.config import load_settings
-from eidolon_agent.persistence import create_engine, create_session_factory
-from eidolon_agent.persistence.models import ChatMessageRow, TurnRow
+from eidolon_agent.infra.persistence import create_engine, create_session_factory
+from eidolon_agent.infra.persistence.models import ChatMessageRow, TurnRow
 
 
 async def main(conv_id: str) -> None:

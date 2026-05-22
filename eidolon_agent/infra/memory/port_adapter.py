@@ -11,8 +11,8 @@ from eidolon_agent.core.types.memory import (
     MemoryQueryPlan,
     MemoryScope,
 )
-from eidolon_agent.memory.mcp_client import McpClientPool
-from eidolon_agent.memory.nats_pub import MemoryNatsPublisher
+from eidolon_agent.infra.memory.mcp_client import McpClientPool
+from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
 
 _log = logging.getLogger(__name__)
 

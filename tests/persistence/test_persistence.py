@@ -7,7 +7,7 @@ import pytest
 
 from eidolon_agent.config.settings import SqliteSettings
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
-from eidolon_agent.persistence import (
+from eidolon_agent.infra.persistence import (
     SqlAlchemyUnitOfWork,
     create_engine,
     create_session_factory,

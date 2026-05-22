@@ -2,7 +2,7 @@
 
 The hex-arch contract: business code depends only on these Protocols, never
 on concrete adapters. Concrete adapters live under the corresponding feature
-package (``eidolon_agent.memory``, ``eidolon_agent.brain.llm``, etc.).
+package (``eidolon_agent.infra.memory``, ``eidolon_agent.infra.llm.providers``, etc.).
 
 Every Protocol is runtime-checkable (``@runtime_checkable``) so tests can
 verify duck-typed fakes match.

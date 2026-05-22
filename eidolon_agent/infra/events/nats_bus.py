@@ -1,7 +1,7 @@
 """NATS-backed EventBus + KVStore.
 
 - Core NATS for transient pub/sub (low latency, no persistence).
-- JetStream for subjects under :data:`eidolon_agent.events.topics.PERSISTENT_PREFIXES`.
+- JetStream for subjects under :data:`eidolon_agent.infra.events.topics.PERSISTENT_PREFIXES`.
 - JetStream KV for the bucket-scoped KV store.
 
 The connection is established lazily on first use so importing this module is
@@ -27,7 +27,7 @@ from nats.js.kv import KeyValue
 
 from eidolon_agent.core.errors import ConflictError, NatsUnavailableError
 from eidolon_agent.core.types.event import Event
-from eidolon_agent.events.topics import is_persistent
+from eidolon_agent.infra.events.topics import is_persistent
 
 _log = logging.getLogger(__name__)
 

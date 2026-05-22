@@ -32,8 +32,6 @@ from eidolon_agent.admin import build_admin_app
 from eidolon_agent.agent.companion import CompanionAgent
 from eidolon_agent.agent.registry import AgentRegistry, AgentTemplate
 from eidolon_agent.agent.turn import TurnEngine
-from eidolon_agent.brain import LLMRouter
-from eidolon_agent.brain.llm.fake import FakeLLM
 from eidolon_agent.config.settings import Settings, load_settings
 from eidolon_agent.context.compiler import ContextCompiler
 from eidolon_agent.context.providers import (
@@ -42,18 +40,20 @@ from eidolon_agent.context.providers import (
     RealtimeSignalProvider,
 )
 from eidolon_agent.dispatch import NatsWorkstationClient, TaskClassifier
-from eidolon_agent.events import NatsEventBus, NatsKVStore
-from eidolon_agent.events.nats_bus import ensure_buckets
 from eidolon_agent.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.history import HistoryFanout, HistoryManager
 from eidolon_agent.hooks import HookExecutor
-from eidolon_agent.memory import EidolonMemoryPort
-from eidolon_agent.memory.discovery import build_initial_memory_routes
-from eidolon_agent.memory.mcp_client import McpClientPool
-from eidolon_agent.memory.nats_pub import MemoryNatsPublisher
-from eidolon_agent.observability import configure_logging
-from eidolon_agent.observability.tracing import configure_tracing
-from eidolon_agent.persistence import (
+from eidolon_agent.infra.events import NatsEventBus, NatsKVStore
+from eidolon_agent.infra.events.nats_bus import ensure_buckets
+from eidolon_agent.infra.llm import LLMRouter
+from eidolon_agent.infra.llm.providers.fake import FakeLLM
+from eidolon_agent.infra.memory import EidolonMemoryPort
+from eidolon_agent.infra.memory.discovery import build_initial_memory_routes
+from eidolon_agent.infra.memory.mcp_client import McpClientPool
+from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
+from eidolon_agent.infra.observability import configure_logging
+from eidolon_agent.infra.observability.tracing import configure_tracing
+from eidolon_agent.infra.persistence import (
     create_engine,
     create_session_factory,
     ensure_schema,
@@ -266,7 +266,7 @@ async def build_application(
 
 def _build_llm_router(settings: Settings) -> LLMRouter:
     """Build a router with LiteLLM providers from config + FakeLLM for tests."""
-    from eidolon_agent.brain.llm import LiteLLMProvider
+    from eidolon_agent.infra.llm.providers import LiteLLMProvider
 
     providers: dict[str, object] = {"fake": FakeLLM()}
     for m in settings.llm.models:
@@ -343,7 +343,7 @@ class _PersonasEventAdapter(PersonaEventPort):
         if self._bus is None:
             return
         from eidolon_agent.core.types.event import Event
-        from eidolon_agent.events.topics import Topics
+        from eidolon_agent.infra.events.topics import Topics
 
         await self._bus.publish(
             Event(
@@ -357,7 +357,7 @@ class _PersonasEventAdapter(PersonaEventPort):
         if self._bus is None:
             return
         from eidolon_agent.core.types.event import Event
-        from eidolon_agent.events.topics import Topics
+        from eidolon_agent.infra.events.topics import Topics
 
         await self._bus.publish(
             Event(
