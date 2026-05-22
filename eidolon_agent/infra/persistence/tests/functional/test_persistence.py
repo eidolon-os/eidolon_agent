@@ -1,35 +1,19 @@
-"""SQLite + repositories smoke tests."""
+"""SQLite + chat-messages end-to-end roundtrip.
+
+Per-repo unit tests live in ``../unit/``. This file keeps a single
+end-to-end test that exercises the UoW + commit + reopen flow.
+"""
 
 import uuid
 from datetime import datetime, timezone
 
 import pytest
 
-from eidolon_agent.config.settings import SqliteSettings
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
-from eidolon_agent.infra.persistence import (
-    SqlAlchemyUnitOfWork,
-    create_engine,
-    create_session_factory,
-    ensure_schema,
-)
 
 pytestmark = pytest.mark.functional
 
-@pytest.fixture
-async def uow_factory():
-    eng = create_engine(SqliteSettings(path=":memory:"))
-    await ensure_schema(eng)
-    sf = create_session_factory(eng)
 
-    def _factory():
-        return SqlAlchemyUnitOfWork(sf)
-
-    yield _factory
-    await eng.dispose()
-
-
-@pytest.mark.asyncio
 async def test_chat_message_roundtrip(uow_factory):
     conv_id = uuid.uuid4().hex
     turn_id = uuid.uuid4().hex

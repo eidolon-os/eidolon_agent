@@ -116,8 +116,16 @@ asyncio_mode = "auto"
 # and co-located with each module under eidolon_agent/<layer>/<module>/tests/.
 testpaths = ["tests", "eidolon_agent"]
 python_files = ["test_*.py"]
-# Coverage is opt-in: run `pytest --cov` to measure. We do not yet enforce
-# a minimum gate — Phase 4 of the test plan sets that once gaps are filled.
+markers = [
+    "unit: pure unit test — mocks all external collaborators",
+    "functional: module-level test — in-memory adapters allowed (FakeLLM, InMemoryEventBus, in-mem SQLite)",
+    "integration: cross-module / cross-layer test (still in-process, no real network/NATS/LLM)",
+    "smoke: requires real external service (NATS, LLM endpoint); skipped in default CI",
+]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:google.*",
+]
 
 [tool.coverage.run]
 source = ["eidolon_agent"]
@@ -125,6 +133,7 @@ omit = [
     "*/tests/*",
     "*/_pb2*",
     "eidolon_agent/app/transport/grpc/proto/*",
+    "eidolon_agent/infra/persistence/migrations/*",
 ]
 branch = true
 
@@ -138,16 +147,9 @@ exclude_lines = [
 show_missing = true
 skip_empty = true
 precision = 1
-markers = [
-    "unit: pure unit test — mocks all external collaborators",
-    "functional: module-level test — in-memory adapters allowed (FakeLLM, InMemoryEventBus, in-mem SQLite)",
-    "integration: cross-module / cross-layer test (still in-process, no real network/NATS/LLM)",
-    "smoke: requires real external service (NATS, LLM endpoint); skipped in default CI",
-]
-filterwarnings = [
-    "error",
-    "ignore::DeprecationWarning:google.*",
-]
+# CI gate: ratchet upward as gaps close. Today's floor is the latest infra
+# coverage; aim for 80% once NATS / MCP / metrics get adapter tests.
+fail_under = 75
 
 # ---------------------------------------------------------------------------
 # import-linter: enforces the layered architecture.
@@ -157,6 +159,11 @@ filterwarnings = [
 
 [tool.importlinter]
 root_package = "eidolon_agent"
+
+# Module-local test packages live under <layer>/<module>/tests/ — each
+# contract excludes them via ignore_imports below so a test for
+# infra.persistence may import any domain type it needs to construct
+# fixtures without breaking the layer rule.
 
 # L0 — core/: pure types & protocols. Zero sibling deps.
 [[tool.importlinter.contracts]]
@@ -168,6 +175,7 @@ forbidden_modules = [
     "eidolon_agent.domain",
     "eidolon_agent.infra",
 ]
+ignore_imports = ["**.tests.** -> **"]
 
 # L1 — domain/: business logic. May import core/ only.
 [[tool.importlinter.contracts]]
@@ -178,6 +186,7 @@ forbidden_modules = [
     "eidolon_agent.infra",
     "eidolon_agent.app",
 ]
+ignore_imports = ["**.tests.** -> **"]
 
 # L2 — infra/: adapters. Must not depend on app/. May reference domain TYPES
 # when implementing a domain-owned port (see Phase 1 of the refactor plan).
@@ -186,6 +195,7 @@ name = "infra modules do not import app"
 type = "forbidden"
 source_modules = ["eidolon_agent.infra"]
 forbidden_modules = ["eidolon_agent.app"]
+ignore_imports = ["**.tests.** -> **"]
 
 # Allow infra → domain TYPE imports only. Anything beyond types (services,
 # registries, etc.) would invert the layer and is forbidden.
@@ -196,4 +206,5 @@ source_modules = ["eidolon_agent.infra"]
 forbidden_modules = ["eidolon_agent.domain"]
 ignore_imports = [
     "eidolon_agent.infra.persistence.repositories -> eidolon_agent.domain.personas.types",
+    "**.tests.** -> **",
 ]
