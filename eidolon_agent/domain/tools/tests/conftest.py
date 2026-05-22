@@ -1,0 +1,57 @@
+"""Module-local fixtures for ``domain/tools`` tests."""
+
+from __future__ import annotations
+
+import pytest
+
+from eidolon_agent.core.ports.tool import ToolInvocationContext
+from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
+from eidolon_agent.core.types.tool import ToolCall, ToolSchema
+
+
+@pytest.fixture
+def caller_ctx() -> ToolInvocationContext:
+    return ToolInvocationContext(
+        caller=CallerContext(
+            identity=Identity(tenant_id="t", user_id="u", agent_instance_id="i"),
+            caller_kind=CallerKind.WEB_CHAT,
+            trace_id="trace",
+            request_id="req",
+        ),
+        turn_id="turn-1",
+    )
+
+
+class _StubTool:
+    """Minimal tool used in registry/dispatcher tests. Configurable per case."""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        side_effect: bool = False,
+        invoke=None,
+        timeout_s: float = 1.0,
+    ) -> None:
+        self.schema = ToolSchema(
+            name=name,
+            description=f"stub {name}",
+            json_schema={"type": "object", "additionalProperties": True},
+            side_effect=side_effect,
+            timeout_s=timeout_s,
+        )
+        self._invoke = invoke
+        self.calls: list[ToolCall] = []
+
+    async def invoke(self, call, *, ctx):
+        self.calls.append(call)
+        if self._invoke is not None:
+            return await self._invoke(call, ctx)
+        from eidolon_agent.core.types.tool import ToolResult
+
+        return ToolResult(call_id=call.id, name=self.schema.name, ok=True, content={})
+
+
+@pytest.fixture
+def stub_tool_factory():
+    return _StubTool
