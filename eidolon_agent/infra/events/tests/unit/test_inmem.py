@@ -106,3 +106,121 @@ async def test_kv_keys_filters_by_prefix() -> None:
     await kv.put("other", b"z")
     keys = await kv.keys("user.")
     assert sorted(keys) == ["user.a", "user.b"]
+
+
+async def test_kv_keys_skips_expired_entries() -> None:
+    """TTL'd entry that has lapsed should not show up in keys()."""
+    kv = InMemoryKVStore("BUCKET")
+    await kv.put("alive", b"x")
+    await kv.put("dead", b"y", ttl_s=1)
+    # Manually expire by stamping a past expires_at.
+    kv._store["dead"].expires_at = 0.0
+    assert await kv.keys() == ["alive"]
+
+
+async def test_kv_get_clears_expired_entry() -> None:
+    kv = InMemoryKVStore("BUCKET")
+    await kv.put("k", b"v", ttl_s=1)
+    kv._store["k"].expires_at = 0.0
+    assert await kv.get("k") is None
+    # Entry was actively evicted from the store.
+    assert "k" not in kv._store
+
+
+async def test_kv_watch_yields_put_and_delete_events() -> None:
+    """``watch()`` is an async generator: yields (key, value, rev) on put,
+    (key, None, -1) on delete, until the consumer stops iterating."""
+    kv = InMemoryKVStore("BUCKET")
+
+    async def _consume(limit: int) -> list:
+        out: list = []
+        async for evt in kv.watch("user.>"):
+            out.append(evt)
+            if len(out) >= limit:
+                break
+        return out
+
+    # Start the watcher in the background, then publish updates.
+    consumer = asyncio.create_task(_consume(2))
+    await asyncio.sleep(0)  # let the watcher register
+    await kv.put("user.a", b"hello")
+    await kv.delete("user.a")
+    events = await asyncio.wait_for(consumer, timeout=1)
+    assert events[0][0] == "user.a"
+    assert events[0][1] == b"hello"
+    assert events[0][2] >= 1  # revision
+    assert events[1][0] == "user.a"
+    assert events[1][1] is None  # delete
+    assert events[1][2] == -1
+
+
+async def test_kv_watch_only_matches_pattern() -> None:
+    kv = InMemoryKVStore("BUCKET")
+
+    received: list = []
+
+    async def _consume() -> None:
+        async for evt in kv.watch("alpha.>"):
+            received.append(evt[0])
+            if len(received) >= 1:
+                return
+
+    task = asyncio.create_task(_consume())
+    await asyncio.sleep(0)
+    await kv.put("other.x", b"1")  # should NOT match
+    await kv.put("alpha.x", b"1")  # should match
+    await asyncio.wait_for(task, timeout=1)
+    assert received == ["alpha.x"]
+
+
+# ---- EventBus request/reply ----------------------------------------------
+
+
+async def test_event_bus_request_returns_responder_reply() -> None:
+    bus = InMemoryEventBus()
+
+    async def _responder(payload: dict) -> dict:
+        return {"echo": payload.get("ping", "?")}
+
+    bus.register_responder("svc.echo", _responder)
+    resp = await bus.request("svc.echo", {"ping": "pong"})
+    assert resp == {"echo": "pong"}
+
+
+async def test_event_bus_request_unknown_subject_times_out() -> None:
+    bus = InMemoryEventBus()
+    with pytest.raises(asyncio.TimeoutError):
+        await bus.request("svc.nobody", {}, timeout_s=0.05)
+
+
+async def test_event_bus_health_is_true() -> None:
+    assert await InMemoryEventBus().health() is True
+
+
+# ---- queue group load-balancing ------------------------------------------
+
+
+async def test_queue_group_delivers_to_one_member_per_event() -> None:
+    """Three subscribers in the same queue_group: each event reaches only
+    one of them. Independent subscribers (no group) still all receive."""
+    bus = InMemoryEventBus()
+    counts: dict[str, int] = {"a": 0, "b": 0, "c": 0, "watcher": 0}
+
+    async def _make(name: str):
+        async def _h(_ev) -> None:
+            counts[name] += 1
+
+        return _h
+
+    await bus.subscribe("svc.work", await _make("a"), queue_group="workers")
+    await bus.subscribe("svc.work", await _make("b"), queue_group="workers")
+    await bus.subscribe("svc.work", await _make("c"), queue_group="workers")
+    await bus.subscribe("svc.work", await _make("watcher"))
+
+    for _ in range(4):
+        await bus.publish(Event(subject="svc.work", payload={}, source="t"))
+    await asyncio.sleep(0)
+
+    worker_total = counts["a"] + counts["b"] + counts["c"]
+    assert worker_total == 4  # one worker handled each event
+    assert counts["watcher"] == 4  # independent subscriber got all 4

@@ -22,7 +22,9 @@ from eidolon_agent.infra.memory.discovery import (
 )
 from eidolon_agent.infra.memory.mcp_client import (
     McpClientPool,
+    McpUserSession,
     _decode_call_tool_result,
+    transient_mcp_session,
 )
 
 pytestmark = pytest.mark.unit
@@ -117,3 +119,99 @@ async def test_session_rotated_when_url_changes() -> None:
     s2 = await pool.session_for("alice")
     assert s2 is not s1
     s1.close.assert_awaited()  # old session was closed
+
+
+async def test_pool_close_all_closes_each_session() -> None:
+    pool = McpClientPool(
+        routes=_routes(
+            MemoryRoute(user_id="alice", mcp_url="http://a/mcp"),
+            MemoryRoute(user_id="bob", mcp_url="http://b/mcp"),
+        )
+    )
+    s1 = await pool.session_for("alice")
+    s2 = await pool.session_for("bob")
+    s1.close = AsyncMock()
+    s2.close = AsyncMock()
+    await pool.close_all()
+    s1.close.assert_awaited_once()
+    s2.close.assert_awaited_once()
+
+
+# ---- McpUserSession ------------------------------------------------------
+
+
+def _make_session(call_tool_return, *, raise_on_call: bool = False) -> McpUserSession:
+    """Build a session with an injected fake MCP session so we don't import mcp."""
+    sess = McpUserSession("http://x/mcp")
+    fake = AsyncMock()
+    if raise_on_call:
+        fake.call_tool = AsyncMock(side_effect=RuntimeError("upstream broken"))
+    else:
+        fake.call_tool = AsyncMock(return_value=call_tool_return)
+    sess._session = fake  # bypass the lazy MCP loader
+    return sess
+
+
+async def test_call_tool_returns_dict_on_dict_decode() -> None:
+    raw = SimpleNamespace(
+        isError=False,
+        structuredContent={"records": [{"id": "r1", "value": "v"}]},
+        content=[],
+    )
+    sess = _make_session(raw)
+    out = await sess.call_tool("eidolon_memory_search", {"q": "x"})
+    assert out == {"records": [{"id": "r1", "value": "v"}]}
+
+
+async def test_call_tool_wraps_list_decode_in_records() -> None:
+    raw = SimpleNamespace(isError=False, structuredContent=[1, 2, 3], content=[])
+    sess = _make_session(raw)
+    out = await sess.call_tool("any", {})
+    assert out == {"records": [1, 2, 3]}
+
+
+async def test_call_tool_wraps_scalar_decode_in_result_key() -> None:
+    raw = SimpleNamespace(isError=False, structuredContent=42, content=[])
+    sess = _make_session(raw)
+    out = await sess.call_tool("any", {})
+    assert out == {"result": 42}
+
+
+async def test_call_tool_raises_memory_unavailable_on_exception() -> None:
+    sess = _make_session(None, raise_on_call=True)
+    with pytest.raises(MemoryUnavailableError, match="upstream broken"):
+        await sess.call_tool("any", {})
+
+
+async def test_session_close_is_idempotent_and_drops_refs() -> None:
+    sess = McpUserSession("http://x/mcp")
+    sess._session = AsyncMock()
+    sess._session.__aexit__ = AsyncMock()
+    sess._client_cm = AsyncMock()
+    sess._client_cm.__aexit__ = AsyncMock()
+    sess._http_client = AsyncMock()
+    await sess.close()
+    assert sess._session is None
+    assert sess._client_cm is None
+    assert sess._http_client is None
+    # Second close is a no-op (no AttributeError).
+    await sess.close()
+
+
+def test_session_matches_url_and_token() -> None:
+    sess = McpUserSession("http://x/mcp", bearer_token="tok")
+    assert sess.matches(mcp_url="http://x/mcp", bearer_token="tok")
+    assert not sess.matches(mcp_url="http://y/mcp", bearer_token="tok")
+    assert not sess.matches(mcp_url="http://x/mcp", bearer_token="other")
+
+
+# ---- transient_mcp_session -----------------------------------------------
+
+
+async def test_transient_session_closes_on_exit() -> None:
+    """The context manager yields a fresh session and closes it after the
+    ``async with`` block, even when the block raises."""
+    async with transient_mcp_session("http://x/mcp") as sess:
+        assert isinstance(sess, McpUserSession)
+        sess.close = AsyncMock()  # swap before exit so we can observe
+    sess.close.assert_awaited_once()
