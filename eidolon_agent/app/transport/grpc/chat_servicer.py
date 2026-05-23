@@ -72,75 +72,98 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         identity = current_identity()
         if identity is None:
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "no identity")
-        cancel_event = asyncio.Event()
         active_turns: set[asyncio.Task] = set()
 
-        async for frame in request_iterator:
-            payload = frame.WhichOneof("payload")
-            if payload == "cancel":
-                cancel_event.set()
-                # cancel any running task tagged with this turn_id
-                for task in list(active_turns):
-                    if not task.done() and task.get_name() == f"turn-{frame.cancel.turn_id}":
-                        task.cancel()
-                continue
-            if payload == "signal":
-                # Forward to signal bus; non-blocking.
-                _log.debug("inline signal: %s", frame.signal.label)
-                continue
-            if payload != "start":
-                continue
+        # Watch the gRPC context for cancellation (raw TCP close, RPC cancel
+        # without a CancelTurn frame, deadline exceeded, …). When fired, cancel
+        # every in-flight turn so we stop pulling tokens from the LLM provider
+        # and don't bill against a disconnected client.
+        async def _on_rpc_cancelled() -> None:
+            while not context.cancelled() and not context.done():
+                await asyncio.sleep(0.05)
+            for task in list(active_turns):
+                if not task.done():
+                    task.cancel()
 
-            start = frame.start
-            try:
-                inst = await self._registry.resolve_for_caller(
-                    tenant_id=identity.tenant_id,
-                    user_id=identity.user_id,
-                    template_id=identity.default_template_id or None,
-                )
-                agent = inst.agent
-            except NotFoundError as exc:
-                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, exc.message)
+        watcher = asyncio.create_task(_on_rpc_cancelled(), name="chat-cancel-watcher")
 
-            ti = TurnInput(
-                turn_id=start.turn_id or uuid.uuid4().hex,
-                conversation_id=start.conversation_id,
-                session_id=start.conversation_id,  # one-to-one for now
-                caller=CallerContext(
-                    identity=Identity(
+        try:
+            async for frame in request_iterator:
+                payload = frame.WhichOneof("payload")
+                if payload == "cancel":
+                    # Explicit cancel of a specific turn from the client.
+                    for task in list(active_turns):
+                        if not task.done() and task.get_name() == f"turn-{frame.cancel.turn_id}":
+                            task.cancel()
+                    continue
+                if payload == "signal":
+                    # Forward to signal bus; non-blocking.
+                    _log.debug("inline signal: %s", frame.signal.label)
+                    continue
+                if payload != "start":
+                    continue
+
+                start = frame.start
+                try:
+                    inst = await self._registry.resolve_for_caller(
                         tenant_id=identity.tenant_id,
                         user_id=identity.user_id,
-                        agent_instance_id=inst.instance_id,
-                        device_id=identity.device_id,
+                        template_id=identity.default_template_id or None,
+                    )
+                    agent = inst.agent
+                except NotFoundError as exc:
+                    await context.abort(grpc.StatusCode.FAILED_PRECONDITION, exc.message)
+
+                ti = TurnInput(
+                    turn_id=start.turn_id or uuid.uuid4().hex,
+                    conversation_id=start.conversation_id,
+                    session_id=start.conversation_id,  # one-to-one for now
+                    caller=CallerContext(
+                        identity=Identity(
+                            tenant_id=identity.tenant_id,
+                            user_id=identity.user_id,
+                            agent_instance_id=inst.instance_id,
+                            device_id=identity.device_id,
+                        ),
+                        caller_kind=CallerKind.LIVEKIT_VOICE,
+                        trace_id=dict(context.invocation_metadata()).get(
+                            "x-trace-id", uuid.uuid4().hex
+                        ),
+                        request_id=dict(context.invocation_metadata()).get(
+                            "x-request-id", uuid.uuid4().hex
+                        ),
                     ),
-                    caller_kind=CallerKind.LIVEKIT_VOICE,  # most chat traffic; web overrides via metadata in future
-                    trace_id=dict(context.invocation_metadata()).get("x-trace-id", uuid.uuid4().hex),
-                    request_id=dict(context.invocation_metadata()).get("x-request-id", uuid.uuid4().hex),
-                ),
-                trigger=TurnTrigger.USER_UTTERANCE,
-                text=start.text,
-                metadata=struct_to_dict(start.metadata),
-            )
+                    trigger=TurnTrigger.USER_UTTERANCE,
+                    text=start.text,
+                    metadata=struct_to_dict(start.metadata),
+                )
 
-            async def _emit_turn(_agent=agent, _ti=ti) -> None:
+                async def _emit_turn(_agent=agent, _ti=ti) -> None:
+                    try:
+                        async for ev in _agent.run_turn(_ti):
+                            await context.write(turn_event_to_proto(ev))
+                    except asyncio.CancelledError:
+                        raise
+                    except EidolonError as exc:
+                        _log.warning("turn %s failed: %s", _ti.turn_id, exc)
+
+                task = asyncio.create_task(_emit_turn(), name=f"turn-{ti.turn_id}")
+                active_turns.add(task)
+                task.add_done_callback(active_turns.discard)
+        finally:
+            watcher.cancel()
+            # If the iterator returned because the RPC was cancelled, propagate
+            # the cancel to any in-flight turn. Legitimate stream-end (client
+            # closed cleanly) still wants to drain.
+            if context.cancelled() or context.done():
+                for task in list(active_turns):
+                    if not task.done():
+                        task.cancel()
+            for task in list(active_turns):
                 try:
-                    async for ev in _agent.run_turn(_ti):
-                        await context.write(turn_event_to_proto(ev))
+                    await task
                 except asyncio.CancelledError:
-                    raise
-                except EidolonError as exc:
-                    _log.warning("turn %s failed: %s", _ti.turn_id, exc)
-
-            task = asyncio.create_task(_emit_turn(), name=f"turn-{ti.turn_id}")
-            active_turns.add(task)
-            task.add_done_callback(active_turns.discard)
-
-        # Drain remaining turn tasks before closing the stream.
-        for task in list(active_turns):
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+                    pass
 
     # ---- One-shot ----------------------------------------------------------
 

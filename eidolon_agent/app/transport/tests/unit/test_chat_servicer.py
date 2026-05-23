@@ -179,6 +179,71 @@ async def test_push_signal_publishes_to_signal_bus() -> None:
     assert 0.9 < sig.confidence <= 1.0
 
 
+async def test_chat_cancels_active_turn_when_context_is_cancelled() -> None:
+    """Raw TCP close / RPC cancellation must propagate to in-flight turns so we
+    stop billing the LLM. The watcher task polls ``context.cancelled()`` and
+    cancels the turn task within ~50 ms."""
+    import asyncio
+
+    from eidolon_agent.core.types.turn import TurnEvent
+
+    cancelled_during_turn = asyncio.Event()
+
+    async def _slow_turn(_ti):
+        try:
+            # Yield one event, then sleep — emulates an LLM that hasn't started
+            # producing yet but is holding the upstream HTTP connection.
+            yield TurnEvent(turn_id="t", seq=0, kind=TurnEventKind.STATE, data={"state": "speaking"})
+            await asyncio.sleep(5.0)
+        except asyncio.CancelledError:
+            cancelled_during_turn.set()
+            raise
+
+    agent = MagicMock()
+    agent.run_turn = _slow_turn
+
+    registry = MagicMock()
+    registry.resolve_for_caller = AsyncMock(
+        return_value=SimpleNamespace(instance_id="inst-1", agent=agent)
+    )
+    svc = EidolonAgentServicer(
+        agent_registry=registry, pairing=MagicMock(),
+        signals_bus=MagicMock(), proactive_bus=MagicMock(),
+    )
+
+    # Build a request iterator that yields one start frame and then blocks,
+    # simulating a client still holding the stream open.
+    iterator_blocker = asyncio.Event()
+    start_frame = pb.ChatRequest(
+        start=pb.StartTurn(turn_id="t1", conversation_id="c", text="hi")
+    )
+
+    async def _req_iter():
+        yield start_frame
+        await iterator_blocker.wait()
+
+    ctx = _make_context()
+    cancelled_flag = {"v": False}
+    ctx.cancelled = lambda: cancelled_flag["v"]
+    ctx.done = lambda: cancelled_flag["v"]
+
+    token = _current_identity.set(_StubIdentity())
+    try:
+        chat_task = asyncio.create_task(svc.Chat(_req_iter(), ctx))
+        # Give the turn time to start and write the first event.
+        await asyncio.sleep(0.1)
+        # Simulate the gRPC layer marking the RPC cancelled (TCP close).
+        cancelled_flag["v"] = True
+        iterator_blocker.set()  # release the iterator so Chat() can finish
+        await asyncio.wait_for(chat_task, timeout=1.0)
+    finally:
+        _current_identity.reset(token)
+
+    # The turn was actually interrupted by CancelledError, not by reaching its
+    # natural end. This is the whole point of the watcher.
+    assert cancelled_during_turn.is_set()
+
+
 async def test_push_signal_unknown_modality_falls_back_to_ambient() -> None:
     signals = MagicMock()
     signals.publish = AsyncMock()

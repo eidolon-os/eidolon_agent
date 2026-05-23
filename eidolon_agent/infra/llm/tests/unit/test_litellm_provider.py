@@ -193,6 +193,82 @@ async def test_mid_stream_exception_wrapped(monkeypatch: pytest.MonkeyPatch, pro
             pass
 
 
+async def test_response_aclose_called_on_normal_completion(
+    monkeypatch: pytest.MonkeyPatch, provider
+) -> None:
+    """The provider must close the upstream stream once iteration ends so the
+    HTTP connection returns to the pool / is torn down."""
+    closed = {"v": False}
+
+    class _Resp:
+        def __init__(self, items):
+            self._it = iter(items)
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self._it)
+            except StopIteration:
+                raise StopAsyncIteration from None
+
+        async def aclose(self) -> None:
+            closed["v"] = True
+
+    chunks = [
+        _Chunk(choices=[_Choice(delta=_Delta(content="hi"))]),
+        _Chunk(choices=[_Choice(delta=_Delta(), finish_reason="stop")]),
+    ]
+
+    async def _fake(**kwargs):
+        return _Resp(chunks)
+
+    monkeypatch.setattr(litellm, "acompletion", _fake)
+    async for _ in provider.stream([_msg("x")], request_id="r"):
+        pass
+    assert closed["v"] is True
+
+
+async def test_response_aclose_called_on_cancel(
+    monkeypatch: pytest.MonkeyPatch, provider
+) -> None:
+    """If the consumer cancels mid-stream (TCP close, RPC cancel), the
+    provider must still call ``aclose()`` on the upstream — otherwise the
+    HTTP request stays open and we keep paying for tokens nobody reads."""
+    import asyncio
+
+    closed = {"v": False}
+
+    class _SlowResp:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            # Block forever — the consumer must cancel to escape.
+            await asyncio.sleep(60)
+            raise StopAsyncIteration
+
+        async def aclose(self) -> None:
+            closed["v"] = True
+
+    async def _fake(**kwargs):
+        return _SlowResp()
+
+    monkeypatch.setattr(litellm, "acompletion", _fake)
+
+    async def _consume() -> None:
+        async for _ in provider.stream([_msg("x")], request_id="r"):
+            pass
+
+    task = asyncio.create_task(_consume())
+    await asyncio.sleep(0.05)  # let it block on __anext__
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert closed["v"] is True
+
+
 async def test_count_tokens_falls_back_when_litellm_raises(
     monkeypatch: pytest.MonkeyPatch, provider
 ) -> None:

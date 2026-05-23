@@ -8,6 +8,7 @@ goes here, not behind an abstraction.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -50,10 +51,13 @@ class ContextCompiler:
             ti.caller.tenant_id, ti.caller.user_id, ti.conversation_id
         )
 
-        # ---- Persona system prompt (always present) -------------------------
-        # Pass dry_run_memory=[] to skip PersonasService's own memory recall;
-        # we own memory on the hot path and append it once below.
-        persona = await self._personas.compile_prompt(
+        # ---- Run the three independent fetches concurrently ----------------
+        # Persona compile, memory recall, and history window have no data
+        # dependency on each other; awaiting them sequentially costs ~250ms
+        # in production. ``return_exceptions=True`` keeps a single fetch
+        # failure from poisoning the others — each branch handles its own
+        # degraded path below.
+        persona_task = self._personas.compile_prompt(
             tenant_id=ti.caller.tenant_id,
             user_id=ti.caller.user_id,
             instance_id=instance_id,
@@ -62,28 +66,26 @@ class ContextCompiler:
             realtime=_realtime_dict(ti.realtime),
             dry_run_memory=[],
         )
+        memory_task = self._memory_recall(ti)
+        history_task = self._history.recent_window(
+            conversation_id=ti.conversation_id, window=self._history_window
+        )
+
+        persona, memory_text, history = await asyncio.gather(
+            persona_task, memory_task, history_task, return_exceptions=True
+        )
+
+        # Persona is the only segment we cannot proceed without — re-raise
+        # to surface configuration errors instead of silently degrading.
+        if isinstance(persona, BaseException):
+            raise persona
+
         system_parts: list[str] = [persona.system_prompt]
 
-        # ---- Memory recall (best-effort, with timeout) ----------------------
-        if self._memory is not None and ti.text:
-            try:
-                plan = MemoryQueryPlan(
-                    episodic_query=ti.text,
-                    semantic_query=ti.text,
-                    episodic_k=3,
-                    semantic_k=self._memory_top_k,
-                    voice=ti.caller.caller_kind.value == "livekit_voice",
-                )
-                formatted, _hits, _degraded = await self._memory.recall_context(
-                    user_id=ti.caller.user_id,
-                    query=ti.text,
-                    plan=plan,
-                    timeout_s=self._memory_timeout_s,
-                )
-                if formatted:
-                    system_parts.append(f"[MEMORY]\n{formatted}")
-            except Exception:
-                _log.exception("memory recall failed; continuing without")
+        if isinstance(memory_text, BaseException):
+            _log.warning("memory recall raised: %s", memory_text)
+        elif memory_text:
+            system_parts.append(f"[MEMORY]\n{memory_text}")
 
         # ---- Realtime digest (signals from voice pipeline) ------------------
         if ti.realtime is not None:
@@ -91,11 +93,12 @@ class ContextCompiler:
             if line:
                 system_parts.append(f"（实时信号：{line}）")
 
+        if isinstance(history, BaseException):
+            _log.warning("history window raised: %s", history)
+            history = []
+
         # ---- Assemble messages ---------------------------------------------
         now = datetime.now(timezone.utc)
-        history = await self._history.recent_window(
-            conversation_id=ti.conversation_id, window=self._history_window
-        )
         out: list[ChatMessage] = [
             ChatMessage(
                 id=uuid.uuid4().hex,
@@ -115,6 +118,34 @@ class ContextCompiler:
                 )
             )
         return out
+
+    async def _memory_recall(self, ti: TurnInput) -> str | None:
+        """Memory recall branch for the parallel ``gather`` above.
+
+        Returns the formatted memory block (possibly ``""``) or ``None`` when
+        memory is disabled / the turn has no text to query on. Exceptions are
+        swallowed and logged — gather sees the ``None`` result.
+        """
+        if self._memory is None or not ti.text:
+            return None
+        try:
+            plan = MemoryQueryPlan(
+                episodic_query=ti.text,
+                semantic_query=ti.text,
+                episodic_k=3,
+                semantic_k=self._memory_top_k,
+                voice=ti.caller.caller_kind.value == "livekit_voice",
+            )
+            formatted, _hits, _degraded = await self._memory.recall_context(
+                user_id=ti.caller.user_id,
+                query=ti.text,
+                plan=plan,
+                timeout_s=self._memory_timeout_s,
+            )
+            return formatted or None
+        except Exception:
+            _log.exception("memory recall failed; continuing without")
+            return None
 
 
 def _realtime_dict(digest) -> dict | None:  # type: ignore[no-untyped-def]

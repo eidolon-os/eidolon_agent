@@ -64,49 +64,67 @@ class LiteLLMProvider:
             raise LLMUnavailableError(f"litellm call failed: {exc}") from exc
 
         try:
-            async for chunk in response:
-                if not chunk.choices:
-                    continue
-                choice = chunk.choices[0]
-                delta = choice.delta
+            try:
+                async for chunk in response:
+                    if not chunk.choices:
+                        continue
+                    choice = chunk.choices[0]
+                    delta = choice.delta
 
-                if delta and getattr(delta, "content", None):
-                    yield LLMDelta(text_delta=delta.content)
+                    if delta and getattr(delta, "content", None):
+                        yield LLMDelta(text_delta=delta.content)
 
-                if delta and getattr(delta, "tool_calls", None):
-                    for tc in delta.tool_calls:
-                        idx = tc.index if hasattr(tc, "index") else 0
-                        buf = tool_buf.setdefault(idx, {"id": None, "name": None, "args": ""})
-                        if tc.id:
-                            buf["id"] = tc.id
-                        if tc.function and tc.function.name:
-                            buf["name"] = tc.function.name
-                        if tc.function and tc.function.arguments:
-                            buf["args"] += tc.function.arguments
+                    if delta and getattr(delta, "tool_calls", None):
+                        for tc in delta.tool_calls:
+                            idx = tc.index if hasattr(tc, "index") else 0
+                            buf = tool_buf.setdefault(idx, {"id": None, "name": None, "args": ""})
+                            if tc.id:
+                                buf["id"] = tc.id
+                            if tc.function and tc.function.name:
+                                buf["name"] = tc.function.name
+                            if tc.function and tc.function.arguments:
+                                buf["args"] += tc.function.arguments
 
-                if choice.finish_reason:
-                    for buf in tool_buf.values():
-                        if not buf["name"]:
-                            continue
-                        try:
-                            args = json.loads(buf["args"] or "{}")
-                        except json.JSONDecodeError:
-                            args = {"_raw": buf["args"]}
+                    if choice.finish_reason:
+                        for buf in tool_buf.values():
+                            if not buf["name"]:
+                                continue
+                            try:
+                                args = json.loads(buf["args"] or "{}")
+                            except json.JSONDecodeError:
+                                args = {"_raw": buf["args"]}
+                            yield LLMDelta(
+                                tool_call=ToolCall(
+                                    id=buf["id"] or "", name=buf["name"], arguments=args
+                                )
+                            )
+                        yield LLMDelta(finish=_map_finish(choice.finish_reason))
+
+                    usage = getattr(chunk, "usage", None)
+                    if usage:
                         yield LLMDelta(
-                            tool_call=ToolCall(id=buf["id"] or "", name=buf["name"], arguments=args)
+                            usage=LLMUsage(
+                                tokens_in=getattr(usage, "prompt_tokens", 0) or 0,
+                                tokens_out=getattr(usage, "completion_tokens", 0) or 0,
+                            )
                         )
-                    yield LLMDelta(finish=_map_finish(choice.finish_reason))
-
-                usage = getattr(chunk, "usage", None)
-                if usage:
-                    yield LLMDelta(
-                        usage=LLMUsage(
-                            tokens_in=getattr(usage, "prompt_tokens", 0) or 0,
-                            tokens_out=getattr(usage, "completion_tokens", 0) or 0,
-                        )
-                    )
-        except Exception as exc:
-            raise LLMUnavailableError(f"litellm stream error: {exc}") from exc
+            except Exception as exc:
+                # CancelledError is BaseException and bypasses this — we WANT
+                # cancellation to propagate so the finally below closes the
+                # upstream HTTP stream, but we don't want to wrap it.
+                raise LLMUnavailableError(f"litellm stream error: {exc}") from exc
+        finally:
+            # When the caller cancels mid-stream (TCP close, RPC cancel, …),
+            # the underlying HTTP connection would otherwise be orphaned and
+            # keep pulling tokens we'll never read — billing against a
+            # disconnected client. Closing the response (when the provider
+            # exposes aclose) tears the upstream socket down immediately.
+            aclose = getattr(response, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception:
+                    pass
 
     async def count_tokens(self, messages: list[ChatMessage]) -> int:
         try:
