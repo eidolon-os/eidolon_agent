@@ -224,3 +224,59 @@ async def test_queue_group_delivers_to_one_member_per_event() -> None:
     worker_total = counts["a"] + counts["b"] + counts["c"]
     assert worker_total == 4  # one worker handled each event
     assert counts["watcher"] == 4  # independent subscriber got all 4
+
+
+# ---- handler failure isolation -------------------------------------------
+
+
+async def test_handler_exception_is_logged_not_swallowed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failing handler must not block other handlers and must surface a
+    WARNING log including the subject — silent swallowing makes debugging
+    impossible.
+    """
+    bus = InMemoryEventBus()
+    survivors: list[str] = []
+
+    async def _broken(_ev) -> None:
+        raise RuntimeError("kaboom")
+
+    async def _ok(ev) -> None:
+        survivors.append(ev.subject)
+
+    await bus.subscribe("svc.x", _broken)
+    await bus.subscribe("svc.x", _ok)
+
+    with caplog.at_level("WARNING", logger="eidolon_agent.infra.events.adapters.inmem"):
+        await bus.publish(Event(subject="svc.x", payload={}, source="t"))
+        await asyncio.sleep(0)
+        # Give the broken handler's task a chance to surface the exception.
+        await asyncio.sleep(0)
+
+    # The healthy handler still received the event…
+    assert survivors == ["svc.x"]
+    # …and the broken one logged a WARNING that mentions the subject.
+    matching = [r for r in caplog.records if "svc.x" in r.getMessage()]
+    assert matching, f"expected WARNING mentioning subject, got {caplog.records!r}"
+    assert any(r.levelname == "WARNING" for r in matching)
+
+
+async def test_delivery_task_set_drains_after_handlers_finish() -> None:
+    """The bus retains strong refs to in-flight tasks (so GC can't reap them
+    mid-handler) and drops them once each task completes."""
+    bus = InMemoryEventBus()
+
+    async def _h(_ev) -> None:
+        pass
+
+    await bus.subscribe("svc.y", _h)
+    await bus.publish(Event(subject="svc.y", payload={}, source="t"))
+    # Right after publish but before the handler has run, the task set should
+    # have one entry (we deliberately kept the ref).
+    assert len(bus._delivery_tasks) >= 1
+    # Let the handler run.
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    # done_callback should have removed it.
+    assert bus._delivery_tasks == set()

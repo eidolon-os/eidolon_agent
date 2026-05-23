@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import logging
 import time
 from collections import defaultdict
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -16,6 +17,8 @@ from dataclasses import dataclass
 
 from eidolon_agent.core.errors import ConflictError
 from eidolon_agent.core.types.event import Event
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -42,6 +45,11 @@ class InMemoryEventBus:
         self._lock = asyncio.Lock()
         # request/reply handlers are keyed by exact subject
         self._rr: dict[str, Callable[[dict], Awaitable[dict]]] = {}
+        # Strong refs to in-flight delivery tasks. asyncio holds only weakrefs
+        # to "free" tasks, so without this set a task created by ``publish``
+        # could be GC'd before the handler runs. We add on create + drop on
+        # completion via ``Task.add_done_callback``.
+        self._delivery_tasks: set[asyncio.Task] = set()
 
     async def publish(self, event: Event, *, persistent: bool = False) -> None:
         # Persistence is a no-op in-process; we just deliver to subscribers.
@@ -62,8 +70,11 @@ class InMemoryEventBus:
                 targets.append(sub)
         for sub in targets:
             # Fire-and-forget by design; tests use `await asyncio.sleep(0)` to
-            # let handlers run before asserting.
-            asyncio.create_task(_safe_invoke(sub.handler, event))  # noqa: RUF006
+            # let handlers run before asserting. We retain a strong reference
+            # so the task can't be garbage-collected before the handler runs.
+            task = asyncio.create_task(_safe_invoke(sub.handler, event))
+            self._delivery_tasks.add(task)
+            task.add_done_callback(self._delivery_tasks.discard)
 
     async def subscribe(
         self,
@@ -107,12 +118,23 @@ class InMemoryEventBus:
 async def _safe_invoke(
     handler: Callable[[Event], Awaitable[None]], event: Event
 ) -> None:
-    """Errors in handlers must not propagate to publisher or other subscribers."""
+    """Errors in handlers must not propagate to publisher or other subscribers.
+
+    Failures are logged at WARNING with the subject + handler qualname so they
+    surface in tests and production logs instead of vanishing silently. We do
+    NOT re-raise — pub/sub is fire-and-forget, the publisher has already
+    moved on by the time we get here.
+    """
     try:
         await handler(event)
+    except asyncio.CancelledError:
+        raise
     except Exception:
-        # Swallow — production would log via structured logger.
-        pass
+        handler_name = getattr(handler, "__qualname__", repr(handler))
+        _log.warning(
+            "event handler %s failed for subject %r", handler_name, event.subject,
+            exc_info=True,
+        )
 
 
 # ---------------------------------------------------------------------------
