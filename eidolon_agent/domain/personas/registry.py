@@ -44,6 +44,15 @@ class PersonaTemplateRegistry:
         except KeyError as exc:
             raise NotFoundError(f"persona template not found: {template_id}") from exc
 
+    def raw_yaml(self, template_id: str) -> str:
+        """Return the original YAML text for a template — admin source view."""
+        if template_id not in self._templates:
+            raise NotFoundError(f"persona template not found: {template_id}")
+        path = self._dir / f"{template_id}.yaml"
+        if not path.exists():
+            raise NotFoundError(f"template file missing on disk: {path}")
+        return path.read_text(encoding="utf-8")
+
 
 def _parse_template(path: Path) -> PersonaTemplate:
     try:

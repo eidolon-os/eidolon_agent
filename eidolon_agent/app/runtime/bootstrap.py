@@ -39,7 +39,7 @@ from eidolon_agent.domain.personas import (
     PersonaTemplateRegistry,
     YamlPersonaInstanceStore,
 )
-from eidolon_agent.domain.personas.ports import NullPersonaAuditPort, PersonaEventPort
+from eidolon_agent.domain.personas.ports import PersonaEventPort
 from eidolon_agent.domain.signals import SignalBus
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import EmitEventTool, GetTimeTool
@@ -53,6 +53,7 @@ from eidolon_agent.infra.memory.mcp_client import McpClientPool
 from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
 from eidolon_agent.infra.observability import configure_logging
 from eidolon_agent.infra.persistence import (
+    SqlEvolutionHistoryStore,
     SqlPersonaInstanceStore,
     create_engine,
     create_session_factory,
@@ -124,13 +125,18 @@ async def build_application(
         )
     else:
         instance_store = SqlPersonaInstanceStore(session_factory)
+    # One adapter satisfies both PersonaAuditPort (write) and
+    # PersonaEvolutionRepository (read) so worker writes audit rows AND admin
+    # can paginate them. NullPersonaAuditPort is no longer used in production.
+    evolution_history = SqlEvolutionHistoryStore(session_factory)
     personas_service = PersonasService(
         registry=tpl_reg,
         instances=instance_store,
         memory_port=memory_port,
         llm_port=None,
         event_port=_PersonasEventAdapter(container.event_bus),
-        audit_port=NullPersonaAuditPort(),
+        audit_port=evolution_history,
+        evolution_repo=evolution_history,
         memory_timeout_s=settings.memory.recall_timeout_s,
     )
     await personas_service.start()

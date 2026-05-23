@@ -5,6 +5,7 @@
       <router-link to="/">Dashboard</router-link> |
       <router-link to="/devices">Devices</router-link> |
       <router-link to="/templates">Templates</router-link> |
+      <router-link to="/instances">Instances</router-link> |
       <router-link to="/chat-test">Chat Test</router-link>
     </nav>
   </header>

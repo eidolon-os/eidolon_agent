@@ -16,6 +16,7 @@ from eidolon_agent.domain.personas.ports import (
     NullPersonaEventPort,
     PersonaAuditPort,
     PersonaEventPort,
+    PersonaEvolutionRepository,
     PersonaInstanceStore,
     PersonaLLMPort,
     PersonaMemoryPort,
@@ -54,6 +55,7 @@ class PersonasService:
         llm_port: PersonaLLMPort | None = None,
         event_port: PersonaEventPort | None = None,
         audit_port: PersonaAuditPort | None = None,
+        evolution_repo: PersonaEvolutionRepository | None = None,
         memory_timeout_s: float = 0.2,
     ) -> None:
         self._registry = registry
@@ -67,6 +69,7 @@ class PersonasService:
         self._llm = llm_port
         self._events = event_port or NullPersonaEventPort()
         self._audit = audit_port or NullPersonaAuditPort()
+        self._evolution_repo = evolution_repo
         self._memory_timeout_s = memory_timeout_s
         self._worker = worker or PersonaEvolutionWorker(
             instances=self._instances,
@@ -370,6 +373,82 @@ class PersonasService:
         """Re-scan ``templates_dir`` and return the new template count."""
         await self._registry.load_all()
         return len(self._registry.list_all())
+
+    async def get_template_raw(self, template_id: str) -> str:
+        """Return the original YAML source for a template."""
+        return self._registry.raw_yaml(template_id)
+
+    async def rollback_evolution(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        instance_id: str,
+        delta_id: str,
+    ) -> PersonaEvolutionResult:
+        """Reverse the changes recorded under ``delta_id``.
+
+        Reads the audit row, applies its inverse (each ``old`` value restored
+        onto the corresponding knob), bumps ``overlay_version``, and persists.
+        The original audit row remains; a new audit row marks the rollback
+        as a separate event so the timeline reads forward only.
+        """
+        if self._evolution_repo is None:
+            raise NotFoundError("evolution repository not wired; cannot rollback")
+        original = await self._evolution_repo.get(delta_id)
+        if original is None:
+            raise NotFoundError(f"evolution delta not found: {delta_id}")
+        instance = await self.get_instance(
+            tenant_id=tenant_id, user_id=user_id, instance_id=instance_id
+        )
+        # Apply inverse: each change[].path → restore old value on the knob.
+        knobs = dict(instance.behavioral_knobs)
+        reverse_changes: list = []
+        for change in original.changes:
+            path = change.path
+            if not path.startswith("behavioral_knobs."):
+                continue
+            knob_name = path[len("behavioral_knobs.") :]
+            knob = knobs.get(knob_name)
+            if knob is None:
+                continue
+            knobs[knob_name] = knob.model_copy(update={"current": float(change.old)})
+            reverse_changes.append(
+                change.model_copy(update={"old": change.new, "new": change.old})
+            )
+        rolled = instance.model_copy(
+            update={
+                "behavioral_knobs": knobs,
+                "overlay_version": instance.overlay_version + 1,
+                "updated_at": datetime.now(timezone.utc),
+            }
+        )
+        await self._instances.save(rolled, reason=f"rollback:{delta_id}")
+        result = PersonaEvolutionResult(
+            instance_id=instance_id,
+            applied=True,
+            changes=tuple(reverse_changes),
+            rationale=f"rollback of {delta_id}",
+        )
+        await self._audit.record_evolution(result)
+        await self._events.publish_persona_updated(
+            instance_id,
+            {"reason": "rollback", "delta_id": delta_id},
+        )
+        return result
+
+    async def list_evolution_history(
+        self, instance_id: str, *, limit: int = 50
+    ) -> list[PersonaEvolutionResult]:
+        """Return the recent applied evolution rows for an instance.
+
+        Admin uses this to render the per-instance history view. Requires a
+        ``PersonaEvolutionRepository`` to have been wired; without one the
+        method returns an empty list (the audit trail simply isn't persisted).
+        """
+        if self._evolution_repo is None:
+            return []
+        return await self._evolution_repo.list_for_instance(instance_id, limit=limit)
 
 
 async def build_default_personas_service(

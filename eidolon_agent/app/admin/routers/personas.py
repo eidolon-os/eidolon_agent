@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from eidolon_agent.core.errors import NotFoundError
@@ -39,10 +40,22 @@ class MockMemoryTriggerRequest(BaseModel):
     apply: bool = False
 
 
+class RollbackRequest(BaseModel):
+    delta_id: str
+
+
 @router.get("/personas/templates")
 async def list_templates(request: Request):
     service = _service(request)
     return [t.model_dump(mode="json") for t in await service.list_templates()]
+
+
+@router.post("/personas/templates/reload")
+async def reload_templates(request: Request):
+    """Re-scan ``templates_dir`` and return the new template count."""
+    service = _service(request)
+    count = await service.reload_templates()
+    return {"loaded": count}
 
 
 @router.get("/personas/templates/{template_id}")
@@ -53,6 +66,39 @@ async def get_template(template_id: str, request: Request):
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=exc.message) from exc
     return tpl.model_dump(mode="json")
+
+
+@router.get("/personas/templates/{template_id}/raw", response_class=PlainTextResponse)
+async def get_template_raw(template_id: str, request: Request):
+    """Return the original YAML source for a template — admin read-only view."""
+    service = _service(request)
+    try:
+        return await service.get_template_raw(template_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.message) from exc
+
+
+@router.get("/personas/instances")
+async def list_instances(request: Request):
+    """List every persona instance across tenants/users.
+
+    Used by the admin UI to render the global instance table; ordered by
+    ``last_active_at DESC`` at the store level.
+    """
+    service = _service(request)
+    rows = await service.list_instances()
+    return [
+        {
+            "instance_id": r.instance_id,
+            "tenant_id": r.tenant_id,
+            "user_id": r.user_id,
+            "template_id": r.origin_template_id,
+            "overlay_version": r.overlay_version,
+            "created_at": r.created_at.isoformat(),
+            "updated_at": r.updated_at.isoformat(),
+        }
+        for r in rows
+    ]
 
 
 @router.post("/personas/instances")
@@ -79,6 +125,71 @@ async def get_instance(tenant_id: str, user_id: str, instance_id: str, request: 
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=exc.message) from exc
     return instance.model_dump(mode="json")
+
+
+@router.get("/personas/instances/{tenant_id}/{user_id}/{instance_id}/snapshot")
+async def get_instance_snapshot(
+    tenant_id: str, user_id: str, instance_id: str, request: Request
+):
+    """Current snapshot: instance + runtime state + prompt hint."""
+    service = _service(request)
+    try:
+        snapshot = await service.get_snapshot(
+            tenant_id=tenant_id, user_id=user_id, instance_id=instance_id,
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.message) from exc
+    return snapshot.model_dump(mode="json")
+
+
+@router.get("/personas/instances/{tenant_id}/{user_id}/{instance_id}/evolution")
+async def list_instance_evolution(
+    tenant_id: str,
+    user_id: str,
+    instance_id: str,
+    request: Request,
+    limit: int = 50,
+):
+    """Recent applied evolution history for the instance (most-recent first)."""
+    service = _service(request)
+    history = await service.list_evolution_history(instance_id, limit=limit)
+    return [r.model_dump(mode="json") for r in history]
+
+
+@router.post("/personas/instances/{tenant_id}/{user_id}/{instance_id}/rollback")
+async def rollback_evolution(
+    tenant_id: str,
+    user_id: str,
+    instance_id: str,
+    body: RollbackRequest,
+    request: Request,
+):
+    """Reverse the changes recorded under ``delta_id``.
+
+    Bumps overlay_version; appends a new audit row marking the rollback.
+    """
+    service = _service(request)
+    try:
+        result = await service.rollback_evolution(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            instance_id=instance_id,
+            delta_id=body.delta_id,
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.message) from exc
+    return result.model_dump(mode="json")
+
+
+@router.delete("/personas/instances/{tenant_id}/{user_id}/{instance_id}")
+async def delete_instance(
+    tenant_id: str, user_id: str, instance_id: str, request: Request
+):
+    service = _service(request)
+    await service.delete_instance(
+        tenant_id=tenant_id, user_id=user_id, instance_id=instance_id
+    )
+    return {"deleted": instance_id}
 
 
 @router.post("/personas/instances/{tenant_id}/{user_id}/{instance_id}/compile-preview")
