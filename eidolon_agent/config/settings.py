@@ -149,7 +149,12 @@ class PersonaSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     templates_dir: Path = Path("eidolon_agent/domain/personas/templates")
+    # ``instances_dir`` is kept as a migration source for the YAML→SQLite
+    # script and as a fallback when ``storage`` is set to "yaml".
     instances_dir: Path = Path("~/eidolon/personas/instances")
+    # Production default. "yaml" is preserved for ops scenarios where reading
+    # the raw on-disk overlay is easier than poking SQLite.
+    storage: Literal["sqlite", "yaml"] = "sqlite"
     watch_enabled: bool = True
     auto_evolution_enabled: bool = True
 

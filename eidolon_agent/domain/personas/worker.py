@@ -7,8 +7,11 @@ import logging
 from datetime import datetime, timezone
 
 from eidolon_agent.domain.personas.evolution import PersonaEvolutionEngine
-from eidolon_agent.domain.personas.instance_store import PersonaInstanceStore
-from eidolon_agent.domain.personas.ports import PersonaAuditPort, PersonaEventPort
+from eidolon_agent.domain.personas.ports import (
+    PersonaAuditPort,
+    PersonaEventPort,
+    PersonaInstanceStore,
+)
 from eidolon_agent.domain.personas.runtime_state import PersonaRuntimeStateStore
 from eidolon_agent.domain.personas.types import (
     AttentionTarget,
@@ -86,7 +89,9 @@ class PersonaEvolutionWorker:
             await self._apply_runtime_state(event)
             if not event.template_id:
                 return
-            instance = self._instances.load(event.tenant_id, event.user_id, event.instance_id)
+            instance = await self._instances.load(
+                event.tenant_id, event.user_id, event.instance_id
+            )
             evo_events = _interaction_to_evolution_events(event)
             if not evo_events:
                 return
@@ -96,7 +101,15 @@ class PersonaEvolutionWorker:
                 dry_run=False,
             )
             if result.applied:
-                self._instances.save(evolved, reason=f"async_evolution:{event.kind}")
+                # Bump version + persist together. SqlPersonaInstanceStore.save
+                # wraps the row update + evolution_history append in one TX so
+                # the worker cannot leave a half-applied state on crash.
+                evolved = evolved.model_copy(
+                    update={"overlay_version": instance.overlay_version + 1}
+                )
+                await self._instances.save(
+                    evolved, reason=f"async_evolution:{event.kind}"
+                )
                 await self._audit.record_evolution(result)
                 await self._events.publish_evolution_applied(
                     event.instance_id,

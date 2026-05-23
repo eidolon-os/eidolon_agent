@@ -241,6 +241,10 @@ class PersonaInstance(BaseModel):
     user_id: str
     origin_template_id: str
     origin_template_revision: int
+    # Monotonic per-instance version stamp. Incremented every time the
+    # evolution worker (or admin edit / rollback) writes a new overlay. Used
+    # for observability (Turn metadata) and admin rollback comparisons.
+    overlay_version: int = Field(1, ge=1)
     created_at: datetime
     updated_at: datetime
     metadata: PersonaMetadata
@@ -277,6 +281,10 @@ class CompiledPersona(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     instance_id: str
+    # Snapshot of the instance's overlay_version at compile time. Threaded
+    # through the Turn pipeline so post-turn events / admin probes can answer
+    # "which persona overlay produced this answer?" without an extra DB hit.
+    overlay_version: int = 1
     system_prompt: str
     identity_block: str
     style_block: str

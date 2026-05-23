@@ -1,9 +1,11 @@
 """SQLAlchemy 2.0 ORM models — only what we actively read/write.
 
-Five tables remain after the Phase 4 simplification pass:
+Six tables after the Phase 3 persona-instance migration:
     conversations / turns / chat_messages — conversation event source
     devices                                — pairing & revocation
     evolution_history                      — persona evolution audit
+    persona_instances                      — per-user persona overlay storage
+                                             (replaces the old YAML files)
 
 Dropped (see migrations/versions/...drop_unused_tables.py):
     tenants, users, agent_instances        — never written; multi-tenancy
@@ -173,11 +175,46 @@ class EvolutionHistoryRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, index=True)
 
 
+# ---------------------------------------------------------------------------
+# Persona instances (per-user overlay snapshots)
+# ---------------------------------------------------------------------------
+
+
+class PersonaInstanceRow(Base):
+    """A user's persona overlay copy.
+
+    The full ``PersonaInstance`` model_dump() is serialised into ``overlay_json``.
+    The denormalised columns above the JSON blob (template_id, overlay_version,
+    timestamps) exist solely so the admin UI can paginate + sort with SQL
+    without parsing the JSON. Keep them in sync with the JSON on every save —
+    SqlPersonaInstanceRepository.upsert is the single writer.
+    """
+
+    __tablename__ = "persona_instances"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    template_id: Mapped[str] = mapped_column(String(128), index=True)
+    template_version: Mapped[int] = mapped_column(Integer, default=1)
+    overlay_version: Mapped[int] = mapped_column(Integer, default=1)
+    overlay_json: Mapped[dict] = mapped_column("overlay_json", JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
+    last_active_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "user_id", "id", name="uq_persona_inst_tuid"),
+        Index("ix_persona_inst_last_active", "last_active_at"),
+    )
+
+
 __all__ = [
     "Base",
     "ChatMessageRow",
     "ConversationRow",
     "DeviceRow",
     "EvolutionHistoryRow",
+    "PersonaInstanceRow",
     "TurnRow",
 ]

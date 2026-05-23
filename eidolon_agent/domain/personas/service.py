@@ -9,13 +9,14 @@ from eidolon_agent.core.errors import NotFoundError
 from eidolon_agent.core.types.memory import MemoryHit, MemoryQueryPlan
 from eidolon_agent.domain.personas.compiler import PersonaCompiler
 from eidolon_agent.domain.personas.evolution import PersonaEvolutionEngine
-from eidolon_agent.domain.personas.instance_store import PersonaInstanceStore
+from eidolon_agent.domain.personas.instance_store import YamlPersonaInstanceStore
 from eidolon_agent.domain.personas.memory_adapter import PersonaMemoryAdapter
 from eidolon_agent.domain.personas.ports import (
     NullPersonaAuditPort,
     NullPersonaEventPort,
     PersonaAuditPort,
     PersonaEventPort,
+    PersonaInstanceStore,
     PersonaLLMPort,
     PersonaMemoryPort,
 )
@@ -96,7 +97,7 @@ class PersonasService:
         template_id: str,
     ) -> PersonaInstance:
         template = self._registry.get(template_id)
-        instance = self._instances.create_from_template(
+        instance = await self._instances.create_from_template(
             template=template,
             tenant_id=tenant_id,
             user_id=user_id,
@@ -117,7 +118,7 @@ class PersonasService:
         template_id: str | None = None,
     ) -> PersonaInstance:
         try:
-            return self._instances.load(tenant_id, user_id, instance_id)
+            return await self._instances.load(tenant_id, user_id, instance_id)
         except NotFoundError:
             if template_id is None:
                 raise
@@ -261,7 +262,13 @@ class PersonasService:
             dry_run=dry_run,
         )
         if result.applied:
-            self._instances.save(evolved, reason="evolve")
+            # Bump version every time we persist a new overlay. Single-TX
+            # writes are the responsibility of the store implementation
+            # (SqlPersonaInstanceStore wraps save+history in one session).
+            evolved = evolved.model_copy(
+                update={"overlay_version": instance.overlay_version + 1}
+            )
+            await self._instances.save(evolved, reason="evolve")
             await self._audit.record_evolution(result)
             await self._events.publish_evolution_applied(
                 instance_id,
@@ -341,6 +348,29 @@ class PersonasService:
     async def drain_evolution_queue(self) -> None:
         await self._worker.join()
 
+    # ---- Admin surface --------------------------------------------------
+
+    async def list_instances(self) -> list[PersonaInstance]:
+        """Return every persona instance across tenants/users.
+
+        Used by the admin UI to render the global instance table. Order is
+        whatever the store returns — admin frontend sorts client-side.
+        """
+        return await self._instances.list_all()
+
+    async def delete_instance(
+        self, *, tenant_id: str, user_id: str, instance_id: str
+    ) -> None:
+        await self._instances.delete(tenant_id, user_id, instance_id)
+        await self._events.publish_persona_updated(
+            instance_id, {"reason": "deleted"}
+        )
+
+    async def reload_templates(self) -> int:
+        """Re-scan ``templates_dir`` and return the new template count."""
+        await self._registry.load_all()
+        return len(self._registry.list_all())
+
 
 async def build_default_personas_service(
     *,
@@ -352,11 +382,18 @@ async def build_default_personas_service(
     audit_port: PersonaAuditPort | None = None,
     memory_timeout_s: float = 0.2,
 ) -> PersonasService:
+    """Build a service with the legacy YAML store.
+
+    Production callers should instead build a ``SqlPersonaInstanceStore`` and
+    pass it to ``PersonasService`` directly — see ``app/runtime/bootstrap.py``.
+    This helper is preserved for tests and migration scripts that work off
+    raw YAML files.
+    """
     registry = PersonaTemplateRegistry(templates_dir)
     await registry.load_all()
     return PersonasService(
         registry=registry,
-        instances=PersonaInstanceStore(instances_dir),
+        instances=YamlPersonaInstanceStore(instances_dir),
         memory_port=memory_port,
         llm_port=llm_port,
         event_port=event_port,

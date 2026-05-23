@@ -52,6 +52,6 @@ async def test_runtime_state_not_written_to_instance_yaml(personas_service, pers
         emotion="sad",
         emotion_delta=0.8,
     )
-    loaded = persona_instance_store.load("t", "u", "i-runtime")
+    loaded = await persona_instance_store.load("t", "u", "i-runtime")
     assert not hasattr(loaded, "runtime_state")
 

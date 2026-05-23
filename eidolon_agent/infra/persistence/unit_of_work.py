@@ -9,6 +9,7 @@ from eidolon_agent.infra.persistence.repositories import (
     SqlConversationRepository,
     SqlDeviceRepository,
     SqlEvolutionHistoryRepository,
+    SqlPersonaInstanceRepository,
 )
 
 
@@ -26,6 +27,7 @@ class SqlAlchemyUnitOfWork:
     conversations: SqlConversationRepository
     devices: SqlDeviceRepository
     evolution_history: SqlEvolutionHistoryRepository
+    persona_instances: SqlPersonaInstanceRepository
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
@@ -37,6 +39,7 @@ class SqlAlchemyUnitOfWork:
         self.conversations = SqlConversationRepository(self._session)
         self.devices = SqlDeviceRepository(self._session)
         self.evolution_history = SqlEvolutionHistoryRepository(self._session)
+        self.persona_instances = SqlPersonaInstanceRepository(self._session)
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:

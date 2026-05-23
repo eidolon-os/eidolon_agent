@@ -12,9 +12,9 @@ from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.domain.history import HistoryFanout, HistoryManager
 from eidolon_agent.domain.personas import (
-    PersonaInstanceStore,
     PersonasService,
     PersonaTemplateRegistry,
+    YamlPersonaInstanceStore,
 )
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import EmitEventTool, GetTimeTool
@@ -50,7 +50,7 @@ async def canonical_template_registry():
 
 @pytest.fixture
 def persona_instance_store(tmp_path):
-    return PersonaInstanceStore(tmp_path / "instances")
+    return YamlPersonaInstanceStore(tmp_path / "instances")
 
 
 @pytest.fixture

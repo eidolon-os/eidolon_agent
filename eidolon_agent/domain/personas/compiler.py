@@ -41,6 +41,7 @@ class PersonaCompiler:
 
         return CompiledPersona(
             instance_id=instance.instance_id,
+            overlay_version=instance.overlay_version,
             system_prompt="\n\n".join(parts),
             identity_block=identity_block,
             style_block=style_block,

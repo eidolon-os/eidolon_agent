@@ -7,8 +7,8 @@ import pytest
 from eidolon_agent.core.errors import EvolutionGuardError, ValidationError
 from eidolon_agent.core.types.memory import MemoryHit, MemoryKind
 from eidolon_agent.domain.personas import (
-    PersonaInstanceStore,
     PersonaTemplateRegistry,
+    YamlPersonaInstanceStore,
 )
 from eidolon_agent.domain.personas.evolution import PersonaEvolutionEngine
 from eidolon_agent.domain.personas.memory_adapter import PersonaMemoryAdapter
@@ -37,15 +37,15 @@ async def test_registry_rejects_schema_version(tmp_path):
 
 @pytest.mark.asyncio
 async def test_instance_is_full_copy(canonical_template_registry, tmp_path):
-    store = PersonaInstanceStore(tmp_path / "instances")
+    store = YamlPersonaInstanceStore(tmp_path / "instances")
     template = canonical_template_registry.get("caretaker_jiezhi")
-    instance = store.create_from_template(
+    instance = await store.create_from_template(
         template=template,
         tenant_id="t",
         user_id="u",
         instance_id="i",
     )
-    loaded = store.load("t", "u", "i")
+    loaded = await store.load("t", "u", "i")
     assert loaded == instance
     assert loaded.origin_template_id == "caretaker_jiezhi"
     assert loaded.behavioral_knobs["intimacy"].current == template.behavioral_knobs["intimacy"].current
@@ -155,8 +155,8 @@ async def test_evolve_applies_and_persists(personas_service):
 @pytest.mark.asyncio
 async def test_evolution_rejects_unknown_target(canonical_template_registry, tmp_path):
     template = canonical_template_registry.get("caretaker_jiezhi")
-    store = PersonaInstanceStore(tmp_path / "instances")
-    instance = store.create_from_template(
+    store = YamlPersonaInstanceStore(tmp_path / "instances")
+    instance = await store.create_from_template(
         template=template,
         tenant_id="t",
         user_id="u",
@@ -181,7 +181,7 @@ async def test_evolution_rejects_unknown_target(canonical_template_registry, tmp
 @pytest.mark.asyncio
 async def test_memory_adapter_degrades_without_metadata(canonical_template_registry, tmp_path):
     template = canonical_template_registry.get("caretaker_jiezhi")
-    instance = PersonaInstanceStore(tmp_path / "instances").create_from_template(
+    instance = await YamlPersonaInstanceStore(tmp_path / "instances").create_from_template(
         template=template,
         tenant_id="t",
         user_id="u",

@@ -49,7 +49,13 @@ workstation:
 
 persona:
   templates_dir: eidolon_agent/domain/personas/templates
+  # Used as the migration source when storage=sqlite and as the live store
+  # when storage=yaml.
   instances_dir: ~/eidolon/personas/instances
+  # Production default. Switch to "yaml" only for forensic / diagnostic
+  # scenarios; see scripts/migrate_personas_yaml_to_sqlite.py for the
+  # one-shot upgrade from the legacy YAML layout.
+  storage: sqlite
   auto_evolution_enabled: true
 
 observability:

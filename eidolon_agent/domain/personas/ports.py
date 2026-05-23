@@ -9,7 +9,11 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from eidolon_agent.core.types.memory import MemoryHit, MemoryQueryPlan
-from eidolon_agent.domain.personas.types import PersonaEvolutionResult
+from eidolon_agent.domain.personas.types import (
+    PersonaEvolutionResult,
+    PersonaInstance,
+    PersonaTemplate,
+)
 
 
 @runtime_checkable
@@ -44,6 +48,45 @@ class PersonaEventPort(Protocol):
 class PersonaAuditPort(Protocol):
     async def record_evolution(self, result: PersonaEvolutionResult) -> None:
         ...
+
+
+@runtime_checkable
+class PersonaInstanceStore(Protocol):
+    """Persistence boundary for per-user persona instance copies.
+
+    Two implementations exist:
+      * ``YamlPersonaInstanceStore`` (legacy / migration source) reads one
+        YAML file per instance from ``settings.persona.instances_dir``.
+      * ``SqlPersonaInstanceStore`` (production) wraps a SQLAlchemy
+        ``async_sessionmaker`` and stores instances as JSON blobs in the
+        ``persona_instances`` table; supports single-TX evolution writes.
+
+    Both implementations are async so the service layer can call them without
+    knowing the backing store.
+    """
+
+    async def exists(self, tenant_id: str, user_id: str, instance_id: str) -> bool: ...
+
+    async def load(
+        self, tenant_id: str, user_id: str, instance_id: str
+    ) -> PersonaInstance: ...
+
+    async def save(self, instance: PersonaInstance, *, reason: str = "") -> None: ...
+
+    async def create_from_template(
+        self,
+        *,
+        template: PersonaTemplate,
+        tenant_id: str,
+        user_id: str,
+        instance_id: str,
+    ) -> PersonaInstance: ...
+
+    async def list_all(self) -> list[PersonaInstance]:
+        """List every instance across tenants/users — used by the admin UI."""
+        ...
+
+    async def delete(self, tenant_id: str, user_id: str, instance_id: str) -> None: ...
 
 
 @runtime_checkable

@@ -14,14 +14,16 @@ from datetime import datetime, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eidolon_agent.core.errors import NotFoundError
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnResult
-from eidolon_agent.domain.personas.types import PersonaEvolutionResult
+from eidolon_agent.domain.personas.types import PersonaEvolutionResult, PersonaInstance
 from eidolon_agent.infra.persistence.models import (
     ChatMessageRow,
     ConversationRow,
     DeviceRow,
     EvolutionHistoryRow,
+    PersonaInstanceRow,
     TurnRow,
 )
 
@@ -251,9 +253,101 @@ def _row_to_evolution(r: EvolutionHistoryRow) -> PersonaEvolutionResult:
     )
 
 
+class SqlPersonaInstanceRepository:
+    """CRUD for the ``persona_instances`` table.
+
+    Translates between the domain ``PersonaInstance`` dataclass and the
+    ``PersonaInstanceRow`` ORM. The full overlay is stored as JSON; columns
+    next to the blob are indexed/denormalised for admin list queries.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(
+        self, tenant_id: str, user_id: str, instance_id: str
+    ) -> PersonaInstance | None:
+        row = await self._session.get(PersonaInstanceRow, instance_id)
+        if row is None or row.tenant_id != tenant_id or row.user_id != user_id:
+            return None
+        return _row_to_persona_instance(row)
+
+    async def load(
+        self, tenant_id: str, user_id: str, instance_id: str
+    ) -> PersonaInstance:
+        instance = await self.get(tenant_id, user_id, instance_id)
+        if instance is None:
+            raise NotFoundError(
+                f"persona instance not found: {tenant_id}/{user_id}/{instance_id}"
+            )
+        return instance
+
+    async def upsert(
+        self, instance: PersonaInstance, *, mark_active: bool = True
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        row = await self._session.get(PersonaInstanceRow, instance.instance_id)
+        overlay = instance.model_dump(mode="json")
+        if row is None:
+            self._session.add(
+                PersonaInstanceRow(
+                    id=instance.instance_id,
+                    tenant_id=instance.tenant_id,
+                    user_id=instance.user_id,
+                    template_id=instance.origin_template_id,
+                    template_version=instance.origin_template_revision,
+                    overlay_version=instance.overlay_version,
+                    overlay_json=overlay,
+                    created_at=instance.created_at,
+                    updated_at=now,
+                    last_active_at=now if mark_active else None,
+                )
+            )
+            return
+        row.template_id = instance.origin_template_id
+        row.template_version = instance.origin_template_revision
+        row.overlay_version = instance.overlay_version
+        row.overlay_json = overlay
+        row.updated_at = now
+        if mark_active:
+            row.last_active_at = now
+
+    async def delete(self, tenant_id: str, user_id: str, instance_id: str) -> None:
+        await self._session.execute(
+            delete(PersonaInstanceRow).where(
+                PersonaInstanceRow.id == instance_id,
+                PersonaInstanceRow.tenant_id == tenant_id,
+                PersonaInstanceRow.user_id == user_id,
+            )
+        )
+
+    async def list_all(
+        self, *, limit: int = 500, offset: int = 0
+    ) -> list[PersonaInstance]:
+        rows = (
+            await self._session.execute(
+                select(PersonaInstanceRow)
+                .order_by(PersonaInstanceRow.last_active_at.desc().nulls_last())
+                .limit(limit)
+                .offset(offset)
+            )
+        ).scalars().all()
+        return [_row_to_persona_instance(r) for r in rows]
+
+    async def touch_last_active(self, instance_id: str) -> None:
+        row = await self._session.get(PersonaInstanceRow, instance_id)
+        if row is not None:
+            row.last_active_at = datetime.now(timezone.utc)
+
+
+def _row_to_persona_instance(row: PersonaInstanceRow) -> PersonaInstance:
+    return PersonaInstance.model_validate(row.overlay_json)
+
+
 __all__ = [
     "SqlChatMessageRepository",
     "SqlConversationRepository",
     "SqlDeviceRepository",
     "SqlEvolutionHistoryRepository",
+    "SqlPersonaInstanceRepository",
 ]
