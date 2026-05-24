@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from eidolon_agent.core.errors import NotFoundError
 from eidolon_agent.core.types.memory import MemoryHit, MemoryKind
-from eidolon_agent.domain.personas.types import PersonaEvolutionEvent
+from eidolon_agent.domain.personas import PersonaEvolutionEvent, render_template_markdown
 
 router = APIRouter()
 
@@ -76,6 +76,34 @@ async def get_template_raw(template_id: str, request: Request):
         return await service.get_template_raw(template_id)
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=exc.message) from exc
+
+
+@router.post("/personas/templates/{template_id}/render")
+async def render_template(template_id: str, request: Request):
+    """Render the template's initial state into a markdown soul document.
+
+    This is the bind-time entry point used by ``eidolon_admin`` to materialize
+    a per-device "soul.md" in NATS KV. Pure read: no instance is created,
+    no SQL is touched, no NATS key is written from here. Admin owns the
+    write-side; this endpoint is a stable, side-effect-free template →
+    markdown conversion.
+
+    Why it lives on the agent side (not in admin):
+        Only the agent owns the canonical template schema (identity_core,
+        knobs, style_compiler, etc.); reproducing render logic in admin
+        would mean shipping that schema across two repos.
+    """
+    service = _service(request)
+    try:
+        tpl = await service.get_template(template_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.message) from exc
+    markdown = render_template_markdown(tpl)
+    return {
+        "markdown": markdown,
+        "template_id": tpl.metadata.template_id,
+        "template_revision": tpl.metadata.template_revision,
+    }
 
 
 @router.get("/personas/instances")
