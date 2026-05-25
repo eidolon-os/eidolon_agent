@@ -268,7 +268,10 @@ def _build_llm_router(settings: Settings) -> LLMRouter:
     for m in settings.llm.models:
         try:
             providers[m.name] = LiteLLMProvider(
-                model=m.name, api_key=m.api_key, api_base=m.api_base, timeout_s=m.timeout_s,
+                model=m.name,
+                api_key=m.resolved_api_key(),
+                api_base=m.api_base,
+                timeout_s=m.timeout_s,
             )
         except Exception:
             _log.warning("model %s not loaded", m.name)

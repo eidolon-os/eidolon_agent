@@ -1,7 +1,9 @@
 """Process-level settings.
 
-Loads ``config/config.yaml`` (or the path in ``$EIDOLON_AGENT_SETTINGS_YAML``).
-Copy ``config/config.yaml.example`` to ``config/config.yaml`` before first run.
+Loads ``config/settings.yaml`` and ``config/.env`` (or overrides via
+``EIDOLON_AGENT_SETTINGS_YAML`` / ``EIDOLON_AGENT_ENV_FILE``).
+Copy templates from ``config/settings.example.yaml`` and ``config/.env.example``
+via ``./deploy/dev/init.sh`` before first run.
 """
 
 from __future__ import annotations
@@ -118,14 +120,32 @@ class SqliteSettings(BaseModel):
 
 class LLMModelConfig(BaseModel):
     """One model entry. ``name`` uses LiteLLM convention: ``gpt-4o-mini``,
-    ``claude-3-5-sonnet-latest``, ``ollama/llama3``, etc."""
+    ``claude-3-5-sonnet-latest``, ``ollama/llama3``, etc.
+
+    API keys must live in ``config/.env`` (``EIDOLON_AGENT_LLM_API_KEY``), not yaml.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    api_key: str | None = None
     api_base: str | None = None
     timeout_s: float = 30.0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_inline_api_key(cls, data: Any) -> Any:
+        if isinstance(data, dict) and (data.get("api_key") or "").strip():
+            raise ValueError(
+                "llm.models[].api_key is not allowed in yaml — set "
+                "EIDOLON_AGENT_LLM_API_KEY in config/.env"
+            )
+        if isinstance(data, dict):
+            data.pop("api_key", None)
+        return data
+
+    def resolved_api_key(self) -> str | None:
+        key = os.environ.get("EIDOLON_AGENT_LLM_API_KEY", "").strip()
+        return key or None
 
 
 class LLMSettings(BaseModel):
@@ -220,18 +240,17 @@ class _YamlConfigSource(PydanticBaseSettingsSource):
     Has lower precedence than env vars but higher than field defaults.
     """
 
-    def __init__(self, settings_cls: type[BaseSettings], yaml_path: Path | None) -> None:
+    def __init__(self, settings_cls: type[BaseSettings], yaml_path: Path) -> None:
         super().__init__(settings_cls)
         self._yaml_path = yaml_path
         self._cache: dict[str, Any] | None = None
 
     def _load(self) -> dict[str, Any]:
         if self._cache is None:
-            if self._yaml_path is None or not self._yaml_path.exists():
-                self._cache = {}
-            else:
-                with self._yaml_path.open("r", encoding="utf-8") as f:
-                    self._cache = yaml.safe_load(f) or {}
+            with self._yaml_path.open("r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            _reject_inline_secrets(data)
+            self._cache = data
         return self._cache
 
     def get_field_value(self, field, field_name):
@@ -244,10 +263,19 @@ class _YamlConfigSource(PydanticBaseSettingsSource):
         return self._load()
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_LEGACY_YAML = Path("config/config.yaml")
+_DEFAULT_YAML = Path("config/settings.yaml")
+_DEFAULT_ENV = Path("config/.env")
+
+
 class Settings(BaseSettings):
     """Process-level settings. One instance per process (cached singleton)."""
 
-    model_config = SettingsConfigDict(extra="ignore")
+    model_config = SettingsConfigDict(
+        extra="ignore",
+        env_file_encoding="utf-8",
+    )
 
     env: Literal["dev", "test", "prod"] = "dev"
 
@@ -269,6 +297,17 @@ class Settings(BaseSettings):
         _expand_all_paths(self)
         return self
 
+    @model_validator(mode="after")
+    def _pairing_secret_from_env(self) -> Settings:
+        env_secret = os.environ.get("PAIRING_JWT_SECRET", "").strip()
+        if env_secret and not self.pairing.jwt_secret:
+            return self.model_copy(
+                update={
+                    "pairing": self.pairing.model_copy(update={"jwt_secret": env_secret})
+                }
+            )
+        return self
+
     @classmethod
     def settings_customise_sources(
         cls,
@@ -278,11 +317,12 @@ class Settings(BaseSettings):
         dotenv_settings,
         file_secret_settings,
     ):
-        """Precedence: init kwargs > YAML > defaults. No env var overrides."""
-        yaml_path = _resolve_yaml_path()
+        """Precedence: init > shell env > .env > yaml > defaults."""
         return (
             init_settings,
-            _YamlConfigSource(settings_cls, yaml_path),
+            env_settings,
+            dotenv_settings,
+            _YamlConfigSource(settings_cls, _resolve_yaml_path()),
         )
 
 
@@ -290,29 +330,61 @@ class Settings(BaseSettings):
 # Loaders
 # ---------------------------------------------------------------------------
 
-_CONFIG_PATH = Path("config/config.yaml")
+
+def _reject_inline_secrets(obj: Any, *, path: str = "") -> None:
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            p = f"{path}.{k}" if path else k
+            if k.lower() in ("api_key", "secret", "token") and isinstance(v, str) and v.strip():
+                raise ValueError(f"inline secret not allowed at {p}; use config/.env")
+            _reject_inline_secrets(v, path=p)
+    elif isinstance(obj, list):
+        for i, item in enumerate(obj):
+            _reject_inline_secrets(item, path=f"{path}[{i}]")
 
 
-def _resolve_yaml_path() -> Path | None:
-    explicit = os.environ.get("EIDOLON_AGENT_SETTINGS_YAML")
+def _resolve_yaml_path() -> Path:
+    explicit = os.environ.get("EIDOLON_AGENT_SETTINGS_YAML", "").strip()
     if explicit:
         p = Path(explicit).expanduser()
-        if not p.exists():
+        if not p.is_file():
             raise FileNotFoundError(f"EIDOLON_AGENT_SETTINGS_YAML points to missing file: {p}")
-        return p
-    if _CONFIG_PATH.exists():
-        return _CONFIG_PATH
-    return None
+        return p.resolve()
+    for candidate in (_DEFAULT_YAML, _LEGACY_YAML):
+        if candidate.is_file():
+            return candidate.resolve()
+    raise FileNotFoundError(
+        f"settings file not found (tried {_DEFAULT_YAML}, {_LEGACY_YAML}). "
+        f"Run ./deploy/dev/init.sh in {_REPO_ROOT}"
+    )
+
+
+def _resolve_env_path() -> Path:
+    explicit = os.environ.get("EIDOLON_AGENT_ENV_FILE", "").strip()
+    if explicit:
+        p = Path(explicit).expanduser()
+        if not p.is_file():
+            raise FileNotFoundError(f"EIDOLON_AGENT_ENV_FILE points to missing file: {p}")
+        return p.resolve()
+    p = _DEFAULT_ENV
+    if not p.is_file():
+        raise FileNotFoundError(
+            f"env file not found: {p}. Run ./deploy/dev/init.sh in {_REPO_ROOT}"
+        )
+    return p.resolve()
 
 
 def load_settings(*, yaml_path: Path | None = None) -> Settings:
     """Construct a Settings instance.
 
-    Loads ``config/config.yaml`` by default.  Tests can override by passing
+    Loads ``config/settings.yaml`` by default.  Tests can override by passing
     ``yaml_path`` or by setting ``$EIDOLON_AGENT_SETTINGS_YAML``.
     """
     if yaml_path is not None:
         os.environ["EIDOLON_AGENT_SETTINGS_YAML"] = str(yaml_path)
+    from dotenv import load_dotenv
+
+    load_dotenv(_resolve_env_path(), override=False)
     return Settings()
 
 

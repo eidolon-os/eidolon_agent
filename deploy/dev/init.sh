@@ -40,10 +40,18 @@ rm -f eidolon_agent/app/transport/grpc/proto/eidolon_pb2_grpc.py.bak
 info "alembic upgrade head"
 .venv/bin/alembic upgrade head >/dev/null
 
-# Config file
-if [ ! -f config/config.yaml ]; then
-  cp config/config.yaml.example config/config.yaml
-  info "created config/config.yaml from template — edit as needed"
+# Config files
+if [ -f config/config.yaml ] && [ ! -f config/settings.yaml ]; then
+  cp config/config.yaml config/settings.yaml
+  info "migrated config/config.yaml -> config/settings.yaml"
+fi
+if [ ! -f config/settings.yaml ]; then
+  cp config/settings.example.yaml config/settings.yaml
+  info "created config/settings.yaml from template"
+fi
+if [ ! -f config/.env ]; then
+  cp config/.env.example config/.env
+  info "created config/.env from template — add EIDOLON_AGENT_LLM_API_KEY"
 fi
 
 # Runtime dirs

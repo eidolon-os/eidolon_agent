@@ -1,0 +1,66 @@
+# eidolon-agent configuration template.
+#
+#   cp config/settings.example.yaml config/settings.yaml
+#   cp config/.env.example config/.env
+#
+# Secrets (LLM API key, pairing JWT) go in config/.env only.
+
+env: dev
+
+grpc:
+  tcp_host: 127.0.0.1
+  tcp_port: 50051
+  uds_path: ~/eidolon/run/eidolon-agent.sock
+
+http:
+  host: 127.0.0.1
+  port: 8080
+  admin_port: 8081
+  cors_origins:
+    - http://127.0.0.1:5281
+
+nats:
+  url: nats://127.0.0.1:4222
+
+memory:
+  discovery_url: http://127.0.0.1:8020/api/discovery/agent-routing
+  discovery_token_env: ""   # env var name for discovery bearer (optional)
+  discovery_refresh_s: 30
+  endpoints:
+    - user_id: default
+      mcp_url: http://127.0.0.1:8030/mcp
+  recall_timeout_s: 0.3
+
+sqlite:
+  path: ~/eidolon/history/eidolon_agent.sqlite3
+  enable_wal: true
+
+llm:
+  models:
+    - name: openai/deepseek-v4-flash
+      api_base: http://127.0.0.1:8080/v1
+      api_key: ""   # env: EIDOLON_AGENT_LLM_API_KEY (all models share one key)
+  default_model: openai/deepseek-v4-flash
+
+workstation:
+  transport: nats
+
+persona:
+  templates_dir: eidolon_agent/domain/personas/templates
+  instances_dir: ~/eidolon/personas/instances
+  storage: sqlite
+  auto_evolution_enabled: true
+
+observability:
+  log_level: INFO
+  log_json: true
+  log_dir: ~/eidolon/logs
+
+pairing:
+  jwt_secret: ""        # env: PAIRING_JWT_SECRET
+  jwt_algorithm: HS256
+
+runtime:
+  log_dir: ~/eidolon/logs
+  run_dir: ~/eidolon/run
+  debug_dir: ~/eidolon/debug

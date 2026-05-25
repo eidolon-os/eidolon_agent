@@ -10,6 +10,9 @@ dist/
 # Virtual envs
 .venv/
 .env
+config/.env
+config/settings.yaml
+config/config.yaml
 env/
 venv/
 
