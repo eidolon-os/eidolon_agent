@@ -52,7 +52,7 @@
                 │       LiveKit voice agent     │
                 │   (caller of this service)    │
                 └──────────────┬───────────────┘
-                               │ gRPC Chat bidi  (UDS or :50051)
+                               │ gRPC Chat bidi  (UDS or :55051)
                                ▼
         ┌──────────────────────────────────────────────┐
         │              eidolon-agent                    │
@@ -300,7 +300,7 @@ JetStream 持久化前缀：`agent.memory.*` / `agent.emotion.*` / `agent.workst
 
 ## 8. 对外接口
 
-### gRPC（数据面，`:50051` 或 UDS）
+### gRPC（数据面，`:55051` 或 UDS）
 
 `app/transport/grpc/proto/eidolon.proto`：
 
@@ -408,7 +408,7 @@ nats-server -js -sd ~/eidolon/nats-jetstream --port 4222 --http_port 8222
 ```
 
 启动后端口：
-- `:50051` gRPC（LiveKit / 设备）
+- `:55051` gRPC（LiveKit / 设备；勿用 50000–60000，与 LiveKit RTC 端口段冲突）
 - `:8080`  HTTP 健康探针 `/readyz`
 - `:8081`  Admin HTTP `/api/admin/*`、OpenAPI `/api/docs`
 

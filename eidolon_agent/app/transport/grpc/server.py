@@ -22,7 +22,7 @@ class GrpcServer:
         servicer: EidolonAgentServicer,
         token_verifier,
         tcp_host: str = "127.0.0.1",
-        tcp_port: int = 50051,
+        tcp_port: int = 55051,
         uds_path: Path | None = None,
         keepalive_time_s: int = 20,
         keepalive_timeout_s: int = 5,
@@ -48,7 +48,16 @@ class GrpcServer:
         )
         pbg.add_EidolonAgentServicer_to_server(self._servicer, self._server)
         tcp_target = f"{self._tcp_host}:{self._tcp_port}"
-        self._server.add_insecure_port(tcp_target)
+        try:
+            self._server.add_insecure_port(tcp_target)
+        except RuntimeError as exc:
+            hint = ""
+            if 50_000 <= self._tcp_port <= 60_000:
+                hint = (
+                    " Port is inside the LiveKit RTC range (50000-60000); "
+                    "set grpc.tcp_port outside that range (e.g. 55051) in config/settings.yaml."
+                )
+            raise RuntimeError(f"Failed to bind gRPC to {tcp_target}.{hint}") from exc
         _log.info("gRPC listening on tcp %s", tcp_target)
         if self._uds_path is not None:
             uds = self._uds_path.expanduser()

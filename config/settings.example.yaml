@@ -9,7 +9,7 @@ env: dev
 
 grpc:
   tcp_host: 127.0.0.1
-  tcp_port: 50051
+  tcp_port: 55051
   uds_path: ~/eidolon/run/eidolon-agent.sock
 
 http:

@@ -51,7 +51,7 @@ class GrpcSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tcp_host: str = "127.0.0.1"
-    tcp_port: int = 50051
+    tcp_port: int = 55051  # outside LiveKit RTC range (see eidolon_admin ports.yaml)
     uds_path: Path | None = None  # if set AND same host, auto-prefer UDS
     tls_cert_path: Path | None = None
     tls_key_path: Path | None = None
