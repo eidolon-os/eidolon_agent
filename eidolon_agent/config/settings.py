@@ -9,6 +9,7 @@ before first run (see README §10).
 from __future__ import annotations
 
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -20,6 +21,14 @@ from pydantic_settings import (
     PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
+
+
+_ENV_PLACEHOLDER_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
+def is_env_placeholder(value: str) -> bool:
+    v = (value or "").strip()
+    return bool(v) and _ENV_PLACEHOLDER_RE.fullmatch(v) is not None
 
 
 def _expand_all_paths(obj: object) -> None:
@@ -149,8 +158,22 @@ class LLMModelConfig(BaseModel):
 class LLMSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    api_key: str = ""  # yaml placeholder: EIDOLON_AGENT_LLM_API_KEY
     models: list[LLMModelConfig] = Field(default_factory=list)
     default_model: str = "gpt-4o-mini"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_api_key_placeholder(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            val = (data.get("api_key") or "").strip()
+            if val and val != "EIDOLON_AGENT_LLM_API_KEY":
+                raise ValueError(
+                    "llm.api_key must be empty or the placeholder "
+                    "EIDOLON_AGENT_LLM_API_KEY; set the secret in config/.env"
+                )
+            data.pop("api_key", None)
+        return data
 
 
 class WorkstationSettings(BaseModel):
@@ -194,8 +217,22 @@ class ObservabilitySettings(BaseModel):
 class PairingSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    jwt_secret: str = ""
+    jwt_secret: str = ""  # yaml placeholder: PAIRING_JWT_SECRET
     jwt_algorithm: Literal["HS256", "RS256"] = "HS256"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_jwt_secret_placeholder(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            val = (data.get("jwt_secret") or "").strip()
+            if val and val != "PAIRING_JWT_SECRET":
+                raise ValueError(
+                    "pairing.jwt_secret must be empty or the placeholder "
+                    "PAIRING_JWT_SECRET; set the secret in config/.env"
+                )
+            if val == "PAIRING_JWT_SECRET":
+                data["jwt_secret"] = ""
+        return data
     pairing_code_ttl_s: int = 600
     pairing_code_length: int = 8
     device_token_ttl_days: int = 30
@@ -332,8 +369,16 @@ def _reject_inline_secrets(obj: Any, *, path: str = "") -> None:
     if isinstance(obj, dict):
         for k, v in obj.items():
             p = f"{path}.{k}" if path else k
-            if k.lower() in ("api_key", "secret", "token") and isinstance(v, str) and v.strip():
-                raise ValueError(f"inline secret not allowed at {p}; use config/.env")
+            if (
+                k.lower() in ("api_key", "secret", "token")
+                and isinstance(v, str)
+                and v.strip()
+                and not is_env_placeholder(v)
+            ):
+                raise ValueError(
+                    f"inline secret not allowed at {p}; use config/.env "
+                    f"(yaml placeholder = env var name)"
+                )
             _reject_inline_secrets(v, path=p)
     elif isinstance(obj, list):
         for i, item in enumerate(obj):

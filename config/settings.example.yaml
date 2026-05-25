@@ -34,10 +34,10 @@ sqlite:
   enable_wal: true
 
 llm:
+  api_key: EIDOLON_AGENT_LLM_API_KEY
   models:
     - name: openai/deepseek-v4-flash
       api_base: http://127.0.0.1:8080/v1
-      api_key: ""   # env: EIDOLON_AGENT_LLM_API_KEY (all models share one key)
   default_model: openai/deepseek-v4-flash
 
 workstation:
@@ -55,7 +55,7 @@ observability:
   log_dir: ~/eidolon/logs
 
 pairing:
-  jwt_secret: ""        # env: PAIRING_JWT_SECRET
+  jwt_secret: PAIRING_JWT_SECRET
   jwt_algorithm: HS256
 
 runtime:
