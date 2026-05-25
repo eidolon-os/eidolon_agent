@@ -333,9 +333,9 @@ service EidolonAgent {
 
 ## 9. 配置与持久化
 
-### 配置：`config/config.yaml`
+### 配置：`config/settings.yaml` + `config/.env`
 
-模板在 `config/config.yaml.example`，`./deploy/dev/init.sh` 自动 copy。所有运行时设置在这一个文件里。
+非密钥项在 `config/settings.yaml`（模板 `config/settings.example.yaml`），密钥在 `config/.env`（模板 `config/.env.example`）。`./deploy/dev/init.sh` 首次运行会自动创建两者。
 
 Pydantic settings 顶层段：
 
@@ -376,7 +376,7 @@ Alembic 在 `infra/persistence/migrations/versions/`：
 
 ```bash
 uv sync --extra dev                # 装依赖
-./deploy/dev/init.sh               # SQLite 建表、proto 重生成、运行时目录、config.yaml copy
+./deploy/dev/init.sh               # SQLite 建表、proto 重生成、运行时目录、settings.yaml + .env
 ```
 
 ### 启动
@@ -459,8 +459,10 @@ CI 卡点：
 eidolon_agent/             ← Python 包（见 §3）
 admin_web/                 ← Vue 3 + Vite 管理控制台
 config/
-├── config.yaml.example    ← 模板（git-tracked）
-└── config.yaml            ← 本地实际配置（git-ignored，由 init.sh copy）
+├── settings.example.yaml  ← 非密钥模板（git-tracked）
+├── settings.yaml          ← 本地配置（git-ignored，由 init.sh copy）
+├── .env.example           ← 密钥模板
+└── .env                   ← 本地密钥（git-ignored）
 deploy/dev/
 ├── init.sh                ← 首次初始化
 ├── run_nats.sh            ← NATS 起停

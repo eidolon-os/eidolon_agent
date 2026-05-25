@@ -41,10 +41,6 @@ info "alembic upgrade head"
 .venv/bin/alembic upgrade head >/dev/null
 
 # Config files
-if [ -f config/config.yaml ] && [ ! -f config/settings.yaml ]; then
-  cp config/config.yaml config/settings.yaml
-  info "migrated config/config.yaml -> config/settings.yaml"
-fi
 if [ ! -f config/settings.yaml ]; then
   cp config/settings.example.yaml config/settings.yaml
   info "created config/settings.yaml from template"

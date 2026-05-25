@@ -264,8 +264,7 @@ class _YamlConfigSource(PydanticBaseSettingsSource):
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_LEGACY_YAML = Path("config/config.yaml")
-_DEFAULT_YAML = Path("config/settings.yaml")
+_SETTINGS_YAML = Path("config/settings.yaml")
 _DEFAULT_ENV = Path("config/.env")
 
 
@@ -350,11 +349,10 @@ def _resolve_yaml_path() -> Path:
         if not p.is_file():
             raise FileNotFoundError(f"EIDOLON_AGENT_SETTINGS_YAML points to missing file: {p}")
         return p.resolve()
-    for candidate in (_DEFAULT_YAML, _LEGACY_YAML):
-        if candidate.is_file():
-            return candidate.resolve()
+    if _SETTINGS_YAML.is_file():
+        return _SETTINGS_YAML.resolve()
     raise FileNotFoundError(
-        f"settings file not found (tried {_DEFAULT_YAML}, {_LEGACY_YAML}). "
+        f"settings file not found: {_SETTINGS_YAML}. "
         f"Run ./deploy/dev/init.sh in {_REPO_ROOT}"
     )
 

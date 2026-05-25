@@ -9,7 +9,7 @@ Usage::
 
     .venv/bin/python -m scripts.migrate_personas_yaml_to_sqlite
 
-The script reads ``config/config.yaml`` (or ``$EIDOLON_AGENT_SETTINGS_YAML``)
+The script reads ``config/settings.yaml`` (or ``$EIDOLON_AGENT_SETTINGS_YAML``)
 for paths so the same settings tree that drives the runtime drives the
 migration. YAML files are *not* deleted afterwards — the operator should
 verify the SQLite contents and then clean up by hand.

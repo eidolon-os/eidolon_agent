@@ -12,7 +12,6 @@ dist/
 .env
 config/.env
 config/settings.yaml
-config/config.yaml
 env/
 venv/
 
@@ -50,9 +49,6 @@ admin_web/dist/
 
 # Persona overlays may contain PII; tracked separately by deployment policy
 personas/overlays/
-
-# Local config (copied from config/config.yaml.example)
-config/config.yaml
 
 # Stray literal ~ dir (created by Path("~") without expanduser)
 ~/
