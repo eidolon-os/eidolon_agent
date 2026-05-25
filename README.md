@@ -316,6 +316,24 @@ service EidolonAgent {
 
 `AuthInterceptor` 在每个 RPC 上校验 `Bearer <device_token>`（JWT，HS256），`ExchangePairingCode` 例外。
 
+**外部客户端（如 eidolon_channel）必须先拿到 device_token**，不能把占位字符串当 token 用。最快流程：
+
+```bash
+# 1. 确保 agent 已起（admin :8081 + gRPC :45051）
+curl -s http://127.0.0.1:8081/api/docs >/dev/null
+
+# 2. 在 eidolon_channel 仓库签发 JWT（30 天有效）
+cd ../eidolon_channel
+.venv/bin/python scripts/provision_eidolon_token.py \
+  --tenant-id demo --user-id alice
+
+# 3. 将 stdout 的 JWT 写入 eidolon_channel/config/.env：
+#    REMOTE_AGENT_RPC_DEVICE_TOKEN=<粘贴>
+# 4. 重启 LiveKit worker
+```
+
+`provision_eidolon_token.py` 会调用 admin `POST /api/admin/pairing/codes`，再用公开 RPC `ExchangePairingCode` 换 token。`PAIRING_JWT_SECRET` 为空时 agent 会把密钥持久化在 `~/eidolon/run/jwt-secret`；重启 agent 后旧 token 仍有效，除非你删了该文件。
+
 ### HTTP（`:8080`）—— 健康探针
 
 仅一个端点 `/readyz`，给 systemd / k8s liveness 用。
