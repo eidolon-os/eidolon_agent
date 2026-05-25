@@ -16,8 +16,6 @@ http:
   host: 127.0.0.1
   port: 8080
   admin_port: 8081
-  cors_origins:
-    - http://127.0.0.1:5281
 
 nats:
   url: nats://127.0.0.1:4222

@@ -91,7 +91,7 @@
 
 **对外接口（5 个）**：
 1. **进来的**：LiveKit / 设备 →（gRPC Chat） → eidolon-agent
-2. **进来的**：admin web →（HTTP）→ eidolon-agent admin :8081
+2. **进来的**：运维 / 脚本 →（HTTP）→ eidolon-agent admin :8081
 3. **出去的**：eidolon-agent →（HTTPS）→ LLM endpoint
 4. **出去的**：eidolon-agent →（MCP HTTP / NATS publish）→ eidolon-memory
 5. **出去的**：eidolon-agent →（NATS publish）→ workstation-agent
@@ -322,12 +322,12 @@ service EidolonAgent {
 
 ### Admin HTTP（`:8081`）—— 控制面
 
-- `POST /api/admin/pairing/codes` —— 签发配对码（admin web 用）
+- `POST /api/admin/pairing/codes` —— 签发配对码
 - `GET  /api/admin/pairing/codes/{code}.png` —— 配对码 QR
 - `GET  /api/admin/devices` —— 设备列表
 - `DELETE /api/admin/devices/{id}` —— 吊销设备
 - `GET  /api/admin/personas/templates` —— 模板列表
-- `POST /api/admin/chat/test` —— 完整 gRPC 链路冒烟 SSE 端点（admin web Chat Test 页用）
+- `POST /api/admin/chat/test` —— 完整 gRPC 链路冒烟 SSE 端点
 
 ---
 
@@ -335,7 +335,7 @@ service EidolonAgent {
 
 ### 配置：`config/settings.yaml` + `config/.env`
 
-非密钥项在 `config/settings.yaml`（模板 `config/settings.example.yaml`），密钥在 `config/.env`（模板 `config/.env.example`）。`./deploy/dev/init.sh` 首次运行会自动创建两者。
+非密钥项在 `config/settings.yaml`（模板 `config/settings.example.yaml`），密钥在 `config/.env`（模板 `config/.env.example`）。首次运行按 §10 从模板复制即可。
 
 Pydantic settings 顶层段：
 
@@ -375,39 +375,49 @@ Alembic 在 `infra/persistence/migrations/versions/`：
 ### 一次性初始化
 
 ```bash
-uv sync --extra dev                # 装依赖
-./deploy/dev/init.sh               # SQLite 建表、proto 重生成、运行时目录、settings.yaml + .env
+uv sync --extra dev
+
+# 配置（若尚不存在）
+cp -n config/settings.example.yaml config/settings.yaml
+cp -n config/.env.example config/.env
+# 编辑 config/.env：EIDOLON_AGENT_LLM_API_KEY、PAIRING_JWT_SECRET
+
+# gRPC stub 重生成
+.venv/bin/python -m grpc_tools.protoc \
+  -I eidolon_agent/app/transport/grpc/proto \
+  --python_out=eidolon_agent/app/transport/grpc/proto \
+  --grpc_python_out=eidolon_agent/app/transport/grpc/proto \
+  --pyi_out=eidolon_agent/app/transport/grpc/proto \
+  eidolon_agent/app/transport/grpc/proto/eidolon.proto
+sed -i.bak 's/^import eidolon_pb2 as eidolon__pb2/from . import eidolon_pb2 as eidolon__pb2/' \
+  eidolon_agent/app/transport/grpc/proto/eidolon_pb2_grpc.py
+rm -f eidolon_agent/app/transport/grpc/proto/eidolon_pb2_grpc.py.bak
+
+.venv/bin/alembic upgrade head
+mkdir -p ~/eidolon/{run,logs,debug,history}
 ```
 
 ### 启动
 
 ```bash
-./deploy/dev/run_nats.sh start     # 本地 NATS (JetStream)
-./deploy/dev/run_all.sh start      # eidolon-agent + admin web
+# NATS（JetStream，另开终端或 systemd）
+nats-server -js -sd ~/eidolon/nats-jetstream --port 4222 --http_port 8222
+
+# agent（前台）
+.venv/bin/eidolon-agent
 ```
 
 启动后端口：
 - `:50051` gRPC（LiveKit / 设备）
 - `:8080`  HTTP 健康探针 `/readyz`
-- `:8081`  Admin HTTP `/api/admin/*`
-- `:5281`  admin web（Vite dev server，代理 `/api` 到 `:8081`）
+- `:8081`  Admin HTTP `/api/admin/*`、OpenAPI `/api/docs`
 
 ### 验证
 
 ```bash
-# 命令行模拟 LiveKit
 python scripts/livekit_sim.py "你好"
-
-# 浏览器
-open http://127.0.0.1:5281/chat-test
-```
-
-### 状态 / 停止
-
-```bash
-./deploy/dev/run_all.sh status
-./deploy/dev/run_all.sh stop
-./deploy/dev/run_nats.sh stop
+curl -s http://127.0.0.1:8080/readyz
+curl -s http://127.0.0.1:8081/api/docs
 ```
 
 ---
@@ -457,16 +467,11 @@ CI 卡点：
 
 ```
 eidolon_agent/             ← Python 包（见 §3）
-admin_web/                 ← Vue 3 + Vite 管理控制台
 config/
 ├── settings.example.yaml  ← 非密钥模板（git-tracked）
-├── settings.yaml          ← 本地配置（git-ignored，由 init.sh copy）
+├── settings.yaml          ← 本地配置（git-ignored）
 ├── .env.example           ← 密钥模板
 └── .env                   ← 本地密钥（git-ignored）
-deploy/dev/
-├── init.sh                ← 首次初始化
-├── run_nats.sh            ← NATS 起停
-└── run_all.sh             ← agent + admin web 起停
 scripts/
 ├── livekit_sim.py         ← 端到端模拟脚本
 ├── replay_conversation.py ← 回放 SQLite 中的会话

@@ -1,7 +1,7 @@
 """Admin FastAPI application factory.
 
-Mounts all admin routers under ``/api/admin``, serves the admin_web SPA build
-(if present) at ``/``, and exposes OpenAPI docs at ``/api/docs``.
+Mounts all admin routers under ``/api/admin`` and exposes OpenAPI docs at
+``/api/docs``.
 
 This app is independent of the core transport layer and can be mounted on its
 own uvicorn instance or composed into a larger ASGI app.
@@ -9,11 +9,8 @@ own uvicorn instance or composed into a larger ASGI app.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from eidolon_agent.app.admin.routers import chat_test, devices, personas
 from eidolon_agent.app.admin.routers import pairing as pairing_router
@@ -50,10 +47,5 @@ def build_admin_app(
     app.include_router(personas.router, prefix="/api/admin", tags=["personas"])
     app.include_router(pairing_router.router, prefix="/api/admin", tags=["pairing"])
     app.include_router(chat_test.router, prefix="/api/admin", tags=["chat-test"])
-
-    if settings.http.serve_admin_web_dist:
-        dist = Path(settings.http.admin_web_dist_path)
-        if dist.is_dir():
-            app.mount("/", StaticFiles(directory=str(dist), html=True), name="admin_web")
 
     return app

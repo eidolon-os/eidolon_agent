@@ -8,7 +8,7 @@ Generated files are git-ignored; rebuild with::
         --pyi_out=eidolon_agent/app/transport/grpc/proto \
         eidolon_agent/app/transport/grpc/proto/eidolon.proto
 
-The bootstrap script (``deploy/dev/init.sh``) runs the build automatically.
+See README §10 for the full protoc command (including the package-relative import patch).
 """
 
 # Pre-load proto dependencies before importing the generated pb2 module.

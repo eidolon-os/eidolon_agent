@@ -43,10 +43,6 @@ eidolon_agent/app/transport/grpc/proto/*_pb2.py
 eidolon_agent/app/transport/grpc/proto/*_pb2.pyi
 eidolon_agent/app/transport/grpc/proto/*_pb2_grpc.py
 
-# admin_web
-node_modules/
-admin_web/dist/
-
 # Persona overlays may contain PII; tracked separately by deployment policy
 personas/overlays/
 

@@ -3,7 +3,7 @@
 Loads ``config/settings.yaml`` and ``config/.env`` (or overrides via
 ``EIDOLON_AGENT_SETTINGS_YAML`` / ``EIDOLON_AGENT_ENV_FILE``).
 Copy templates from ``config/settings.example.yaml`` and ``config/.env.example``
-via ``./deploy/dev/init.sh`` before first run.
+before first run (see README §10).
 """
 
 from __future__ import annotations
@@ -59,9 +59,7 @@ class HttpSettings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8080
     admin_port: int = 8081
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://127.0.0.1:5281"])
-    serve_admin_web_dist: bool = True
-    admin_web_dist_path: Path = Path("admin_web/dist")
+    cors_origins: list[str] = Field(default_factory=list)
 
 
 class NatsSettings(BaseModel):
@@ -353,7 +351,7 @@ def _resolve_yaml_path() -> Path:
         return _SETTINGS_YAML.resolve()
     raise FileNotFoundError(
         f"settings file not found: {_SETTINGS_YAML}. "
-        f"Run ./deploy/dev/init.sh in {_REPO_ROOT}"
+        f"Copy config/settings.example.yaml to {_SETTINGS_YAML} (see README §10)"
     )
 
 
@@ -367,7 +365,7 @@ def _resolve_env_path() -> Path:
     p = _DEFAULT_ENV
     if not p.is_file():
         raise FileNotFoundError(
-            f"env file not found: {p}. Run ./deploy/dev/init.sh in {_REPO_ROOT}"
+            f"env file not found: {p}. Copy config/.env.example to config/.env"
         )
     return p.resolve()
 
