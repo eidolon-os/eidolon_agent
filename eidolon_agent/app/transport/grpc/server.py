@@ -22,7 +22,7 @@ class GrpcServer:
         servicer: EidolonAgentServicer,
         token_verifier,
         tcp_host: str = "127.0.0.1",
-        tcp_port: int = 55051,
+        tcp_port: int = 45051,
         uds_path: Path | None = None,
         keepalive_time_s: int = 20,
         keepalive_timeout_s: int = 5,
@@ -55,7 +55,7 @@ class GrpcServer:
             if 50_000 <= self._tcp_port <= 60_000:
                 hint = (
                     " Port is inside the LiveKit RTC range (50000-60000); "
-                    "set grpc.tcp_port outside that range (e.g. 55051) in config/settings.yaml."
+                    "set grpc.tcp_port outside that range (e.g. 45051) in config/settings.yaml."
                 )
             raise RuntimeError(f"Failed to bind gRPC to {tcp_target}.{hint}") from exc
         _log.info("gRPC listening on tcp %s", tcp_target)

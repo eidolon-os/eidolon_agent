@@ -80,6 +80,6 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("text", nargs="?", default="你好")
     p.add_argument("--http", default="http://127.0.0.1:8081")
-    p.add_argument("--grpc", default="127.0.0.1:55051")
+    p.add_argument("--grpc", default="127.0.0.1:45051")
     args = p.parse_args()
     asyncio.run(main(args.text, args.http, args.grpc))
