@@ -80,7 +80,12 @@ def _msg(content: str) -> ChatMessage:
 
 @pytest.fixture
 def provider() -> LiteLLMProvider:
-    return LiteLLMProvider(model="openai/test", api_key="k", api_base="http://x/v1")
+    return LiteLLMProvider(
+        model="openai/test",
+        api_key="k",
+        api_base="http://x/v1",
+        shared_http_client=False,
+    )
 
 
 async def test_text_chunks_yield_text_delta(monkeypatch: pytest.MonkeyPatch, provider) -> None:
@@ -98,6 +103,37 @@ async def test_text_chunks_yield_text_delta(monkeypatch: pytest.MonkeyPatch, pro
     text = "".join(d.text_delta or "" for d in out)
     assert text == "hello world"
     assert any(d.finish is LLMFinishReason.STOP for d in out)
+
+
+async def test_request_includes_retries_and_api_base(monkeypatch: pytest.MonkeyPatch, provider) -> None:
+    seen = {}
+
+    async def _fake(**kwargs):
+        seen.update(kwargs)
+        return _aiter([_Chunk(choices=[_Choice(delta=_Delta(), finish_reason="stop")])])
+
+    monkeypatch.setattr(litellm, "acompletion", _fake)
+    out = [d async for d in provider.stream([_msg("hi")], request_id="r")]
+    assert any(d.finish is LLMFinishReason.STOP for d in out)
+    assert seen["api_base"] == "http://x/v1"
+    assert seen["api_key"] == "k"
+    assert seen["max_retries"] == 2
+
+
+async def test_warmup_uses_small_non_streaming_request(
+    monkeypatch: pytest.MonkeyPatch, provider
+) -> None:
+    seen = {}
+
+    async def _fake(**kwargs):
+        seen.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(litellm, "acompletion", _fake)
+    assert await provider.warmup(timeout_s=3)
+    assert seen["stream"] is False
+    assert seen["max_tokens"] == 1
+    assert seen["timeout"] == 3
 
 
 async def test_tool_call_buffered_across_chunks(monkeypatch: pytest.MonkeyPatch, provider) -> None:

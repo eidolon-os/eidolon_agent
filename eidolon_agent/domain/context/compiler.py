@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -57,22 +58,51 @@ class ContextCompiler:
         # in production. ``return_exceptions=True`` keeps a single fetch
         # failure from poisoning the others — each branch handles its own
         # degraded path below.
-        persona_task = self._personas.compile_prompt(
-            tenant_id=ti.caller.tenant_id,
-            user_id=ti.caller.user_id,
-            instance_id=instance_id,
-            template_id=template_id,
-            user_text=ti.text or "",
-            realtime=_realtime_dict(ti.realtime),
-            dry_run_memory=[],
+        compile_t0 = time.monotonic()
+        persona_task = _timed(
+            "persona",
+            self._personas.compile_prompt(
+                tenant_id=ti.caller.tenant_id,
+                user_id=ti.caller.user_id,
+                instance_id=instance_id,
+                template_id=template_id,
+                user_text=ti.text or "",
+                realtime=_realtime_dict(ti.realtime),
+                dry_run_memory=[],
+            ),
         )
-        memory_task = self._memory_recall(ti)
-        history_task = self._history.recent_window(
-            conversation_id=ti.conversation_id, window=self._history_window
+        memory_task = _timed("memory", self._memory_recall(ti))
+        history_task = _timed(
+            "history",
+            self._history.recent_window(
+                conversation_id=ti.conversation_id, window=self._history_window
+            ),
         )
 
-        persona, memory_text, history = await asyncio.gather(
+        results = await asyncio.gather(
             persona_task, memory_task, history_task, return_exceptions=True
+        )
+        # Each _timed task yields (value, elapsed_ms) on success; on exception
+        # asyncio.gather replaces the tuple with the exception itself.
+        persona_res, memory_res, history_res = results
+
+        def _unpack(res):  # type: ignore[no-untyped-def]
+            if isinstance(res, BaseException):
+                return res, None
+            return res
+
+        persona, persona_ms = _unpack(persona_res)
+        memory_text, memory_ms = _unpack(memory_res)
+        history, history_ms = _unpack(history_res)
+
+        gather_ms = int((time.monotonic() - compile_t0) * 1000)
+        _log.info(
+            "compile_timings conv=%s gather_ms=%d persona=%s memory=%s history=%s",
+            ti.conversation_id,
+            gather_ms,
+            persona_ms,
+            memory_ms,
+            history_ms,
         )
 
         # Persona is the only segment we cannot proceed without — re-raise
@@ -146,6 +176,19 @@ class ContextCompiler:
         except Exception:
             _log.exception("memory recall failed; continuing without")
             return None
+
+
+async def _timed(_name: str, coro):  # type: ignore[no-untyped-def]
+    """Wrap a coroutine to also return its elapsed ms.
+
+    Returns ``(value, elapsed_ms)``. Exceptions propagate untouched; the
+    asyncio.gather caller (with ``return_exceptions=True``) records them as
+    the gather result and the timing is lost — which is fine, we only care
+    about the success path for diagnostics.
+    """
+    t0 = time.monotonic()
+    value = await coro
+    return value, int((time.monotonic() - t0) * 1000)
 
 
 def _realtime_dict(digest) -> dict | None:  # type: ignore[no-untyped-def]

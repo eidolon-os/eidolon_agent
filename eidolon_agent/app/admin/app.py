@@ -22,6 +22,7 @@ def build_admin_app(
     settings: Settings,
     agent_registry,
     pairing,
+    pairing_verifier=None,
     personas_service=None,
 ) -> FastAPI:
     app = FastAPI(
@@ -41,6 +42,7 @@ def build_admin_app(
     app.state.settings = settings
     app.state.agent_registry = agent_registry
     app.state.pairing = pairing
+    app.state.pairing_verifier = pairing_verifier
     app.state.personas_service = personas_service
 
     app.include_router(devices.router, prefix="/api/admin", tags=["devices"])

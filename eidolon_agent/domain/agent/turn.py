@@ -110,10 +110,18 @@ class TurnEngine:
         assistant_text_parts: list[str] = []
         usage_in = usage_out = 0
         error_code: str | None = None
+        # Per-phase wall clock for P0 diagnostics. Each phase records the
+        # elapsed-since-t0 *at completion*; the diff between adjacent values is
+        # the phase duration. A None means the phase didn't run on this path.
+        ts_guard_ms: int | None = None
+        ts_triage_ms: int | None = None
+        ts_compile_ms: int | None = None
+        ts_output_ms: int | None = None
 
         try:
             # ---- Input guardrail --------------------------------------------
             verdict = self._input_g.check(ti.text)
+            ts_guard_ms = int((time.monotonic() - t0) * 1000)
             if verdict.action is SafetyAction.ESCALATE:
                 crisis = await self._crisis.handle(
                     instance_id=ti.caller.agent_instance_id or "",
@@ -149,6 +157,7 @@ class TurnEngine:
 
             # ---- Triage -----------------------------------------------------
             triage_kind = self._triage.classify(ti.text)
+            ts_triage_ms = int((time.monotonic() - t0) * 1000)
             yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.THINKING, time.time())
 
             # ---- COMPLEX_LONG branch ---------------------------------------
@@ -161,6 +170,7 @@ class TurnEngine:
 
             # ---- Compile context -------------------------------------------
             messages = await self._compiler.compile(ti)
+            ts_compile_ms = int((time.monotonic() - t0) * 1000)
 
             # ---- LLM stream (with tool loop) -------------------------------
             tools = self._tool_schemas()
@@ -239,6 +249,20 @@ class TurnEngine:
                 # Crude soften: prefix; production would re-prompt LLM.
                 final_text = "（让我换个说法）" + final_text
                 yield TurnEvent.delta(ti.turn_id, seq.next(), "（让我换个说法）", time.time())
+            ts_output_ms = int((time.monotonic() - t0) * 1000)
+
+            # ---- P0 diagnostic: phase timings ------------------------------
+            _log_turn_timings(
+                turn_id=ti.turn_id,
+                t0=t0,
+                guard_at=ts_guard_ms,
+                triage_at=ts_triage_ms,
+                compile_at=ts_compile_ms,
+                first_delta_at=first_delta_ms,
+                output_at=ts_output_ms,
+                tokens_in=usage_in,
+                tokens_out=usage_out,
+            )
 
             # ---- Yield DONE FIRST, then handle post-turn in background ----
             yield TurnEvent.done(
@@ -440,3 +464,51 @@ class _SeqGen:
     def next(self) -> int:
         self._n += 1
         return self._n
+
+
+def _log_turn_timings(
+    *,
+    turn_id: str,
+    t0: float,
+    guard_at: int | None,
+    triage_at: int | None,
+    compile_at: int | None,
+    first_delta_at: int | None,
+    output_at: int | None,
+    tokens_in: int,
+    tokens_out: int,
+) -> None:
+    """Emit P0 diagnostic: per-phase ms breakdown for a single Turn.
+
+    Each ``*_at`` is the elapsed ms from turn start *at the end of that phase*.
+    Phase durations are deltas between adjacent checkpoints, with the previous
+    phase's end (or 0 / t0) as the start. ``llm_ttft_ms`` here is the wall time
+    from compile-done to first DELTA — the *brain-side* TTFT, distinct from the
+    LiteLLM provider's connect+prefill measurement (logged separately).
+    """
+    total_ms = int((time.monotonic() - t0) * 1000)
+
+    def _delta(end: int | None, prev: int | None) -> int | None:
+        if end is None:
+            return None
+        return end - (prev or 0)
+
+    guard_ms = _delta(guard_at, None)
+    triage_ms = _delta(triage_at, guard_at)
+    compile_ms = _delta(compile_at, triage_at)
+    llm_ttft_ms = _delta(first_delta_at, compile_at)
+    output_ms = _delta(output_at, first_delta_at)
+
+    _log.info(
+        "turn_timings turn=%s total_ms=%d guard=%s triage=%s compile=%s "
+        "llm_ttft=%s output=%s tokens_in=%d tokens_out=%d",
+        turn_id,
+        total_ms,
+        guard_ms,
+        triage_ms,
+        compile_ms,
+        llm_ttft_ms,
+        output_ms,
+        tokens_in,
+        tokens_out,
+    )

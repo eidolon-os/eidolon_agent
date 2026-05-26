@@ -14,15 +14,24 @@ pytestmark = pytest.mark.unit
 
 
 class _StubProvider:
-    def __init__(self, *, deltas: list[LLMDelta] | None = None, raise_exc: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        deltas: list[LLMDelta] | None = None,
+        raise_exc: Exception | None = None,
+        raise_after: Exception | None = None,
+    ) -> None:
         self._deltas = deltas or [LLMDelta(text_delta="ok"), LLMDelta(finish=LLMFinishReason.STOP)]
         self._exc = raise_exc
+        self._raise_after = raise_after
 
     async def stream(self, messages, *, tools=None, model=None, temperature=0.7, max_tokens=None, request_id) -> AsyncIterator[LLMDelta]:
         if self._exc is not None:
             raise self._exc
         for d in self._deltas:
             yield d
+        if self._raise_after is not None:
+            raise self._raise_after
 
     async def count_tokens(self, messages):
         return 1
@@ -71,6 +80,36 @@ async def test_router_preserves_llm_unavailable() -> None:
     with pytest.raises(LLMUnavailableError, match="upstream busy"):
         async for _ in router.stream([], request_id="r"):
             pass
+
+
+async def test_router_uses_fallback_before_first_chunk() -> None:
+    primary = _StubProvider(raise_exc=LLMUnavailableError("upstream busy"))
+    fallback = _StubProvider(deltas=[LLMDelta(text_delta="fallback")])
+    router = LLMRouter(
+        providers={"primary": primary, "fallback": fallback},
+        default="primary",
+        fallback_models=["fallback"],
+    )
+    chunks = [d.text_delta async for d in router.stream([], request_id="r")]
+    assert chunks == ["fallback"]
+
+
+async def test_router_does_not_fallback_after_stream_started() -> None:
+    primary = _StubProvider(
+        deltas=[LLMDelta(text_delta="partial")],
+        raise_after=LLMUnavailableError("stream reset"),
+    )
+    fallback = _StubProvider(deltas=[LLMDelta(text_delta="fallback")])
+    router = LLMRouter(
+        providers={"primary": primary, "fallback": fallback},
+        default="primary",
+        fallback_models=["fallback"],
+    )
+    seen = []
+    with pytest.raises(LLMUnavailableError, match="stream reset"):
+        async for d in router.stream([], request_id="r"):
+            seen.append(d.text_delta)
+    assert seen == ["partial"]
 
 
 async def test_count_tokens_uses_default_provider() -> None:

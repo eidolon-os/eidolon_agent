@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from eidolon_agent.app.transport.pairing.token import sign_device_token
+from eidolon_agent.app.transport.pairing.token import VerifiedDevice, sign_device_token
 from eidolon_agent.core.errors import NotFoundError, UnauthenticatedError
 
 _ALPHABET = string.ascii_uppercase + string.digits  # no lowercase to avoid confusion
@@ -103,4 +103,24 @@ class PairingCoordinator:
             tenant_id=rec.tenant_id,
             user_id=rec.user_id,
             default_template_id=rec.default_template_id,
+        )
+
+    async def rotate(self, device: VerifiedDevice) -> IssuedToken:
+        token, exp = sign_device_token(
+            secret=self._secret,
+            algorithm=self._alg,
+            device_id=device.device_id,
+            tenant_id=device.tenant_id,
+            user_id=device.user_id,
+            default_template_id=device.default_template_id,
+            scopes=list(device.scopes) or ["device"],
+            ttl_days=self._token_ttl_days,
+        )
+        return IssuedToken(
+            device_id=device.device_id,
+            token=token,
+            expires_at=exp,
+            tenant_id=device.tenant_id,
+            user_id=device.user_id,
+            default_template_id=device.default_template_id,
         )

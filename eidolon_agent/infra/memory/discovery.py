@@ -189,7 +189,11 @@ class MemoryDiscoveryClient:
         token = os.environ.get(self._token_env, "").strip()
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        async with httpx.AsyncClient(timeout=self._timeout, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=self._timeout,
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
             resp = await client.get(self._url, headers=headers or None)
             resp.raise_for_status()
             return DiscoveryResponse.model_validate(resp.json())

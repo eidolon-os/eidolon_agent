@@ -161,6 +161,12 @@ class LLMSettings(BaseModel):
     api_key: str = ""  # yaml placeholder: EIDOLON_AGENT_LLM_API_KEY
     models: list[LLMModelConfig] = Field(default_factory=list)
     default_model: str = "gpt-4o-mini"
+    fallback_models: list[str] = Field(default_factory=list)
+    max_retries: int = 2
+    startup_warm_enabled: bool = True
+    startup_warm_timeout_s: float = 10.0
+    shared_http_client: bool = True
+    trust_env: bool = False
 
     @model_validator(mode="before")
     @classmethod

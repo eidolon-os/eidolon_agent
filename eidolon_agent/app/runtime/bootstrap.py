@@ -168,6 +168,11 @@ async def build_application(
     # production replaces via settings.llm.providers).
     llm_router = _build_llm_router(settings)
     container.llm_router = llm_router
+    if settings.runtime.warmup_enabled and settings.llm.startup_warm_enabled:
+        try:
+            await llm_router.warmup_default(timeout_s=settings.llm.startup_warm_timeout_s)
+        except Exception:
+            _log.warning("llm warmup failed; continuing startup", exc_info=True)
 
     # (Workstation dispatch is now a one-line NATS publish from the Turn
     # pipeline; see domain/agent/workstation.py. No long-lived client to wire.)
@@ -241,6 +246,7 @@ async def build_application(
         settings=settings,
         agent_registry=agent_registry,
         pairing=pairing,
+        pairing_verifier=verifier,
         personas_service=personas_service,
     )
     container.http_app = http_app
@@ -272,6 +278,9 @@ def _build_llm_router(settings: Settings) -> LLMRouter:
                 api_key=m.resolved_api_key(),
                 api_base=m.api_base,
                 timeout_s=m.timeout_s,
+                max_retries=settings.llm.max_retries,
+                shared_http_client=settings.llm.shared_http_client,
+                trust_env=settings.llm.trust_env,
             )
         except Exception:
             _log.warning("model %s not loaded", m.name)
@@ -280,7 +289,11 @@ def _build_llm_router(settings: Settings) -> LLMRouter:
     if default not in providers:
         _log.warning("default_model %s not configured, falling back to fake", default)
         default = "fake"
-    return LLMRouter(providers=providers, default=default)
+    return LLMRouter(
+        providers=providers,
+        default=default,
+        fallback_models=settings.llm.fallback_models,
+    )
 
 
 def _build_turn_engine(

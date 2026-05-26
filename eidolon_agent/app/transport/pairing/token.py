@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import uuid
 
 import jwt
 
@@ -47,6 +48,7 @@ def sign_device_token(
         "user_id": user_id,
         "template_id": default_template_id,
         "scopes": scopes,
+        "jti": uuid.uuid4().hex,
         "exp": int(exp.timestamp()),
         "iat": int(datetime.now(timezone.utc).timestamp()),
     }
