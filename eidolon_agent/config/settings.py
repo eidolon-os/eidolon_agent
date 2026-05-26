@@ -66,7 +66,7 @@ class HttpSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     host: str = "127.0.0.1"
-    port: int = 8080
+    port: int = 8180
     admin_port: int = 8081
     cors_origins: list[str] = Field(default_factory=list)
 

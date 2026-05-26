@@ -14,7 +14,7 @@ grpc:
 
 http:
   host: 127.0.0.1
-  port: 8080
+  port: 8180
   admin_port: 8081
 
 nats:
@@ -37,7 +37,7 @@ llm:
   api_key: EIDOLON_AGENT_LLM_API_KEY
   models:
     - name: openai/deepseek-v4-flash
-      api_base: http://127.0.0.1:8080/v1
+      api_base: http://127.0.0.1:8180/v1
   default_model: openai/deepseek-v4-flash
 
 workstation:

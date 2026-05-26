@@ -334,7 +334,7 @@ cd ../eidolon_channel
 
 `provision_eidolon_token.py` 会调用 admin `POST /api/admin/pairing/codes`，再用公开 RPC `ExchangePairingCode` 换 token。`PAIRING_JWT_SECRET` 为空时 agent 会把密钥持久化在 `~/eidolon/run/jwt-secret`；重启 agent 后旧 token 仍有效，除非你删了该文件。
 
-### HTTP（`:8080`）—— 健康探针
+### HTTP（`:8180`）—— 健康探针
 
 仅一个端点 `/readyz`，给 systemd / k8s liveness 用。
 
@@ -427,14 +427,14 @@ nats-server -js -sd ~/eidolon/nats-jetstream --port 4222 --http_port 8222
 
 启动后端口：
 - `:45051` gRPC（LiveKit / 设备；勿用 50000–60000，与 LiveKit RTC 端口段冲突）
-- `:8080`  HTTP 健康探针 `/readyz`
+- `:8180`  HTTP 健康探针 `/readyz`
 - `:8081`  Admin HTTP `/api/admin/*`、OpenAPI `/api/docs`
 
 ### 验证
 
 ```bash
 python scripts/livekit_sim.py "你好"
-curl -s http://127.0.0.1:8080/readyz
+curl -s http://127.0.0.1:8180/readyz
 curl -s http://127.0.0.1:8081/api/docs
 ```
 
