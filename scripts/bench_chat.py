@@ -37,7 +37,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
 
-
 PROMPTS = [
     "你好，我刚醒来，今天感觉怎么样？",
     "帮我想想晚饭吃什么。",
