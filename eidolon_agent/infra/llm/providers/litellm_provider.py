@@ -25,6 +25,22 @@ litellm.drop_params = True
 
 _log = logging.getLogger(__name__)
 _shared_http_client: httpx.AsyncClient | None = None
+# Monotonic timestamp of the previous acompletion *start*, process-wide. Used
+# only for F1 diagnostics: correlating a slow connect_ms with the idle gap
+# since the last call distinguishes a cold-connection / cold-upstream-worker
+# spike (large connect after large idle) from upstream queueing/load (large
+# connect after a short idle). Concurrency races are acceptable for a
+# diagnostic gauge.
+_last_call_monotonic: float | None = None
+
+
+def _idle_ms_and_mark() -> int:
+    """Return ms since the previous call start and mark 'now' as the latest."""
+    global _last_call_monotonic
+    now = time.monotonic()
+    idle_ms = -1 if _last_call_monotonic is None else int((now - _last_call_monotonic) * 1000)
+    _last_call_monotonic = now
+    return idle_ms
 
 
 class LiteLLMProvider:
@@ -74,16 +90,18 @@ class LiteLLMProvider:
             kwargs["tools"] = [t.to_openai_function() for t in tools]
 
         tool_buf: dict[int, dict] = {}
+        idle_ms = _idle_ms_and_mark()
         t0 = time.monotonic()
         try:
             response = await litellm.acompletion(**kwargs)
         except Exception as exc:
             connect_ms = int((time.monotonic() - t0) * 1000)
             _log.warning(
-                "litellm acompletion failed req=%s model=%s connect_ms=%d err=%s",
+                "litellm acompletion failed req=%s model=%s connect_ms=%d idle_ms=%d err=%s",
                 request_id,
                 kwargs["model"],
                 connect_ms,
+                idle_ms,
                 exc,
             )
             raise LLMUnavailableError(f"litellm call failed: {exc}") from exc
@@ -96,11 +114,12 @@ class LiteLLMProvider:
                     if not first_chunk_logged:
                         ttft_ms = int((time.monotonic() - t0) * 1000)
                         _log.info(
-                            "litellm_timings req=%s model=%s connect_ms=%d ttft_ms=%d",
+                            "litellm_timings req=%s model=%s connect_ms=%d ttft_ms=%d idle_ms=%d",
                             request_id,
                             kwargs["model"],
                             connect_ms,
                             ttft_ms,
+                            idle_ms,
                         )
                         first_chunk_logged = True
                     if not chunk.choices:

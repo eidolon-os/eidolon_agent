@@ -38,7 +38,28 @@ llm:
   models:
     - name: openai/deepseek-v4-flash
       api_base: http://127.0.0.1:8180/v1
+    # Configure a second model to make `fallback_models` effective. It should
+    # be a genuinely independent endpoint — falling back to the same upstream
+    # that just failed buys nothing.
+    # - name: openai/deepseek-v4-backup
+    #   api_base: http://backup-gateway.internal/v1
   default_model: openai/deepseek-v4-flash
+  # Ordered list of model names to try (in order) when the default fails
+  # *before its first token*. Empty by default → no failover. The router only
+  # fails over on errors, not on a slow-but-successful response.
+  fallback_models: []
+  # litellm/httpx tuning. trust_env=False makes the LLM HTTP client IGNORE the
+  # ambient HTTP(S)_PROXY / NO_PROXY / .netrc env. We default to False because
+  # the LLM endpoint here is reached directly; an env proxy intercepting the
+  # call returns 502 (root cause of the original cold-start failures).
+  # IMPORTANT: this assumes `api_base` is reachable WITHOUT a proxy. If a future
+  # endpoint is only reachable via a corporate proxy, set trust_env: true and
+  # ensure NO_PROXY covers any loopback endpoints.
+  trust_env: false
+  shared_http_client: true   # one pooled, keepalive httpx client across turns
+  max_retries: 2
+  startup_warm_enabled: true # prime DNS/TCP/TLS + upstream model at boot
+  startup_warm_timeout_s: 10.0
 
 workstation:
   transport: nats
