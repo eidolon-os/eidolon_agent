@@ -158,10 +158,46 @@ class SqlConversationRepository:
         row.cost_usd_micro = result.cost_usd_micro
         row.model = result.model
         row.error_code = result.error_code
+        if result.metadata is not None:
+            row.metadata_ = result.metadata
         if result.started_at:
             row.started_at = result.started_at
         if result.finished_at:
             row.finished_at = result.finished_at
+
+    async def ensure_started(
+        self,
+        *,
+        conversation_id: str,
+        tenant_id: str,
+        user_id: str,
+        agent_instance_id: str,
+    ) -> None:
+        """Idempotent ``start``: no-op if the conversation row already exists."""
+        existing = await self._session.get(ConversationRow, conversation_id)
+        if existing is not None:
+            return
+        await self.start(
+            conversation_id=conversation_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            agent_instance_id=agent_instance_id,
+        )
+
+    async def count_turns(self, conversation_id: str) -> int:
+        """Number of turns already recorded for a conversation.
+
+        Used to assign ``seq_in_conversation`` (the table has a UNIQUE
+        constraint on ``(conversation_id, seq)``).
+        """
+        from sqlalchemy import func, select
+
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(TurnRow)
+            .where(TurnRow.conversation_id == conversation_id)
+        )
+        return int(result.scalar_one())
 
 
 class SqlDeviceRepository:

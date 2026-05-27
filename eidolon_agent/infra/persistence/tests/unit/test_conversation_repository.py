@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from datetime import datetime, timezone
 
@@ -87,3 +88,56 @@ async def test_record_turn_inserts_then_updates(uow_factory) -> None:
     async with uow_factory() as uow:
         row = await uow._session.get(TurnRow, turn_id)  # type: ignore[attr-defined]
     assert row.status == TurnStatus.ERRORED.value
+
+
+async def test_ensure_started_is_idempotent(uow_factory) -> None:
+    conv_id = uuid.uuid4().hex
+    async with uow_factory() as uow:
+        await uow.conversations.ensure_started(
+            conversation_id=conv_id, tenant_id="t", user_id="u", agent_instance_id="i"
+        )
+        # Second call with different fields must NOT raise (no duplicate insert)
+        # and must NOT overwrite the original row.
+        await uow.conversations.ensure_started(
+            conversation_id=conv_id, tenant_id="t2", user_id="u2", agent_instance_id="i2"
+        )
+        await uow.commit()
+    async with uow_factory() as uow:
+        row = await uow._session.get(ConversationRow, conv_id)  # type: ignore[attr-defined]
+    assert row.user_id == "u"  # original preserved
+
+
+async def test_count_turns_assigns_unique_seq(uow_factory) -> None:
+    conv_id = uuid.uuid4().hex
+    async with uow_factory() as uow:
+        await uow.conversations.ensure_started(
+            conversation_id=conv_id, tenant_id="t", user_id="u", agent_instance_id="i"
+        )
+        assert await uow.conversations.count_turns(conv_id) == 0
+        # Record two turns using count as the per-conversation seq — the
+        # (conversation_id, seq) UNIQUE constraint must not be violated.
+        for _ in range(2):
+            seq = await uow.conversations.count_turns(conv_id)
+            r = _result(uuid.uuid4().hex, conv_id)
+            await uow.conversations.record_turn(
+                dataclasses.replace(r, seq_in_conversation=seq)
+            )
+            await uow.commit()
+        assert await uow.conversations.count_turns(conv_id) == 2
+
+
+async def test_record_turn_persists_metadata_timings(uow_factory) -> None:
+    conv_id, turn_id = uuid.uuid4().hex, uuid.uuid4().hex
+    timings = {"guard_ms": 1, "triage_ms": 0, "compile_ms": 20, "first_delta_ms": 180}
+    async with uow_factory() as uow:
+        await uow.conversations.ensure_started(
+            conversation_id=conv_id, tenant_id="t", user_id="u", agent_instance_id="i"
+        )
+        base = _result(turn_id, conv_id)
+        await uow.conversations.record_turn(
+            dataclasses.replace(base, metadata=timings)
+        )
+        await uow.commit()
+    async with uow_factory() as uow:
+        row = await uow._session.get(TurnRow, turn_id)  # type: ignore[attr-defined]
+    assert row.metadata_ == timings

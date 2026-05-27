@@ -330,6 +330,7 @@ def _build_turn_engine(
         persona_template_id=template_id,
         max_tool_iters=container.settings.turn.max_tool_iters,
         taboos_provider=lambda: tuple(),
+        session_factory=container.session_factory,
     )
 
 

@@ -83,6 +83,7 @@ class TurnEngine:
         persona_template_id: str | None = None,
         max_tool_iters: int = 4,
         taboos_provider=lambda: (),  # () -> tuple[str, ...]
+        session_factory=None,  # async_sessionmaker; None disables turn persistence
     ) -> None:
         self._compiler = compiler
         self._llm = llm
@@ -98,6 +99,7 @@ class TurnEngine:
         self._persona_template_id = persona_template_id
         self._max_tool_iters = max_tool_iters
         self._taboos_provider = taboos_provider
+        self._session_factory = session_factory
 
     async def run(self, ti: TurnInput) -> AsyncIterator[TurnEvent]:
         """Run a single Turn. Yields TurnEvents until DONE or ERROR."""
@@ -294,6 +296,33 @@ class TurnEngine:
             error_code = "internal"
             yield TurnEvent.error(ti.turn_id, seq.next(), error_code, str(exc), time.time())
         finally:
+            # Persist the turn row (latency + phase timings) for every outcome.
+            # Fire-and-forget: the user already has their answer, and a DB hiccup
+            # must never affect the stream. Disabled when no session_factory.
+            if self._session_factory is not None:
+                total_ms = int((time.monotonic() - t0) * 1000)
+                timings = {
+                    "guard_ms": ts_guard_ms,
+                    "triage_ms": ts_triage_ms,
+                    "compile_ms": ts_compile_ms,
+                    "first_delta_ms": first_delta_ms,
+                    "output_ms": ts_output_ms,
+                }
+                asyncio.create_task(  # noqa: RUF006 — fire-and-forget by design
+                    self._persist_turn(
+                        ti=ti,
+                        status=status,
+                        triage_kind=triage_kind,
+                        started_at=started_at,
+                        finished_at=datetime.now(timezone.utc),
+                        first_delta_ms=first_delta_ms,
+                        total_ms=total_ms,
+                        usage_in=usage_in,
+                        usage_out=usage_out,
+                        error_code=error_code,
+                        timings=timings,
+                    )
+                )
             if self._bus is not None:
                 try:
                     await self._bus.publish(
@@ -360,6 +389,63 @@ class TurnEngine:
         yield TurnEvent.done(
             ti.turn_id, seq.next(), TurnStatus.HANDED_OFF, time.time(), task_id=task_id
         )
+
+    async def _persist_turn(
+        self,
+        *,
+        ti: TurnInput,
+        status: TurnStatus,
+        triage_kind: TriageKind,
+        started_at: datetime,
+        finished_at: datetime,
+        first_delta_ms: int | None,
+        total_ms: int,
+        usage_in: int,
+        usage_out: int,
+        error_code: str | None,
+        timings: dict,
+    ) -> None:
+        """Background: write the TurnRow (latency + phase timings) to SQLite.
+
+        Ensures the parent conversation row exists (idempotent) and assigns a
+        per-conversation ``seq`` via a COUNT. Errors are logged and swallowed —
+        this runs after DONE and must never surface to the caller.
+        """
+        from eidolon_agent.core.types.turn import TurnResult
+        from eidolon_agent.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
+
+        try:
+            async with SqlAlchemyUnitOfWork(self._session_factory) as uow:
+                await uow.conversations.ensure_started(
+                    conversation_id=ti.conversation_id,
+                    tenant_id=ti.caller.tenant_id,
+                    user_id=ti.caller.user_id,
+                    agent_instance_id=ti.caller.agent_instance_id or "",
+                )
+                seq_in_conv = await uow.conversations.count_turns(ti.conversation_id)
+                await uow.conversations.record_turn(
+                    TurnResult(
+                        turn_id=ti.turn_id,
+                        conversation_id=ti.conversation_id,
+                        status=status,
+                        triage_kind=triage_kind,
+                        trigger=ti.trigger,
+                        seq_count=0,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        latency_first_delta_ms=first_delta_ms,
+                        total_latency_ms=total_ms,
+                        tokens_in=usage_in,
+                        tokens_out=usage_out,
+                        model=getattr(self._llm, "model_id", None),
+                        error_code=error_code,
+                        seq_in_conversation=seq_in_conv,
+                        metadata=timings,
+                    )
+                )
+                await uow.commit()
+        except Exception:
+            _log.exception("persist turn %s failed", ti.turn_id)
 
     async def _post_turn(
         self,

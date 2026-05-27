@@ -154,3 +154,7 @@ class TurnResult:
     model: str | None = None
     error_code: str | None = None
     seq_in_conversation: int = 0
+    # Free-form per-turn diagnostics persisted into TurnRow.metadata (JSON).
+    # Used by F3 to carry the granular phase timings (guard/triage/compile/
+    # llm_ttft) without a schema migration.
+    metadata: dict[str, Any] | None = None
