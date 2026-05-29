@@ -166,7 +166,6 @@ class LLMSettings(BaseModel):
     startup_warm_enabled: bool = True
     startup_warm_timeout_s: float = 10.0
     shared_http_client: bool = True
-    trust_env: bool = False
 
     @model_validator(mode="before")
     @classmethod

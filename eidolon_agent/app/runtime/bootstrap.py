@@ -280,7 +280,6 @@ def _build_llm_router(settings: Settings) -> LLMRouter:
                 timeout_s=m.timeout_s,
                 max_retries=settings.llm.max_retries,
                 shared_http_client=settings.llm.shared_http_client,
-                trust_env=settings.llm.trust_env,
             )
         except Exception:
             _log.warning("model %s not loaded", m.name)

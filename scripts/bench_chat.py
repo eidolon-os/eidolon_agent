@@ -253,7 +253,7 @@ async def main() -> None:
         f"reuse_stream={args.reuse_stream}"
     )
 
-    async with httpx.AsyncClient(trust_env=False) as http:
+    async with httpx.AsyncClient() as http:
         token, _ = await _issue_token(
             http,
             args.grpc,

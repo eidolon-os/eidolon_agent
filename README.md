@@ -96,11 +96,13 @@
 4. **出去的**：eidolon-agent →（MCP HTTP / NATS publish）→ eidolon-memory
 5. **出去的**：eidolon-agent →（NATS publish）→ workstation-agent
 
-> ⚠️ **LLM 出口与代理**：LLM HTTP 客户端默认 `llm.trust_env=false`，即**忽略**进程环境里的
-> `HTTP(S)_PROXY` / `NO_PROXY`。这样做是因为环境代理拦截 LLM 调用会返回 `502`（曾导致首通
-> 冷启动失败）。前提：`llm.api_base` 不经代理可直达。若 LLM endpoint 只能经公司代理访问，
-> 需设 `trust_env: true` 并让 `NO_PROXY` 覆盖所有环回 endpoint。启动时会对 default model 做
-> 一次 warmup 把 DNS/TCP/TLS + 上游模型 cold start 提前到 boot（`startup_warm_*`）。
+> ⚠️ **LLM 出口与代理**：代理策略由**部署层**统一管理，agent 代码本身不感知。在
+> admin/supervisord 启动的栈里，`NO_PROXY=127.0.0.1,localhost,::1,*.local` 由 supervisord
+> 注入到所有子进程，环回流量直连；外网 LLM 调用按 operator shell 里的
+> `HTTP(S)_PROXY` 自然走（国内用户用 Clash/VPN 访问 openai.com 就是这条路径）。
+> 单独跑 agent（脱离 supervisord）时请确保 shell 里有 `NO_PROXY=127.0.0.1,localhost,::1`，
+> 否则环回 endpoint（memory MCP / discovery）可能被系统代理劫持。启动时仍会对 default
+> model 做一次 warmup 把 DNS/TCP/TLS + 上游模型 cold start 提前到 boot（`startup_warm_*`）。
 
 ---
 

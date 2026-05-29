@@ -60,7 +60,6 @@ class McpUserSession:
                 self._http_client = httpx.AsyncClient(
                     headers=headers,
                     follow_redirects=True,
-                    trust_env=False,
                 )
                 self._client_cm = streamable_http_client(
                     self._url,

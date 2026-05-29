@@ -48,14 +48,11 @@ llm:
   # *before its first token*. Empty by default → no failover. The router only
   # fails over on errors, not on a slow-but-successful response.
   fallback_models: []
-  # litellm/httpx tuning. trust_env=False makes the LLM HTTP client IGNORE the
-  # ambient HTTP(S)_PROXY / NO_PROXY / .netrc env. We default to False because
-  # the LLM endpoint here is reached directly; an env proxy intercepting the
-  # call returns 502 (root cause of the original cold-start failures).
-  # IMPORTANT: this assumes `api_base` is reachable WITHOUT a proxy. If a future
-  # endpoint is only reachable via a corporate proxy, set trust_env: true and
-  # ensure NO_PROXY covers any loopback endpoints.
-  trust_env: false
+  # Proxy policy is owned by the deployment layer (admin's supervisord sets
+  # NO_PROXY=loopback so internal traffic stays direct, while the operator's
+  # HTTP_PROXY / HTTPS_PROXY still drive external LLM calls through a VPN /
+  # corporate proxy when the LLM endpoint requires one). httpx defaults
+  # transparently honor that policy — no per-service knob here.
   shared_http_client: true   # one pooled, keepalive httpx client across turns
   max_retries: 2
   startup_warm_enabled: true # prime DNS/TCP/TLS + upstream model at boot

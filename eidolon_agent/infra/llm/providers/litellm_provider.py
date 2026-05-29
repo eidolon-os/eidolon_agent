@@ -53,7 +53,6 @@ class LiteLLMProvider:
         timeout_s: float = 30.0,
         max_retries: int = 2,
         shared_http_client: bool = True,
-        trust_env: bool = False,
     ) -> None:
         self._model = model
         self._api_key = api_key
@@ -61,7 +60,6 @@ class LiteLLMProvider:
         self._timeout = timeout_s
         self._max_retries = max_retries
         self._shared_http_client = shared_http_client
-        self._trust_env = trust_env
 
     @property
     def model_id(self) -> str:
@@ -234,7 +232,7 @@ class LiteLLMProvider:
         timeout_s: float,
     ) -> dict:
         if self._shared_http_client:
-            _ensure_shared_client(trust_env=self._trust_env)
+            _ensure_shared_client()
         kwargs: dict = {
             "model": model or self._model,
             "messages": [_to_msg(m) for m in messages],
@@ -250,12 +248,18 @@ class LiteLLMProvider:
         return kwargs
 
 
-def _ensure_shared_client(*, trust_env: bool) -> httpx.AsyncClient:
-    """Install one reusable HTTPX client for LiteLLM/OpenAI-compatible calls."""
+def _ensure_shared_client() -> httpx.AsyncClient:
+    """Install one reusable HTTPX client for LiteLLM/OpenAI-compatible calls.
+
+    Proxy policy is owned by the deployment layer (supervisord NO_PROXY for
+    loopback bypass; the user's HTTP_PROXY/HTTPS_PROXY for external traffic
+    when needed — e.g. operators in regions that require a VPN to reach a
+    public LLM endpoint). httpx defaults (``trust_env=True``) transparently
+    honor that policy without forcing per-call hardcoding here.
+    """
     global _shared_http_client
     if _shared_http_client is None or _shared_http_client.is_closed:
         _shared_http_client = httpx.AsyncClient(
-            trust_env=trust_env,
             limits=httpx.Limits(
                 max_connections=100,
                 max_keepalive_connections=20,
