@@ -1,68 +1,234 @@
-"""Template registry for canonical persona templates."""
+"""Template registry for canonical persona templates.
+
+Two sources at the same logical address:
+
+  - **builtin**: YAML files under ``templates_dir``, loaded once at
+    bootstrap. Read-only — these are deployment artifacts shipped with
+    the agent. Cached in memory because the set is small and static
+    until the process restarts.
+
+  - **custom** (Phase 29.D): operator-authored templates persisted in
+    the ``persona_templates_custom`` SQL table via
+    :class:`SqlCustomTemplateStore`. The registry holds an in-memory
+    cache of the custom set, refreshed whenever admin CRUD mutates it.
+
+Read API stays **synchronous** — registry consumers (turn compilation,
+prompt rendering, evolution) need a fast lookup with no SQL roundtrip
+on the hot path. Only the cache-refresh side effect of admin writes is
+async.
+
+When both sources hold the same ``template_id`` the custom version
+wins (operator's hand-edit overrides the shipped baseline).
+"""
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from typing import Protocol
 
 import yaml
 
 from eidolon_agent.core.errors import NotFoundError, ValidationError
 from eidolon_agent.domain.personas.types import PersonaTemplate, PersonaTemplateSummary
 
+_log = logging.getLogger(__name__)
+
+
+class _CustomTemplateSource(Protocol):
+    """The minimal slice of ``SqlCustomTemplateStore`` the registry needs.
+
+    Declared as a Protocol so the domain layer keeps its
+    ``no-infra-import`` rule (the actual SQL store lives in
+    ``infra/persistence``).
+    """
+
+    async def list_all(self): ...  # returns list[CustomTemplateView]
+
 
 class PersonaTemplateRegistry:
-    def __init__(self, templates_dir: Path) -> None:
+    """Two-source registry. Read API is sync; cache refresh is async."""
+
+    def __init__(
+        self,
+        templates_dir: Path,
+        *,
+        custom_source: _CustomTemplateSource | None = None,
+    ) -> None:
         self._dir = templates_dir
-        self._templates: dict[str, PersonaTemplate] = {}
+        # Builtin (immutable until process restart).
+        self._builtin: dict[str, PersonaTemplate] = {}
+        self._builtin_raw: dict[str, str] = {}
+        # Custom (refreshed on admin CRUD).
+        self._custom: dict[str, PersonaTemplate] = {}
+        self._custom_raw: dict[str, str] = {}
+        # Unparseable custom rows kept here for the list view to show
+        # so the operator can find and delete broken yaml.
+        self._custom_broken: dict[str, PersonaTemplateSummary] = {}
+        self._custom_source = custom_source
+
+    # ---- bootstrap / refresh ------------------------------------------------
 
     async def load_all(self) -> None:
-        self._templates.clear()
+        """Load both sources from scratch. Called once at boot."""
+        self._load_builtin_from_disk()
+        await self.refresh_custom()
+
+    def _load_builtin_from_disk(self) -> None:
+        self._builtin.clear()
+        self._builtin_raw.clear()
         if not self._dir.exists():
             return
         for path in sorted(self._dir.glob("*.yaml")):
-            template = _parse_template(path)
-            self._templates[template.metadata.template_id] = template
+            text = path.read_text(encoding="utf-8")
+            template = _parse_yaml_str_with_path_hint(text, path)
+            self._builtin[template.metadata.template_id] = template
+            self._builtin_raw[template.metadata.template_id] = text
+
+    async def refresh_custom(self) -> None:
+        """Reload the custom cache from the source. Called by orchestrator
+        after any CRUD mutation. No-op when no custom_source is configured
+        (e.g. tests that only need builtin).
+
+        Important: the cache key is the STORE ROW's ``template_id`` (the
+        SQL PK) — NOT the ``metadata.template_id`` embedded in the yaml.
+        Fork copies a source's yaml verbatim under a new row id, so the
+        yaml inside still references the OLD id. If we keyed by the
+        embedded id, the fork would silently overwrite the source in the
+        cache (one entry, source's id) — admin would see "only one
+        template" after forking.
+
+        Same care applies to the parsed PersonaTemplate's metadata —
+        we override ``template_id`` (and ``template_revision``) to match
+        the row so the rendered soul references the row's id, which is
+        the only id the operator and downstream agents/instances use.
+        """
+        self._custom.clear()
+        self._custom_raw.clear()
+        self._custom_broken.clear()
+        if self._custom_source is None:
+            return
+        rows = await self._custom_source.list_all()
+        for row in rows:
+            try:
+                parsed = _parse_yaml_str(row.yaml_body)
+                # Override the parsed metadata so the row's identity (id +
+                # revision) is the source of truth, not whatever the yaml
+                # text says. Cheaper than re-validating the yaml after
+                # mutating its dict.
+                normalized = parsed.model_copy(
+                    update={
+                        "metadata": parsed.metadata.model_copy(
+                            update={
+                                "template_id": row.template_id,
+                                "template_revision": row.revision,
+                            }
+                        )
+                    }
+                )
+                self._custom[row.template_id] = normalized
+                self._custom_raw[row.template_id] = row.yaml_body
+            except ValidationError as exc:
+                _log.warning(
+                    "custom template %r unparseable; surfacing as broken: %s",
+                    row.template_id,
+                    exc,
+                )
+                # Fall back to denormalised display name so the operator
+                # can still see + delete it from the list.
+                self._custom_broken[row.template_id] = PersonaTemplateSummary(
+                    template_id=row.template_id,
+                    template_revision=row.revision,
+                    name=row.display_name,
+                    archetype=row.archetype,
+                    description="(unparseable YAML — please edit or delete)",
+                )
+
+    # ---- read API (sync, custom-aware) -------------------------------------
 
     def list_templates(self) -> list[PersonaTemplateSummary]:
-        return [
-            PersonaTemplateSummary(
+        """Builtin + custom (+ broken-custom placeholders). Custom wins
+        on id collision. Stable order: by template_id."""
+        merged: dict[str, PersonaTemplateSummary] = {
+            tid: PersonaTemplateSummary(
                 template_id=t.metadata.template_id,
                 template_revision=t.metadata.template_revision,
                 name=t.metadata.name,
                 archetype=t.metadata.archetype,
                 description=t.metadata.description,
             )
-            for t in sorted(self._templates.values(), key=lambda item: item.metadata.template_id)
-        ]
+            for tid, t in self._builtin.items()
+        }
+        for tid, t in self._custom.items():
+            merged[tid] = PersonaTemplateSummary(
+                template_id=t.metadata.template_id,
+                template_revision=t.metadata.template_revision,
+                name=t.metadata.name,
+                archetype=t.metadata.archetype,
+                description=t.metadata.description,
+            )
+        # broken rows surface so operator can delete them
+        for tid, summary in self._custom_broken.items():
+            if tid not in merged:  # don't overwrite a parseable copy
+                merged[tid] = summary
+        return sorted(merged.values(), key=lambda s: s.template_id)
 
     def list_all(self) -> list[PersonaTemplate]:
-        return [self._templates[k] for k in sorted(self._templates)]
+        """Parsed objects only (builtin + parseable custom)."""
+        out: dict[str, PersonaTemplate] = dict(self._builtin)
+        out.update(self._custom)  # custom wins on collision
+        return [out[k] for k in sorted(out)]
 
     def get(self, template_id: str) -> PersonaTemplate:
+        """Custom wins over builtin on id collision."""
+        if template_id in self._custom:
+            return self._custom[template_id]
         try:
-            return self._templates[template_id]
+            return self._builtin[template_id]
         except KeyError as exc:
-            raise NotFoundError(f"persona template not found: {template_id}") from exc
+            raise NotFoundError(
+                f"persona template not found: {template_id}"
+            ) from exc
 
     def raw_yaml(self, template_id: str) -> str:
-        """Return the original YAML text for a template — admin source view."""
-        if template_id not in self._templates:
+        """Original YAML for the admin source view. Custom > builtin."""
+        if template_id in self._custom_raw:
+            return self._custom_raw[template_id]
+        raw = self._builtin_raw.get(template_id)
+        if raw is None:
             raise NotFoundError(f"persona template not found: {template_id}")
-        path = self._dir / f"{template_id}.yaml"
-        if not path.exists():
-            raise NotFoundError(f"template file missing on disk: {path}")
-        return path.read_text(encoding="utf-8")
+        return raw
+
+    # ---- introspection ------------------------------------------------------
+
+    def builtin_ids(self) -> set[str]:
+        """Used by admin endpoints to decide whether DELETE is permitted
+        (builtin templates can't be deleted — only forked)."""
+        return set(self._builtin.keys())
+
+    def is_custom(self, template_id: str) -> bool:
+        return template_id in self._custom or template_id in self._custom_broken
 
 
-def _parse_template(path: Path) -> PersonaTemplate:
+def _parse_yaml_str_with_path_hint(text: str, path: Path) -> PersonaTemplate:
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return _parse_yaml_str(text)
+    except ValidationError as exc:
+        raise ValidationError(f"{path}: {exc}") from exc
+
+
+def _parse_yaml_str(text: str) -> PersonaTemplate:
+    try:
+        raw = yaml.safe_load(text) or {}
     except yaml.YAMLError as exc:
-        raise ValidationError(f"{path}: YAML parse error: {exc}") from exc
+        raise ValidationError(f"YAML parse error: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValidationError(
+            "template root must be a mapping, got " + type(raw).__name__
+        )
     if "schema_version" in raw:
-        raise ValidationError(f"{path}: schema_version is not used by canonical personas")
+        raise ValidationError("schema_version is not used by canonical personas")
     try:
         return PersonaTemplate(**raw)
     except Exception as exc:
-        raise ValidationError(f"{path}: template schema error: {exc}") from exc
-
+        raise ValidationError(f"template schema error: {exc}") from exc

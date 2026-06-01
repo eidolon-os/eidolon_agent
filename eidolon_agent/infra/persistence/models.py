@@ -209,6 +209,40 @@ class PersonaInstanceRow(Base):
     )
 
 
+class PersonaTemplateCustomRow(Base):
+    """Operator-authored persona templates (Phase 29.D).
+
+    Built-in templates live as YAML files under ``settings.persona.templates_dir``
+    — those are deployment artifacts shipped with the agent code. Custom
+    templates created via admin's UI / REST land here. The
+    ``PersonaTemplateRegistry`` consults both sources at lookup time so
+    rendering / instance creation works uniformly across the two.
+
+    No foreign key from ``persona_instances.template_id`` to this table
+    because instances may reference builtin templates that aren't in
+    SQL. Refcount-on-delete is enforced in application code.
+    """
+
+    __tablename__ = "persona_templates_custom"
+
+    template_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64), default="default", index=True
+    )
+    display_name: Mapped[str] = mapped_column(String(255))
+    archetype: Mapped[str] = mapped_column(String(64), default="custom")
+    # The raw YAML text. Stored verbatim so the operator can round-trip
+    # edits — re-serializing through PersonaTemplate.model_dump() would
+    # lose comments and reorder fields.
+    yaml_body: Mapped[str] = mapped_column(Text)
+    # Bumps on every PUT. persona_instances persist the revision they
+    # were rendered from so older agents keep working after template
+    # updates — operator must explicitly trigger re-render to migrate.
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
+
+
 __all__ = [
     "Base",
     "ChatMessageRow",
@@ -216,5 +250,6 @@ __all__ = [
     "DeviceRow",
     "EvolutionHistoryRow",
     "PersonaInstanceRow",
+    "PersonaTemplateCustomRow",
     "TurnRow",
 ]

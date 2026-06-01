@@ -12,7 +12,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from eidolon_agent.app.admin.routers import chat_test, devices, personas
+from eidolon_agent.app.admin.routers import chat_test, devices, personas, templates
 from eidolon_agent.app.admin.routers import pairing as pairing_router
 from eidolon_agent.config.settings import Settings
 
@@ -24,6 +24,8 @@ def build_admin_app(
     pairing,
     pairing_verifier=None,
     personas_service=None,
+    custom_template_store=None,
+    persona_template_registry=None,
 ) -> FastAPI:
     app = FastAPI(
         title="eidolon-agent admin",
@@ -44,9 +46,21 @@ def build_admin_app(
     app.state.pairing = pairing
     app.state.pairing_verifier = pairing_verifier
     app.state.personas_service = personas_service
+    # Phase 29.D — custom template CRUD. These two are coupled (router
+    # mutates the store, then calls registry.refresh_custom() so the
+    # in-memory cache stays consistent).
+    app.state.custom_template_store = custom_template_store
+    app.state.persona_template_registry = persona_template_registry
 
     app.include_router(devices.router, prefix="/api/admin", tags=["devices"])
     app.include_router(personas.router, prefix="/api/admin", tags=["personas"])
+    # ``templates`` MUST come after ``personas`` because both mount routes
+    # under ``/personas/templates/*`` — personas has the read endpoints
+    # (list/detail/raw/render) on /personas/templates while templates has
+    # the write endpoints (POST/PUT/DELETE/fork). FastAPI matches in
+    # registration order; the read-side patterns are fine following the
+    # write-side because the path segments differ.
+    app.include_router(templates.router, prefix="/api/admin", tags=["templates"])
     app.include_router(pairing_router.router, prefix="/api/admin", tags=["pairing"])
     app.include_router(chat_test.router, prefix="/api/admin", tags=["chat-test"])
 

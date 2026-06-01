@@ -76,7 +76,21 @@ async def test_three_fetches_run_concurrently() -> None:
     assert msgs[-1].content == "ask"
 
 
-async def test_memory_failure_does_not_break_concurrent_compile() -> None:
+async def test_memory_failure_injects_degraded_notice_into_prompt() -> None:
+    """Phase 29.B.1: a memory recall failure no longer degrades *silently*.
+
+    The compiler injects a structured ``[MEMORY]`` block carrying the
+    degraded-backend notice so the downstream LLM is told NOT to fake
+    remembering prior context. This replaces the previous behavior
+    (return None, append nothing) which produced an amnesiac-but-
+    confident assistant — exactly the failure mode this change fixes.
+
+    Test pins three things:
+      1. compile() does not raise — memory is still non-critical
+      2. the system message HAS a [MEMORY] block (the degraded notice)
+      3. the user input still appears as the trailing user message
+    """
+
     class _BoomMemory:
         async def recall_context(self, **_):
             raise RuntimeError("upstream broken")
@@ -88,7 +102,10 @@ async def test_memory_failure_does_not_break_concurrent_compile() -> None:
         memory_port=_BoomMemory(),
     )
     msgs = await compiler.compile(make_turn_input("ask"))
-    assert "[MEMORY]" not in msgs[0].content  # degraded silently
+    assert "[MEMORY]" in msgs[0].content  # degraded notice is present
+    # The notice must include a clear "memory backend unavailable" cue so
+    # the LLM behavior is observable from the prompt alone.
+    assert "memory backend" in msgs[0].content.lower() or "记忆" in msgs[0].content
     assert msgs[-1].content == "ask"
 
 

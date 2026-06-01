@@ -113,8 +113,22 @@ async def build_application(
         container.extras["memory_discovery_refresher"] = memory_refresher
 
     # 5 + 6. Personas templates + per-user instance copies ---------------------
-    tpl_reg = PersonaTemplateRegistry(Path(settings.persona.templates_dir))
+    # Templates have two backing stores: builtin yaml files (read-only,
+    # ship with the agent) and an operator-mutable SQL table for custom
+    # templates (Phase 29.D). The registry merges them at lookup time;
+    # the SQL store is None for tests/diagnostic modes that don't want
+    # to hit the database.
+    from eidolon_agent.infra.persistence.sql_custom_template_store import (
+        SqlCustomTemplateStore,
+    )
+    custom_template_store = SqlCustomTemplateStore(session_factory)
+    tpl_reg = PersonaTemplateRegistry(
+        Path(settings.persona.templates_dir),
+        custom_source=custom_template_store,
+    )
     await tpl_reg.load_all()
+    container.custom_template_store = custom_template_store
+    container.persona_template_registry = tpl_reg
     # Production wiring: SQLite-backed instance store. The legacy
     # YamlPersonaInstanceStore is now only used by the YAML→SQLite migration
     # script. ``persona.storage`` in config lets ops fall back to YAML for
@@ -248,6 +262,8 @@ async def build_application(
         pairing=pairing,
         pairing_verifier=verifier,
         personas_service=personas_service,
+        custom_template_store=custom_template_store,
+        persona_template_registry=tpl_reg,
     )
     container.http_app = http_app
     container.admin_app = admin_app
