@@ -149,12 +149,32 @@ class ContextCompiler:
             )
         return out
 
+    # Injected into the system prompt when memory recall raises. Tells the
+    # LLM not to confabulate prior context — degraded honestly beats
+    # silently-amnesiac-pretending-to-remember.
+    _MEMORY_DEGRADED_NOTICE = (
+        "（系统提示：本轮 memory backend 暂不可达,你没有任何过往记忆访问权。"
+        "请如实承认这点,不要假装记得用户之前说过的事;"
+        "也不要主动声称会记住用户接下来说的——因为本轮记忆链路是断的。）"
+    )
+
     async def _memory_recall(self, ti: TurnInput) -> str | None:
         """Memory recall branch for the parallel ``gather`` above.
 
-        Returns the formatted memory block (possibly ``""``) or ``None`` when
-        memory is disabled / the turn has no text to query on. Exceptions are
-        swallowed and logged — gather sees the ``None`` result.
+        Three return shapes:
+          - ``None``: memory was not attempted (port absent, no text). No
+            block goes into the system prompt.
+          - non-empty hit string: normal recall produced context. Gets
+            injected as ``[MEMORY]\\n<block>``.
+          - ``_MEMORY_DEGRADED_NOTICE``: recall raised. The LLM is told
+            in-prompt that memory is down for this turn, so it won't
+            silently confabulate "as you mentioned earlier...". This
+            replaces the previous silent ``None`` fallback whose net
+            effect was an amnesiac-but-confident assistant — exactly
+            the failure mode that motivated this change.
+
+        The compile() outer loop treats all three the same way (truthy →
+        append to system_parts) so no caller code changes.
         """
         if self._memory is None or not ti.text:
             return None
@@ -174,8 +194,12 @@ class ContextCompiler:
             )
             return formatted or None
         except Exception:
-            _log.exception("memory recall failed; continuing without")
-            return None
+            _log.exception(
+                "memory recall failed for user=%s; injecting degraded notice "
+                "into system prompt",
+                ti.caller.user_id,
+            )
+            return self._MEMORY_DEGRADED_NOTICE
 
 
 async def _timed(_name: str, coro):  # type: ignore[no-untyped-def]

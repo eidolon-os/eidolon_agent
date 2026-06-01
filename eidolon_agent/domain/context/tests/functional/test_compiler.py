@@ -139,6 +139,51 @@ async def test_memory_failure_does_not_break_turn() -> None:
     assert msgs[0].role is MessageRole.SYSTEM
 
 
+async def test_memory_failure_injects_degraded_notice_into_prompt() -> None:
+    """Regression: silent fallback used to give the LLM no signal that
+    memory was down, so it would happily confabulate "as you mentioned
+    earlier..." answers. The new behavior is to inject an in-prompt
+    notice telling the LLM not to fake having access to memory.
+
+    See compiler.ContextCompiler._MEMORY_DEGRADED_NOTICE.
+    """
+    class _Boom:
+        async def recall_context(self, **_):
+            raise RuntimeError("MemoryUnavailableError: no reachable MCP endpoint")
+
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas("[PERSONA]\nyou are helpful"),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=_Boom(),
+    )
+    msgs = await compiler.compile(make_turn_input("你还记得铁锤这个词吗？"))
+    system = msgs[0].content
+    # The persona prompt still ships, AND the degraded notice rides along.
+    assert "[PERSONA]" in system
+    assert "memory backend" in system  # part of the notice
+    # The notice explicitly tells the LLM not to fake memory access.
+    assert "不要假装" in system or "如实承认" in system
+
+
+async def test_memory_success_does_not_inject_degraded_notice() -> None:
+    """Sanity check: when memory works, the degraded notice MUST NOT appear,
+    otherwise every healthy turn would tell the LLM "memory is down".
+    """
+    memory = _StubMemory(formatted="user mentioned 铁锤 last week")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=memory,
+    )
+    msgs = await compiler.compile(make_turn_input("聊聊铁锤"))
+    system = msgs[0].content
+    assert "[MEMORY]" in system
+    assert "暂不可达" not in system  # the notice keyword must not appear
+    assert "memory backend" not in system  # the notice keyword must not appear
+
+
 async def test_empty_text_skips_trailing_user_message() -> None:
     compiler = ContextCompiler(
         personas_service=_StubPersonas(),
