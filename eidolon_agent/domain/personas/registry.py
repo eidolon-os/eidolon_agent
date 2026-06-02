@@ -112,16 +112,24 @@ class PersonaTemplateRegistry:
         for row in rows:
             try:
                 parsed = _parse_yaml_str(row.yaml_body)
-                # Override the parsed metadata so the row's identity (id +
-                # revision) is the source of truth, not whatever the yaml
-                # text says. Cheaper than re-validating the yaml after
-                # mutating its dict.
+                # Override the parsed metadata so the row's identity is
+                # the source of truth, not whatever the yaml text says:
+                #   - template_id: the SQL PK (fork copies yaml verbatim
+                #     under a new row id; without override the cache key
+                #     would collide with the source)
+                #   - template_revision: bumps on every PUT, the parser
+                #     can't know that
+                #   - name: the row's operator-chosen display_name
+                #     (operator picked it via "display_name" in the form;
+                #     the yaml's metadata.name is whatever was in the
+                #     forked source and may be misleading for an edit)
                 normalized = parsed.model_copy(
                     update={
                         "metadata": parsed.metadata.model_copy(
                             update={
                                 "template_id": row.template_id,
                                 "template_revision": row.revision,
+                                "name": row.display_name,
                             }
                         )
                     }

@@ -264,6 +264,9 @@ async def build_application(
         personas_service=personas_service,
         custom_template_store=custom_template_store,
         persona_template_registry=tpl_reg,
+        # Phase 33.B1: admin /users/{id}/revoke-sessions writes here;
+        # same instance the verifier reads. Same bucket, two consumers.
+        revocation_kv=revocation_kv,
     )
     container.http_app = http_app
     container.admin_app = admin_app

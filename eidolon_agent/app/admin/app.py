@@ -26,6 +26,7 @@ def build_admin_app(
     personas_service=None,
     custom_template_store=None,
     persona_template_registry=None,
+    revocation_kv=None,
 ) -> FastAPI:
     app = FastAPI(
         title="eidolon-agent admin",
@@ -46,6 +47,11 @@ def build_admin_app(
     app.state.pairing = pairing
     app.state.pairing_verifier = pairing_verifier
     app.state.personas_service = personas_service
+    # Phase 33.B1: expose the DEVICE_REVOCATIONS KV so the admin
+    # /users/{id}/revoke-sessions route can write user-level
+    # revocation keys. Verifier reads via its own ``revocation_kv``
+    # already configured at bootstrap (same instance).
+    app.state.revocation_kv = revocation_kv
     # Phase 29.D — custom template CRUD. These two are coupled (router
     # mutates the store, then calls registry.refresh_custom() so the
     # in-memory cache stays consistent).

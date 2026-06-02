@@ -96,12 +96,30 @@ class PairingTokenVerifier:
         device_id = payload.get("device_id")
         if not device_id:
             raise UnauthenticatedError("token missing device_id")
-        if self._kv is not None and await self._kv.get(f"revoked.{device_id}"):
-            raise TokenRevokedError(f"device revoked: {device_id}")
+        user_id = payload.get("user_id") or ""
+
+        # Phase 33.B1: revocation is checked at TWO scopes — a specific
+        # device (legacy, used by pairing rotate / device admin) AND a
+        # whole user (admin disables the user account, wants all in-
+        # flight sessions cut off). Either match → reject.
+        #
+        # Key conventions:
+        #   - ``revoked.<device_id>`` — single device (existing)
+        #   - ``revoked.user.<user_id>`` — every device belonging to the
+        #     user; channel's per-session JWTs have ``device_id="web-xxx"``
+        #     so user-level is the only effective revocation for them
+        if self._kv is not None:
+            if await self._kv.get(f"revoked.{device_id}"):
+                raise TokenRevokedError(f"device revoked: {device_id}")
+            if user_id and await self._kv.get(f"revoked.user.{user_id}"):
+                raise TokenRevokedError(
+                    f"all sessions revoked for user: {user_id}"
+                )
+
         return VerifiedDevice(
             device_id=device_id,
             tenant_id=payload.get("tenant_id", ""),
-            user_id=payload.get("user_id", ""),
+            user_id=user_id,
             default_template_id=payload.get("template_id"),
             scopes=tuple(payload.get("scopes") or ()),
             exp=datetime.fromtimestamp(payload["exp"], tz=timezone.utc),

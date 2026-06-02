@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
@@ -36,6 +36,50 @@ async def list_devices(request: Request):
 async def revoke_device(device_id: str, request: Request):
     # Real impl: DeviceRepository.revoke + KV put on bucket DEVICE_REVOCATIONS.
     return None
+
+
+class RevokeUserSessionsResponse(BaseModel):
+    user_id: str
+    revoked: bool
+
+
+@router.post(
+    "/users/{user_id}/revoke-sessions",
+    response_model=RevokeUserSessionsResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def revoke_user_sessions(user_id: str, request: Request) -> RevokeUserSessionsResponse:
+    """Phase 33.B1: invalidate ALL active runtime tokens for a user.
+
+    Writes ``revoked.user.<user_id>`` to the ``DEVICE_REVOCATIONS`` KV
+    bucket. ``PairingTokenVerifier.verify`` checks this key on every
+    gRPC call — so the next chat() turn for any session of this user
+    fails with ``TokenRevokedError`` → LK session aborts → web client
+    sees ``transport.sidecar_unavailable`` and must re-connect (which
+    will fail at hub /api/config 404 if admin also disabled the user).
+
+    Use cases:
+      - Operator disables a user account in admin UI; want active calls
+        cut off immediately, not at next token expiry (24h).
+      - Suspected token leak; revoke before rotating the secret.
+
+    The bucket entry has no TTL — operator must explicitly delete it
+    to un-revoke the user. (TODO: add a DELETE endpoint for that.)
+    """
+    kv = getattr(request.app.state, "revocation_kv", None)
+    if kv is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "revocation_kv not configured on agent; the DEVICE_REVOCATIONS "
+                "bucket failed to initialize at startup"
+            ),
+        )
+    # Value can be anything truthy — verifier just checks key existence.
+    # Store the timestamp for ops-side audit ("when was this revoked").
+    timestamp = datetime.now(timezone.utc).isoformat()
+    await kv.put(f"revoked.user.{user_id}", timestamp.encode("utf-8"))
+    return RevokeUserSessionsResponse(user_id=user_id, revoked=True)
 
 
 @router.post("/devices/{device_id}/rotate", response_model=RotateDeviceTokenResponse)
