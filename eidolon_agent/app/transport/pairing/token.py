@@ -4,6 +4,20 @@ Issued by :func:`sign_device_token`; verified by :class:`PairingTokenVerifier`.
 The verifier consults the device revocation list (NATS KV bucket
 ``DEVICE_REVOCATIONS``) on every call so admin-side revocations propagate
 instantly without re-issuing tokens.
+
+**Cross-project schema coupling** (Phase 32.B): a sibling implementation
+of ``sign_device_token`` lives in ``eidolon_channel`` at
+``eidolon/livekit/agent/runtime/token_signer.py``. It uses the SAME
+payload schema (``device_id`` / ``tenant_id`` / ``user_id`` /
+``template_id`` / ``scopes`` / ``jti`` / ``exp`` / ``iat``) and the
+SAME HMAC secret (``PAIRING_JWT_SECRET`` env or
+``~/eidolon/run/jwt-secret`` file). If you change ANY field name or
+algorithm here, you MUST update the channel copy + run tests on both
+sides — otherwise channel-signed tokens will fail verification here
+and all web/esp32 conversations break. The duplication exists because
+channel doesn't want a hard pkg import on eidolon_agent (separate
+venv, separate deploy unit) — a shared ``eidolon-runtime-tokens`` pkg
+is the long-term fix but not warranted for ~80 lines of code today.
 """
 
 from __future__ import annotations
