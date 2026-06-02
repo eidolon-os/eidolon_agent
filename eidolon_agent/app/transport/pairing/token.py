@@ -18,6 +18,13 @@ and all web/esp32 conversations break. The duplication exists because
 channel doesn't want a hard pkg import on eidolon_agent (separate
 venv, separate deploy unit) — a shared ``eidolon-runtime-tokens`` pkg
 is the long-term fix but not warranted for ~80 lines of code today.
+
+**Drift sentinel** (Phase 33.A1): the contract is pinned by
+``eidolon_admin/server/tests/test_runtime_token_contract.py``. That
+test imports both copies and verifies a channel-signed token round-
+trips through this verifier with every field intact. If you edit
+this file and break the contract, that test fails — fix it before
+merging.
 """
 
 from __future__ import annotations
