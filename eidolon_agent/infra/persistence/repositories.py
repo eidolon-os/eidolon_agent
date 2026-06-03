@@ -184,6 +184,101 @@ class SqlConversationRepository:
             agent_instance_id=agent_instance_id,
         )
 
+    async def list_turns_by_user(
+        self,
+        *,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        limit: int = 50,
+        before: datetime | None = None,
+    ) -> list[dict]:
+        """Browse turns for the admin "conversations" view.
+
+        Joins ``turns`` to ``conversations`` so we can filter by
+        ``tenant_id`` / ``user_id`` (those live on the conversation,
+        not the turn). Newest-first; ``before`` lets the UI page
+        backwards through history (cursor on ``started_at``). Returns a
+        list of dicts to avoid leaking ORM rows past the repository
+        boundary; the router/schema layer composes the response.
+
+        We intentionally DON'T fetch messages here — the master list
+        only needs cheap turn-level columns. Use ``get_turn_with_
+        messages`` for detail view.
+        """
+        stmt = (
+            select(
+                TurnRow.id,
+                TurnRow.conversation_id,
+                TurnRow.seq,
+                TurnRow.trigger,
+                TurnRow.caller_kind,
+                TurnRow.device_id,
+                TurnRow.started_at,
+                TurnRow.finished_at,
+                TurnRow.status,
+                TurnRow.triage_kind,
+                TurnRow.latency_first_delta_ms,
+                TurnRow.total_latency_ms,
+                TurnRow.tokens_in,
+                TurnRow.tokens_out,
+                TurnRow.model,
+                TurnRow.error_code,
+                ConversationRow.tenant_id,
+                ConversationRow.user_id,
+                ConversationRow.agent_instance_id,
+            )
+            .join(ConversationRow, TurnRow.conversation_id == ConversationRow.id)
+            .order_by(TurnRow.started_at.desc())
+            .limit(limit)
+        )
+        if user_id is not None:
+            stmt = stmt.where(ConversationRow.user_id == user_id)
+        if tenant_id is not None:
+            stmt = stmt.where(ConversationRow.tenant_id == tenant_id)
+        if before is not None:
+            stmt = stmt.where(TurnRow.started_at < before)
+        rows = (await self._session.execute(stmt)).mappings().all()
+        return [dict(r) for r in rows]
+
+    async def get_turn(self, turn_id: str) -> dict | None:
+        """Fetch one turn joined with its conversation context.
+
+        Returns None when the turn doesn't exist. Used by the admin
+        conversations detail endpoint together with
+        :meth:`SqlChatMessageRepository.list_for_turn`.
+        """
+        stmt = (
+            select(
+                TurnRow.id,
+                TurnRow.conversation_id,
+                TurnRow.seq,
+                TurnRow.trigger,
+                TurnRow.caller_kind,
+                TurnRow.device_id,
+                TurnRow.started_at,
+                TurnRow.finished_at,
+                TurnRow.status,
+                TurnRow.triage_kind,
+                TurnRow.latency_first_delta_ms,
+                TurnRow.total_latency_ms,
+                TurnRow.tokens_in,
+                TurnRow.tokens_out,
+                TurnRow.cost_usd_micro,
+                TurnRow.model,
+                TurnRow.trace_id,
+                TurnRow.error_code,
+                TurnRow.metadata_,
+                ConversationRow.tenant_id,
+                ConversationRow.user_id,
+                ConversationRow.agent_instance_id,
+                ConversationRow.title.label("conversation_title"),
+            )
+            .join(ConversationRow, TurnRow.conversation_id == ConversationRow.id)
+            .where(TurnRow.id == turn_id)
+        )
+        row = (await self._session.execute(stmt)).mappings().first()
+        return dict(row) if row else None
+
     async def count_turns(self, conversation_id: str) -> int:
         """Number of turns already recorded for a conversation.
 

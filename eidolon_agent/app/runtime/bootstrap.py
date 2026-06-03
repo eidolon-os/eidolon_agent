@@ -267,6 +267,11 @@ async def build_application(
         # Phase 33.B1: admin /users/{id}/revoke-sessions writes here;
         # same instance the verifier reads. Same bucket, two consumers.
         revocation_kv=revocation_kv,
+        # Phase 34.A: conversations browse router reads turns + messages
+        # via SqlConversationRepository / SqlChatMessageRepository. Same
+        # session factory the writer side uses, just opened in read-only
+        # short transactions.
+        session_factory=session_factory,
     )
     container.http_app = http_app
     container.admin_app = admin_app
