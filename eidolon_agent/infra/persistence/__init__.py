@@ -27,6 +27,7 @@ from eidolon_agent.infra.persistence.sql_custom_template_store import (
 from eidolon_agent.infra.persistence.sql_persona_instance_store import (
     SqlPersonaInstanceStore,
 )
+from eidolon_agent.infra.persistence.turn_io import build_history_hydrator, build_turn_persister
 from eidolon_agent.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
 __all__ = [
@@ -38,6 +39,8 @@ __all__ = [
     "SqlCustomTemplateStore",
     "SqlEvolutionHistoryStore",
     "SqlPersonaInstanceStore",
+    "build_history_hydrator",
+    "build_turn_persister",
     "create_engine",
     "create_session_factory",
     "ensure_schema",

@@ -21,7 +21,10 @@ from eidolon_agent.core.types.memory import (
     MemoryKind,
     MemoryQueryPlan,
     MemoryScope,
+    MemoryWriteDisposition,
+    MemoryWriteDispositionKind,
     MemoryWritePolicy,
+    classify_memory_write,
 )
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.signal import RealtimeSignal, SignalDigest, SignalModality
@@ -63,7 +66,10 @@ __all__ = [  # noqa: RUF022 - grouped by domain rather than alphabetical for rea
     "MemoryKind",
     "MemoryQueryPlan",
     "MemoryScope",
+    "MemoryWriteDisposition",
+    "MemoryWriteDispositionKind",
     "MemoryWritePolicy",
+    "classify_memory_write",
     # messages
     "ChatMessage",
     "MessageRole",

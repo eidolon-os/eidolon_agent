@@ -9,15 +9,18 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict, deque
+from collections.abc import Awaitable, Callable
 
 from eidolon_agent.core.types.messages import ChatMessage
+
+HistoryHydrator = Callable[..., Awaitable[list[ChatMessage]]]
 
 
 class HistoryManager:
     def __init__(
         self,
         *,
-        session_factory=None,  # SqlAlchemy session factory; UoW-style read on demand
+        hydrate_messages: HistoryHydrator | None = None,
         window_size: int = 50,
         hydrate_timeout_s: float = 0.05,
     ) -> None:
@@ -25,7 +28,7 @@ class HistoryManager:
         self._windows: OrderedDict[str, deque[ChatMessage]] = OrderedDict()
         self._window_size = window_size
         self._lock = asyncio.Lock()
-        self._session_factory = session_factory
+        self._hydrate_messages = hydrate_messages
         self._hydrate_timeout_s = hydrate_timeout_s
 
     async def append(self, *, conversation_id: str, message: ChatMessage) -> None:
@@ -45,12 +48,12 @@ class HistoryManager:
                 cached: list[ChatMessage] = []
             else:
                 cached = _public_messages(list(w))[-window:]
-            if len(cached) >= window or self._session_factory is None:
+            if len(cached) >= window or self._hydrate_messages is None:
                 return cached
 
         try:
             hydrated = await asyncio.wait_for(
-                self._hydrate_from_db(conversation_id=conversation_id, window=window),
+                self._hydrate_external(conversation_id=conversation_id, window=window),
                 timeout=self._hydrate_timeout_s,
             )
         except Exception:
@@ -76,16 +79,15 @@ class HistoryManager:
             w.extend(kept)
             return removed
 
-    async def _hydrate_from_db(
+    async def _hydrate_external(
         self, *, conversation_id: str, window: int
     ) -> list[ChatMessage]:
-        from eidolon_agent.infra.persistence import SqlAlchemyUnitOfWork
-
-        async with SqlAlchemyUnitOfWork(self._session_factory) as uow:
-            messages = await uow.chat_messages.list_for_conversation(
-                conversation_id,
-                limit=window,
-            )
+        if self._hydrate_messages is None:
+            return []
+        messages = await self._hydrate_messages(
+            conversation_id=conversation_id,
+            window=window,
+        )
         return _public_messages(messages)
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from eidolon_agent.domain.memory_policy import (
+from eidolon_agent.core.types import (
     MemoryWriteDispositionKind,
     classify_memory_write,
 )

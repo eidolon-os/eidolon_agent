@@ -21,6 +21,7 @@ from eidolon_agent.domain.tools.builtin import EmitEventTool, GetTimeTool
 from eidolon_agent.infra.events import InMemoryEventBus, InMemoryKVStore
 from eidolon_agent.infra.llm import LLMRouter
 from eidolon_agent.infra.llm.providers.fake import FakeLLM
+from eidolon_agent.infra.persistence import build_history_hydrator, build_turn_persister
 
 
 @pytest.fixture
@@ -68,7 +69,13 @@ async def turn_engine_factory(personas_service, event_bus):
     def _factory(*, llm=None, memory_port=None, tool_dispatcher=None, history=None, session_factory=None):
         from eidolon_agent.domain.agent.turn import TurnEngine
 
-        history = history or HistoryManager(session_factory=session_factory)
+        history = history or HistoryManager(
+            hydrate_messages=(
+                build_history_hydrator(session_factory)
+                if session_factory is not None
+                else None
+            )
+        )
         fanout = HistoryFanout(event_bus=event_bus)
         if tool_dispatcher is None:
             tools = ToolRegistry()
@@ -86,9 +93,10 @@ async def turn_engine_factory(personas_service, event_bus):
             memory_port=memory_port,
             history_window=20,
         )
+        llm_router = LLMRouter(providers={"fake": llm or FakeLLM()}, default="fake")
         return TurnEngine(
             compiler=compiler,
-            llm=LLMRouter(providers={"fake": llm or FakeLLM()}, default="fake"),
+            llm=llm_router,
             tool_dispatcher=tool_dispatcher,
             history=history,
             fanout=fanout,
@@ -100,7 +108,14 @@ async def turn_engine_factory(personas_service, event_bus):
             personas_service=personas_service,
             persona_template_id="caretaker_jiezhi",
             memory_port=memory_port,
-            session_factory=session_factory,
+            turn_persister=(
+                build_turn_persister(
+                    session_factory,
+                    model_id_provider=lambda: getattr(llm_router, "model_id", None),
+                )
+                if session_factory is not None
+                else None
+            ),
         )
 
     return _factory

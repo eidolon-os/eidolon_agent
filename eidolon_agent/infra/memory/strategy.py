@@ -6,8 +6,8 @@ working/episodic/semantic model and applies it consistently.
 
 from __future__ import annotations
 
-from eidolon_agent.core.types.memory import MemoryQueryPlan
-from eidolon_agent.domain.memory_policy import (
+from eidolon_agent.core.types.memory import (
+    MemoryQueryPlan,
     MemoryWriteDisposition,
     MemoryWriteDispositionKind,
     classify_memory_write,

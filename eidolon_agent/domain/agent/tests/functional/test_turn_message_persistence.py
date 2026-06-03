@@ -18,6 +18,7 @@ from sqlalchemy import select
 
 from eidolon_agent.config.settings import SqliteSettings
 from eidolon_agent.infra.persistence import (
+    build_turn_persister,
     create_engine,
     create_session_factory,
     ensure_schema,
@@ -60,7 +61,10 @@ async def test_turn_persists_user_and_assistant_messages(
         event_bus=base_engine._bus,
         personas_service=base_engine._personas,
         persona_template_id="caretaker_jiezhi",
-        session_factory=session_factory,
+        turn_persister=build_turn_persister(
+            session_factory,
+            model_id_provider=lambda: getattr(base_engine._llm, "model_id", None),
+        ),
     )
 
     # Drive the turn. We don't care about the exact text — the fake
@@ -150,7 +154,10 @@ async def test_persist_skips_messages_when_text_empty(
         event_bus=base_engine._bus,
         personas_service=base_engine._personas,
         persona_template_id="caretaker_jiezhi",
-        session_factory=session_factory,
+        turn_persister=build_turn_persister(
+            session_factory,
+            model_id_provider=lambda: getattr(base_engine._llm, "model_id", None),
+        ),
     )
 
     from datetime import datetime, timezone

@@ -76,37 +76,33 @@ async def test_private_messages_are_filtered_from_recent_window() -> None:
 
 
 async def test_db_hydrate_runs_when_window_is_insufficient() -> None:
-    class _HydratingHistory(HistoryManager):
-        def __init__(self):
-            super().__init__(session_factory=object())
-            self.hydrated = False
+    calls = []
 
-        async def _hydrate_from_db(self, *, conversation_id: str, window: int):
-            old = datetime.now(timezone.utc) - timedelta(minutes=5)
-            self.hydrated = True
-            return [
-                _msg("db-old", created_at=old),
-                _msg("db-new", created_at=old + timedelta(minutes=1)),
-            ]
+    async def _hydrate(*, conversation_id: str, window: int):
+        old = datetime.now(timezone.utc) - timedelta(minutes=5)
+        calls.append((conversation_id, window))
+        return [
+            _msg("db-old", created_at=old),
+            _msg("db-new", created_at=old + timedelta(minutes=1)),
+        ]
 
-    mgr = _HydratingHistory()
+    mgr = HistoryManager(hydrate_messages=_hydrate)
     await mgr.append(conversation_id="c1", message=_msg("cached"))
 
     items = await mgr.recent_window(conversation_id="c1", window=3)
 
-    assert mgr.hydrated is True
+    assert calls == [("c1", 3)]
     assert [m.content for m in items] == ["db-old", "db-new", "cached"]
 
 
 async def test_db_hydrate_timeout_degrades_to_cached_window() -> None:
     import asyncio
 
-    class _SlowHistory(HistoryManager):
-        async def _hydrate_from_db(self, *, conversation_id: str, window: int):
-            await asyncio.sleep(1)
-            return [_msg("db")]
+    async def _slow_hydrate(*, conversation_id: str, window: int):
+        await asyncio.sleep(1)
+        return [_msg("db")]
 
-    mgr = _SlowHistory(session_factory=object(), hydrate_timeout_s=0.001)
+    mgr = HistoryManager(hydrate_messages=_slow_hydrate, hydrate_timeout_s=0.001)
     await mgr.append(conversation_id="c1", message=_msg("cached"))
 
     items = await mgr.recent_window(conversation_id="c1", window=3)

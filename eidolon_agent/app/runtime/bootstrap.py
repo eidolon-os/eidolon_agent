@@ -56,6 +56,8 @@ from eidolon_agent.infra.observability import configure_logging
 from eidolon_agent.infra.persistence import (
     SqlEvolutionHistoryStore,
     SqlPersonaInstanceStore,
+    build_history_hydrator,
+    build_turn_persister,
     create_engine,
     create_session_factory,
     ensure_schema,
@@ -159,7 +161,7 @@ async def build_application(
     container.personas_service = personas_service
 
     # 7. Cross-cutting services -----------------------------------------------
-    history = HistoryManager(session_factory=session_factory)
+    history = HistoryManager(hydrate_messages=build_history_hydrator(session_factory))
     fanout = HistoryFanout(event_bus=container.event_bus, memory_routes=memory_routes)
     sig_bus = SignalBus()
     container.history_manager = history
@@ -359,7 +361,10 @@ def _build_turn_engine(
         memory_port=container.memory_port,
         max_tool_iters=container.settings.turn.max_tool_iters,
         taboos_provider=lambda: tuple(),
-        session_factory=container.session_factory,
+        turn_persister=build_turn_persister(
+            container.session_factory,
+            model_id_provider=lambda: getattr(container.llm_router, "model_id", None),
+        ),
     )
 
 
