@@ -308,6 +308,12 @@ class TurnEngine:
                     "first_delta_ms": first_delta_ms,
                     "output_ms": ts_output_ms,
                 }
+                # Phase 34.C: thread user + assistant text through so
+                # both land in chat_messages atomically with the
+                # TurnRow. ``assistant_text_parts`` is initialized at
+                # the top of the method, so it's safe to read here in
+                # the finally — empty list on exception paths produces
+                # "" (and _persist_turn no-ops the message append).
                 asyncio.create_task(  # noqa: RUF006 — fire-and-forget by design
                     self._persist_turn(
                         ti=ti,
@@ -321,6 +327,8 @@ class TurnEngine:
                         usage_out=usage_out,
                         error_code=error_code,
                         timings=timings,
+                        user_text=ti.text or "",
+                        assistant_text="".join(assistant_text_parts),
                     )
                 )
             if self._bus is not None:
@@ -404,12 +412,21 @@ class TurnEngine:
         usage_out: int,
         error_code: str | None,
         timings: dict,
+        user_text: str = "",
+        assistant_text: str = "",
     ) -> None:
-        """Background: write the TurnRow (latency + phase timings) to SQLite.
+        """Background: write the TurnRow (latency + phase timings) AND
+        the user / assistant chat messages to SQLite.
 
         Ensures the parent conversation row exists (idempotent) and assigns a
         per-conversation ``seq`` via a COUNT. Errors are logged and swallowed —
         this runs after DONE and must never surface to the caller.
+
+        Phase 34.C: the user/assistant message bodies are persisted here
+        in the same UoW transaction as the TurnRow so the chat_messages
+        FK to turns.id is guaranteed. Until 34.C they were only kept in
+        the in-process HistoryManager window — admin's
+        ``/conversations`` browse showed empty message lists.
         """
         from eidolon_agent.core.types.turn import TurnResult
         from eidolon_agent.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
@@ -443,6 +460,31 @@ class TurnEngine:
                         metadata=timings,
                     )
                 )
+                # Same transaction so the chat_messages FK (turns.id) is
+                # never observable in an inconsistent state. Empty
+                # strings are skipped (error / cancellation paths).
+                if user_text:
+                    await uow.chat_messages.append(
+                        ti.turn_id,
+                        ChatMessage(
+                            id=uuid.uuid4().hex,
+                            role=MessageRole.USER,
+                            content=user_text,
+                            created_at=started_at,
+                        ),
+                    )
+                if assistant_text:
+                    await uow.chat_messages.append(
+                        ti.turn_id,
+                        ChatMessage(
+                            id=uuid.uuid4().hex,
+                            role=MessageRole.ASSISTANT,
+                            content=assistant_text,
+                            tokens=usage_out or None,
+                            model=getattr(self._llm, "model_id", None),
+                            created_at=finished_at,
+                        ),
+                    )
                 await uow.commit()
         except Exception:
             _log.exception("persist turn %s failed", ti.turn_id)
