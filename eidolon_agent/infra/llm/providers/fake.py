@@ -23,12 +23,13 @@ class FakeLLM:
     def __init__(
         self,
         *,
-        script: list[dict] | None = None,
+        script: list[dict] | list[list[dict]] | None = None,
         per_token_delay_s: float = 0.005,
     ) -> None:
         # Default: echo the last user message in 5 chunks.
         self._script = script
         self._delay = per_token_delay_s
+        self.calls = 0
 
     async def stream(
         self,
@@ -40,7 +41,7 @@ class FakeLLM:
         max_tokens: int | None = None,
         request_id: str,
     ) -> AsyncIterator[LLMDelta]:
-        script = self._script or _default_echo_script(messages)
+        script = self._script_for_call(messages)
         for step in script:
             if step["kind"] == "text":
                 text = step["text"]
@@ -56,13 +57,24 @@ class FakeLLM:
                         arguments=step.get("arguments") or {},
                     )
                 )
+        finish = _finish_for_script(script)
         yield LLMDelta(
-            finish=LLMFinishReason.STOP,
+            finish=finish,
             usage=LLMUsage(tokens_in=_count(messages), tokens_out=_count_script(script)),
         )
 
     async def count_tokens(self, messages: list[ChatMessage]) -> int:
         return _count(messages)
+
+    def _script_for_call(self, messages: list[ChatMessage]) -> list[dict]:
+        self.calls += 1
+        if self._script is None:
+            return _default_echo_script(messages)
+        if self._script and isinstance(self._script[0], list):
+            scripts = self._script  # type: ignore[assignment]
+            idx = min(self.calls - 1, len(scripts) - 1)
+            return scripts[idx]  # type: ignore[index]
+        return self._script  # type: ignore[return-value]
 
 
 def _chunks(s: str, size: int):
@@ -76,6 +88,16 @@ def _count(messages: list[ChatMessage]) -> int:
 
 def _count_script(script: list[dict]) -> int:
     return sum(max(1, len(s.get("text", "")) // 3) for s in script if s.get("kind") == "text")
+
+
+def _finish_for_script(script: list[dict]) -> LLMFinishReason:
+    explicit = next((s.get("finish") for s in script if s.get("kind") == "finish"), None)
+    if explicit:
+        return LLMFinishReason(explicit)
+    meaningful = [s for s in script if s.get("kind") != "finish"]
+    if meaningful and meaningful[-1].get("kind") == "tool_call":
+        return LLMFinishReason.TOOL_CALLS
+    return LLMFinishReason.STOP
 
 
 def _default_echo_script(messages: list[ChatMessage]) -> list[dict]:

@@ -19,7 +19,9 @@ from eidolon_agent.app.transport.grpc.proto import pb, pbg
 from eidolon_agent.app.transport.pairing.coordinator import PairingCoordinator
 from eidolon_agent.core.errors import EidolonError, NotFoundError, UnauthenticatedError
 from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
+from eidolon_agent.core.types.signal import SignalDigest
 from eidolon_agent.core.types.turn import TurnInput, TurnTrigger
+from eidolon_agent.domain.signals import SignalFuser
 
 _log = logging.getLogger(__name__)
 
@@ -73,6 +75,8 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         if identity is None:
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "no identity")
         active_turns: set[asyncio.Task] = set()
+        last_session_id: str | None = None
+        signal_fuser = SignalFuser()
 
         # Watch the gRPC context for cancellation (raw TCP close, RPC cancel
         # without a CancelTurn frame, deadline exceeded, …). When fired, cancel
@@ -97,13 +101,17 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                             task.cancel()
                     continue
                 if payload == "signal":
-                    # Forward to signal bus; non-blocking.
-                    _log.debug("inline signal: %s", frame.signal.label)
+                    if last_session_id:
+                        await self._signals.publish(
+                            last_session_id,
+                            _signal_from_proto(frame.signal),
+                        )
                     continue
                 if payload != "start":
                     continue
 
                 start = frame.start
+                last_session_id = start.conversation_id
                 try:
                     inst = await self._registry.resolve_for_caller(
                         tenant_id=identity.tenant_id,
@@ -113,6 +121,14 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     agent = inst.agent
                 except NotFoundError as exc:
                     await context.abort(grpc.StatusCode.FAILED_PRECONDITION, exc.message)
+
+                realtime = _digest_from_dict(struct_to_dict(start.realtime))
+                if realtime is None:
+                    recent_signals = await self._signals.recent(
+                        start.conversation_id,
+                        window_ms=signal_fuser.window_ms,
+                    )
+                    realtime = signal_fuser.fuse(recent_signals)
 
                 ti = TurnInput(
                     turn_id=start.turn_id or uuid.uuid4().hex,
@@ -135,6 +151,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     ),
                     trigger=TurnTrigger.USER_UTTERANCE,
                     text=start.text,
+                    realtime=realtime,
                     metadata=struct_to_dict(start.metadata),
                 )
 
@@ -299,3 +316,35 @@ def _presence_from_signal(modality: str, label: str) -> str:
     if label in {"away", "distracted", "present"}:
         return label
     return "present"
+
+
+def _digest_from_dict(data: dict) -> SignalDigest | None:
+    if not data:
+        return None
+    return SignalDigest(
+        window_ms=int(data.get("window_ms") or 0),
+        dominant_emotion=data.get("dominant_emotion"),
+        emotion_confidence=float(data.get("emotion_confidence") or 0.0),
+        speech_rate=data.get("speech_rate"),
+        presence=data.get("presence") or "present",
+        confidence_overall=float(data.get("confidence_overall") or 0.0),
+        notable_events=tuple(data.get("notable_events") or ()),
+    )
+
+
+def _signal_from_proto(signal) -> object:  # type: ignore[no-untyped-def]
+    from datetime import datetime, timezone
+
+    from eidolon_agent.core.types.signal import RealtimeSignal, SignalModality
+
+    try:
+        modality = SignalModality(signal.modality)
+    except ValueError:
+        modality = SignalModality.AMBIENT
+    return RealtimeSignal(
+        ts=datetime.now(timezone.utc),
+        modality=modality,
+        label=signal.label,
+        confidence=float(signal.confidence),
+        raw=struct_to_dict(signal.raw),
+    )

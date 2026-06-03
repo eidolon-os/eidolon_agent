@@ -19,12 +19,14 @@ class HistoryManager:
         *,
         session_factory=None,  # SqlAlchemy session factory; UoW-style read on demand
         window_size: int = 50,
+        hydrate_timeout_s: float = 0.05,
     ) -> None:
         # conv_id → bounded deque of ChatMessage (newest at the right end)
         self._windows: OrderedDict[str, deque[ChatMessage]] = OrderedDict()
         self._window_size = window_size
         self._lock = asyncio.Lock()
         self._session_factory = session_factory
+        self._hydrate_timeout_s = hydrate_timeout_s
 
     async def append(self, *, conversation_id: str, message: ChatMessage) -> None:
         async with self._lock:
@@ -40,9 +42,64 @@ class HistoryManager:
         async with self._lock:
             w = self._windows.get(conversation_id)
             if w is None:
-                return []
-            return list(w)[-window:]
+                cached: list[ChatMessage] = []
+            else:
+                cached = _public_messages(list(w))[-window:]
+            if len(cached) >= window or self._session_factory is None:
+                return cached
+
+        try:
+            hydrated = await asyncio.wait_for(
+                self._hydrate_from_db(conversation_id=conversation_id, window=window),
+                timeout=self._hydrate_timeout_s,
+            )
+        except Exception:
+            return cached
+        return _merge_tail(hydrated, cached, window=window)
 
     async def drop_session(self, conversation_id: str) -> None:
         async with self._lock:
             self._windows.pop(conversation_id, None)
+
+    async def forget_matching(self, *, conversation_id: str, query: str) -> int:
+        """Best-effort in-process privacy scrub for the current conversation."""
+
+        if not query:
+            return 0
+        async with self._lock:
+            w = self._windows.get(conversation_id)
+            if w is None:
+                return 0
+            kept = [m for m in w if query not in m.content]
+            removed = len(w) - len(kept)
+            w.clear()
+            w.extend(kept)
+            return removed
+
+    async def _hydrate_from_db(
+        self, *, conversation_id: str, window: int
+    ) -> list[ChatMessage]:
+        from eidolon_agent.infra.persistence import SqlAlchemyUnitOfWork
+
+        async with SqlAlchemyUnitOfWork(self._session_factory) as uow:
+            messages = await uow.chat_messages.list_for_conversation(
+                conversation_id,
+                limit=window,
+            )
+        return _public_messages(messages)
+
+
+def _public_messages(messages: list[ChatMessage]) -> list[ChatMessage]:
+    return [m for m in messages if not bool(m.metadata.get("is_private", False))]
+
+
+def _merge_tail(
+    hydrated: list[ChatMessage],
+    cached: list[ChatMessage],
+    *,
+    window: int,
+) -> list[ChatMessage]:
+    by_id: dict[str, ChatMessage] = {}
+    for msg in [*hydrated, *cached]:
+        by_id[msg.id] = msg
+    return sorted(by_id.values(), key=lambda m: m.created_at)[-window:]

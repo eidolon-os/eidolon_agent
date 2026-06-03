@@ -32,13 +32,18 @@ class _StubTool:
         side_effect: bool = False,
         invoke=None,
         timeout_s: float = 1.0,
+        json_schema: dict | None = None,
+        permissions=frozenset(),
+        idempotency_key_template: str | None = None,
     ) -> None:
         self.schema = ToolSchema(
             name=name,
             description=f"stub {name}",
-            json_schema={"type": "object", "additionalProperties": True},
+            json_schema=json_schema or {"type": "object", "additionalProperties": True},
+            permissions=frozenset(permissions),
             side_effect=side_effect,
             timeout_s=timeout_s,
+            idempotency_key_template=idempotency_key_template,
         )
         self._invoke = invoke
         self.calls: list[ToolCall] = []

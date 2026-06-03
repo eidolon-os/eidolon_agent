@@ -17,6 +17,12 @@ from datetime import datetime, timezone
 from eidolon_agent.core.types.memory import MemoryQueryPlan
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnInput
+from eidolon_agent.domain.context.types import (
+    ContextLedger,
+    ContextSegment,
+    ContextSegmentKind,
+)
+from eidolon_agent.domain.runtime_policy import TurnRuntimePolicy
 
 _log = logging.getLogger(__name__)
 
@@ -51,6 +57,7 @@ class ContextCompiler:
         instance_id, template_id = self._locator(
             ti.caller.tenant_id, ti.caller.user_id, ti.conversation_id
         )
+        policy = TurnRuntimePolicy.from_metadata(ti.metadata)
 
         # ---- Run the three independent fetches concurrently ----------------
         # Persona compile, memory recall, and history window have no data
@@ -72,12 +79,15 @@ class ContextCompiler:
             ),
         )
         memory_task = _timed("memory", self._memory_recall(ti))
-        history_task = _timed(
-            "history",
-            self._history.recent_window(
-                conversation_id=ti.conversation_id, window=self._history_window
-            ),
+        history_coro = (
+            _empty_history()
+            if not policy.history_context_allowed
+            else self._history.recent_window(
+                conversation_id=ti.conversation_id,
+                window=self._history_window,
+            )
         )
+        history_task = _timed("history", history_coro)
 
         results = await asyncio.gather(
             persona_task, memory_task, history_task, return_exceptions=True
@@ -92,7 +102,7 @@ class ContextCompiler:
             return res
 
         persona, persona_ms = _unpack(persona_res)
-        memory_text, memory_ms = _unpack(memory_res)
+        memory_payload, memory_ms = _unpack(memory_res)
         history, history_ms = _unpack(history_res)
 
         gather_ms = int((time.monotonic() - compile_t0) * 1000)
@@ -111,21 +121,91 @@ class ContextCompiler:
             raise persona
 
         system_parts: list[str] = [persona.system_prompt]
+        ledger = ContextLedger(
+            kept_segments=[
+                ContextSegment(
+                    kind=ContextSegmentKind.PERSONA,
+                    content="",
+                    source="personas_service",
+                    token_estimate=_estimate_tokens(persona.system_prompt),
+                    droppable=False,
+                )
+            ]
+        )
 
-        if isinstance(memory_text, BaseException):
-            _log.warning("memory recall raised: %s", memory_text)
-        elif memory_text:
+        memory_text: str | None = None
+        memory_degraded = False
+        memory_hit_ids: list[str] = []
+        if isinstance(memory_payload, BaseException):
+            _log.warning("memory recall raised: %s", memory_payload)
+            memory_degraded = True
+        elif memory_payload:
+            memory_text, memory_degraded, memory_hit_ids = memory_payload
+
+        if memory_degraded:
+            ledger.mark_degraded("memory")
+        if memory_degraded and not memory_text:
+            memory_text = self._MEMORY_DEGRADED_NOTICE
+        if memory_text:
             system_parts.append(f"[MEMORY]\n{memory_text}")
+            ledger.kept_segments.append(
+                ContextSegment(
+                    kind=ContextSegmentKind.MEMORY,
+                    content="",
+                    source="memory",
+                    token_estimate=_estimate_tokens(memory_text),
+                    priority=80,
+                    metadata={"degraded": memory_degraded},
+                )
+            )
+        ti.metadata["memory_trace"] = {
+            "attempted": (
+                self._memory is not None
+                and bool(ti.text)
+                and policy.memory_recall_allowed
+            ),
+            "skipped_reason": (
+                "privacy_policy"
+                if self._memory is not None and bool(ti.text) and not policy.memory_recall_allowed
+                else None
+            ),
+            "degraded": memory_degraded,
+            "elapsed_ms": memory_ms,
+            "timeout_ms": int(self._memory_timeout_s * 1000),
+            "hit_ids": memory_hit_ids,
+            "hit_count": len(memory_hit_ids),
+            "context_injected": bool(memory_text),
+        }
 
         # ---- Realtime digest (signals from voice pipeline) ------------------
         if ti.realtime is not None:
             line = _realtime_line(ti.realtime)
             if line:
                 system_parts.append(f"（实时信号：{line}）")
+                ledger.kept_segments.append(
+                    ContextSegment(
+                        kind=ContextSegmentKind.REALTIME,
+                        content="",
+                        source="turn_input.realtime",
+                        token_estimate=_estimate_tokens(line),
+                        priority=90,
+                    )
+                )
 
         if isinstance(history, BaseException):
             _log.warning("history window raised: %s", history)
             history = []
+        elif history:
+            ledger.kept_segments.append(
+                ContextSegment(
+                    kind=ContextSegmentKind.HISTORY,
+                    content="",
+                    source="history_manager",
+                    token_estimate=sum(_estimate_tokens(m.content) for m in history),
+                    priority=60,
+                    metadata={"messages": len(history)},
+                )
+            )
 
         # ---- Assemble messages ---------------------------------------------
         now = datetime.now(timezone.utc)
@@ -139,6 +219,15 @@ class ContextCompiler:
             *history,
         ]
         if ti.text:
+            ledger.kept_segments.append(
+                ContextSegment(
+                    kind=ContextSegmentKind.CURRENT_USER,
+                    content="",
+                    source="turn_input.text",
+                    token_estimate=_estimate_tokens(ti.text),
+                    droppable=False,
+                )
+            )
             out.append(
                 ChatMessage(
                     id=uuid.uuid4().hex,
@@ -147,6 +236,7 @@ class ContextCompiler:
                     created_at=now,
                 )
             )
+        ti.metadata["context_ledger"] = ledger.to_metadata()
         return out
 
     # Injected into the system prompt when memory recall raises. Tells the
@@ -158,7 +248,7 @@ class ContextCompiler:
         "也不要主动声称会记住用户接下来说的——因为本轮记忆链路是断的。）"
     )
 
-    async def _memory_recall(self, ti: TurnInput) -> str | None:
+    async def _memory_recall(self, ti: TurnInput) -> tuple[str | None, bool, list[str]] | None:
         """Memory recall branch for the parallel ``gather`` above.
 
         Three return shapes:
@@ -178,6 +268,8 @@ class ContextCompiler:
         """
         if self._memory is None or not ti.text:
             return None
+        if not TurnRuntimePolicy.from_metadata(ti.metadata).memory_recall_allowed:
+            return None
         try:
             plan = MemoryQueryPlan(
                 episodic_query=ti.text,
@@ -186,20 +278,20 @@ class ContextCompiler:
                 semantic_k=self._memory_top_k,
                 voice=ti.caller.caller_kind.value == "livekit_voice",
             )
-            formatted, _hits, _degraded = await self._memory.recall_context(
+            formatted, hits, _degraded = await self._memory.recall_context(
                 user_id=ti.caller.user_id,
                 query=ti.text,
                 plan=plan,
                 timeout_s=self._memory_timeout_s,
             )
-            return formatted or None
+            return formatted or None, bool(_degraded), [h.id for h in hits]
         except Exception:
             _log.exception(
                 "memory recall failed for user=%s; injecting degraded notice "
                 "into system prompt",
                 ti.caller.user_id,
             )
-            return self._MEMORY_DEGRADED_NOTICE
+            return self._MEMORY_DEGRADED_NOTICE, True, []
 
 
 async def _timed(_name: str, coro):  # type: ignore[no-untyped-def]
@@ -213,6 +305,10 @@ async def _timed(_name: str, coro):  # type: ignore[no-untyped-def]
     t0 = time.monotonic()
     value = await coro
     return value, int((time.monotonic() - t0) * 1000)
+
+
+async def _empty_history() -> list[ChatMessage]:
+    return []
 
 
 def _realtime_dict(digest) -> dict | None:  # type: ignore[no-untyped-def]
@@ -240,3 +336,7 @@ def _realtime_line(digest) -> str:  # type: ignore[no-untyped-def]
     if digest.notable_events:
         parts.extend(digest.notable_events)
     return " | ".join(parts)
+
+
+def _estimate_tokens(text: str) -> int:
+    return max(1, len(text) // 3) if text else 0

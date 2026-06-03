@@ -42,7 +42,7 @@ class _StubMemory:
 
     async def recall_context(self, *, user_id, query, plan, timeout_s):
         self.calls.append({"user_id": user_id, "query": query})
-        return self._formatted, [], self._degraded
+        return self._formatted, [SimpleNamespace(id="mem-1")], self._degraded
 
 
 def _locator(_t, _u, _c):
@@ -184,6 +184,60 @@ async def test_memory_success_does_not_inject_degraded_notice() -> None:
     assert "memory backend" not in system  # the notice keyword must not appear
 
 
+async def test_memory_soft_degraded_injects_degraded_notice() -> None:
+    memory = _StubMemory(formatted="", degraded=True)
+    ti = make_turn_input("你还记得什么？")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=memory,
+    )
+
+    msgs = await compiler.compile(ti)
+
+    assert "memory backend" in msgs[0].content
+    assert "memory" in ti.metadata["context_ledger"]["degraded_sources"]
+
+
+async def test_context_ledger_metadata_is_written_without_prompt_text() -> None:
+    ti = make_turn_input("当前问题")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas("[PERSONA]\nsecret-system-prompt"),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=_StubMemory(formatted="recalled-private-detail"),
+    )
+
+    await compiler.compile(ti)
+
+    ledger = ti.metadata["context_ledger"]
+    assert ledger["total_token_estimate"] > 0
+    assert {s["kind"] for s in ledger["segments"]} >= {"persona", "memory", "current_user"}
+    assert "secret-system-prompt" not in str(ledger)
+    assert "recalled-private-detail" not in str(ledger)
+
+
+async def test_memory_trace_records_ids_and_degraded_without_content() -> None:
+    ti = make_turn_input("帮我回忆一下")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=_StubMemory(formatted="private recalled sentence"),
+    )
+
+    await compiler.compile(ti)
+
+    trace = ti.metadata["memory_trace"]
+    assert trace["attempted"] is True
+    assert trace["degraded"] is False
+    assert trace["hit_ids"] == ["mem-1"]
+    assert trace["hit_count"] == 1
+    assert trace["context_injected"] is True
+    assert "private recalled sentence" not in str(trace)
+
+
 async def test_empty_text_skips_trailing_user_message() -> None:
     compiler = ContextCompiler(
         personas_service=_StubPersonas(),
@@ -192,3 +246,33 @@ async def test_empty_text_skips_trailing_user_message() -> None:
     )
     msgs = await compiler.compile(make_turn_input(""))
     assert msgs[-1].role is MessageRole.SYSTEM  # only system, no user
+
+
+async def test_temporary_turn_skips_memory_and_history_context() -> None:
+    history = HistoryManager()
+    await history.append(
+        conversation_id="c1",
+        message=ChatMessage(
+            id=uuid.uuid4().hex,
+            role=MessageRole.USER,
+            content="should-not-appear",
+            created_at=_now(),
+        ),
+    )
+    memory = _StubMemory(formatted="should-not-appear-memory")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=history,
+        memory_port=memory,
+    )
+    ti = make_turn_input("这段临时聊聊")
+    ti.metadata["temporary"] = True
+
+    msgs = await compiler.compile(ti)
+
+    assert memory.calls == []
+    assert [m.role for m in msgs] == [MessageRole.SYSTEM, MessageRole.USER]
+    assert "should-not-appear" not in "\n".join(m.content for m in msgs)
+    assert ti.metadata["memory_trace"]["attempted"] is False
+    assert ti.metadata["memory_trace"]["skipped_reason"] == "privacy_policy"

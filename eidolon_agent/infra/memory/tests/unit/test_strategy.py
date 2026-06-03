@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from eidolon_agent.infra.memory.strategy import MemoryStrategy
+from eidolon_agent.infra.memory.strategy import MemoryStrategy, MemoryWriteDispositionKind
 
 pytestmark = pytest.mark.unit
 
@@ -38,6 +38,29 @@ async def test_retrieve_calls_port_recall_context_with_plan() -> None:
     assert kwargs["user_id"] == "alice"
     assert kwargs["query"] == "hello"
     assert kwargs["plan"].semantic_k == 5  # plan_for_turn default
+    assert kwargs["timeout_s"] == 0.15
+
+
+async def test_retrieve_uses_longer_timeout_for_non_voice() -> None:
+    port = AsyncMock()
+    port.recall_context = AsyncMock(return_value=("", [], False))
+    await MemoryStrategy(port=port).retrieve(user_id="alice", user_text="hello", voice=False)
+    assert port.recall_context.await_args.kwargs["timeout_s"] == 0.25
+
+
+@pytest.mark.parametrize(
+    ("text", "kind"),
+    [
+        ("哈哈你好", MemoryWriteDispositionKind.IGNORE),
+        ("今天我去了医院", MemoryWriteDispositionKind.EPISODIC_ONLY),
+        ("以后叫我小满", MemoryWriteDispositionKind.SEMANTIC_UPSERT),
+        ("明天提醒我喝水", MemoryWriteDispositionKind.PROMISE_CREATE),
+        ("我的身份证是123", MemoryWriteDispositionKind.SENSITIVE_REQUIRES_CONSENT),
+    ],
+)
+def test_classify_write_disposition(text: str, kind: MemoryWriteDispositionKind) -> None:
+    out = MemoryStrategy(port=None).classify_write(user_text=text)
+    assert out.kind is kind
 
 
 async def test_write_turn_delegates_positionally() -> None:

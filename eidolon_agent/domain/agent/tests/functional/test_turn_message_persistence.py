@@ -82,6 +82,15 @@ async def test_turn_persists_user_and_assistant_messages(
         ).scalar_one_or_none()
         assert turn_row is not None, "TurnRow missing — _persist_turn didn't run"
         assert turn_row.conversation_id == ti.conversation_id
+        trace = (turn_row.metadata_ or {}).get("turn_trace")
+        assert trace is not None
+        assert trace["schema_version"] == "turn_trace.v1"
+        assert trace["boundary"] == "eidolon_agent.brain"
+        assert trace["turn"]["turn_id"] == ti.turn_id
+        assert trace["context_ledger"]["segments"]
+        assert trace["latency"]["total_ms"] is not None
+        assert trace["latency"]["first_delta_ms"] <= trace["latency"]["total_ms"]
+        assert trace["privacy"]["mode"] == "normal"
 
         messages = (
             (
@@ -180,4 +189,46 @@ async def test_persist_skips_messages_when_text_empty(
         )
 
     assert messages == [], "empty text should not insert blank chat_messages rows"
+    await sql_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_crisis_turn_persists_private_user_and_assistant_messages(
+    tmp_path: Path,
+    turn_engine_factory,
+) -> None:
+    sql_engine = create_engine(SqliteSettings(path=tmp_path / "agent.sqlite3"))
+    await ensure_schema(sql_engine)
+    session_factory = create_session_factory(sql_engine)
+
+    engine = turn_engine_factory(session_factory=session_factory)
+    ti = make_turn_input("我想死，活不下去了")
+    events = [ev async for ev in engine.run(ti)]
+    assert events[-1].data.get("crisis") is True
+
+    for _ in range(5):
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.05)
+
+    async with session_factory() as session:
+        turn_row = (
+            await session.execute(select(TurnRow).where(TurnRow.id == ti.turn_id))
+        ).scalar_one_or_none()
+        assert turn_row is not None
+        messages = (
+            (
+                await session.execute(
+                    select(ChatMessageRow)
+                    .where(ChatMessageRow.turn_id == ti.turn_id)
+                    .order_by(ChatMessageRow.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert [m.role for m in messages] == ["user", "assistant"]
+    assert all(m.is_private for m in messages)
+    assert "听到你了" in messages[1].content
+    assert turn_row.metadata_["turn_trace"]["privacy"]["mode"] == "private"
     await sql_engine.dispose()

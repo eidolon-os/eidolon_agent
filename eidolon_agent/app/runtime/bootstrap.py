@@ -27,6 +27,7 @@ from eidolon_agent.app.transport.grpc.chat_servicer import EidolonAgentServicer
 from eidolon_agent.app.transport.http import build_http_app
 from eidolon_agent.app.transport.pairing import PairingCoordinator, PairingTokenVerifier
 from eidolon_agent.config.settings import Settings, load_settings
+from eidolon_agent.core.types.tool import Permission
 from eidolon_agent.domain.agent.companion import CompanionAgent
 from eidolon_agent.domain.agent.registry import AgentRegistry, AgentTemplate
 from eidolon_agent.domain.agent.triage import TaskClassifier
@@ -158,7 +159,7 @@ async def build_application(
     container.personas_service = personas_service
 
     # 7. Cross-cutting services -----------------------------------------------
-    history = HistoryManager()
+    history = HistoryManager(session_factory=session_factory)
     fanout = HistoryFanout(event_bus=container.event_bus, memory_routes=memory_routes)
     sig_bus = SignalBus()
     container.history_manager = history
@@ -174,7 +175,11 @@ async def build_application(
     tool_registry.register(GetTimeTool())
     tool_registry.register(EmitEventTool(event_bus=container.event_bus))
     idemp_kv = container.kv_buckets.get("EIDOLON_TOOL_IDEMP")
-    tool_dispatcher = ToolDispatcher(tool_registry, idempotency_store=idemp_kv)
+    tool_dispatcher = ToolDispatcher(
+        tool_registry,
+        idempotency_store=idemp_kv,
+        allowed_permissions={p for p in Permission},
+    )
     container.tool_registry = tool_registry
     container.tool_dispatcher = tool_dispatcher
 
@@ -351,6 +356,7 @@ def _build_turn_engine(
         event_bus=container.event_bus,
         personas_service=container.personas_service,
         persona_template_id=template_id,
+        memory_port=container.memory_port,
         max_tool_iters=container.settings.turn.max_tool_iters,
         taboos_provider=lambda: tuple(),
         session_factory=container.session_factory,

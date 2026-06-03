@@ -15,6 +15,15 @@ from eidolon_agent.infra.persistence.engine import (
 from eidolon_agent.infra.persistence.sql_evolution_history_store import (
     SqlEvolutionHistoryStore,
 )
+from eidolon_agent.infra.persistence.repositories import (
+    SqlChatMessageRepository,
+    SqlConversationRepository,
+)
+from eidolon_agent.infra.persistence.sql_custom_template_store import (
+    CustomTemplateAlreadyExists,
+    CustomTemplateNotFound,
+    SqlCustomTemplateStore,
+)
 from eidolon_agent.infra.persistence.sql_persona_instance_store import (
     SqlPersonaInstanceStore,
 )
@@ -22,6 +31,11 @@ from eidolon_agent.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
 __all__ = [
     "SqlAlchemyUnitOfWork",
+    "CustomTemplateAlreadyExists",
+    "CustomTemplateNotFound",
+    "SqlChatMessageRepository",
+    "SqlConversationRepository",
+    "SqlCustomTemplateStore",
     "SqlEvolutionHistoryStore",
     "SqlPersonaInstanceStore",
     "create_engine",

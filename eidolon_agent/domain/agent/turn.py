@@ -31,10 +31,17 @@ from datetime import datetime, timezone
 from eidolon_agent.core.errors import GuardrailBlockedError, TurnCancelledError
 from eidolon_agent.core.ports.llm import LLMPort
 from eidolon_agent.core.ports.tool import ToolInvocationContext
-from eidolon_agent.core.types.event import Event
-from eidolon_agent.core.types.llm import LLMFinishReason
-from eidolon_agent.core.types.messages import ChatMessage, MessageRole
-from eidolon_agent.core.types.tool import ToolCall
+from eidolon_agent.core.types import (
+    Event,
+    LatencyBreakdown,
+    LLMFinishReason,
+    MessageRole,
+    PersonaTrace,
+    ChatMessage,
+    ToolTrace,
+    TurnTrace,
+    ToolCall,
+)
 from eidolon_agent.core.types.topics import Topics
 from eidolon_agent.core.types.turn import (
     FSMState,
@@ -53,9 +60,11 @@ from eidolon_agent.domain.guardrails.output_filter import OutputGuardrail
 from eidolon_agent.domain.history.fanout import HistoryFanout
 from eidolon_agent.domain.history.manager import HistoryManager
 from eidolon_agent.domain.personas.types import PersonaInteractionEvent
+from eidolon_agent.domain.runtime_policy import TurnRuntimePolicy
 from eidolon_agent.domain.tools.dispatcher import ToolDispatcher
 
 _log = logging.getLogger(__name__)
+_COMPLEX_HOLDING = "好的，我让工作站去帮你做。"
 
 
 class TurnEngine:
@@ -81,6 +90,7 @@ class TurnEngine:
         event_bus=None,
         personas_service=None,
         persona_template_id: str | None = None,
+        memory_port=None,
         max_tool_iters: int = 4,
         taboos_provider=lambda: (),  # () -> tuple[str, ...]
         session_factory=None,  # async_sessionmaker; None disables turn persistence
@@ -97,6 +107,7 @@ class TurnEngine:
         self._bus = event_bus
         self._personas = personas_service
         self._persona_template_id = persona_template_id
+        self._memory = memory_port
         self._max_tool_iters = max_tool_iters
         self._taboos_provider = taboos_provider
         self._session_factory = session_factory
@@ -110,6 +121,7 @@ class TurnEngine:
         triage_kind = TriageKind.SIMPLE
         status = TurnStatus.OK
         assistant_text_parts: list[str] = []
+        assistant_text_for_persist = ""
         usage_in = usage_out = 0
         error_code: str | None = None
         # Per-phase wall clock for P0 diagnostics. Each phase records the
@@ -119,6 +131,9 @@ class TurnEngine:
         ts_triage_ms: int | None = None
         ts_compile_ms: int | None = None
         ts_output_ms: int | None = None
+        tool_ms_total = 0
+        tool_trace: list[ToolTrace] = []
+        runtime_policy = TurnRuntimePolicy.from_metadata(ti.metadata)
 
         try:
             # ---- Input guardrail --------------------------------------------
@@ -130,6 +145,9 @@ class TurnEngine:
                     user_id=ti.caller.user_id,
                     locale=ti.caller.locale,
                 )
+                ti.metadata["is_private"] = True
+                runtime_policy = TurnRuntimePolicy.from_metadata(ti.metadata)
+                assistant_text_for_persist = crisis.text
                 yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.SPEAKING, time.time())
                 yield TurnEvent.delta(ti.turn_id, seq.next(), crisis.text, time.time())
                 yield TurnEvent.done(
@@ -145,15 +163,38 @@ class TurnEngine:
                 return
             if verdict.action is SafetyAction.REFUSE:
                 refuse = "我不能那样做，不过我可以继续陪你聊点别的。"
+                assistant_text_for_persist = refuse
                 yield TurnEvent.delta(ti.turn_id, seq.next(), refuse, time.time())
                 yield TurnEvent.done(ti.turn_id, seq.next(), TurnStatus.OK, time.time())
                 return
             if verdict.action is SafetyAction.FORGET:
                 # Tool-direct branch: forget memory (caller-side action; we ack here).
+                removed = 0
+                if self._memory is not None:
+                    try:
+                        removed = await self._memory.forget(
+                            ti.caller.user_id,
+                            ti.text or "",
+                        )
+                    except Exception:
+                        _log.exception("memory forget failed")
+                try:
+                    removed += await self._history.forget_matching(
+                        conversation_id=ti.conversation_id,
+                        query=ti.text or "",
+                    )
+                except Exception:
+                    _log.exception("local history forget failed")
                 ack = "好的，我会忘掉的。"
+                assistant_text_for_persist = ack
                 yield TurnEvent.delta(ti.turn_id, seq.next(), ack, time.time())
                 yield TurnEvent.done(
-                    ti.turn_id, seq.next(), TurnStatus.OK, time.time(), action="memory_forget"
+                    ti.turn_id,
+                    seq.next(),
+                    TurnStatus.OK,
+                    time.time(),
+                    action="memory_forget",
+                    removed=removed,
                 )
                 return
 
@@ -164,6 +205,7 @@ class TurnEngine:
 
             # ---- COMPLEX_LONG branch ---------------------------------------
             if triage_kind is TriageKind.COMPLEX_LONG and self._bus is not None:
+                assistant_text_for_persist = _COMPLEX_HOLDING
                 async for ev in self._handle_complex(ti, seq, t0):
                     yield ev
                 first_delta_ms = first_delta_ms or int((time.monotonic() - t0) * 1000)
@@ -178,9 +220,8 @@ class TurnEngine:
             tools = self._tool_schemas()
             yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.SPEAKING, time.time())
 
-            iters = 0
-            while iters <= self._max_tool_iters:
-                iters += 1
+            tool_iters = 0
+            while True:
                 tool_calls: list[ToolCall] = []
                 finish_reason: LLMFinishReason | None = None
                 async for delta in self._llm.stream(messages, tools=tools, request_id=ti.turn_id):
@@ -215,10 +256,33 @@ class TurnEngine:
                     if delta.finish is not None:
                         finish_reason = delta.finish
 
-                if finish_reason is LLMFinishReason.TOOL_CALLS and tool_calls and iters <= self._max_tool_iters:
+                if finish_reason is LLMFinishReason.TOOL_CALLS and tool_calls:
+                    if tool_iters >= self._max_tool_iters:
+                        yield TurnEvent.error(
+                            ti.turn_id,
+                            seq.next(),
+                            "tool_loop_exceeded",
+                            f"exceeded max_tool_iters={self._max_tool_iters}",
+                            time.time(),
+                        )
+                        break
+                    tool_iters += 1
+                    tool_t0 = time.monotonic()
                     results = await self._tools.dispatch_batch(
                         tool_calls,
                         ctx=ToolInvocationContext(caller=ti.caller, turn_id=ti.turn_id),
+                    )
+                    tool_ms_total += int((time.monotonic() - tool_t0) * 1000)
+                    tool_trace.extend(
+                        ToolTrace(
+                            call_id=r.call_id,
+                            name=r.name,
+                            ok=r.ok,
+                            latency_ms=r.latency_ms,
+                            error_code=r.error_code,
+                            cached=bool(r.metadata.get("idempotent_cache")),
+                        )
+                        for r in results
                     )
                     # Feed results back into the conversation as TOOL messages.
                     now = datetime.now(timezone.utc)
@@ -251,6 +315,7 @@ class TurnEngine:
                 # Crude soften: prefix; production would re-prompt LLM.
                 final_text = "（让我换个说法）" + final_text
                 yield TurnEvent.delta(ti.turn_id, seq.next(), "（让我换个说法）", time.time())
+            assistant_text_for_persist = final_text
             ts_output_ms = int((time.monotonic() - t0) * 1000)
 
             # ---- P0 diagnostic: phase timings ------------------------------
@@ -301,12 +366,45 @@ class TurnEngine:
             # must never affect the stream. Disabled when no session_factory.
             if self._session_factory is not None:
                 total_ms = int((time.monotonic() - t0) * 1000)
+                trace = TurnTrace(
+                    turn_id=ti.turn_id,
+                    conversation_id=ti.conversation_id,
+                    status=status.value,
+                    trigger=ti.trigger.value,
+                    triage=triage_kind.value,
+                    caller_kind=ti.caller.caller_kind.value,
+                    model=getattr(self._llm, "model_id", None),
+                    latency=LatencyBreakdown(
+                        guard_ms=_duration(ts_guard_ms, None),
+                        triage_ms=_duration(ts_triage_ms, ts_guard_ms),
+                        compile_ms=_duration(ts_compile_ms, ts_triage_ms),
+                        first_delta_ms=_duration(first_delta_ms, ts_compile_ms),
+                        output_ms=_duration(ts_output_ms, first_delta_ms),
+                        tool_ms=tool_ms_total,
+                        total_ms=total_ms,
+                    ),
+                    context_ledger=ti.metadata.get("context_ledger"),
+                    memory_trace=ti.metadata.get("memory_trace"),
+                    tool_trace=tool_trace,
+                    persona=PersonaTrace(
+                        instance_id=ti.caller.agent_instance_id,
+                        template_id=self._persona_template_id,
+                    ),
+                    privacy=runtime_policy.privacy,
+                    proactive_reason=ti.metadata.get("proactive_reason"),
+                    usage={"tokens_in": usage_in, "tokens_out": usage_out},
+                ).to_metadata()
                 timings = {
                     "guard_ms": ts_guard_ms,
                     "triage_ms": ts_triage_ms,
                     "compile_ms": ts_compile_ms,
                     "first_delta_ms": first_delta_ms,
                     "output_ms": ts_output_ms,
+                    "tool_ms": tool_ms_total,
+                    "context_ledger": ti.metadata.get("context_ledger"),
+                    "memory_trace": ti.metadata.get("memory_trace"),
+                    "tool_trace": [t.to_metadata() for t in tool_trace],
+                    "turn_trace": trace,
                 }
                 # Phase 34.C: thread user + assistant text through so
                 # both land in chat_messages atomically with the
@@ -328,7 +426,8 @@ class TurnEngine:
                         error_code=error_code,
                         timings=timings,
                         user_text=ti.text or "",
-                        assistant_text="".join(assistant_text_parts),
+                        assistant_text=assistant_text_for_persist,
+                        is_private=runtime_policy.mark_messages_private,
                     )
                 )
             if self._bus is not None:
@@ -366,7 +465,7 @@ class TurnEngine:
         workstation service publishes to — not back through this Turn stream.
         """
         yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.SPEAKING, time.time())
-        holding = "好的，我让工作站去帮你做。"
+        holding = _COMPLEX_HOLDING
         yield TurnEvent.delta(ti.turn_id, seq.next(), holding, time.time())
         yield TurnEvent(
             turn_id=ti.turn_id,
@@ -414,6 +513,7 @@ class TurnEngine:
         timings: dict,
         user_text: str = "",
         assistant_text: str = "",
+        is_private: bool = False,
     ) -> None:
         """Background: write the TurnRow (latency + phase timings) AND
         the user / assistant chat messages to SQLite.
@@ -429,7 +529,7 @@ class TurnEngine:
         ``/conversations`` browse showed empty message lists.
         """
         from eidolon_agent.core.types.turn import TurnResult
-        from eidolon_agent.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
+        from eidolon_agent.infra.persistence import SqlAlchemyUnitOfWork
 
         try:
             async with SqlAlchemyUnitOfWork(self._session_factory) as uow:
@@ -471,6 +571,7 @@ class TurnEngine:
                             role=MessageRole.USER,
                             content=user_text,
                             created_at=started_at,
+                            metadata={"is_private": is_private} if is_private else {},
                         ),
                     )
                 if assistant_text:
@@ -483,6 +584,7 @@ class TurnEngine:
                             tokens=usage_out or None,
                             model=getattr(self._llm, "model_id", None),
                             created_at=finished_at,
+                            metadata={"is_private": is_private} if is_private else {},
                         ),
                     )
                 await uow.commit()
@@ -500,9 +602,16 @@ class TurnEngine:
         Errors here never reach the user; logged + swallowed.
         """
         try:
-            await self._persist_messages(ti, ti.text or "", assistant_text)
+            await self._persist_messages(
+                ti,
+                ti.text or "",
+                assistant_text,
+                is_private=TurnRuntimePolicy.from_metadata(ti.metadata).mark_messages_private,
+            )
         except Exception:
             _log.exception("post-turn: persist failed")
+        if not TurnRuntimePolicy.from_metadata(ti.metadata).post_turn_side_effects_allowed:
+            return
         try:
             await self._fanout.publish_turn(
                 tenant_id=ti.caller.tenant_id,
@@ -640,3 +749,9 @@ def _log_turn_timings(
         tokens_in,
         tokens_out,
     )
+
+
+def _duration(end_ms: int | None, start_ms: int | None) -> int | None:
+    if end_ms is None:
+        return None
+    return end_ms - (start_ms or 0)

@@ -94,7 +94,14 @@ async def _seed_turn(
                 model="test/model-1",
                 error_code=None,
                 seq_in_conversation=seq,
-                metadata={"triage_ms": 5},
+                metadata={
+                    "triage_ms": 5,
+                    "turn_trace": {
+                        "schema_version": "turn_trace.v1",
+                        "boundary": "eidolon_agent.brain",
+                        "turn": {"turn_id": turn_id},
+                    },
+                },
             )
         )
         await msg_repo.append(
@@ -190,6 +197,9 @@ async def test_get_turn_returns_messages_in_order(tmp_path) -> None:
     assert body["turn_id"] == "t-1"
     assert body["user_id"] == "manson"
     assert body["latency_first_delta_ms"] == 120
+    assert body["turn_trace"]["schema_version"] == "turn_trace.v1"
+    assert body["turn_trace"]["boundary"] == "eidolon_agent.brain"
+    assert body["metadata"]["turn_trace"]["turn"]["turn_id"] == "t-1"
     roles = [m["role"] for m in body["messages"]]
     contents = [m["content"] for m in body["messages"]]
     assert roles == ["user", "assistant"]

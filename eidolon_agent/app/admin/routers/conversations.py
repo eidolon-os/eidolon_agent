@@ -34,7 +34,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from eidolon_agent.infra.persistence.repositories import (
+from eidolon_agent.infra.persistence import (
     SqlChatMessageRepository,
     SqlConversationRepository,
 )
@@ -115,6 +115,7 @@ class TurnDetail(BaseModel):
     trace_id: str | None
     error_code: str | None
     metadata: dict[str, Any] | None = Field(default=None)
+    turn_trace: dict[str, Any] | None = Field(default=None)
     messages: list[ChatMessageView]
 
 
@@ -197,6 +198,7 @@ async def get_turn(turn_id: str, request: Request) -> TurnDetail:
             raise HTTPException(404, f"turn {turn_id!r} not found")
         messages = await msg_repo.list_for_turn(turn_id)
 
+    metadata = row["metadata_"]
     return TurnDetail(
         turn_id=row["id"],
         conversation_id=row["conversation_id"],
@@ -220,7 +222,8 @@ async def get_turn(turn_id: str, request: Request) -> TurnDetail:
         model=row["model"],
         trace_id=row["trace_id"],
         error_code=row["error_code"],
-        metadata=row["metadata_"],
+        metadata=metadata,
+        turn_trace=(metadata or {}).get("turn_trace"),
         messages=[
             ChatMessageView(
                 id=m.id,

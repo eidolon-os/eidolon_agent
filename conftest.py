@@ -65,15 +65,16 @@ async def personas_service(canonical_template_registry, persona_instance_store):
 async def turn_engine_factory(personas_service, event_bus):
     """Builds a minimal TurnEngine for tests."""
 
-    def _factory(*, llm=None):
+    def _factory(*, llm=None, memory_port=None, tool_dispatcher=None, history=None, session_factory=None):
         from eidolon_agent.domain.agent.turn import TurnEngine
 
-        history = HistoryManager()
+        history = history or HistoryManager(session_factory=session_factory)
         fanout = HistoryFanout(event_bus=event_bus)
-        tools = ToolRegistry()
-        tools.register(GetTimeTool())
-        tools.register(EmitEventTool(event_bus=event_bus))
-        dispatcher = ToolDispatcher(tools)
+        if tool_dispatcher is None:
+            tools = ToolRegistry()
+            tools.register(GetTimeTool())
+            tools.register(EmitEventTool(event_bus=event_bus))
+            tool_dispatcher = ToolDispatcher(tools)
 
         def loc(_tenant, _user, _conv):
             return ("inst-test", "caretaker_jiezhi")
@@ -82,13 +83,13 @@ async def turn_engine_factory(personas_service, event_bus):
             personas_service=personas_service,
             instance_locator=loc,
             history_manager=history,
-            memory_port=None,
+            memory_port=memory_port,
             history_window=20,
         )
         return TurnEngine(
             compiler=compiler,
             llm=LLMRouter(providers={"fake": llm or FakeLLM()}, default="fake"),
-            tool_dispatcher=dispatcher,
+            tool_dispatcher=tool_dispatcher,
             history=history,
             fanout=fanout,
             triage=TaskClassifier(),
@@ -98,6 +99,8 @@ async def turn_engine_factory(personas_service, event_bus):
             event_bus=event_bus,
             personas_service=personas_service,
             persona_template_id="caretaker_jiezhi",
+            memory_port=memory_port,
+            session_factory=session_factory,
         )
 
     return _factory

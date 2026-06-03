@@ -130,7 +130,7 @@ async def create_custom_template(
 
     store = _store(request)
     # Import error types lazily to keep the router module light.
-    from eidolon_agent.infra.persistence.sql_custom_template_store import (
+    from eidolon_agent.infra.persistence import (
         CustomTemplateAlreadyExists,
     )
     try:
@@ -168,7 +168,7 @@ async def update_custom_template(
         _validate_yaml_renders(body.yaml_body)
 
     store = _store(request)
-    from eidolon_agent.infra.persistence.sql_custom_template_store import (
+    from eidolon_agent.infra.persistence import (
         CustomTemplateNotFound,
     )
     try:
@@ -216,7 +216,7 @@ async def delete_custom_template(template_id: str, request: Request) -> None:
             ),
         )
 
-    from eidolon_agent.infra.persistence.sql_custom_template_store import (
+    from eidolon_agent.infra.persistence import (
         CustomTemplateNotFound,
     )
     try:
@@ -267,7 +267,7 @@ async def fork_template(
         source_archetype = "custom"
 
     store = _store(request)
-    from eidolon_agent.infra.persistence.sql_custom_template_store import (
+    from eidolon_agent.infra.persistence import (
         CustomTemplateAlreadyExists,
     )
     try:

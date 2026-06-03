@@ -129,7 +129,8 @@ async def test_chat_once_returns_assembled_assistant_text() -> None:
     )
     svc = EidolonAgentServicer(
         agent_registry=registry, pairing=MagicMock(),
-        signals_bus=MagicMock(), proactive_bus=MagicMock(),
+        signals_bus=SimpleNamespace(recent=AsyncMock(return_value=[])),
+        proactive_bus=MagicMock(),
     )
     token = _current_identity.set(_StubIdentity())
     try:
@@ -208,7 +209,8 @@ async def test_chat_cancels_active_turn_when_context_is_cancelled() -> None:
     )
     svc = EidolonAgentServicer(
         agent_registry=registry, pairing=MagicMock(),
-        signals_bus=MagicMock(), proactive_bus=MagicMock(),
+        signals_bus=SimpleNamespace(recent=AsyncMock(return_value=[])),
+        proactive_bus=MagicMock(),
     )
 
     # Build a request iterator that yields one start frame and then blocks,
@@ -242,6 +244,105 @@ async def test_chat_cancels_active_turn_when_context_is_cancelled() -> None:
     # The turn was actually interrupted by CancelledError, not by reaching its
     # natural end. This is the whole point of the watcher.
     assert cancelled_during_turn.is_set()
+
+
+async def test_chat_start_inline_realtime_reaches_turn_input() -> None:
+    from eidolon_agent.core.types.turn import TurnEvent
+
+    captured = {}
+
+    async def _turn(ti):
+        captured["realtime"] = ti.realtime
+        yield TurnEvent(turn_id=ti.turn_id, seq=0, kind=TurnEventKind.DONE, data={})
+
+    agent = MagicMock()
+    agent.run_turn = _turn
+    registry = MagicMock()
+    registry.resolve_for_caller = AsyncMock(
+        return_value=SimpleNamespace(instance_id="inst-1", agent=agent)
+    )
+    signals = MagicMock()
+    signals.recent = AsyncMock(return_value=[])
+    svc = EidolonAgentServicer(
+        agent_registry=registry, pairing=MagicMock(),
+        signals_bus=signals, proactive_bus=MagicMock(),
+    )
+
+    async def _req_iter():
+        yield pb.ChatRequest(
+            start=pb.StartTurn(
+                turn_id="t1",
+                conversation_id="c",
+                text="hi",
+                realtime={
+                    "window_ms": 1000,
+                    "dominant_emotion": "sad",
+                    "emotion_confidence": 0.8,
+                    "confidence_overall": 0.8,
+                },
+            )
+        )
+
+    ctx = _make_context()
+    ctx.cancelled = lambda: False
+    ctx.done = lambda: False
+    token = _current_identity.set(_StubIdentity())
+    try:
+        await svc.Chat(_req_iter(), ctx)
+    finally:
+        _current_identity.reset(token)
+
+    assert captured["realtime"].dominant_emotion == "sad"
+    signals.recent.assert_not_awaited()
+
+
+async def test_chat_fuses_recent_signals_when_start_has_no_realtime() -> None:
+    from datetime import timedelta
+
+    from eidolon_agent.core.types.signal import RealtimeSignal, SignalModality
+    from eidolon_agent.core.types.turn import TurnEvent
+
+    captured = {}
+
+    async def _turn(ti):
+        captured["realtime"] = ti.realtime
+        yield TurnEvent(turn_id=ti.turn_id, seq=0, kind=TurnEventKind.DONE, data={})
+
+    agent = MagicMock()
+    agent.run_turn = _turn
+    registry = MagicMock()
+    registry.resolve_for_caller = AsyncMock(
+        return_value=SimpleNamespace(instance_id="inst-1", agent=agent)
+    )
+    now = datetime.now(timezone.utc)
+    signals = MagicMock()
+    signals.recent = AsyncMock(return_value=[
+        RealtimeSignal(
+            ts=now - timedelta(milliseconds=10),
+            modality=SignalModality.PROSODY,
+            label="calm",
+            confidence=0.9,
+        )
+    ])
+    svc = EidolonAgentServicer(
+        agent_registry=registry, pairing=MagicMock(),
+        signals_bus=signals, proactive_bus=MagicMock(),
+    )
+
+    async def _req_iter():
+        yield pb.ChatRequest(start=pb.StartTurn(turn_id="t1", conversation_id="c", text="hi"))
+
+    ctx = _make_context()
+    ctx.cancelled = lambda: False
+    ctx.done = lambda: False
+    token = _current_identity.set(_StubIdentity())
+    try:
+        await svc.Chat(_req_iter(), ctx)
+    finally:
+        _current_identity.reset(token)
+
+    assert captured["realtime"].dominant_emotion == "calm"
+    signals.recent.assert_awaited_once()
 
 
 async def test_push_signal_unknown_modality_falls_back_to_ambient() -> None:
