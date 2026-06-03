@@ -59,6 +59,10 @@ from eidolon_agent.domain.guardrails.input_filter import InputGuardrail, SafetyA
 from eidolon_agent.domain.guardrails.output_filter import OutputGuardrail
 from eidolon_agent.domain.history.fanout import HistoryFanout
 from eidolon_agent.domain.history.manager import HistoryManager
+from eidolon_agent.domain.memory_policy import (
+    MemoryWriteDispositionKind,
+    classify_memory_write,
+)
 from eidolon_agent.domain.personas.types import PersonaInteractionEvent
 from eidolon_agent.domain.runtime_policy import TurnRuntimePolicy
 from eidolon_agent.domain.tools.dispatcher import ToolDispatcher
@@ -601,16 +605,27 @@ class TurnEngine:
 
         Errors here never reach the user; logged + swallowed.
         """
+        policy = TurnRuntimePolicy.from_metadata(ti.metadata)
         try:
             await self._persist_messages(
                 ti,
                 ti.text or "",
                 assistant_text,
-                is_private=TurnRuntimePolicy.from_metadata(ti.metadata).mark_messages_private,
+                is_private=policy.mark_messages_private,
             )
         except Exception:
             _log.exception("post-turn: persist failed")
-        if not TurnRuntimePolicy.from_metadata(ti.metadata).post_turn_side_effects_allowed:
+        if not policy.post_turn_side_effects_allowed:
+            return
+        disposition = classify_memory_write(
+            user_text=ti.text or "",
+            assistant_text=assistant_text,
+        )
+        if disposition.kind is MemoryWriteDispositionKind.SENSITIVE_REQUIRES_CONSENT:
+            _log.info(
+                "post-turn: skipped memory/persona side effects for sensitive turn %s",
+                ti.turn_id,
+            )
             return
         try:
             await self._fanout.publish_turn(
@@ -621,6 +636,12 @@ class TurnEngine:
                 user_text=ti.text or "",
                 assistant_text=assistant_text,
                 timestamp_iso=started_at.isoformat(),
+                metadata={
+                    **disposition.to_metadata(),
+                    "source_component": "turn_engine",
+                    "conversation_id": ti.conversation_id,
+                    "privacy_mode": policy.privacy.mode,
+                },
             )
         except Exception:
             _log.exception("post-turn: fanout failed")

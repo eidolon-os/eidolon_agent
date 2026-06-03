@@ -45,6 +45,39 @@ async def test_publish_turn_emits_memory_event(event_bus) -> None:
     assert payload["user_text"] == "你好"
     assert payload["assistant_text"] == "嗨"
     assert payload["metadata"]["source"] == "eidolon-agent"
+    assert payload["metadata"]["source_turn_id"] == "turn-1"
+    assert payload["metadata"]["tenant_id"] == "t"
+
+
+async def test_publish_turn_merges_memory_policy_metadata(event_bus) -> None:
+    received: list = []
+
+    async def _on(ev) -> None:
+        received.append(ev)
+
+    await event_bus.subscribe("agent.memory.conversation.turn.alice", _on)
+    fanout = HistoryFanout(event_bus=event_bus)
+    await fanout.publish_turn(
+        tenant_id="t",
+        user_id="alice",
+        session_id="s",
+        turn_id="turn-1",
+        user_text="以后叫我小满",
+        assistant_text="好的",
+        timestamp_iso="2026-05-22T10:00:00Z",
+        metadata={
+            "memory_write_disposition": "semantic_upsert",
+            "memory_write_reason": "stable_preference_or_identity",
+            "conversation_id": "c1",
+        },
+    )
+    await asyncio.sleep(0)
+
+    metadata = received[0].payload["metadata"]
+    assert metadata["source"] == "eidolon-agent"
+    assert metadata["source_component"] == "history.fanout"
+    assert metadata["memory_write_disposition"] == "semantic_upsert"
+    assert metadata["conversation_id"] == "c1"
 
 
 async def test_publish_turn_uses_route_resolver_when_provided(event_bus) -> None:

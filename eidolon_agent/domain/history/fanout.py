@@ -37,9 +37,19 @@ class HistoryFanout:
         assistant_text: str,
         timestamp_iso: str,
         emotion_payload: dict | None = None,
+        metadata: dict | None = None,
     ) -> None:
         if self._bus is None:
             return
+        payload_metadata = {
+            "source": "eidolon-agent",
+            "source_project": "eidolon_agent",
+            "source_component": "history.fanout",
+            "source_turn_id": turn_id,
+            "tenant_id": tenant_id,
+        }
+        if metadata:
+            payload_metadata.update(metadata)
         memory_payload = {
             "turn_id": turn_id,
             "user_id": user_id,
@@ -47,7 +57,7 @@ class HistoryFanout:
             "timestamp": timestamp_iso,
             "user_text": user_text,
             "assistant_text": assistant_text,
-            "metadata": {"source": "eidolon-agent"},
+            "metadata": payload_metadata,
         }
         try:
             memory_subject = (
