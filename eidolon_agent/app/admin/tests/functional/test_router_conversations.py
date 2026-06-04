@@ -143,6 +143,16 @@ async def _seed_turn(
                             "hit_count": 1,
                             "context_injected": True,
                         },
+                        "memory_write_trace": {
+                            "source_turn_id": turn_id,
+                            "conversation_id": conversation_id,
+                            "privacy_mode": "normal",
+                            "disposition": "semantic_upsert",
+                            "reason": "stable_preference_or_identity",
+                            "policy_version": "agent_memory_policy.v1",
+                            "fanout_allowed": True,
+                            "skipped_reason": None,
+                        },
                         "tool_trace": [
                             {
                                 "call_id": "tc-1",
@@ -233,6 +243,32 @@ async def test_list_turns_returns_newest_first_and_filters_by_user(tmp_path) -> 
     await engine.dispose()
 
 
+async def test_memory_audit_lists_write_candidates_without_message_text(tmp_path) -> None:
+    client, factory, engine = await _fresh_app(tmp_path)
+    t0 = datetime(2026, 6, 3, 9, 0, 0, tzinfo=timezone.utc)
+    await _seed_turn(
+        factory,
+        tenant_id="default", user_id="manson",
+        conversation_id="c-1", turn_id="t-1", seq=0,
+        user_text="以后叫我小满", assistant_text="好的，小满。",
+        started_at=t0,
+    )
+
+    async with client:
+        r = await client.get("/api/admin/conversations/memory-audit?user_id=manson")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["rows"]) == 1
+    row = body["rows"][0]
+    assert row["turn_id"] == "t-1"
+    assert row["disposition"] == "semantic_upsert"
+    assert row["fanout_allowed"] is True
+    assert row["privacy_mode"] == "normal"
+    assert "小满" not in str(body)
+    await engine.dispose()
+
+
 async def test_get_turn_returns_messages_in_order(tmp_path) -> None:
     client, factory, engine = await _fresh_app(tmp_path)
     t0 = datetime(2026, 6, 3, 9, 0, 0, tzinfo=timezone.utc)
@@ -259,6 +295,7 @@ async def test_get_turn_returns_messages_in_order(tmp_path) -> None:
     assert summary["context"]["segment_kinds"] == ["persona", "memory"]
     assert summary["context"]["dropped_kinds"] == ["history"]
     assert summary["memory"]["degraded"] is True
+    assert summary["memory_write"]["disposition"] == "semantic_upsert"
     assert summary["tools"]["names"] == ["get_time"]
     assert summary["latency"]["compile_ms"] == 3
     assert "prompt_fingerprint" in summary

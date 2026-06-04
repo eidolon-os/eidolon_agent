@@ -19,6 +19,7 @@ def build_turn_observability_summary(
 
     ledger = trace.get("context_ledger") or {}
     memory = trace.get("memory_trace") or {}
+    memory_write = trace.get("memory_write_trace") or {}
     tools = trace.get("tool_trace") or []
     privacy = trace.get("privacy") or {}
     latency = trace.get("latency") or {}
@@ -35,6 +36,13 @@ def build_turn_observability_summary(
             "skipped_reason": memory.get("skipped_reason"),
             "hit_count": memory.get("hit_count") or 0,
             "context_injected": bool(memory.get("context_injected")),
+        },
+        "memory_write": {
+            "disposition": memory_write.get("disposition"),
+            "reason": memory_write.get("reason"),
+            "fanout_allowed": bool(memory_write.get("fanout_allowed")),
+            "skipped_reason": memory_write.get("skipped_reason"),
+            "policy_version": memory_write.get("policy_version"),
         },
         "tools": {
             "count": len(tools),

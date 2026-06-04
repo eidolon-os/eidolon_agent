@@ -100,6 +100,7 @@ class TurnTrace:
     latency: LatencyBreakdown
     context_ledger: dict[str, Any] | None = None
     memory_trace: dict[str, Any] | None = None
+    memory_write_trace: dict[str, Any] | None = None
     tool_trace: list[ToolTrace] = field(default_factory=list)
     persona: PersonaTrace = field(default_factory=PersonaTrace)
     privacy: PrivacyTrace = field(default_factory=PrivacyTrace)
@@ -122,6 +123,7 @@ class TurnTrace:
             "latency": self.latency.to_metadata(),
             "context_ledger": self.context_ledger,
             "memory_trace": self.memory_trace,
+            "memory_write_trace": self.memory_write_trace,
             "tool_trace": [t.to_metadata() for t in self.tool_trace],
             "persona": self.persona.to_metadata(),
             "privacy": self.privacy.to_metadata(),

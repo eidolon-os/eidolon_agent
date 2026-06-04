@@ -95,6 +95,8 @@ async def test_turn_persists_user_and_assistant_messages(
         assert trace["latency"]["total_ms"] is not None
         assert trace["latency"]["first_delta_ms"] <= trace["latency"]["total_ms"]
         assert trace["privacy"]["mode"] == "normal"
+        assert trace["memory_write_trace"]["source_turn_id"] == ti.turn_id
+        assert trace["memory_write_trace"]["fanout_allowed"] is True
 
         messages = (
             (

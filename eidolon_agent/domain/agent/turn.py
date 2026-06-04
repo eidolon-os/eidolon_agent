@@ -369,6 +369,11 @@ class TurnEngine:
             # turn_persister is injected.
             if self._turn_persister is not None:
                 total_ms = int((time.monotonic() - t0) * 1000)
+                memory_write_trace = _memory_write_trace(
+                    ti=ti,
+                    assistant_text=assistant_text_for_persist,
+                    policy=runtime_policy,
+                )
                 trace = TurnTrace(
                     turn_id=ti.turn_id,
                     conversation_id=ti.conversation_id,
@@ -388,6 +393,7 @@ class TurnEngine:
                     ),
                     context_ledger=ti.metadata.get("context_ledger"),
                     memory_trace=ti.metadata.get("memory_trace"),
+                    memory_write_trace=memory_write_trace,
                     tool_trace=tool_trace,
                     persona=PersonaTrace(
                         instance_id=ti.caller.agent_instance_id,
@@ -406,6 +412,7 @@ class TurnEngine:
                     "tool_ms": tool_ms_total,
                     "context_ledger": ti.metadata.get("context_ledger"),
                     "memory_trace": ti.metadata.get("memory_trace"),
+                    "memory_write_trace": memory_write_trace,
                     "tool_trace": [t.to_metadata() for t in tool_trace],
                     "turn_trace": trace,
                 }
@@ -568,14 +575,16 @@ class TurnEngine:
             _log.exception("post-turn: persist failed")
         if not policy.post_turn_side_effects_allowed:
             return
-        disposition = classify_memory_write(
-            user_text=ti.text or "",
+        write_trace = _memory_write_trace(
+            ti=ti,
             assistant_text=assistant_text,
+            policy=policy,
         )
-        if disposition.kind is MemoryWriteDispositionKind.SENSITIVE_REQUIRES_CONSENT:
+        if not write_trace["fanout_allowed"]:
             _log.info(
-                "post-turn: skipped memory/persona side effects for sensitive turn %s",
+                "post-turn: skipped memory/persona side effects for turn %s reason=%s",
                 ti.turn_id,
+                write_trace["skipped_reason"],
             )
             return
         try:
@@ -588,7 +597,9 @@ class TurnEngine:
                 assistant_text=assistant_text,
                 timestamp_iso=started_at.isoformat(),
                 metadata={
-                    **disposition.to_metadata(),
+                    "memory_write_disposition": write_trace["disposition"],
+                    "memory_write_reason": write_trace["reason"],
+                    "memory_policy_version": write_trace["policy_version"],
                     "source_component": "turn_engine",
                     "conversation_id": ti.conversation_id,
                     "privacy_mode": policy.privacy.mode,
@@ -727,3 +738,36 @@ def _duration(end_ms: int | None, start_ms: int | None) -> int | None:
     if end_ms is None:
         return None
     return end_ms - (start_ms or 0)
+
+
+def _memory_write_trace(
+    *,
+    ti: TurnInput,
+    assistant_text: str,
+    policy: TurnRuntimePolicy,
+) -> dict:
+    disposition = classify_memory_write(
+        user_text=ti.text or "",
+        assistant_text=assistant_text,
+    )
+    skipped_reason: str | None = None
+    if not ti.text:
+        skipped_reason = "empty_user_text"
+    elif not assistant_text:
+        skipped_reason = "empty_assistant_text"
+    elif not policy.post_turn_side_effects_allowed:
+        skipped_reason = "privacy_policy"
+    elif disposition.kind is MemoryWriteDispositionKind.SENSITIVE_REQUIRES_CONSENT:
+        skipped_reason = "requires_consent"
+
+    metadata = disposition.to_metadata()
+    return {
+        "source_turn_id": ti.turn_id,
+        "conversation_id": ti.conversation_id,
+        "privacy_mode": policy.privacy.mode,
+        "disposition": disposition.kind.value,
+        "reason": disposition.reason,
+        "policy_version": metadata["memory_policy_version"],
+        "fanout_allowed": skipped_reason is None,
+        "skipped_reason": skipped_reason,
+    }

@@ -78,6 +78,26 @@ class ListTurnsResponse(BaseModel):
     next_before: datetime | None = None
 
 
+class MemoryAuditRow(BaseModel):
+    turn_id: str
+    conversation_id: str
+    seq: int
+    tenant_id: str
+    user_id: str
+    started_at: datetime
+    disposition: str | None
+    reason: str | None
+    policy_version: str | None
+    fanout_allowed: bool
+    skipped_reason: str | None
+    privacy_mode: str | None
+
+
+class MemoryAuditResponse(BaseModel):
+    rows: list[MemoryAuditRow]
+    next_before: datetime | None = None
+
+
 class ChatMessageView(BaseModel):
     id: str
     role: str
@@ -192,6 +212,50 @@ async def list_turns(
     # null when this page wasn't full (means we hit the tail).
     next_before = turns[-1].started_at if len(turns) == limit else None
     return ListTurnsResponse(turns=turns, next_before=next_before)
+
+
+@router.get("/conversations/memory-audit", response_model=MemoryAuditResponse)
+async def list_memory_audit(
+    request: Request,
+    user_id: str | None = Query(default=None, description="Filter by admin user_id"),
+    tenant_id: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    before: datetime | None = Query(default=None),
+) -> MemoryAuditResponse:
+    """Prompt-safe memory write candidates from local turn traces."""
+    factory = _session_factory(request)
+    async with factory() as session:
+        repo = SqlConversationRepository(session)
+        rows = await repo.list_turns_by_user(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            limit=limit,
+            before=before,
+        )
+    out: list[MemoryAuditRow] = []
+    for row in rows:
+        trace = ((row.get("metadata_") or {}).get("turn_trace") or {})
+        write = trace.get("memory_write_trace") or {}
+        if not write:
+            continue
+        out.append(
+            MemoryAuditRow(
+                turn_id=row["id"],
+                conversation_id=row["conversation_id"],
+                seq=row["seq"],
+                tenant_id=row["tenant_id"],
+                user_id=row["user_id"],
+                started_at=row["started_at"],
+                disposition=write.get("disposition"),
+                reason=write.get("reason"),
+                policy_version=write.get("policy_version"),
+                fanout_allowed=bool(write.get("fanout_allowed")),
+                skipped_reason=write.get("skipped_reason"),
+                privacy_mode=write.get("privacy_mode"),
+            )
+        )
+    next_before = out[-1].started_at if len(rows) == limit and out else None
+    return MemoryAuditResponse(rows=out, next_before=next_before)
 
 
 @router.get("/conversations/turns/{turn_id}", response_model=TurnDetail)

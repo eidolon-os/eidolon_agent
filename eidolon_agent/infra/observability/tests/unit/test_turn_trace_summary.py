@@ -43,6 +43,13 @@ def test_summary_is_prompt_safe_and_operator_friendly() -> None:
                 "hit_count": 2,
                 "context_injected": True,
             },
+            "memory_write_trace": {
+                "disposition": "semantic_upsert",
+                "reason": "stable_preference_or_identity",
+                "fanout_allowed": True,
+                "skipped_reason": None,
+                "policy_version": "agent_memory_policy.v1",
+            },
             "tool_trace": [
                 {
                     "name": "get_time",
@@ -67,6 +74,7 @@ def test_summary_is_prompt_safe_and_operator_friendly() -> None:
     assert summary["context"]["segment_kinds"] == ["persona"]
     assert summary["context"]["dropped_kinds"] == ["history"]
     assert summary["memory"]["hit_count"] == 2
+    assert summary["memory_write"]["disposition"] == "semantic_upsert"
     assert summary["tools"]["count"] == 2
     assert summary["tools"]["error_count"] == 1
     assert summary["tools"]["cached_count"] == 1
