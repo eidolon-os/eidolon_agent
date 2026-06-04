@@ -33,6 +33,7 @@ from eidolon_agent.core.ports.llm import LLMPort
 from eidolon_agent.core.ports.tool import ToolInvocationContext
 from eidolon_agent.core.types import (
     Event,
+    DevelopmentGuardTrace,
     LatencyBreakdown,
     LLMFinishReason,
     MemoryWriteDispositionKind,
@@ -94,6 +95,9 @@ class TurnEngine:
         persona_template_id: str | None = None,
         memory_port=None,
         max_tool_iters: int = 4,
+        memory_write_mode: str = "enabled",
+        tool_schema_strict: bool = True,
+        require_idempotency_for_side_effect_tools: bool = False,
         taboos_provider=lambda: (),  # () -> tuple[str, ...]
         turn_persister=None,  # async callable; None disables durable turn persistence
     ) -> None:
@@ -111,6 +115,11 @@ class TurnEngine:
         self._persona_template_id = persona_template_id
         self._memory = memory_port
         self._max_tool_iters = max_tool_iters
+        self._memory_write_mode = _normalize_guard_mode(memory_write_mode)
+        self._tool_schema_strict = tool_schema_strict
+        self._require_idempotency_for_side_effect_tools = (
+            require_idempotency_for_side_effect_tools
+        )
         self._taboos_provider = taboos_provider
         self._turn_persister = turn_persister
 
@@ -373,6 +382,16 @@ class TurnEngine:
                     ti=ti,
                     assistant_text=assistant_text_for_persist,
                     policy=runtime_policy,
+                    mode=self._memory_write_mode,
+                )
+                development_guards = _development_guard_trace(
+                    ti=ti,
+                    memory_write_trace=memory_write_trace,
+                    max_tool_iters=self._max_tool_iters,
+                    tool_schema_strict=self._tool_schema_strict,
+                    require_idempotency_for_side_effect_tools=(
+                        self._require_idempotency_for_side_effect_tools
+                    ),
                 )
                 trace = TurnTrace(
                     turn_id=ti.turn_id,
@@ -401,6 +420,7 @@ class TurnEngine:
                     ),
                     privacy=runtime_policy.privacy,
                     proactive_reason=ti.metadata.get("proactive_reason"),
+                    development_guards=development_guards,
                     usage={"tokens_in": usage_in, "tokens_out": usage_out},
                 ).to_metadata()
                 timings = {
@@ -579,6 +599,7 @@ class TurnEngine:
             ti=ti,
             assistant_text=assistant_text,
             policy=policy,
+            mode=self._memory_write_mode,
         )
         if not write_trace["fanout_allowed"]:
             _log.info(
@@ -745,29 +766,80 @@ def _memory_write_trace(
     ti: TurnInput,
     assistant_text: str,
     policy: TurnRuntimePolicy,
+    mode: str = "enabled",
 ) -> dict:
-    disposition = classify_memory_write(
-        user_text=ti.text or "",
-        assistant_text=assistant_text,
-    )
+    mode = _normalize_guard_mode(mode)
+    disposition = None
     skipped_reason: str | None = None
-    if not ti.text:
+    if mode == "disabled":
+        skipped_reason = "policy_disabled"
+    elif not ti.text:
         skipped_reason = "empty_user_text"
     elif not assistant_text:
         skipped_reason = "empty_assistant_text"
     elif not policy.post_turn_side_effects_allowed:
         skipped_reason = "privacy_policy"
-    elif disposition.kind is MemoryWriteDispositionKind.SENSITIVE_REQUIRES_CONSENT:
-        skipped_reason = "requires_consent"
+    else:
+        disposition = classify_memory_write(
+            user_text=ti.text or "",
+            assistant_text=assistant_text,
+        )
+        if mode == "shadow":
+            skipped_reason = "shadow_only"
+        elif disposition.kind is MemoryWriteDispositionKind.SENSITIVE_REQUIRES_CONSENT:
+            skipped_reason = "requires_consent"
 
-    metadata = disposition.to_metadata()
+    if disposition is None and mode != "disabled":
+        disposition = classify_memory_write(
+            user_text=ti.text or "",
+            assistant_text=assistant_text,
+        )
+    metadata = disposition.to_metadata() if disposition is not None else {}
     return {
         "source_turn_id": ti.turn_id,
         "conversation_id": ti.conversation_id,
         "privacy_mode": policy.privacy.mode,
-        "disposition": disposition.kind.value,
-        "reason": disposition.reason,
-        "policy_version": metadata["memory_policy_version"],
+        "mode": mode,
+        "shadow_only": mode == "shadow",
+        "disposition": disposition.kind.value if disposition is not None else None,
+        "reason": disposition.reason if disposition is not None else None,
+        "policy_version": metadata.get("memory_policy_version"),
         "fanout_allowed": skipped_reason is None,
         "skipped_reason": skipped_reason,
     }
+
+
+def _development_guard_trace(
+    *,
+    ti: TurnInput,
+    memory_write_trace: dict,
+    max_tool_iters: int,
+    tool_schema_strict: bool,
+    require_idempotency_for_side_effect_tools: bool,
+) -> DevelopmentGuardTrace:
+    guards = ti.metadata.get("development_guards") or {}
+    return DevelopmentGuardTrace(
+        context_budget=guards.get("context_budget"),
+        memory_write_policy={
+            "mode": memory_write_trace.get("mode"),
+            "shadow_only": bool(memory_write_trace.get("shadow_only")),
+            "fanout_allowed": bool(memory_write_trace.get("fanout_allowed")),
+            "skipped_reason": memory_write_trace.get("skipped_reason"),
+            "disposition": memory_write_trace.get("disposition"),
+            "policy_version": memory_write_trace.get("policy_version"),
+        },
+        tool_policy={
+            "schema_strict": tool_schema_strict,
+            "require_idempotency_for_side_effect_tools": (
+                require_idempotency_for_side_effect_tools
+            ),
+            "max_tool_iters": max_tool_iters,
+        },
+    )
+
+
+def _normalize_guard_mode(mode: str) -> str:
+    if mode in {"enabled", "shadow", "disabled"}:
+        return mode
+    _log.warning("unknown development guard mode=%s; falling back to enabled", mode)
+    return "enabled"

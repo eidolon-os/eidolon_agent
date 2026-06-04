@@ -181,6 +181,9 @@ async def build_application(
         tool_registry,
         idempotency_store=idemp_kv,
         allowed_permissions={p for p in Permission},
+        schema_strict=settings.turn.tool_schema_strict,
+        batch_timeout_s=settings.turn.tool_batch_timeout_s,
+        require_idempotency_for_side_effect=settings.turn.require_idempotency_for_side_effect_tools,
     )
     container.tool_registry = tool_registry
     container.tool_dispatcher = tool_dispatcher
@@ -345,6 +348,7 @@ def _build_turn_engine(
         history_window=20,
         memory_timeout_s=container.settings.memory.recall_timeout_s,
         context_budget_tokens=container.settings.turn.max_token_budget,
+        context_budget_mode=container.settings.turn.context_budget_mode,
     )
     return TurnEngine(
         compiler=compiler,
@@ -361,6 +365,9 @@ def _build_turn_engine(
         persona_template_id=template_id,
         memory_port=container.memory_port,
         max_tool_iters=container.settings.turn.max_tool_iters,
+        memory_write_mode=container.settings.turn.memory_write_mode,
+        tool_schema_strict=container.settings.turn.tool_schema_strict,
+        require_idempotency_for_side_effect_tools=container.settings.turn.require_idempotency_for_side_effect_tools,
         taboos_provider=lambda: tuple(),
         turn_persister=build_turn_persister(
             container.session_factory,

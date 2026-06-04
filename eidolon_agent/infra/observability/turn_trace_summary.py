@@ -23,6 +23,7 @@ def build_turn_observability_summary(
     tools = trace.get("tool_trace") or []
     privacy = trace.get("privacy") or {}
     latency = trace.get("latency") or {}
+    development_guards = trace.get("development_guards") or {}
     snapshot = snapshot_from_turn_trace(trace, fallback_key="turn")
 
     return {
@@ -60,6 +61,7 @@ def build_turn_observability_summary(
             "tool_ms": latency.get("tool_ms", 0),
             "total_ms": latency.get("total_ms", total_latency_ms),
         },
+        "development_guards": _development_guard_summary(development_guards),
     }
 
 
@@ -80,6 +82,36 @@ def _int_or_zero(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _development_guard_summary(guards: dict[str, Any]) -> dict[str, Any]:
+    context = guards.get("context_budget") or {}
+    memory_write = guards.get("memory_write_policy") or {}
+    tool = guards.get("tool_policy") or {}
+    return {
+        "context_budget": {
+            "mode": context.get("mode"),
+            "applied": bool(context.get("applied")),
+            "max_tokens": context.get("max_tokens"),
+            "dropped_count": context.get("dropped_count") or 0,
+            "shadow_dropped_count": context.get("shadow_dropped_count") or 0,
+            "shadow_dropped_kinds": list(context.get("shadow_dropped_kinds") or []),
+        },
+        "memory_write_policy": {
+            "mode": memory_write.get("mode"),
+            "shadow_only": bool(memory_write.get("shadow_only")),
+            "fanout_allowed": bool(memory_write.get("fanout_allowed")),
+            "skipped_reason": memory_write.get("skipped_reason"),
+            "disposition": memory_write.get("disposition"),
+        },
+        "tool_policy": {
+            "schema_strict": bool(tool.get("schema_strict")),
+            "require_idempotency_for_side_effect_tools": bool(
+                tool.get("require_idempotency_for_side_effect_tools")
+            ),
+            "max_tool_iters": tool.get("max_tool_iters"),
+        },
+    }
 
 
 __all__ = ["build_turn_observability_summary"]

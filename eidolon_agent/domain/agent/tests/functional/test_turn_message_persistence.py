@@ -97,6 +97,10 @@ async def test_turn_persists_user_and_assistant_messages(
         assert trace["privacy"]["mode"] == "normal"
         assert trace["memory_write_trace"]["source_turn_id"] == ti.turn_id
         assert trace["memory_write_trace"]["fanout_allowed"] is True
+        assert trace["development_guards"]["context_budget"]["mode"] == "disabled"
+        assert trace["development_guards"]["context_budget"]["configured"] is False
+        assert trace["development_guards"]["memory_write_policy"]["mode"] == "enabled"
+        assert trace["development_guards"]["tool_policy"]["max_tool_iters"] == 4
 
         messages = (
             (

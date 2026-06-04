@@ -46,6 +46,7 @@ class ContextCompiler:
         memory_timeout_s: float = 0.2,
         memory_top_k: int = 5,
         context_budget_tokens: int | None = None,
+        context_budget_mode: str = "enabled",
     ) -> None:
         self._personas = personas_service
         self._locator = instance_locator
@@ -55,6 +56,7 @@ class ContextCompiler:
         self._memory_timeout_s = memory_timeout_s
         self._memory_top_k = memory_top_k
         self._context_budget_tokens = context_budget_tokens
+        self._context_budget_mode = _normalize_budget_mode(context_budget_mode)
 
     async def compile(self, ti: TurnInput) -> list[ChatMessage]:
         instance_id, template_id = self._locator(
@@ -207,7 +209,7 @@ class ContextCompiler:
             )
             segments.append(current_user_segment)
 
-        kept_segments, ledger = self._apply_budget(segments)
+        kept_segments, ledger, budget_guard = self._apply_budget(segments)
         for source in degraded_sources:
             ledger.mark_degraded(source)
         kept_ids = {id(seg) for seg in kept_segments}
@@ -262,14 +264,50 @@ class ContextCompiler:
                 )
             )
         ti.metadata["context_ledger"] = ledger.to_metadata()
+        ti.metadata.setdefault("development_guards", {})["context_budget"] = budget_guard
         return out
 
     def _apply_budget(
         self, segments: list[ContextSegment]
-    ) -> tuple[list[ContextSegment], ContextLedger]:
+    ) -> tuple[list[ContextSegment], ContextLedger, dict]:
+        unbudgeted = ContextLedger(kept_segments=list(segments))
         if self._context_budget_tokens is None:
-            return segments, ContextLedger(kept_segments=list(segments))
-        return ContextBudget(max_tokens=self._context_budget_tokens).prune(segments)
+            return segments, unbudgeted, {
+                "mode": "disabled",
+                "configured": False,
+                "applied": False,
+                "max_tokens": None,
+                "kept_token_estimate": unbudgeted.total_token_estimate,
+                "dropped_count": 0,
+                "shadow_dropped_count": 0,
+                "shadow_dropped_kinds": [],
+            }
+
+        budget = ContextBudget(max_tokens=self._context_budget_tokens)
+        pruned_segments, pruned_ledger = budget.prune(segments)
+        guard = {
+            "mode": self._context_budget_mode,
+            "configured": True,
+            "applied": self._context_budget_mode == "enabled",
+            "max_tokens": self._context_budget_tokens,
+            "kept_token_estimate": (
+                pruned_ledger.total_token_estimate
+                if self._context_budget_mode == "enabled"
+                else unbudgeted.total_token_estimate
+            ),
+            "dropped_count": (
+                len(pruned_ledger.dropped_segments)
+                if self._context_budget_mode == "enabled"
+                else 0
+            ),
+            "shadow_dropped_count": len(pruned_ledger.dropped_segments),
+            "shadow_dropped_kinds": [
+                seg.kind.value for seg in pruned_ledger.dropped_segments
+            ],
+        }
+        if self._context_budget_mode == "enabled":
+            return pruned_segments, pruned_ledger, guard
+        return segments, unbudgeted, guard
 
     # Injected into the system prompt when memory recall raises. Tells the
     # LLM not to confabulate prior context — degraded honestly beats
@@ -368,6 +406,13 @@ def _realtime_line(digest) -> str:  # type: ignore[no-untyped-def]
     if digest.notable_events:
         parts.extend(digest.notable_events)
     return " | ".join(parts)
+
+
+def _normalize_budget_mode(mode: str) -> str:
+    if mode in {"enabled", "shadow", "disabled"}:
+        return mode
+    _log.warning("unknown context_budget_mode=%s; falling back to enabled", mode)
+    return "enabled"
 
 
 def _estimate_tokens(text: str) -> int:

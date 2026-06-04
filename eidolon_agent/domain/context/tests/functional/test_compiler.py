@@ -339,6 +339,29 @@ async def test_budget_drops_oversized_memory_and_records_ledger() -> None:
     assert any(s["kind"] == "memory" for s in dropped)
 
 
+async def test_budget_shadow_records_would_drop_without_changing_prompt() -> None:
+    ti = make_turn_input("当前问题")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas("[P]"),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=_StubMemory(formatted="memory " * 120),
+        context_budget_tokens=20,
+        context_budget_mode="shadow",
+    )
+
+    msgs = await compiler.compile(ti)
+
+    assert "[MEMORY]" in msgs[0].content
+    assert ti.metadata["memory_trace"]["context_injected"] is True
+    guard = ti.metadata["development_guards"]["context_budget"]
+    assert guard["mode"] == "shadow"
+    assert guard["applied"] is False
+    assert guard["dropped_count"] == 0
+    assert guard["shadow_dropped_count"] > 0
+    assert "memory" in guard["shadow_dropped_kinds"]
+
+
 async def test_budget_keeps_degraded_memory_notice_even_over_budget() -> None:
     memory = _StubMemory(formatted="", degraded=True)
     ti = make_turn_input("你还记得什么？")

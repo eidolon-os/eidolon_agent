@@ -260,6 +260,11 @@ class TurnSettings(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    context_budget_mode: Literal["enabled", "shadow", "disabled"] = "enabled"
+    memory_write_mode: Literal["enabled", "shadow", "disabled"] = "enabled"
+    tool_schema_strict: bool = True
+    require_idempotency_for_side_effect_tools: bool = False
+    tool_batch_timeout_s: float | None = None
     compile_soft_timeout_ms: int = 100
     memory_recall_soft_timeout_ms: int = 200
     first_delta_slo_p50_ms: int = 200

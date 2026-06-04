@@ -31,6 +31,7 @@ from eidolon_agent.core.types.signal import RealtimeSignal, SignalDigest, Signal
 from eidolon_agent.core.types.tool import Permission, ToolCall, ToolResult, ToolSchema
 from eidolon_agent.core.types.trace import (
     TRACE_SCHEMA_VERSION,
+    DevelopmentGuardTrace,
     LatencyBreakdown,
     PersonaTrace,
     PrivacyTrace,
@@ -84,6 +85,7 @@ __all__ = [  # noqa: RUF022 - grouped by domain rather than alphabetical for rea
     "ToolSchema",
     # trace
     "TRACE_SCHEMA_VERSION",
+    "DevelopmentGuardTrace",
     "LatencyBreakdown",
     "PersonaTrace",
     "PrivacyTrace",

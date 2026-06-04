@@ -65,6 +65,28 @@ def test_summary_is_prompt_safe_and_operator_friendly() -> None:
                 },
             ],
             "privacy": {"mode": "normal"},
+            "development_guards": {
+                "context_budget": {
+                    "mode": "enabled",
+                    "applied": True,
+                    "max_tokens": 6000,
+                    "dropped_count": 1,
+                    "shadow_dropped_count": 1,
+                    "shadow_dropped_kinds": ["history"],
+                },
+                "memory_write_policy": {
+                    "mode": "enabled",
+                    "shadow_only": False,
+                    "fanout_allowed": True,
+                    "skipped_reason": None,
+                    "disposition": "semantic_upsert",
+                },
+                "tool_policy": {
+                    "schema_strict": True,
+                    "require_idempotency_for_side_effect_tools": False,
+                    "max_tool_iters": 4,
+                },
+            },
         }
     }
 
@@ -80,6 +102,10 @@ def test_summary_is_prompt_safe_and_operator_friendly() -> None:
     assert summary["tools"]["cached_count"] == 1
     assert summary["tools"]["total_latency_ms"] == 6
     assert summary["latency"]["compile_ms"] == 12
+    assert summary["development_guards"]["context_budget"]["mode"] == "enabled"
+    assert summary["development_guards"]["context_budget"]["dropped_count"] == 1
+    assert summary["development_guards"]["memory_write_policy"]["fanout_allowed"] is True
+    assert summary["development_guards"]["tool_policy"]["schema_strict"] is True
     assert "secret prompt text" not in str(summary)
 
 

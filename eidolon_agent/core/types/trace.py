@@ -89,6 +89,22 @@ class PersonaTrace:
 
 
 @dataclass(frozen=True, slots=True)
+class DevelopmentGuardTrace:
+    """Prompt-safe development guard state for high-risk brain behavior."""
+
+    context_budget: dict[str, Any] | None = None
+    memory_write_policy: dict[str, Any] | None = None
+    tool_policy: dict[str, Any] | None = None
+
+    def to_metadata(self) -> dict[str, Any]:
+        return {
+            "context_budget": self.context_budget,
+            "memory_write_policy": self.memory_write_policy,
+            "tool_policy": self.tool_policy,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class TurnTrace:
     turn_id: str
     conversation_id: str
@@ -105,6 +121,9 @@ class TurnTrace:
     persona: PersonaTrace = field(default_factory=PersonaTrace)
     privacy: PrivacyTrace = field(default_factory=PrivacyTrace)
     proactive_reason: dict[str, Any] | None = None
+    development_guards: DevelopmentGuardTrace = field(
+        default_factory=DevelopmentGuardTrace
+    )
     usage: dict[str, int] = field(default_factory=dict)
 
     def to_metadata(self) -> dict[str, Any]:
@@ -128,12 +147,14 @@ class TurnTrace:
             "persona": self.persona.to_metadata(),
             "privacy": self.privacy.to_metadata(),
             "proactive_reason": self.proactive_reason,
+            "development_guards": self.development_guards.to_metadata(),
             "usage": dict(self.usage),
         }
 
 
 __all__ = [
     "TRACE_SCHEMA_VERSION",
+    "DevelopmentGuardTrace",
     "LatencyBreakdown",
     "PersonaTrace",
     "PrivacyTrace",
