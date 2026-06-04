@@ -1,0 +1,79 @@
+"""Admin turn trace summary."""
+
+from __future__ import annotations
+
+import pytest
+
+from eidolon_agent.infra.observability.turn_trace_summary import (
+    build_turn_observability_summary,
+)
+
+pytestmark = pytest.mark.unit
+
+
+def test_summary_is_prompt_safe_and_operator_friendly() -> None:
+    metadata = {
+        "turn_trace": {
+            "schema_version": "turn_trace.v1",
+            "turn": {"turn_id": "t1", "trigger": "user_utterance", "triage": "simple"},
+            "latency": {"compile_ms": 12, "first_delta_ms": 80, "total_ms": 160},
+            "context_ledger": {
+                "segments": [
+                    {
+                        "kind": "persona",
+                        "source": "personas_service",
+                        "token_estimate": 100,
+                        "content": "secret prompt text",
+                    }
+                ],
+                "dropped_segments": [
+                    {
+                        "kind": "history",
+                        "source": "history_manager",
+                        "token_estimate": 80,
+                        "reason": "token_budget_exceeded",
+                    }
+                ],
+                "degraded_sources": [],
+                "total_token_estimate": 100,
+            },
+            "memory_trace": {
+                "attempted": True,
+                "degraded": False,
+                "hit_count": 2,
+                "context_injected": True,
+            },
+            "tool_trace": [
+                {
+                    "name": "get_time",
+                    "ok": True,
+                    "latency_ms": 4,
+                    "cached": True,
+                },
+                {
+                    "name": "emit_event",
+                    "ok": False,
+                    "error_code": "eidolon.tool_permission_denied",
+                    "latency_ms": 2,
+                },
+            ],
+            "privacy": {"mode": "normal"},
+        }
+    }
+
+    summary = build_turn_observability_summary(metadata)
+
+    assert summary is not None
+    assert summary["context"]["segment_kinds"] == ["persona"]
+    assert summary["context"]["dropped_kinds"] == ["history"]
+    assert summary["memory"]["hit_count"] == 2
+    assert summary["tools"]["count"] == 2
+    assert summary["tools"]["error_count"] == 1
+    assert summary["tools"]["cached_count"] == 1
+    assert summary["tools"]["total_latency_ms"] == 6
+    assert summary["latency"]["compile_ms"] == 12
+    assert "secret prompt text" not in str(summary)
+
+
+def test_summary_returns_none_without_turn_trace() -> None:
+    assert build_turn_observability_summary({"x": 1}) is None

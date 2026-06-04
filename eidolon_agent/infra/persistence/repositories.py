@@ -223,6 +223,7 @@ class SqlConversationRepository:
                 TurnRow.tokens_out,
                 TurnRow.model,
                 TurnRow.error_code,
+                TurnRow.metadata_,
                 ConversationRow.tenant_id,
                 ConversationRow.user_id,
                 ConversationRow.agent_instance_id,

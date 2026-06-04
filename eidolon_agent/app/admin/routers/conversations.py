@@ -34,6 +34,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from eidolon_agent.infra.observability import build_turn_observability_summary
 from eidolon_agent.infra.persistence import (
     SqlChatMessageRepository,
     SqlConversationRepository,
@@ -67,6 +68,7 @@ class TurnSummary(BaseModel):
     tokens_out: int
     model: str | None
     error_code: str | None
+    observability_summary: dict[str, Any] | None = Field(default=None)
 
 
 class ListTurnsResponse(BaseModel):
@@ -116,6 +118,7 @@ class TurnDetail(BaseModel):
     error_code: str | None
     metadata: dict[str, Any] | None = Field(default=None)
     turn_trace: dict[str, Any] | None = Field(default=None)
+    observability_summary: dict[str, Any] | None = Field(default=None)
     messages: list[ChatMessageView]
 
 
@@ -177,6 +180,11 @@ async def list_turns(
             tokens_out=r["tokens_out"],
             model=r["model"],
             error_code=r["error_code"],
+            observability_summary=build_turn_observability_summary(
+                r.get("metadata_"),
+                latency_first_delta_ms=r["latency_first_delta_ms"],
+                total_latency_ms=r["total_latency_ms"],
+            ),
         )
         for r in rows
     ]
@@ -224,6 +232,11 @@ async def get_turn(turn_id: str, request: Request) -> TurnDetail:
         error_code=row["error_code"],
         metadata=metadata,
         turn_trace=(metadata or {}).get("turn_trace"),
+        observability_summary=build_turn_observability_summary(
+            metadata,
+            latency_first_delta_ms=row["latency_first_delta_ms"],
+            total_latency_ms=row["total_latency_ms"],
+        ),
         messages=[
             ChatMessageView(
                 id=m.id,

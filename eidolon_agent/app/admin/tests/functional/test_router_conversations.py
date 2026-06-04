@@ -99,7 +99,60 @@ async def _seed_turn(
                     "turn_trace": {
                         "schema_version": "turn_trace.v1",
                         "boundary": "eidolon_agent.brain",
-                        "turn": {"turn_id": turn_id},
+                        "turn": {
+                            "turn_id": turn_id,
+                            "trigger": "user_utterance",
+                            "triage": "simple",
+                        },
+                        "latency": {
+                            "guard_ms": 1,
+                            "triage_ms": 2,
+                            "compile_ms": 3,
+                            "first_delta_ms": 120,
+                            "output_ms": 300,
+                            "tool_ms": 4,
+                            "total_ms": 440,
+                        },
+                        "context_ledger": {
+                            "segments": [
+                                {
+                                    "kind": "persona",
+                                    "source": "personas_service",
+                                    "token_estimate": 100,
+                                },
+                                {
+                                    "kind": "memory",
+                                    "source": "memory",
+                                    "token_estimate": 30,
+                                },
+                            ],
+                            "dropped_segments": [
+                                {
+                                    "kind": "history",
+                                    "source": "history_manager",
+                                    "token_estimate": 80,
+                                    "reason": "token_budget_exceeded",
+                                }
+                            ],
+                            "degraded_sources": ["memory"],
+                            "total_token_estimate": 130,
+                        },
+                        "memory_trace": {
+                            "attempted": True,
+                            "degraded": True,
+                            "hit_count": 1,
+                            "context_injected": True,
+                        },
+                        "tool_trace": [
+                            {
+                                "call_id": "tc-1",
+                                "name": "get_time",
+                                "ok": True,
+                                "latency_ms": 4,
+                                "cached": False,
+                            }
+                        ],
+                        "privacy": {"mode": "normal"},
                     },
                 },
             )
@@ -175,6 +228,8 @@ async def test_list_turns_returns_newest_first_and_filters_by_user(tmp_path) -> 
             assert t["tenant_id"] == "default"
             assert t["status"] == "ok"
             assert t["model"] == "test/model-1"
+            assert t["observability_summary"]["privacy_mode"] == "normal"
+            assert t["observability_summary"]["context"]["dropped_count"] == 1
     await engine.dispose()
 
 
@@ -200,6 +255,13 @@ async def test_get_turn_returns_messages_in_order(tmp_path) -> None:
     assert body["turn_trace"]["schema_version"] == "turn_trace.v1"
     assert body["turn_trace"]["boundary"] == "eidolon_agent.brain"
     assert body["metadata"]["turn_trace"]["turn"]["turn_id"] == "t-1"
+    summary = body["observability_summary"]
+    assert summary["context"]["segment_kinds"] == ["persona", "memory"]
+    assert summary["context"]["dropped_kinds"] == ["history"]
+    assert summary["memory"]["degraded"] is True
+    assert summary["tools"]["names"] == ["get_time"]
+    assert summary["latency"]["compile_ms"] == 3
+    assert "prompt_fingerprint" in summary
     roles = [m["role"] for m in body["messages"]]
     contents = [m["content"] for m in body["messages"]]
     assert roles == ["user", "assistant"]
