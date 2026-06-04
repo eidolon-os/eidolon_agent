@@ -276,3 +276,82 @@ async def test_temporary_turn_skips_memory_and_history_context() -> None:
     assert "should-not-appear" not in "\n".join(m.content for m in msgs)
     assert ti.metadata["memory_trace"]["attempted"] is False
     assert ti.metadata["memory_trace"]["skipped_reason"] == "privacy_policy"
+
+
+async def test_budget_keeps_recent_history_before_older_history() -> None:
+    history = HistoryManager()
+    await history.append(
+        conversation_id="c1",
+        message=ChatMessage(
+            id="old-history",
+            role=MessageRole.USER,
+            content="old " * 24,
+            created_at=_now(),
+        ),
+    )
+    await history.append(
+        conversation_id="c1",
+        message=ChatMessage(
+            id="new-history",
+            role=MessageRole.ASSISTANT,
+            content="new " * 24,
+            created_at=_now(),
+        ),
+    )
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas("[P]"),
+        instance_locator=_locator,
+        history_manager=history,
+        context_budget_tokens=35,
+    )
+
+    ti = make_turn_input("now")
+    msgs = await compiler.compile(ti)
+
+    assert "new " in "\n".join(m.content for m in msgs)
+    assert "old " not in "\n".join(m.content for m in msgs)
+    dropped = ti.metadata["context_ledger"]["dropped_segments"]
+    assert dropped == [
+        {
+            "kind": "history",
+            "source": "history_manager",
+            "token_estimate": 32,
+            "reason": "token_budget_exceeded",
+        }
+    ]
+
+
+async def test_budget_drops_oversized_memory_and_records_ledger() -> None:
+    ti = make_turn_input("当前问题")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas("[P]"),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=_StubMemory(formatted="memory " * 120),
+        context_budget_tokens=20,
+    )
+
+    msgs = await compiler.compile(ti)
+
+    assert "[MEMORY]" not in msgs[0].content
+    assert ti.metadata["memory_trace"]["context_injected"] is False
+    dropped = ti.metadata["context_ledger"]["dropped_segments"]
+    assert any(s["kind"] == "memory" for s in dropped)
+
+
+async def test_budget_keeps_degraded_memory_notice_even_over_budget() -> None:
+    memory = _StubMemory(formatted="", degraded=True)
+    ti = make_turn_input("你还记得什么？")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas("[P]"),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=memory,
+        context_budget_tokens=5,
+    )
+
+    msgs = await compiler.compile(ti)
+
+    assert "memory backend" in msgs[0].content
+    assert ti.metadata["memory_trace"]["context_injected"] is True
+    assert "memory" in ti.metadata["context_ledger"]["degraded_sources"]

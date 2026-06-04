@@ -1,4 +1,4 @@
-"""Direct prompt compilation — no pluggable providers, no budget pruning.
+"""Direct prompt compilation — no pluggable providers.
 
 The hot path is fixed: persona prompt + memory recall + realtime digest as a
 single system message, recent history as user/assistant messages, current
@@ -18,6 +18,7 @@ from eidolon_agent.core.types.memory import MemoryQueryPlan
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnInput
 from eidolon_agent.domain.context.types import (
+    ContextBudget,
     ContextLedger,
     ContextSegment,
     ContextSegmentKind,
@@ -44,6 +45,7 @@ class ContextCompiler:
         history_window: int = 20,
         memory_timeout_s: float = 0.2,
         memory_top_k: int = 5,
+        context_budget_tokens: int | None = None,
     ) -> None:
         self._personas = personas_service
         self._locator = instance_locator
@@ -52,6 +54,7 @@ class ContextCompiler:
         self._history_window = history_window
         self._memory_timeout_s = memory_timeout_s
         self._memory_top_k = memory_top_k
+        self._context_budget_tokens = context_budget_tokens
 
     async def compile(self, ti: TurnInput) -> list[ChatMessage]:
         instance_id, template_id = self._locator(
@@ -120,18 +123,20 @@ class ContextCompiler:
         if isinstance(persona, BaseException):
             raise persona
 
-        system_parts: list[str] = [persona.system_prompt]
-        ledger = ContextLedger(
-            kept_segments=[
-                ContextSegment(
-                    kind=ContextSegmentKind.PERSONA,
-                    content="",
-                    source="personas_service",
-                    token_estimate=_estimate_tokens(persona.system_prompt),
-                    droppable=False,
-                )
-            ]
+        segments: list[ContextSegment] = []
+        system_parts_by_segment: dict[int, str] = {}
+        history_by_segment: dict[int, ChatMessage] = {}
+        degraded_sources: list[str] = []
+
+        persona_segment = ContextSegment(
+            kind=ContextSegmentKind.PERSONA,
+            content="",
+            source="personas_service",
+            token_estimate=_estimate_tokens(persona.system_prompt),
+            droppable=False,
         )
+        segments.append(persona_segment)
+        system_parts_by_segment[id(persona_segment)] = persona.system_prompt
 
         memory_text: str | None = None
         memory_degraded = False
@@ -143,21 +148,70 @@ class ContextCompiler:
             memory_text, memory_degraded, memory_hit_ids = memory_payload
 
         if memory_degraded:
-            ledger.mark_degraded("memory")
+            degraded_sources.append("memory")
         if memory_degraded and not memory_text:
             memory_text = self._MEMORY_DEGRADED_NOTICE
+        memory_segment: ContextSegment | None = None
         if memory_text:
-            system_parts.append(f"[MEMORY]\n{memory_text}")
-            ledger.kept_segments.append(
-                ContextSegment(
-                    kind=ContextSegmentKind.MEMORY,
-                    content="",
-                    source="memory",
-                    token_estimate=_estimate_tokens(memory_text),
-                    priority=80,
-                    metadata={"degraded": memory_degraded},
-                )
+            memory_segment = ContextSegment(
+                kind=ContextSegmentKind.MEMORY,
+                content="",
+                source="memory",
+                token_estimate=_estimate_tokens(memory_text),
+                priority=80,
+                droppable=not memory_degraded,
+                metadata={"degraded": memory_degraded},
             )
+            segments.append(memory_segment)
+            system_parts_by_segment[id(memory_segment)] = f"[MEMORY]\n{memory_text}"
+
+        # ---- Realtime digest (signals from voice pipeline) ------------------
+        if ti.realtime is not None:
+            line = _realtime_line(ti.realtime)
+            if line:
+                realtime_segment = ContextSegment(
+                    kind=ContextSegmentKind.REALTIME,
+                    content="",
+                    source="turn_input.realtime",
+                    token_estimate=_estimate_tokens(line),
+                    priority=90,
+                )
+                segments.append(realtime_segment)
+                system_parts_by_segment[id(realtime_segment)] = f"（实时信号：{line}）"
+
+        if isinstance(history, BaseException):
+            _log.warning("history window raised: %s", history)
+            history = []
+        elif history:
+            for idx, msg in enumerate(history):
+                history_segment = ContextSegment(
+                    kind=ContextSegmentKind.HISTORY,
+                    content="",
+                    source="history_manager",
+                    token_estimate=_estimate_tokens(msg.content),
+                    # Keep newer history first when budget is tight.
+                    priority=60 + idx,
+                    metadata={"message_id": msg.id, "role": msg.role.value},
+                )
+                segments.append(history_segment)
+                history_by_segment[id(history_segment)] = msg
+
+        current_user_segment: ContextSegment | None = None
+        if ti.text:
+            current_user_segment = ContextSegment(
+                kind=ContextSegmentKind.CURRENT_USER,
+                content="",
+                source="turn_input.text",
+                token_estimate=_estimate_tokens(ti.text),
+                droppable=False,
+            )
+            segments.append(current_user_segment)
+
+        kept_segments, ledger = self._apply_budget(segments)
+        for source in degraded_sources:
+            ledger.mark_degraded(source)
+        kept_ids = {id(seg) for seg in kept_segments}
+        memory_kept = memory_segment is not None and id(memory_segment) in kept_ids
         ti.metadata["memory_trace"] = {
             "attempted": (
                 self._memory is not None
@@ -174,41 +228,21 @@ class ContextCompiler:
             "timeout_ms": int(self._memory_timeout_s * 1000),
             "hit_ids": memory_hit_ids,
             "hit_count": len(memory_hit_ids),
-            "context_injected": bool(memory_text),
+            "context_injected": memory_kept,
         }
-
-        # ---- Realtime digest (signals from voice pipeline) ------------------
-        if ti.realtime is not None:
-            line = _realtime_line(ti.realtime)
-            if line:
-                system_parts.append(f"（实时信号：{line}）")
-                ledger.kept_segments.append(
-                    ContextSegment(
-                        kind=ContextSegmentKind.REALTIME,
-                        content="",
-                        source="turn_input.realtime",
-                        token_estimate=_estimate_tokens(line),
-                        priority=90,
-                    )
-                )
-
-        if isinstance(history, BaseException):
-            _log.warning("history window raised: %s", history)
-            history = []
-        elif history:
-            ledger.kept_segments.append(
-                ContextSegment(
-                    kind=ContextSegmentKind.HISTORY,
-                    content="",
-                    source="history_manager",
-                    token_estimate=sum(_estimate_tokens(m.content) for m in history),
-                    priority=60,
-                    metadata={"messages": len(history)},
-                )
-            )
 
         # ---- Assemble messages ---------------------------------------------
         now = datetime.now(timezone.utc)
+        system_parts = [
+            system_parts_by_segment[id(seg)]
+            for seg in kept_segments
+            if id(seg) in system_parts_by_segment
+        ]
+        kept_history = [
+            history_by_segment[id(seg)]
+            for seg in kept_segments
+            if id(seg) in history_by_segment
+        ]
         out: list[ChatMessage] = [
             ChatMessage(
                 id=uuid.uuid4().hex,
@@ -216,18 +250,9 @@ class ContextCompiler:
                 content="\n\n".join(system_parts),
                 created_at=now,
             ),
-            *history,
+            *kept_history,
         ]
-        if ti.text:
-            ledger.kept_segments.append(
-                ContextSegment(
-                    kind=ContextSegmentKind.CURRENT_USER,
-                    content="",
-                    source="turn_input.text",
-                    token_estimate=_estimate_tokens(ti.text),
-                    droppable=False,
-                )
-            )
+        if current_user_segment is not None and id(current_user_segment) in kept_ids:
             out.append(
                 ChatMessage(
                     id=uuid.uuid4().hex,
@@ -238,6 +263,13 @@ class ContextCompiler:
             )
         ti.metadata["context_ledger"] = ledger.to_metadata()
         return out
+
+    def _apply_budget(
+        self, segments: list[ContextSegment]
+    ) -> tuple[list[ContextSegment], ContextLedger]:
+        if self._context_budget_tokens is None:
+            return segments, ContextLedger(kept_segments=list(segments))
+        return ContextBudget(max_tokens=self._context_budget_tokens).prune(segments)
 
     # Injected into the system prompt when memory recall raises. Tells the
     # LLM not to confabulate prior context — degraded honestly beats

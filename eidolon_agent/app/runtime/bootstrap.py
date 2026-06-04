@@ -344,6 +344,7 @@ def _build_turn_engine(
         memory_port=container.memory_port,
         history_window=20,
         memory_timeout_s=container.settings.memory.recall_timeout_s,
+        context_budget_tokens=container.settings.turn.max_token_budget,
     )
     return TurnEngine(
         compiler=compiler,
