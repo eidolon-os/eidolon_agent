@@ -18,6 +18,8 @@ pytestmark = pytest.mark.unit
         ("哈哈你好", MemoryWriteDispositionKind.IGNORE),
         ("今天我去了医院", MemoryWriteDispositionKind.EPISODIC_ONLY),
         ("以后叫我小满", MemoryWriteDispositionKind.SEMANTIC_UPSERT),
+        ("我现在住在杭州", MemoryWriteDispositionKind.SEMANTIC_UPSERT),
+        ("我现在住在哪里？", MemoryWriteDispositionKind.IGNORE),
         ("明天提醒我喝水", MemoryWriteDispositionKind.PROMISE_CREATE),
         ("我的身份证是123", MemoryWriteDispositionKind.SENSITIVE_REQUIRES_CONSENT),
     ],

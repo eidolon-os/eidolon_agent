@@ -111,7 +111,10 @@ def classify_memory_write(
             MemoryWriteDispositionKind.PROMISE_CREATE,
             "explicit_promise_or_reminder",
         )
-    if any(k in text for k in ("我喜欢", "我不喜欢", "以后叫我", "call me", "i like", "i prefer")):
+    is_question = any(k in text for k in ("?", "？", "吗", "哪里", "什么"))
+    if any(k in text for k in ("我喜欢", "我不喜欢", "以后叫我", "call me", "i like", "i prefer")) or (
+        not is_question and any(k in text for k in ("我住在", "我现在住在"))
+    ):
         return MemoryWriteDisposition(
             MemoryWriteDispositionKind.SEMANTIC_UPSERT,
             "stable_preference_or_identity",

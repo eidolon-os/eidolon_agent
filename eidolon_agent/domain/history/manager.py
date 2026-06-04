@@ -67,13 +67,14 @@ class HistoryManager:
     async def forget_matching(self, *, conversation_id: str, query: str) -> int:
         """Best-effort in-process privacy scrub for the current conversation."""
 
-        if not query:
+        terms = _forget_terms(query)
+        if not terms:
             return 0
         async with self._lock:
             w = self._windows.get(conversation_id)
             if w is None:
                 return 0
-            kept = [m for m in w if query not in m.content]
+            kept = [m for m in w if not any(term in m.content for term in terms)]
             removed = len(w) - len(kept)
             w.clear()
             w.extend(kept)
@@ -93,6 +94,32 @@ class HistoryManager:
 
 def _public_messages(messages: list[ChatMessage]) -> list[ChatMessage]:
     return [m for m in messages if not bool(m.metadata.get("is_private", False))]
+
+
+def _forget_terms(query: str) -> list[str]:
+    """Extract conservative text fragments for local forget scrubbing."""
+
+    cleaned = query.strip()
+    if not cleaned:
+        return []
+    terms = {cleaned}
+    markers = (
+        "忘记",
+        "别记",
+        "不要再提",
+        "不再提",
+        "不要提",
+        "忘掉",
+    )
+    suffix_stoppers = "，。,.!?！？"
+    for marker in markers:
+        if marker not in cleaned:
+            continue
+        suffix = cleaned.split(marker, 1)[1].strip()
+        suffix = suffix.strip(suffix_stoppers).strip()
+        if len(suffix) >= 3:
+            terms.add(suffix)
+    return sorted(terms, key=len, reverse=True)
 
 
 def _merge_tail(

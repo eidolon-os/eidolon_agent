@@ -75,6 +75,21 @@ async def test_private_messages_are_filtered_from_recent_window() -> None:
     assert [m.content for m in items] == ["public"]
 
 
+async def test_forget_matching_extracts_forget_target_from_request() -> None:
+    mgr = HistoryManager()
+    await mgr.append(conversation_id="c1", message=_msg("以后叫我小满"))
+    await mgr.append(conversation_id="c1", message=_msg("普通聊天"))
+
+    removed = await mgr.forget_matching(
+        conversation_id="c1",
+        query="请忘记叫我小满",
+    )
+    items = await mgr.recent_window(conversation_id="c1", window=10)
+
+    assert removed == 1
+    assert [m.content for m in items] == ["普通聊天"]
+
+
 async def test_db_hydrate_runs_when_window_is_insufficient() -> None:
     calls = []
 
