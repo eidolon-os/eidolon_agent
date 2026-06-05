@@ -192,6 +192,11 @@ class MemoryDiscoveryClient:
         async with httpx.AsyncClient(
             timeout=self._timeout,
             follow_redirects=True,
+            # Discovery is an internal control-plane call, usually loopback.
+            # In dev, shell HTTP_PROXY often points at a local proxy such as
+            # :7890; letting httpx inherit that turns healthy localhost
+            # discovery into proxy-sourced 502s.
+            trust_env=False,
         ) as client:
             resp = await client.get(self._url, headers=headers or None)
             resp.raise_for_status()

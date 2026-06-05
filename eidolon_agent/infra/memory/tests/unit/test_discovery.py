@@ -2,15 +2,57 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from eidolon_agent.config.settings import MemoryEndpoint, NatsSettings
-from eidolon_agent.infra.memory.discovery import DiscoveryResponse, MemoryRoutingTable
+from eidolon_agent.infra.memory.discovery import (
+    DiscoveryResponse,
+    MemoryDiscoveryClient,
+    MemoryRoutingTable,
+)
 from eidolon_agent.infra.memory.mcp_client import _decode_call_tool_result
 from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
 from eidolon_agent.infra.memory.port_adapter import EidolonMemoryPort
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.asyncio
+async def test_discovery_client_ignores_shell_proxy_env(monkeypatch):
+    captured = {}
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url, headers=None):
+            return httpx.Response(
+                200,
+                json={
+                    "version": 1,
+                    "nats": {"url": "nats://127.0.0.1:4222"},
+                    "users": [],
+                },
+                request=httpx.Request("GET", url),
+            )
+
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:7890")
+    monkeypatch.setattr("eidolon_agent.infra.memory.discovery.httpx.AsyncClient", FakeAsyncClient)
+
+    discovery = await MemoryDiscoveryClient(
+        discovery_url="http://127.0.0.1:8020/api/discovery/agent-routing",
+    ).fetch()
+
+    assert captured["trust_env"] is False
+    assert discovery.nats.url == "nats://127.0.0.1:4222"
+
 
 @pytest.mark.asyncio
 async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
