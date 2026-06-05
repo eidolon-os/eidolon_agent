@@ -14,7 +14,7 @@ import json
 import sys
 from pathlib import Path
 
-from eidolon_agent.infra.replay import run_replay_files
+from eidolon_agent.infra.replay import render_replay_markdown, run_replay_files
 
 
 async def main() -> int:
@@ -28,6 +28,12 @@ async def main() -> int:
     )
     parser.add_argument("--memory-report", type=Path, default=None)
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument(
+        "--markdown",
+        type=Path,
+        default=None,
+        help="Optional readable Markdown report path.",
+    )
     args = parser.parse_args()
 
     fixtures = args.fixture or [Path("tests/replay/fixtures/core_experience.jsonl")]
@@ -39,6 +45,10 @@ async def main() -> int:
         print(f"wrote replay report to {args.output}")
     else:
         print(text)
+    if args.markdown is not None:
+        args.markdown.parent.mkdir(parents=True, exist_ok=True)
+        args.markdown.write_text(render_replay_markdown(report), encoding="utf-8")
+        print(f"wrote readable report to {args.markdown}")
     return 0 if report["passed"] else 1
 
 
