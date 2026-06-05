@@ -96,8 +96,31 @@ async def test_pool_health_false_when_no_routes() -> None:
 
 async def test_session_for_unknown_user_raises_unavailable() -> None:
     pool = McpClientPool(routes=_routes())
-    with pytest.raises(MemoryUnavailableError, match="no reachable MCP endpoint"):
+    with pytest.raises(MemoryUnavailableError, match="no_memory_route") as exc_info:
         await pool.session_for("ghost")
+    assert exc_info.value.details["reason"] == "no_memory_route"
+
+
+@pytest.mark.parametrize(
+    ("route", "reason"),
+    [
+        (
+            MemoryRoute(user_id="alice", mcp_url="http://a/mcp", enabled=False),
+            "memory_route_disabled",
+        ),
+        (
+            MemoryRoute(user_id="alice", mcp_url="http://a/mcp", reachable=False),
+            "memory_route_unreachable",
+        ),
+    ],
+)
+async def test_session_for_unavailable_route_carries_reason(
+    route: MemoryRoute, reason: str
+) -> None:
+    pool = McpClientPool(routes=_routes(route))
+    with pytest.raises(MemoryUnavailableError, match=reason) as exc_info:
+        await pool.session_for("alice")
+    assert exc_info.value.details == {"user_id": "alice", "reason": reason}
 
 
 async def test_session_reused_for_same_route() -> None:

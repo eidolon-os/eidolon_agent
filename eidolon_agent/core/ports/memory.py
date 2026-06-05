@@ -15,6 +15,7 @@ from typing import Protocol, runtime_checkable
 from eidolon_agent.core.types.memory import (
     MemoryHit,
     MemoryQueryPlan,
+    MemoryRecallResult,
     MemoryScope,
 )
 
@@ -43,8 +44,8 @@ class MemoryPort(Protocol):
         *,
         plan: MemoryQueryPlan,
         timeout_s: float = 0.2,
-    ) -> tuple[str, list[MemoryHit], bool]:
-        """Returns (formatted_context, raw_hits, degraded).
+    ) -> MemoryRecallResult:
+        """Returns prompt-ready recall context plus operator diagnostics.
 
         ``degraded=True`` indicates the result is best-effort (timeout / error).
         Callers must inject a sentinel into the prompt rather than raise.

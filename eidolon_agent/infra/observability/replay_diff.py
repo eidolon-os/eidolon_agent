@@ -185,8 +185,10 @@ def compare_replay_snapshots(
                     "candidate": list(cand.tool_decision),
                 }
             )
-        for field in ("first_delta_ms", "total_ms"):
-            regression = _latency_regression(idx, key, field, base, cand, thresholds)
+        for latency_field in ("first_delta_ms", "total_ms"):
+            regression = _latency_regression(
+                idx, key, latency_field, base, cand, thresholds
+            )
             if regression is not None:
                 latency_regressions.append(regression)
 
@@ -268,6 +270,7 @@ def _prompt_safe_shape(trace: dict[str, Any]) -> dict[str, Any]:
             "attempted": bool(memory.get("attempted")),
             "skipped_reason": memory.get("skipped_reason"),
             "degraded": bool(memory.get("degraded")),
+            "degraded_reason": memory.get("degraded_reason"),
             "hit_count": memory.get("hit_count") or 0,
             "context_injected": bool(memory.get("context_injected")),
         },

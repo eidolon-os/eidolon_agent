@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from eidolon_agent.core.errors import MemoryUnavailableError
 from eidolon_agent.core.types.memory import MemoryKind, MemoryQueryPlan
 from eidolon_agent.infra.memory.port_adapter import EidolonMemoryPort, _records_to_hits
 
@@ -121,10 +122,12 @@ async def test_recall_context_returns_context_hits_and_degraded_false() -> None:
         ],
     })
     port, *_ = _port(session_call=call)
-    ctx, hits, degraded = await port.recall_context("alice", "x", plan=_plan())
+    result = await port.recall_context("alice", "x", plan=_plan())
+    ctx, hits, degraded = result
     assert ctx == "prior conversation summary"
     assert [h.id for h in hits] == ["h1"]
     assert degraded is False
+    assert result.degraded_reason is None
     name, args = call.await_args.args
     assert name == "eidolon_memory_recall_context"
     assert args["top_k"] == 5
@@ -134,10 +137,30 @@ async def test_recall_context_returns_context_hits_and_degraded_false() -> None:
 async def test_recall_context_returns_degraded_on_exception() -> None:
     call = AsyncMock(side_effect=RuntimeError("upstream"))
     port, *_ = _port(session_call=call)
-    ctx, hits, degraded = await port.recall_context("alice", "x", plan=_plan())
+    result = await port.recall_context("alice", "x", plan=_plan())
+    ctx, hits, degraded = result
     assert ctx == ""
     assert hits == []
     assert degraded is True
+    assert result.degraded_reason == "error"
+
+
+async def test_recall_context_returns_route_reason_on_unavailable_session() -> None:
+    port, _, pool, _ = _port()
+    pool.session_for = AsyncMock(
+        side_effect=MemoryUnavailableError(
+            "no route",
+            details={"user_id": "alice", "reason": "no_memory_route"},
+        )
+    )
+
+    result = await port.recall_context("alice", "x", plan=_plan())
+
+    ctx, hits, degraded = result
+    assert ctx == ""
+    assert hits == []
+    assert degraded is True
+    assert result.degraded_reason == "no_memory_route"
 
 
 # ---- write_turn / assert_fact / forget ------------------------------------

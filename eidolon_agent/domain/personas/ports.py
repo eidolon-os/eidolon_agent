@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from eidolon_agent.core.types.memory import MemoryHit, MemoryQueryPlan
+from eidolon_agent.core.types.memory import MemoryQueryPlan, MemoryRecallResult
 from eidolon_agent.domain.personas.types import (
     PersonaEvolutionResult,
     PersonaInstance,
@@ -25,7 +25,7 @@ class PersonaMemoryPort(Protocol):
         *,
         plan: MemoryQueryPlan,
         timeout_s: float = 0.2,
-    ) -> tuple[str, list[MemoryHit], bool]:
+    ) -> MemoryRecallResult:
         ...
 
 

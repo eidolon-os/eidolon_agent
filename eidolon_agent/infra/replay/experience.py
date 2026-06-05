@@ -77,6 +77,9 @@ class TurnReplayResult:
                 "memory_recall": {
                     "attempted": (trace.get("memory_trace") or {}).get("attempted"),
                     "degraded": (trace.get("memory_trace") or {}).get("degraded"),
+                    "degraded_reason": (trace.get("memory_trace") or {}).get(
+                        "degraded_reason"
+                    ),
                     "context_injected": (trace.get("memory_trace") or {}).get(
                         "context_injected"
                     ),

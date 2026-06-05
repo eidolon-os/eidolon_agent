@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from eidolon_agent.core.types.memory import MemoryRecallResult
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.history.manager import HistoryManager
@@ -35,14 +36,26 @@ class _StubPersonas:
 class _StubMemory:
     """Memory port stub used by recall integration tests."""
 
-    def __init__(self, formatted: str = "", *, degraded: bool = False) -> None:
+    def __init__(
+        self,
+        formatted: str = "",
+        *,
+        degraded: bool = False,
+        degraded_reason: str | None = None,
+    ) -> None:
         self._formatted = formatted
         self._degraded = degraded
+        self._degraded_reason = degraded_reason
         self.calls: list[dict] = []
 
     async def recall_context(self, *, user_id, query, plan, timeout_s):
         self.calls.append({"user_id": user_id, "query": query})
-        return self._formatted, [SimpleNamespace(id="mem-1")], self._degraded
+        return MemoryRecallResult(
+            context=self._formatted,
+            hits=[SimpleNamespace(id="mem-1")],
+            degraded=self._degraded,
+            degraded_reason=self._degraded_reason,
+        )
 
 
 def _locator(_t, _u, _c):
@@ -236,6 +249,25 @@ async def test_memory_trace_records_ids_and_degraded_without_content() -> None:
     assert trace["hit_count"] == 1
     assert trace["context_injected"] is True
     assert "private recalled sentence" not in str(trace)
+
+
+async def test_memory_trace_records_degraded_reason_without_internal_prompt_detail() -> None:
+    ti = make_turn_input("帮我回忆一下")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=_StubMemory(degraded=True, degraded_reason="no_memory_route"),
+    )
+
+    msgs = await compiler.compile(ti)
+
+    trace = ti.metadata["memory_trace"]
+    assert trace["attempted"] is True
+    assert trace["degraded"] is True
+    assert trace["degraded_reason"] == "no_memory_route"
+    assert trace["context_injected"] is True
+    assert "no_memory_route" not in msgs[0].content
 
 
 async def test_empty_text_skips_trailing_user_message() -> None:

@@ -143,11 +143,19 @@ class MemoryRoutingTable:
             self._source = "discovery"
 
     async def route_for(self, user_id: str) -> MemoryRoute | None:
+        route, _reason = await self.route_status_for(user_id)
+        return route
+
+    async def route_status_for(self, user_id: str) -> tuple[MemoryRoute | None, str | None]:
         async with self._lock:
             route = self._routes.get(user_id)
-            if route is None or not route.enabled or not route.reachable:
-                return None
-            return route
+            if route is None:
+                return None, "no_memory_route"
+            if not route.enabled:
+                return None, "memory_route_disabled"
+            if not route.reachable:
+                return None, "memory_route_unreachable"
+            return route, None
 
     async def endpoint_count(self) -> int:
         async with self._lock:

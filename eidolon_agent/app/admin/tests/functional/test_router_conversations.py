@@ -15,6 +15,7 @@ from pathlib import Path
 import httpx
 import pytest
 from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from eidolon_agent.app.admin.routers import conversations as conv_router
 from eidolon_agent.config.settings import SqliteSettings
@@ -35,7 +36,7 @@ pytestmark = pytest.mark.functional
 
 async def _fresh_app(
     tmp_path: Path,
-) -> tuple[httpx.AsyncClient, "async_sessionmaker", "AsyncEngine"]:  # type: ignore[name-defined]
+) -> tuple[httpx.AsyncClient, async_sessionmaker, AsyncEngine]:
     """Build a real SQLite-backed admin app instance.
 
     The caller is responsible for ``await engine.dispose()`` after
@@ -140,6 +141,7 @@ async def _seed_turn(
                         "memory_trace": {
                             "attempted": True,
                             "degraded": True,
+                            "degraded_reason": "no_memory_route",
                             "hit_count": 1,
                             "context_injected": True,
                         },
@@ -295,6 +297,7 @@ async def test_get_turn_returns_messages_in_order(tmp_path) -> None:
     assert summary["context"]["segment_kinds"] == ["persona", "memory"]
     assert summary["context"]["dropped_kinds"] == ["history"]
     assert summary["memory"]["degraded"] is True
+    assert summary["memory"]["degraded_reason"] == "no_memory_route"
     assert summary["memory_write"]["disposition"] == "semantic_upsert"
     assert summary["tools"]["names"] == ["get_time"]
     assert summary["latency"]["compile_ms"] == 3

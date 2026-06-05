@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from eidolon_agent.core.types import (
+    MemoryRecallResult,
     MemoryWriteDispositionKind,
     classify_memory_write,
 )
@@ -39,6 +40,17 @@ def test_disposition_metadata_is_audit_friendly() -> None:
         "memory_write_reason": "stable_preference_or_identity",
         "memory_policy_version": "agent_memory_policy.v1",
     }
+
+
+def test_memory_recall_result_keeps_legacy_tuple_unpacking() -> None:
+    result = MemoryRecallResult(context="ctx", degraded=True, degraded_reason="timeout")
+
+    context, hits, degraded = result
+
+    assert context == "ctx"
+    assert hits == []
+    assert degraded is True
+    assert result.degraded_reason == "timeout"
 
 
 def test_classify_memory_write_ignores_assistant_chitchat_markers() -> None:

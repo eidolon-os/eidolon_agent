@@ -54,6 +54,26 @@ class MemoryHit:
 
 
 @dataclass(frozen=True, slots=True)
+class MemoryRecallResult:
+    """Prompt-ready memory recall result.
+
+    Iteration intentionally preserves the legacy ``(context, hits, degraded)``
+    shape so older tests and adapters can migrate without a broad flag day.
+    ``degraded_reason`` is for operator traces, not prompt injection.
+    """
+
+    context: str = ""
+    hits: list[MemoryHit] = field(default_factory=list)
+    degraded: bool = False
+    degraded_reason: str | None = None
+
+    def __iter__(self):
+        yield self.context
+        yield self.hits
+        yield self.degraded
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryQueryPlan:
     """How the strategy plans to query memory for a single turn."""
 

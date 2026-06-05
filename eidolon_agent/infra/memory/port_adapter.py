@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from eidolon_agent.core.errors import MemoryUnavailableError
 from eidolon_agent.core.types.memory import (
     MemoryHit,
     MemoryKind,
     MemoryQueryPlan,
+    MemoryRecallResult,
     MemoryScope,
 )
 from eidolon_agent.infra.memory.mcp_client import McpClientPool
@@ -58,8 +60,13 @@ class EidolonMemoryPort:
         *,
         plan: MemoryQueryPlan,
         timeout_s: float = 0.2,
-    ) -> tuple[str, list[MemoryHit], bool]:
-        session = await self._pool.session_for(user_id)
+    ) -> MemoryRecallResult:
+        try:
+            session = await self._pool.session_for(user_id)
+        except MemoryUnavailableError as exc:
+            reason = _memory_unavailable_reason(exc)
+            _log.warning("memory recall unavailable for user=%s reason=%s", user_id, reason)
+            return MemoryRecallResult(degraded=True, degraded_reason=reason)
         try:
             raw = await asyncio.wait_for(
                 session.call_tool(
@@ -74,12 +81,19 @@ class EidolonMemoryPort:
                 ),
                 timeout=timeout_s,
             )
+        except TimeoutError:
+            _log.warning("memory recall timed out for user=%s", user_id)
+            return MemoryRecallResult(degraded=True, degraded_reason="timeout")
+        except MemoryUnavailableError as exc:
+            reason = _memory_unavailable_reason(exc)
+            _log.warning("memory recall unavailable for user=%s reason=%s", user_id, reason)
+            return MemoryRecallResult(degraded=True, degraded_reason=reason)
         except Exception:
             _log.exception("memory recall failed for user=%s", user_id)
-            return "", [], True
+            return MemoryRecallResult(degraded=True, degraded_reason="error")
         context = raw.get("context", "") or ""
         hits = _records_to_hits(raw.get("records") or [])
-        return context, hits, False
+        return MemoryRecallResult(context=context, hits=hits, degraded=False)
 
     async def write_turn(
         self,
@@ -151,3 +165,10 @@ def _records_to_hits(records: list[dict]) -> list[MemoryHit]:
         except (ValueError, TypeError):
             continue
     return hits
+
+
+def _memory_unavailable_reason(exc: MemoryUnavailableError) -> str:
+    reason = exc.details.get("reason")
+    if isinstance(reason, str) and reason:
+        return reason
+    return "memory_unavailable"

@@ -167,10 +167,13 @@ class McpClientPool:
         self._lock = asyncio.Lock()
 
     async def session_for(self, user_id: str) -> McpUserSession:
-        route = await self._routes.route_for(user_id)
+        route, unavailable_reason = await self._routes.route_status_for(user_id)
         if route is None:
             await self._close_user_session(user_id)
-            raise MemoryUnavailableError(f"no reachable MCP endpoint for user {user_id}")
+            raise MemoryUnavailableError(
+                f"no reachable MCP endpoint for user {user_id}: {unavailable_reason}",
+                details={"user_id": user_id, "reason": unavailable_reason},
+            )
         async with self._lock:
             sess = self._sessions.get(user_id)
             if sess is not None and sess.matches(

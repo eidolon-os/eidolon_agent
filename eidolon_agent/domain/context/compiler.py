@@ -142,12 +142,14 @@ class ContextCompiler:
 
         memory_text: str | None = None
         memory_degraded = False
+        memory_degraded_reason: str | None = None
         memory_hit_ids: list[str] = []
         if isinstance(memory_payload, BaseException):
             _log.warning("memory recall raised: %s", memory_payload)
             memory_degraded = True
+            memory_degraded_reason = _exception_degraded_reason(memory_payload)
         elif memory_payload:
-            memory_text, memory_degraded, memory_hit_ids = memory_payload
+            memory_text, memory_degraded, memory_hit_ids, memory_degraded_reason = memory_payload
 
         if memory_degraded:
             degraded_sources.append("memory")
@@ -226,6 +228,7 @@ class ContextCompiler:
                 else None
             ),
             "degraded": memory_degraded,
+            "degraded_reason": memory_degraded_reason,
             "elapsed_ms": memory_ms,
             "timeout_ms": int(self._memory_timeout_s * 1000),
             "hit_ids": memory_hit_ids,
@@ -318,7 +321,9 @@ class ContextCompiler:
         "也不要主动声称会记住用户接下来说的——因为本轮记忆链路是断的。）"
     )
 
-    async def _memory_recall(self, ti: TurnInput) -> tuple[str | None, bool, list[str]] | None:
+    async def _memory_recall(
+        self, ti: TurnInput
+    ) -> tuple[str | None, bool, list[str], str | None] | None:
         """Memory recall branch for the parallel ``gather`` above.
 
         Three return shapes:
@@ -348,20 +353,26 @@ class ContextCompiler:
                 semantic_k=self._memory_top_k,
                 voice=ti.caller.caller_kind.value == "livekit_voice",
             )
-            formatted, hits, _degraded = await self._memory.recall_context(
+            recall = await self._memory.recall_context(
                 user_id=ti.caller.user_id,
                 query=ti.text,
                 plan=plan,
                 timeout_s=self._memory_timeout_s,
             )
-            return formatted or None, bool(_degraded), [h.id for h in hits]
-        except Exception:
+            formatted, hits, _degraded = recall
+            return (
+                formatted or None,
+                bool(_degraded),
+                [h.id for h in hits],
+                getattr(recall, "degraded_reason", None),
+            )
+        except Exception as exc:
             _log.exception(
                 "memory recall failed for user=%s; injecting degraded notice "
                 "into system prompt",
                 ti.caller.user_id,
             )
-            return self._MEMORY_DEGRADED_NOTICE, True, []
+            return self._MEMORY_DEGRADED_NOTICE, True, [], _exception_degraded_reason(exc)
 
 
 async def _timed(_name: str, coro):  # type: ignore[no-untyped-def]
@@ -379,6 +390,15 @@ async def _timed(_name: str, coro):  # type: ignore[no-untyped-def]
 
 async def _empty_history() -> list[ChatMessage]:
     return []
+
+
+def _exception_degraded_reason(exc: BaseException) -> str:
+    details = getattr(exc, "details", None)
+    if isinstance(details, dict):
+        reason = details.get("reason")
+        if isinstance(reason, str) and reason:
+            return reason
+    return "error"
 
 
 def _realtime_dict(digest) -> dict | None:  # type: ignore[no-untyped-def]

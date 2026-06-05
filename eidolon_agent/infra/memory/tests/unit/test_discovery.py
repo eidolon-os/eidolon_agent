@@ -102,6 +102,12 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
     assert alice.bearer_token == "secret"
     assert await routes.route_for("bob") is None
     assert await routes.route_for("charlie") is None
+    bob_route, bob_reason = await routes.route_status_for("bob")
+    charlie_route, charlie_reason = await routes.route_status_for("charlie")
+    ghost_route, ghost_reason = await routes.route_status_for("ghost")
+    assert bob_route is None and bob_reason == "memory_route_disabled"
+    assert charlie_route is None and charlie_reason == "memory_route_unreachable"
+    assert ghost_route is None and ghost_reason == "no_memory_route"
     assert await routes.endpoint_count() == 1
     assert await routes.render_turn_subject("alice") == "mem.turn.alice"
     assert await routes.render_cmd_subject("alice") == "mem.cmd.alice"
