@@ -169,7 +169,7 @@ class McpClientPool:
     async def session_for(self, user_id: str) -> McpUserSession:
         route, unavailable_reason = await self._routes.route_status_for(user_id)
         if route is None:
-            await self._close_user_session(user_id)
+            await self.drop_session(user_id)
             raise MemoryUnavailableError(
                 f"no reachable MCP endpoint for user {user_id}: {unavailable_reason}",
                 details={"user_id": user_id, "reason": unavailable_reason},
@@ -187,11 +187,28 @@ class McpClientPool:
             self._sessions[user_id] = sess
             return sess
 
-    async def _close_user_session(self, user_id: str) -> None:
+    async def drop_session(
+        self,
+        user_id: str,
+        *,
+        session: McpUserSession | None = None,
+    ) -> bool:
+        """Close and remove a cached user session.
+
+        When ``session`` is supplied, the cached object must still be that exact
+        instance. This lets callers discard a poisoned session after a timeout
+        without racing and closing a fresh replacement created by another turn.
+        """
         async with self._lock:
-            sess = self._sessions.pop(user_id, None)
+            sess = self._sessions.get(user_id)
+            if sess is None:
+                return False
+            if session is not None and sess is not session:
+                return False
+            self._sessions.pop(user_id, None)
         if sess is not None:
             await sess.close()
+        return True
 
     async def close_all(self) -> None:
         async with self._lock:

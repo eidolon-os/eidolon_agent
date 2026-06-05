@@ -25,6 +25,7 @@ def _port(*, session_call=None, session_close=None, pub_methods=None):
 
     pool = MagicMock()
     pool.session_for = AsyncMock(return_value=session)
+    pool.drop_session = AsyncMock(return_value=True)
     pool.health = AsyncMock(return_value=True)
     pool.close_all = AsyncMock()
 
@@ -95,14 +96,23 @@ async def test_search_returns_empty_on_timeout() -> None:
         await asyncio.sleep(10)
         return {}
 
-    port, *_ = _port(session_call=_slow)
+    port, session, pool, _ = _port(session_call=_slow)
     assert await port.search("alice", "x", timeout_s=0.01) == []
+    pool.drop_session.assert_awaited_once_with("alice", session=session)
+
+
+async def test_search_drops_session_on_memory_unavailable() -> None:
+    call = AsyncMock(side_effect=MemoryUnavailableError("stream closed"))
+    port, session, pool, _ = _port(session_call=call)
+    assert await port.search("alice", "x") == []
+    pool.drop_session.assert_awaited_once_with("alice", session=session)
 
 
 async def test_search_returns_empty_on_exception() -> None:
     call = AsyncMock(side_effect=RuntimeError("MCP down"))
-    port, *_ = _port(session_call=call)
+    port, _, pool, _ = _port(session_call=call)
     assert await port.search("alice", "x") == []
+    pool.drop_session.assert_not_awaited()
 
 
 # ---- recall_context ------------------------------------------------------
@@ -136,13 +146,49 @@ async def test_recall_context_returns_context_hits_and_degraded_false() -> None:
 
 async def test_recall_context_returns_degraded_on_exception() -> None:
     call = AsyncMock(side_effect=RuntimeError("upstream"))
-    port, *_ = _port(session_call=call)
+    port, _, pool, _ = _port(session_call=call)
     result = await port.recall_context("alice", "x", plan=_plan())
     ctx, hits, degraded = result
     assert ctx == ""
     assert hits == []
     assert degraded is True
     assert result.degraded_reason == "error"
+    pool.drop_session.assert_not_awaited()
+
+
+async def test_recall_context_drops_session_on_timeout() -> None:
+    async def _slow(name, args):
+        import asyncio
+        await asyncio.sleep(10)
+        return {}
+
+    port, session, pool, _ = _port(session_call=_slow)
+    result = await port.recall_context("alice", "x", plan=_plan(), timeout_s=0.01)
+
+    ctx, hits, degraded = result
+    assert ctx == ""
+    assert hits == []
+    assert degraded is True
+    assert result.degraded_reason == "timeout"
+    pool.drop_session.assert_awaited_once_with("alice", session=session)
+
+
+async def test_recall_context_drops_session_on_memory_unavailable_call() -> None:
+    call = AsyncMock(
+        side_effect=MemoryUnavailableError(
+            "stream closed",
+            details={"reason": "memory_stream_closed"},
+        )
+    )
+    port, session, pool, _ = _port(session_call=call)
+    result = await port.recall_context("alice", "x", plan=_plan())
+
+    ctx, hits, degraded = result
+    assert ctx == ""
+    assert hits == []
+    assert degraded is True
+    assert result.degraded_reason == "memory_stream_closed"
+    pool.drop_session.assert_awaited_once_with("alice", session=session)
 
 
 async def test_recall_context_returns_route_reason_on_unavailable_session() -> None:

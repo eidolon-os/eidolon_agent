@@ -160,6 +160,34 @@ async def test_pool_close_all_closes_each_session() -> None:
     s2.close.assert_awaited_once()
 
 
+async def test_pool_drop_session_closes_cached_session() -> None:
+    pool = McpClientPool(routes=_routes(MemoryRoute(user_id="alice", mcp_url="http://a/mcp")))
+    sess = await pool.session_for("alice")
+    sess.close = AsyncMock()
+
+    dropped = await pool.drop_session("alice", session=sess)
+
+    assert dropped is True
+    sess.close.assert_awaited_once()
+    assert await pool.session_for("alice") is not sess
+
+
+async def test_pool_drop_session_identity_guard_keeps_replacement() -> None:
+    pool = McpClientPool(routes=_routes(MemoryRoute(user_id="alice", mcp_url="http://a/mcp")))
+    stale = await pool.session_for("alice")
+    replacement = McpUserSession("http://a/mcp")
+    stale.close = AsyncMock()
+    replacement.close = AsyncMock()
+    pool._sessions["alice"] = replacement
+
+    dropped = await pool.drop_session("alice", session=stale)
+
+    assert dropped is False
+    stale.close.assert_not_awaited()
+    replacement.close.assert_not_awaited()
+    assert await pool.session_for("alice") is replacement
+
+
 # ---- McpUserSession ------------------------------------------------------
 
 

@@ -48,6 +48,14 @@ class EidolonMemoryPort:
                 ),
                 timeout=timeout_s,
             )
+        except TimeoutError:
+            _log.warning("memory search timed out for user=%s", user_id)
+            await self._pool.drop_session(user_id, session=session)
+            return []
+        except MemoryUnavailableError:
+            _log.warning("memory search unavailable for user=%s", user_id)
+            await self._pool.drop_session(user_id, session=session)
+            return []
         except Exception:
             _log.exception("memory search failed for user=%s", user_id)
             return []
@@ -83,10 +91,12 @@ class EidolonMemoryPort:
             )
         except TimeoutError:
             _log.warning("memory recall timed out for user=%s", user_id)
+            await self._pool.drop_session(user_id, session=session)
             return MemoryRecallResult(degraded=True, degraded_reason="timeout")
         except MemoryUnavailableError as exc:
             reason = _memory_unavailable_reason(exc)
             _log.warning("memory recall unavailable for user=%s reason=%s", user_id, reason)
+            await self._pool.drop_session(user_id, session=session)
             return MemoryRecallResult(degraded=True, degraded_reason=reason)
         except Exception:
             _log.exception("memory recall failed for user=%s", user_id)
