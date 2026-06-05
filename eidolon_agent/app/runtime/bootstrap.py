@@ -282,6 +282,8 @@ async def build_application(
         # session factory the writer side uses, just opened in read-only
         # short transactions.
         session_factory=session_factory,
+        memory_routes=memory_routes,
+        memory_discovery_refresher=memory_refresher,
     )
     container.http_app = http_app
     container.admin_app = admin_app

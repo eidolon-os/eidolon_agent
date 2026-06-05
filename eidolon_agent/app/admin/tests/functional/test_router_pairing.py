@@ -8,6 +8,12 @@ from fastapi.testclient import TestClient
 
 from eidolon_agent.app.admin.routers import pairing as pairing_router
 from eidolon_agent.app.transport.pairing import PairingCoordinator
+from eidolon_agent.infra.memory.discovery import (
+    DiscoveryResponse,
+    MemoryNatsRoute,
+    MemoryRoute,
+    MemoryRoutingTable,
+)
 
 pytestmark = pytest.mark.functional
 
@@ -17,6 +23,27 @@ def client() -> TestClient:
     app = FastAPI()
     app.include_router(pairing_router.router, prefix="/api/admin")
     app.state.pairing = PairingCoordinator(jwt_secret="test-secret-not-for-prod-x" * 2)
+    return TestClient(app)
+
+
+def _routes(*routes: MemoryRoute) -> MemoryRoutingTable:
+    return MemoryRoutingTable(
+        nats=MemoryNatsRoute(
+            url="nats://x",
+            stream="",
+            turn_subject_template="t",
+            cmd_subject_template="c",
+        ),
+        routes={r.user_id: r for r in routes},
+    )
+
+
+def _client_with_routes(routes: MemoryRoutingTable, refresher=None) -> TestClient:
+    app = FastAPI()
+    app.include_router(pairing_router.router, prefix="/api/admin")
+    app.state.pairing = PairingCoordinator(jwt_secret="test-secret-not-for-prod-x" * 2)
+    app.state.memory_routes = routes
+    app.state.memory_discovery_refresher = refresher
     return TestClient(app)
 
 
@@ -30,6 +57,74 @@ def test_issue_code_returns_8_char_alphanumeric(client: TestClient) -> None:
     assert len(body["code"]) == 8
     assert body["pair_url"].startswith("eidolon://pair?code=")
     assert body["pair_url"].endswith(body["code"])
+
+
+def test_issue_code_reports_memory_readiness_when_route_exists() -> None:
+    client = _client_with_routes(
+        _routes(MemoryRoute(user_id="alice", mcp_url="http://127.0.0.1:8031/mcp"))
+    )
+
+    r = client.post(
+        "/api/admin/pairing/codes",
+        json={"tenant_id": "t", "user_id": "alice", "default_template_id": "tpl"},
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["memory"] == {
+        "ready": True,
+        "user_id": "alice",
+        "reason": None,
+        "mcp_http_url": "http://127.0.0.1:8031/mcp",
+    }
+
+
+def test_issue_code_rejects_unprovisioned_memory_user() -> None:
+    client = _client_with_routes(_routes())
+
+    r = client.post(
+        "/api/admin/pairing/codes",
+        json={"tenant_id": "t", "user_id": "ghost", "default_template_id": "tpl"},
+    )
+
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert detail["code"] == "memory_user_not_provisioned"
+    assert detail["user_id"] == "ghost"
+    assert detail["reason"] == "no_memory_route"
+
+
+def test_issue_code_refreshes_discovery_before_rejecting() -> None:
+    routes = _routes()
+
+    class _Refresher:
+        async def refresh_once(self) -> bool:
+            await routes.replace_from_discovery(
+                DiscoveryResponse.model_validate(
+                    {
+                        "nats": {"url": "nats://x"},
+                        "users": [
+                            {
+                                "user_id": "alice",
+                                "mcp_http_url": "http://127.0.0.1:8031/mcp",
+                                "enabled": True,
+                                "agent_reachable": True,
+                            }
+                        ],
+                    }
+                )
+            )
+            return True
+
+    client = _client_with_routes(routes, refresher=_Refresher())
+
+    r = client.post(
+        "/api/admin/pairing/codes",
+        json={"tenant_id": "t", "user_id": "alice", "default_template_id": "tpl"},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["memory"]["ready"] is True
 
 
 def test_issue_code_without_template_is_optional(client: TestClient) -> None:

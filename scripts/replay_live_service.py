@@ -36,6 +36,19 @@ async def main() -> int:
     parser.add_argument("--fixture", action="append", type=Path, default=[])
     parser.add_argument("--http", default="http://127.0.0.1:8081")
     parser.add_argument("--grpc", default="127.0.0.1:45051")
+    parser.add_argument(
+        "--registry-http",
+        default=None,
+        help=(
+            "Central eidolon_admin API base including /api, e.g. "
+            "http://127.0.0.1:18765/api. Used with --provision-user."
+        ),
+    )
+    parser.add_argument(
+        "--provision-user",
+        action="store_true",
+        help="Ensure the replay user exists through eidolon_admin /api/users before pairing.",
+    )
     parser.add_argument("--tenant", default="demo")
     parser.add_argument("--user", default=None)
     parser.add_argument("--template", default="caretaker_jiezhi")
@@ -57,6 +70,14 @@ async def main() -> int:
     user_id = args.user or f"replay-live-{uuid.uuid4().hex[:8]}"
     try:
         async with httpx.AsyncClient(timeout=args.http_timeout_s, trust_env=False) as http:
+            provisioning = None
+            if args.provision_user:
+                provisioning = await ensure_registry_user(
+                    http=http,
+                    registry_base=args.registry_http,
+                    tenant_id=args.tenant,
+                    user_id=user_id,
+                )
             token, user_id = await _issue_token(
                 http=http,
                 http_base=args.http,
@@ -77,6 +98,7 @@ async def main() -> int:
                 admin_delay_s=args.admin_delay_s,
                 admin_timeout_s=args.admin_timeout_s,
             )
+            report["provisioning"] = provisioning
     except Exception as exc:
         report = _startup_failure_report(
             scenarios=scenarios,
@@ -103,6 +125,55 @@ async def main() -> int:
         markdown.write_text(render_replay_markdown(report), encoding="utf-8")
         print(f"wrote readable report to {markdown}")
     return 0 if report["passed"] else 1
+
+
+async def ensure_registry_user(
+    *,
+    http: httpx.AsyncClient,
+    registry_base: str | None,
+    tenant_id: str,
+    user_id: str,
+) -> dict[str, Any]:
+    """Create the memory/admin user through eidolon_admin when absent.
+
+    This is the real provisioning path: eidolon_admin owns tenant metadata
+    and calls eidolon_memory's admin HTTP. The live replay script only
+    orchestrates that public surface; it never edits users.yaml directly.
+    """
+    if not registry_base:
+        raise ValueError("--provision-user requires --registry-http")
+    base = registry_base.rstrip("/")
+    get_resp = await http.get(f"{base}/users/{user_id}", timeout=10.0)
+    if get_resp.status_code == 200:
+        body = get_resp.json()
+        return {
+            "status": "exists",
+            "user_id": user_id,
+            "health": body.get("health"),
+            "mcp_http_url": body.get("mcp_http_url"),
+        }
+    if get_resp.status_code != 404:
+        get_resp.raise_for_status()
+
+    create_resp = await http.post(
+        f"{base}/users",
+        json={
+            "user_id": user_id,
+            "tenant_id": tenant_id,
+            "display_name": user_id,
+        },
+        timeout=60.0,
+    )
+    if create_resp.status_code == 409:
+        return {"status": "already_exists_conflict", "user_id": user_id}
+    create_resp.raise_for_status()
+    body = create_resp.json()
+    return {
+        "status": "created",
+        "user_id": user_id,
+        "health": body.get("health"),
+        "mcp_http_url": body.get("mcp_http_url"),
+    }
 
 
 async def _issue_token(
@@ -419,6 +490,12 @@ def _turn_checks(
             "memory_recall_degraded",
             bool(memory.get("degraded")) is bool(expect["memory_recall_degraded"]),
             f"got={memory.get('degraded')}",
+        )
+    if "memory_recall_degraded_reason" in expect:
+        add(
+            "memory_recall_degraded_reason",
+            memory.get("degraded_reason") == expect["memory_recall_degraded_reason"],
+            f"got={memory.get('degraded_reason')}",
         )
     if "privacy_mode" in expect:
         add("privacy_mode", privacy_mode == expect["privacy_mode"], f"got={privacy_mode}")

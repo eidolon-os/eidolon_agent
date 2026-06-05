@@ -244,6 +244,27 @@ class MemoryDiscoveryRefresher:
             pass
         self._task = None
 
+    async def refresh_once(self) -> bool:
+        """Fetch discovery immediately and replace the routing snapshot.
+
+        Pairing/onboarding uses this to avoid a stale-route race right after
+        admin provisions a new memory user. Failures are best-effort and
+        return False; the caller can still report the existing route status.
+        """
+        try:
+            discovery = await self._client.fetch()
+            if discovery.nats.url != self._expected_nats_url:
+                _log.warning(
+                    "memory discovery nats url changed from %s to %s; restart required",
+                    self._expected_nats_url,
+                    discovery.nats.url,
+                )
+            await self._routes.replace_from_discovery(discovery)
+            return True
+        except Exception:
+            _log.exception("memory discovery refresh failed")
+            return False
+
     async def _run(self) -> None:
         while not self._stop.is_set():
             try:
@@ -251,17 +272,7 @@ class MemoryDiscoveryRefresher:
                 return
             except asyncio.TimeoutError:
                 pass
-            try:
-                discovery = await self._client.fetch()
-                if discovery.nats.url != self._expected_nats_url:
-                    _log.warning(
-                        "memory discovery nats url changed from %s to %s; restart required",
-                        self._expected_nats_url,
-                        discovery.nats.url,
-                    )
-                await self._routes.replace_from_discovery(discovery)
-            except Exception:
-                _log.exception("memory discovery refresh failed")
+            await self.refresh_once()
 
 
 async def build_initial_memory_routes(

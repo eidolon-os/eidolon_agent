@@ -36,6 +36,7 @@ import httpx
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
+from scripts.replay_live_service import ensure_registry_user
 
 PROMPTS = [
     "你好，我刚醒来，今天感觉怎么样？",
@@ -226,6 +227,19 @@ async def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--http", default="http://127.0.0.1:8081", help="admin HTTP base")
     p.add_argument("--grpc", default="127.0.0.1:45051", help="gRPC target")
+    p.add_argument(
+        "--registry-http",
+        default=None,
+        help=(
+            "Central eidolon_admin API base including /api, e.g. "
+            "http://127.0.0.1:18765/api. Used with --provision-user."
+        ),
+    )
+    p.add_argument(
+        "--provision-user",
+        action="store_true",
+        help="Ensure the benchmark user exists through eidolon_admin /api/users before pairing.",
+    )
     p.add_argument("--tenant", default="demo")
     p.add_argument(
         "--user",
@@ -253,7 +267,15 @@ async def main() -> None:
         f"reuse_stream={args.reuse_stream}"
     )
 
-    async with httpx.AsyncClient() as http:
+    async with httpx.AsyncClient(trust_env=False) as http:
+        if args.provision_user:
+            provisioning = await ensure_registry_user(
+                http=http,
+                registry_base=args.registry_http,
+                tenant_id=args.tenant,
+                user_id=user_id,
+            )
+            print(f"provisioning={provisioning}")
         token, _ = await _issue_token(
             http,
             args.grpc,

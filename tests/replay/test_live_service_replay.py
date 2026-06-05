@@ -88,6 +88,31 @@ def test_live_turn_checks_accepts_sensitive_requires_consent() -> None:
     assert by_name["memory_fanout_allowed"]["passed"] is True
 
 
+def test_live_turn_checks_can_assert_memory_degraded_reason() -> None:
+    checks = replay_live_service._turn_checks(
+        expect={
+            "memory_recall_degraded": True,
+            "memory_recall_degraded_reason": "no_memory_route",
+        },
+        assistant_text="",
+        events=[{"kind": "DONE"}],
+        detail={
+            "observability_summary": {
+                "memory": {
+                    "degraded": True,
+                    "degraded_reason": "no_memory_route",
+                }
+            }
+        },
+        first_delta_ms=None,
+        total_ms=10,
+    )
+
+    by_name = {c["name"]: c for c in checks}
+    assert by_name["memory_recall_degraded"]["passed"] is True
+    assert by_name["memory_recall_degraded_reason"]["passed"] is True
+
+
 def test_startup_failure_report_is_readable_and_structured() -> None:
     report = replay_live_service._startup_failure_report(
         scenarios=[{"id": "s1", "description": "desc"}],
@@ -147,3 +172,66 @@ async def test_fetch_turn_detail_returns_stable_error_after_timeout() -> None:
     assert detail["status"] == "admin_detail_unavailable"
     assert detail["observability_summary"] is None
     assert detail["error"] == "HTTP 404"
+
+
+@pytest.mark.asyncio
+async def test_ensure_registry_user_returns_existing_user() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/api/users/alice"
+        return httpx.Response(
+            200,
+            json={
+                "health": {"worker_running": True},
+                "mcp_http_url": "http://127.0.0.1:8031/mcp",
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await replay_live_service.ensure_registry_user(
+            http=client,
+            registry_base="http://admin.test/api",
+            tenant_id="demo",
+            user_id="alice",
+        )
+
+    assert result == {
+        "status": "exists",
+        "user_id": "alice",
+        "health": {"worker_running": True},
+        "mcp_http_url": "http://127.0.0.1:8031/mcp",
+    }
+
+
+@pytest.mark.asyncio
+async def test_ensure_registry_user_creates_missing_user() -> None:
+    calls: list[tuple[str, str]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        if request.method == "GET":
+            return httpx.Response(404, json={"detail": "missing"})
+        assert request.method == "POST"
+        assert request.url.path == "/api/users"
+        assert request.content
+        return httpx.Response(
+            201,
+            json={
+                "health": {"worker_running": True},
+                "mcp_http_url": "http://127.0.0.1:8032/mcp",
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await replay_live_service.ensure_registry_user(
+            http=client,
+            registry_base="http://admin.test/api",
+            tenant_id="demo",
+            user_id="new-user",
+        )
+
+    assert calls == [("GET", "/api/users/new-user"), ("POST", "/api/users")]
+    assert result["status"] == "created"
+    assert result["mcp_http_url"] == "http://127.0.0.1:8032/mcp"

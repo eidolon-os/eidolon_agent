@@ -35,6 +35,8 @@ def build_admin_app(
     persona_template_registry=None,
     revocation_kv=None,
     session_factory=None,
+    memory_routes=None,
+    memory_discovery_refresher=None,
 ) -> FastAPI:
     app = FastAPI(
         title="eidolon-agent admin",
@@ -70,6 +72,12 @@ def build_admin_app(
     # paths where SQLite isn't wired (tests); router-side guard returns
     # 503 in that case rather than crashing.
     app.state.session_factory = session_factory
+    # Pairing guard: issuing a device token for an unprovisioned memory
+    # user creates a chat session that can answer but will never recall or
+    # persist long-term memory. Keep this state optional so router unit
+    # tests can mount pairing in isolation.
+    app.state.memory_routes = memory_routes
+    app.state.memory_discovery_refresher = memory_discovery_refresher
 
     app.include_router(devices.router, prefix="/api/admin", tags=["devices"])
     app.include_router(personas.router, prefix="/api/admin", tags=["personas"])
