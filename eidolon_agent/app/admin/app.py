@@ -12,7 +12,14 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from eidolon_agent.app.admin.routers import chat_test, conversations, devices, personas, templates
+from eidolon_agent.app.admin.routers import (
+    chat_test,
+    conversations,
+    devices,
+    personas,
+    reports,
+    templates,
+)
 from eidolon_agent.app.admin.routers import pairing as pairing_router
 from eidolon_agent.config.settings import Settings
 
@@ -78,5 +85,6 @@ def build_admin_app(
     app.include_router(
         conversations.router, prefix="/api/admin", tags=["conversations"]
     )
+    app.include_router(reports.router, prefix="/api/admin", tags=["reports"])
 
     return app
