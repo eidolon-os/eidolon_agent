@@ -110,6 +110,31 @@ async def test_db_hydrate_runs_when_window_is_insufficient() -> None:
     assert [m.content for m in items] == ["db-old", "db-new", "cached"]
 
 
+async def test_db_hydrate_merges_sqlite_naive_and_in_memory_aware_timestamps() -> None:
+    """SQLite returns naive datetimes while in-memory appends use aware UTC."""
+
+    async def _hydrate(*, conversation_id: str, window: int):
+        return [
+            _msg(
+                "db-old",
+                created_at=datetime(2026, 1, 1, 8, 0, 0),
+            )
+        ]
+
+    mgr = HistoryManager(hydrate_messages=_hydrate)
+    await mgr.append(
+        conversation_id="c1",
+        message=_msg(
+            "cached-new",
+            created_at=datetime(2026, 1, 1, 8, 1, 0, tzinfo=timezone.utc),
+        ),
+    )
+
+    items = await mgr.recent_window(conversation_id="c1", window=3)
+
+    assert [m.content for m in items] == ["db-old", "cached-new"]
+
+
 async def test_db_hydrate_timeout_degrades_to_cached_window() -> None:
     import asyncio
 

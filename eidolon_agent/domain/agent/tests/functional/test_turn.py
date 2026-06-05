@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import pytest
 
+from eidolon_agent.core.types.messages import MessageRole
 from tests.helpers import make_turn_input
 
 pytestmark = pytest.mark.functional
+
 
 @pytest.mark.asyncio
 async def test_simple_turn_emits_state_delta_done(turn_engine_factory):
@@ -18,6 +20,25 @@ async def test_simple_turn_emits_state_delta_done(turn_engine_factory):
     assert kinds[-1] == "done"
     # Seq is monotonic.
     assert [e.seq for e in events] == sorted(e.seq for e in events)
+
+
+@pytest.mark.asyncio
+async def test_done_turn_has_recent_history_even_if_stream_closes(turn_engine_factory):
+    engine = turn_engine_factory()
+    ti = make_turn_input("以后请叫我小满")
+
+    async for ev in engine.run(ti):
+        if ev.kind.value == "done":
+            break
+
+    recent = await engine._history.recent_window(
+        conversation_id=ti.conversation_id,
+        window=10,
+    )
+
+    assert [m.role for m in recent] == [MessageRole.USER, MessageRole.ASSISTANT]
+    assert recent[0].content == "以后请叫我小满"
+    assert recent[1].content
 
 
 @pytest.mark.asyncio

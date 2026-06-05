@@ -32,17 +32,17 @@ from eidolon_agent.core.errors import GuardrailBlockedError, TurnCancelledError
 from eidolon_agent.core.ports.llm import LLMPort
 from eidolon_agent.core.ports.tool import ToolInvocationContext
 from eidolon_agent.core.types import (
-    Event,
+    ChatMessage,
     DevelopmentGuardTrace,
+    Event,
     LatencyBreakdown,
     LLMFinishReason,
     MemoryWriteDispositionKind,
     MessageRole,
     PersonaTrace,
-    ChatMessage,
+    ToolCall,
     ToolTrace,
     TurnTrace,
-    ToolCall,
     classify_memory_write,
 )
 from eidolon_agent.core.types.topics import Topics
@@ -117,9 +117,7 @@ class TurnEngine:
         self._max_tool_iters = max_tool_iters
         self._memory_write_mode = _normalize_guard_mode(memory_write_mode)
         self._tool_schema_strict = tool_schema_strict
-        self._require_idempotency_for_side_effect_tools = (
-            require_idempotency_for_side_effect_tools
-        )
+        self._require_idempotency_for_side_effect_tools = require_idempotency_for_side_effect_tools
         self._taboos_provider = taboos_provider
         self._turn_persister = turn_persister
 
@@ -145,6 +143,9 @@ class TurnEngine:
         tool_ms_total = 0
         tool_trace: list[ToolTrace] = []
         runtime_policy = TurnRuntimePolicy.from_metadata(ti.metadata)
+        post_turn_allowed = False
+        post_turn_scheduled = False
+        recent_history_persisted = False
 
         try:
             # ---- Input guardrail --------------------------------------------
@@ -261,7 +262,10 @@ class TurnEngine:
                             turn_id=ti.turn_id,
                             seq=seq.next(),
                             kind=TurnEventKind.USAGE,
-                            data={"tokens_in": delta.usage.tokens_in, "tokens_out": delta.usage.tokens_out},
+                            data={
+                                "tokens_in": delta.usage.tokens_in,
+                                "tokens_out": delta.usage.tokens_out,
+                            },
                             ts=time.time(),
                         )
                     if delta.finish is not None:
@@ -302,7 +306,12 @@ class TurnEngine:
                             turn_id=ti.turn_id,
                             seq=seq.next(),
                             kind=TurnEventKind.TOOL_RESULT,
-                            data={"name": r.name, "ok": r.ok, "content": r.content, "error": r.error_code},
+                            data={
+                                "name": r.name,
+                                "ok": r.ok,
+                                "content": r.content,
+                                "error": r.error_code,
+                            },
                             ts=time.time(),
                         )
                         messages = [
@@ -328,6 +337,21 @@ class TurnEngine:
                 yield TurnEvent.delta(ti.turn_id, seq.next(), "（让我换个说法）", time.time())
             assistant_text_for_persist = final_text
             ts_output_ms = int((time.monotonic() - t0) * 1000)
+            post_turn_allowed = True
+
+            # Keep recent history deterministic for the next turn. This is a
+            # cheap in-memory append, not durable persistence; durable SQLite
+            # writes and external fanout remain after DONE.
+            try:
+                await self._persist_messages(
+                    ti,
+                    ti.text or "",
+                    final_text,
+                    is_private=runtime_policy.mark_messages_private,
+                )
+                recent_history_persisted = True
+            except Exception:
+                _log.exception("recent history append failed")
 
             # ---- P0 diagnostic: phase timings ------------------------------
             _log_turn_timings(
@@ -353,8 +377,14 @@ class TurnEngine:
             )
 
             # User has their answer; persistence + fanout can take their time.
+            post_turn_scheduled = True
             asyncio.create_task(  # noqa: RUF006 — fire-and-forget by design
-                self._post_turn(ti, final_text, started_at)
+                self._post_turn(
+                    ti,
+                    final_text,
+                    started_at,
+                    history_already_persisted=recent_history_persisted,
+                )
             )
 
         except asyncio.CancelledError:
@@ -460,6 +490,15 @@ class TurnEngine:
                         is_private=runtime_policy.mark_messages_private,
                     )
                 )
+            if post_turn_allowed and not post_turn_scheduled:
+                asyncio.create_task(  # noqa: RUF006 — fire-and-forget by design
+                    self._post_turn(
+                        ti,
+                        assistant_text_for_persist,
+                        started_at,
+                        history_already_persisted=recent_history_persisted,
+                    )
+                )
             if self._bus is not None:
                 try:
                     await self._bus.publish(
@@ -506,7 +545,9 @@ class TurnEngine:
         )
         task_id = await submit_to_workstation(self._bus, ti)
         if not task_id:
-            yield TurnEvent.error(ti.turn_id, seq.next(), "dispatch_failed", "workstation unavailable", time.time())
+            yield TurnEvent.error(
+                ti.turn_id, seq.next(), "dispatch_failed", "workstation unavailable", time.time()
+            )
             yield TurnEvent.done(ti.turn_id, seq.next(), TurnStatus.ERRORED, time.time())
             return
         yield TurnEvent(
@@ -578,21 +619,24 @@ class TurnEngine:
         ti: TurnInput,
         assistant_text: str,
         started_at: datetime,
+        *,
+        history_already_persisted: bool = False,
     ) -> None:
         """Background work that runs AFTER DONE was yielded.
 
         Errors here never reach the user; logged + swallowed.
         """
         policy = TurnRuntimePolicy.from_metadata(ti.metadata)
-        try:
-            await self._persist_messages(
-                ti,
-                ti.text or "",
-                assistant_text,
-                is_private=policy.mark_messages_private,
-            )
-        except Exception:
-            _log.exception("post-turn: persist failed")
+        if not history_already_persisted:
+            try:
+                await self._persist_messages(
+                    ti,
+                    ti.text or "",
+                    assistant_text,
+                    is_private=policy.mark_messages_private,
+                )
+            except Exception:
+                _log.exception("post-turn: persist failed")
         if not policy.post_turn_side_effects_allowed:
             return
         write_trace = _memory_write_trace(

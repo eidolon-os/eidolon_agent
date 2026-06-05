@@ -100,7 +100,13 @@ def classify_memory_write(
     user_text: str,
     assistant_text: str = "",
 ) -> MemoryWriteDisposition:
-    text = f"{user_text}\n{assistant_text}".lower()
+    # The user's utterance is the source of truth for write disposition.
+    # Assistant replies often contain conversational words like "今天" or "吗",
+    # which must not turn a stable preference/fact into an episodic event or
+    # question. Keep assistant text only for future policy extensions, not for
+    # today's deterministic signal extraction.
+    del assistant_text
+    text = user_text.lower()
     if any(k in text for k in ("身份证", "银行卡", "password", "密码", "住址")):
         return MemoryWriteDisposition(
             MemoryWriteDispositionKind.SENSITIVE_REQUIRES_CONSENT,
@@ -112,9 +118,27 @@ def classify_memory_write(
             "explicit_promise_or_reminder",
         )
     is_question = any(k in text for k in ("?", "？", "吗", "哪里", "什么"))
-    if any(k in text for k in ("我喜欢", "我不喜欢", "以后叫我", "call me", "i like", "i prefer")) or (
-        not is_question and any(k in text for k in ("我住在", "我现在住在"))
-    ):
+    strong_preference_markers = (
+        "我喜欢",
+        "我不喜欢",
+        "以后叫我",
+        "以后请叫我",
+        "请叫我",
+        "call me",
+        "i like",
+        "i prefer",
+    )
+    weak_preference_markers = ("叫我",)
+    residence_markers = (
+        "我住在",
+        "我现在住在",
+        "现在住在",
+        "住在",
+    )
+    if (
+        any(k in text for k in strong_preference_markers)
+        or (not is_question and any(k in text for k in weak_preference_markers))
+    ) or (not is_question and any(k in text for k in residence_markers)):
         return MemoryWriteDisposition(
             MemoryWriteDispositionKind.SEMANTIC_UPSERT,
             "stable_preference_or_identity",

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 
 from eidolon_agent.core.types.messages import ChatMessage
 
@@ -131,4 +132,10 @@ def _merge_tail(
     by_id: dict[str, ChatMessage] = {}
     for msg in [*hydrated, *cached]:
         by_id[msg.id] = msg
-    return sorted(by_id.values(), key=lambda m: m.created_at)[-window:]
+    return sorted(by_id.values(), key=lambda m: _utc_sort_key(m.created_at))[-window:]
+
+
+def _utc_sort_key(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
