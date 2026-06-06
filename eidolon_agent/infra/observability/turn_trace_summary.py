@@ -37,6 +37,7 @@ def build_turn_observability_summary(
             "degraded_reason": memory.get("degraded_reason"),
             "skipped_reason": memory.get("skipped_reason"),
             "hit_count": memory.get("hit_count") or 0,
+            "kg_triple_count": memory.get("kg_triple_count") or 0,
             "context_injected": bool(memory.get("context_injected")),
         },
         "memory_write": {

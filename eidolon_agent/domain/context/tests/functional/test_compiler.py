@@ -42,10 +42,12 @@ class _StubMemory:
         *,
         degraded: bool = False,
         degraded_reason: str | None = None,
+        kg_triples: list[dict] | None = None,
     ) -> None:
         self._formatted = formatted
         self._degraded = degraded
         self._degraded_reason = degraded_reason
+        self._kg_triples = list(kg_triples or [])
         self.calls: list[dict] = []
 
     async def recall_context(self, *, user_id, query, plan, timeout_s):
@@ -53,6 +55,7 @@ class _StubMemory:
         return MemoryRecallResult(
             context=self._formatted,
             hits=[SimpleNamespace(id="mem-1")],
+            kg_triples=self._kg_triples,
             degraded=self._degraded,
             degraded_reason=self._degraded_reason,
         )
@@ -134,6 +137,43 @@ async def test_memory_recall_appended_when_port_present() -> None:
     msgs = await compiler.compile(make_turn_input("帮我回忆一下"))
     assert "[MEMORY]\nprior_episode_summary" in msgs[0].content
     assert memory.calls and memory.calls[0]["query"] == "帮我回忆一下"
+
+
+async def test_memory_recall_query_includes_recent_history_for_anaphora() -> None:
+    history = HistoryManager()
+    await history.append(
+        conversation_id="c1",
+        message=ChatMessage(
+            id=uuid.uuid4().hex,
+            role=MessageRole.USER,
+            content="跟你了解一下铁锤。",
+            created_at=_now(),
+        ),
+    )
+    await history.append(
+        conversation_id="c1",
+        message=ChatMessage(
+            id=uuid.uuid4().hex,
+            role=MessageRole.ASSISTANT,
+            content="铁锤是那只很特别的狗狗。",
+            created_at=_now(),
+        ),
+    )
+    memory = _StubMemory(formatted="铁锤是一只边境牧羊犬")
+    ti = make_turn_input("我想了解它是什么品种。")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=history,
+        memory_port=memory,
+    )
+
+    await compiler.compile(ti)
+
+    query = memory.calls[0]["query"]
+    assert "铁锤" in query
+    assert "我想了解它是什么品种" in query
+    assert ti.metadata["memory_recall_query"]["source"] == "current_plus_recent_history"
 
 
 async def test_memory_failure_does_not_break_turn() -> None:
@@ -247,8 +287,37 @@ async def test_memory_trace_records_ids_and_degraded_without_content() -> None:
     assert trace["degraded"] is False
     assert trace["hit_ids"] == ["mem-1"]
     assert trace["hit_count"] == 1
+    assert trace["kg_triple_ids"] == []
+    assert trace["kg_triple_count"] == 0
     assert trace["context_injected"] is True
     assert "private recalled sentence" not in str(trace)
+
+
+async def test_memory_trace_records_kg_triple_ids_without_content() -> None:
+    ti = make_turn_input("详细介绍铁锤")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=_StubMemory(
+            formatted="知识图谱事实：\n- [KG] 铁锤 的品种/身份是 边境牧羊犬",
+            kg_triples=[
+                {
+                    "id": "t_pet_tiechui_role",
+                    "subject": "pet:铁锤",
+                    "predicate": "holds_role",
+                    "object": "边境牧羊犬",
+                }
+            ],
+        ),
+    )
+
+    await compiler.compile(ti)
+
+    trace = ti.metadata["memory_trace"]
+    assert trace["kg_triple_ids"] == ["t_pet_tiechui_role"]
+    assert trace["kg_triple_count"] == 1
+    assert "边境牧羊犬" not in str(trace)
 
 
 async def test_memory_trace_records_degraded_reason_without_internal_prompt_detail() -> None:

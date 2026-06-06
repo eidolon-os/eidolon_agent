@@ -130,12 +130,28 @@ async def test_recall_context_returns_context_hits_and_degraded_false() -> None:
         "records": [
             {"id": "h1", "value": "fact", "metadata": {"kind": "fact", "similarity": 0.7}}
         ],
+        "kg_triples": [
+            {
+                "id": "kg-1",
+                "subject": "pet:铁锤",
+                "predicate": "holds_role",
+                "object": "边境牧羊犬",
+            }
+        ],
     })
     port, *_ = _port(session_call=call)
     result = await port.recall_context("alice", "x", plan=_plan())
     ctx, hits, degraded = result
     assert ctx == "prior conversation summary"
     assert [h.id for h in hits] == ["h1"]
+    assert result.kg_triples == [
+        {
+            "id": "kg-1",
+            "subject": "pet:铁锤",
+            "predicate": "holds_role",
+            "object": "边境牧羊犬",
+        }
+    ]
     assert degraded is False
     assert result.degraded_reason is None
     name, args = call.await_args.args

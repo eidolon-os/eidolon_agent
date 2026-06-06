@@ -42,6 +42,7 @@ def test_summary_is_prompt_safe_and_operator_friendly() -> None:
                 "degraded": False,
                 "degraded_reason": None,
                 "hit_count": 2,
+                "kg_triple_count": 3,
                 "context_injected": True,
             },
             "memory_write_trace": {
@@ -97,6 +98,7 @@ def test_summary_is_prompt_safe_and_operator_friendly() -> None:
     assert summary["context"]["segment_kinds"] == ["persona"]
     assert summary["context"]["dropped_kinds"] == ["history"]
     assert summary["memory"]["hit_count"] == 2
+    assert summary["memory"]["kg_triple_count"] == 3
     assert summary["memory"]["degraded_reason"] is None
     assert summary["memory_write"]["disposition"] == "semantic_upsert"
     assert summary["tools"]["count"] == 2

@@ -66,6 +66,7 @@ class MemoryRecallResult:
     hits: list[MemoryHit] = field(default_factory=list)
     degraded: bool = False
     degraded_reason: str | None = None
+    kg_triples: list[dict] = field(default_factory=list)
 
     def __iter__(self):
         yield self.context

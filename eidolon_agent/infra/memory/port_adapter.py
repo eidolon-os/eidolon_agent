@@ -103,7 +103,15 @@ class EidolonMemoryPort:
             return MemoryRecallResult(degraded=True, degraded_reason="error")
         context = raw.get("context", "") or ""
         hits = _records_to_hits(raw.get("records") or [])
-        return MemoryRecallResult(context=context, hits=hits, degraded=False)
+        kg_triples = raw.get("kg_triples") or []
+        if not isinstance(kg_triples, list):
+            kg_triples = []
+        return MemoryRecallResult(
+            context=context,
+            hits=hits,
+            kg_triples=kg_triples,
+            degraded=False,
+        )
 
     async def write_turn(
         self,

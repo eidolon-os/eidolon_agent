@@ -83,6 +83,9 @@ class TurnReplayResult:
                     "context_injected": (trace.get("memory_trace") or {}).get(
                         "context_injected"
                     ),
+                    "kg_triple_count": (trace.get("memory_trace") or {}).get(
+                        "kg_triple_count"
+                    ),
                 },
                 "context": {
                     "segments": [

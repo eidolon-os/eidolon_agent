@@ -144,12 +144,19 @@ class ContextCompiler:
         memory_degraded = False
         memory_degraded_reason: str | None = None
         memory_hit_ids: list[str] = []
+        memory_kg_triple_ids: list[str] = []
         if isinstance(memory_payload, BaseException):
             _log.warning("memory recall raised: %s", memory_payload)
             memory_degraded = True
             memory_degraded_reason = _exception_degraded_reason(memory_payload)
         elif memory_payload:
-            memory_text, memory_degraded, memory_hit_ids, memory_degraded_reason = memory_payload
+            (
+                memory_text,
+                memory_degraded,
+                memory_hit_ids,
+                memory_degraded_reason,
+                memory_kg_triple_ids,
+            ) = memory_payload
 
         if memory_degraded:
             degraded_sources.append("memory")
@@ -233,6 +240,8 @@ class ContextCompiler:
             "timeout_ms": int(self._memory_timeout_s * 1000),
             "hit_ids": memory_hit_ids,
             "hit_count": len(memory_hit_ids),
+            "kg_triple_ids": memory_kg_triple_ids,
+            "kg_triple_count": len(memory_kg_triple_ids),
             "context_injected": memory_kept,
         }
 
@@ -323,7 +332,7 @@ class ContextCompiler:
 
     async def _memory_recall(
         self, ti: TurnInput
-    ) -> tuple[str | None, bool, list[str], str | None] | None:
+    ) -> tuple[str | None, bool, list[str], str | None, list[str]] | None:
         """Memory recall branch for the parallel ``gather`` above.
 
         Three return shapes:
@@ -353,18 +362,25 @@ class ContextCompiler:
                 semantic_k=self._memory_top_k,
                 voice=ti.caller.caller_kind.value == "livekit_voice",
             )
+            recall_query, query_source = await self._memory_recall_query(ti)
+            ti.metadata["memory_recall_query"] = {
+                "source": query_source,
+                "preview": recall_query[:160],
+            }
             recall = await self._memory.recall_context(
                 user_id=ti.caller.user_id,
-                query=ti.text,
+                query=recall_query,
                 plan=plan,
                 timeout_s=self._memory_timeout_s,
             )
             formatted, hits, _degraded = recall
+            kg_triples = getattr(recall, "kg_triples", []) or []
             return (
                 formatted or None,
                 bool(_degraded),
                 [h.id for h in hits],
                 getattr(recall, "degraded_reason", None),
+                _kg_triple_ids(kg_triples),
             )
         except Exception as exc:
             _log.exception(
@@ -372,7 +388,49 @@ class ContextCompiler:
                 "into system prompt",
                 ti.caller.user_id,
             )
-            return self._MEMORY_DEGRADED_NOTICE, True, [], _exception_degraded_reason(exc)
+            return (
+                self._MEMORY_DEGRADED_NOTICE,
+                True,
+                [],
+                _exception_degraded_reason(exc),
+                [],
+            )
+
+    async def _memory_recall_query(self, ti: TurnInput) -> tuple[str, str]:
+        """Build a recall query with a tiny history peek for anaphora.
+
+        Users often continue with "它/他/再找找/你忘了吗" after naming the
+        entity in the previous turn. KG recall only sees the query string, so
+        current text alone can miss the entity. Keep the peek short and
+        timeout-bounded so voice TTFT still belongs to the memory backend, not
+        to SQLite/history hydration.
+        """
+
+        user_text = (ti.text or "").strip()
+        if not TurnRuntimePolicy.from_metadata(ti.metadata).history_context_allowed:
+            return user_text, "current_only"
+        try:
+            recent = await asyncio.wait_for(
+                self._history.recent_window(
+                    conversation_id=ti.conversation_id,
+                    window=min(4, self._history_window),
+                ),
+                timeout=0.025,
+            )
+        except Exception:
+            return user_text, "current_only_history_peek_failed"
+        if not recent:
+            return user_text, "current_only"
+        snippets: list[str] = []
+        for msg in recent[-4:]:
+            content = (msg.content or "").strip()
+            if not content:
+                continue
+            role = "用户" if msg.role is MessageRole.USER else "你"
+            snippets.append(f"{role}: {_truncate_for_query(content)}")
+        if not snippets:
+            return user_text, "current_only"
+        return "\n".join([*snippets, f"当前用户: {user_text}"]), "current_plus_recent_history"
 
 
 async def _timed(_name: str, coro):  # type: ignore[no-untyped-def]
@@ -437,3 +495,22 @@ def _normalize_budget_mode(mode: str) -> str:
 
 def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 3) if text else 0
+
+
+def _truncate_for_query(text: str, limit: int = 120) -> str:
+    text = text.strip()
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _kg_triple_ids(triples: object) -> list[str]:
+    if not isinstance(triples, list):
+        return []
+    ids: list[str] = []
+    for triple in triples:
+        if isinstance(triple, dict):
+            triple_id = triple.get("id")
+        else:
+            triple_id = getattr(triple, "id", None)
+        if triple_id:
+            ids.append(str(triple_id))
+    return ids

@@ -272,6 +272,7 @@ def _prompt_safe_shape(trace: dict[str, Any]) -> dict[str, Any]:
             "degraded": bool(memory.get("degraded")),
             "degraded_reason": memory.get("degraded_reason"),
             "hit_count": memory.get("hit_count") or 0,
+            "kg_triple_count": memory.get("kg_triple_count") or 0,
             "context_injected": bool(memory.get("context_injected")),
         },
         "privacy_mode": privacy.get("mode"),
