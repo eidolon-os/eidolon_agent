@@ -128,7 +128,13 @@ async def test_recall_context_returns_context_hits_and_degraded_false() -> None:
     call = AsyncMock(return_value={
         "context": "prior conversation summary",
         "records": [
-            {"id": "h1", "value": "fact", "metadata": {"kind": "fact", "similarity": 0.7}}
+            {
+                "id": "h1",
+                "value": "fact",
+                "memory_time": "2026-05-18T20:00:00Z",
+                "memory_time_source": "occurred_at",
+                "metadata": {"kind": "fact", "similarity": 0.7},
+            }
         ],
         "kg_triples": [
             {
@@ -144,6 +150,9 @@ async def test_recall_context_returns_context_hits_and_degraded_false() -> None:
     ctx, hits, degraded = result
     assert ctx == "prior conversation summary"
     assert [h.id for h in hits] == ["h1"]
+    assert hits[0].memory_time is not None
+    assert hits[0].memory_time.isoformat() == "2026-05-18T20:00:00+00:00"
+    assert hits[0].memory_time_source == "occurred_at"
     assert result.kg_triples == [
         {
             "id": "kg-1",

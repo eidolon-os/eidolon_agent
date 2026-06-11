@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from eidolon_agent.core.errors import MemoryUnavailableError
 from eidolon_agent.core.types.memory import (
@@ -171,18 +172,43 @@ def _records_to_hits(records: list[dict]) -> list[MemoryHit]:
     hits: list[MemoryHit] = []
     for r in records:
         try:
+            meta = r.get("metadata") or {}
             hits.append(
                 MemoryHit(
                     id=str(r.get("id") or r.get("key") or ""),
                     content=str(r.get("value", "")),
-                    kind=MemoryKind(r.get("metadata", {}).get("kind", "fragment")),
-                    similarity=float(r.get("metadata", {}).get("similarity", 0.0)),
-                    metadata=r.get("metadata") or {},
+                    kind=MemoryKind(meta.get("kind", "fragment")),
+                    similarity=float(meta.get("similarity", 0.0)),
+                    memory_time=_parse_memory_datetime(
+                        r.get("memory_time") or meta.get("memory_time")
+                    ),
+                    memory_time_source=(
+                        str(r.get("memory_time_source") or meta.get("memory_time_source") or "")
+                        or None
+                    ),
+                    valid_from=_parse_memory_datetime(r.get("valid_from") or meta.get("valid_from")),
+                    valid_to=_parse_memory_datetime(r.get("valid_to") or meta.get("valid_to")),
+                    metadata=meta,
                 )
             )
         except (ValueError, TypeError):
             continue
     return hits
+
+
+def _parse_memory_datetime(value: object) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def _memory_unavailable_reason(exc: MemoryUnavailableError) -> str:

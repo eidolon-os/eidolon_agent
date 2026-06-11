@@ -48,6 +48,8 @@ class MemoryHit:
     content: str
     kind: MemoryKind
     similarity: float
+    memory_time: datetime | None = None
+    memory_time_source: str | None = None
     valid_from: datetime | None = None
     valid_to: datetime | None = None
     metadata: dict = field(default_factory=dict)
