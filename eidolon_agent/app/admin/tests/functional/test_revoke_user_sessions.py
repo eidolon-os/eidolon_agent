@@ -20,7 +20,9 @@ from fastapi import FastAPI
 from eidolon_agent.app.admin.routers import devices as devices_router
 from eidolon_agent.app.transport.pairing.token import (
     PairingTokenVerifier,
+    device_revocation_keys,
     sign_device_token,
+    user_revocation_keys,
 )
 from eidolon_agent.core.errors import TokenRevokedError
 
@@ -38,9 +40,13 @@ class _FakeKV:
         self._store: dict[str, bytes] = {}
 
     async def get(self, key: str) -> bytes | None:
+        if ":" in key:
+            raise AssertionError(f"raw unsafe KV key used: {key}")
         return self._store.get(key)
 
     async def put(self, key: str, value: bytes) -> None:
+        if ":" in key:
+            raise AssertionError(f"raw unsafe KV key used: {key}")
         self._store[key] = value
 
     async def delete(self, key: str) -> None:
@@ -72,7 +78,9 @@ async def test_revoke_user_sessions_writes_revocation_key() -> None:
     assert r.status_code == 200
     body = r.json()
     assert body == {"user_id": "manson", "revoked": True}
-    # Key written with a non-empty value (ISO timestamp).
+    # Key written with a non-empty value (ISO timestamp). The endpoint writes
+    # both the encoded key and legacy simple-id key for compatibility.
+    assert await kv.get(user_revocation_keys("manson")[0]) is not None
     val = await kv.get("revoked.user.manson")
     assert val is not None
     assert b"T" in val and b":" in val  # ISO format roughly
@@ -181,3 +189,41 @@ async def test_verifier_device_level_revoke_still_works() -> None:
     with pytest.raises(TokenRevokedError) as exc_info:
         await verifier.verify(token)
     assert "dev-x" in str(exc_info.value)
+
+
+async def test_verifier_accepts_mac_device_id_without_invalid_kv_key() -> None:
+    """MAC-style ESP32 ids contain ``:`` and must not be used raw as KV keys."""
+    kv = _FakeKV()
+    verifier = PairingTokenVerifier(secret=SECRET, revocation_kv=kv)
+
+    token, _ = sign_device_token(
+        secret=SECRET,
+        device_id="1c:db:d4:7a:ef:0c",
+        tenant_id="t",
+        user_id="alice",
+        default_template_id=None,
+        scopes=["device"],
+    )
+
+    verified = await verifier.verify(token)
+    assert verified.device_id == "1c:db:d4:7a:ef:0c"
+
+
+async def test_verifier_rejects_mac_device_id_with_encoded_revocation_key() -> None:
+    kv = _FakeKV()
+    verifier = PairingTokenVerifier(secret=SECRET, revocation_kv=kv)
+    device_id = "1c:db:d4:7a:ef:0c"
+
+    token, _ = sign_device_token(
+        secret=SECRET,
+        device_id=device_id,
+        tenant_id="t",
+        user_id="alice",
+        default_template_id=None,
+        scopes=["device"],
+    )
+    await kv.put(device_revocation_keys(device_id)[0], b"manual-test")
+
+    with pytest.raises(TokenRevokedError) as exc_info:
+        await verifier.verify(token)
+    assert device_id in str(exc_info.value)

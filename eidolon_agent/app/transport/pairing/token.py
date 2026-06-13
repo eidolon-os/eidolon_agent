@@ -29,8 +29,10 @@ merging.
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import re
 import uuid
 
 import jwt
@@ -39,6 +41,39 @@ from eidolon_agent.core.errors import (
     TokenRevokedError,
     UnauthenticatedError,
 )
+
+_KV_SAFE_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+
+
+def _kv_safe_token(value: str) -> str:
+    """Encode arbitrary identity strings into a NATS KV-safe path segment."""
+
+    encoded = base64.urlsafe_b64encode(value.encode("utf-8")).decode("ascii")
+    return encoded.rstrip("=")
+
+
+def device_revocation_keys(device_id: str) -> tuple[str, ...]:
+    """Return revocation keys for a device id.
+
+    ``device_id`` can be a MAC address (``1c:db:...``). NATS KV keys cannot
+    contain ``:``, so new writes use an encoded namespace. For compatibility
+    with existing simple-id entries, verifiers also read the legacy key when
+    the raw id is already KV-safe.
+    """
+
+    keys = [f"revoked.device.{_kv_safe_token(device_id)}"]
+    if _KV_SAFE_RE.fullmatch(device_id):
+        keys.append(f"revoked.{device_id}")
+    return tuple(keys)
+
+
+def user_revocation_keys(user_id: str) -> tuple[str, ...]:
+    """Return revocation keys for all sessions belonging to a user."""
+
+    keys = [f"revoked.user.v2.{_kv_safe_token(user_id)}"]
+    if _KV_SAFE_RE.fullmatch(user_id):
+        keys.append(f"revoked.user.{user_id}")
+    return tuple(keys)
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,17 +139,25 @@ class PairingTokenVerifier:
         # flight sessions cut off). Either match → reject.
         #
         # Key conventions:
-        #   - ``revoked.<device_id>`` — single device (existing)
-        #   - ``revoked.user.<user_id>`` — every device belonging to the
-        #     user; channel's per-session JWTs have ``device_id="web-xxx"``
-        #     so user-level is the only effective revocation for them
+        #   - ``revoked.device.<base64url(device_id)>`` — single device
+        #   - ``revoked.user.v2.<base64url(user_id)>`` — every device
+        #     belonging to the user; channel's per-session JWTs have
+        #     ``device_id="web-xxx"`` so user-level is the only effective
+        #     revocation for them
+        #
+        # Verifier also checks legacy keys for KV-safe ids:
+        #   - ``revoked.<device_id>``
+        #   - ``revoked.user.<user_id>``
         if self._kv is not None:
-            if await self._kv.get(f"revoked.{device_id}"):
-                raise TokenRevokedError(f"device revoked: {device_id}")
-            if user_id and await self._kv.get(f"revoked.user.{user_id}"):
-                raise TokenRevokedError(
-                    f"all sessions revoked for user: {user_id}"
-                )
+            for key in device_revocation_keys(device_id):
+                if await self._kv.get(key):
+                    raise TokenRevokedError(f"device revoked: {device_id}")
+            if user_id:
+                for key in user_revocation_keys(user_id):
+                    if await self._kv.get(key):
+                        raise TokenRevokedError(
+                            f"all sessions revoked for user: {user_id}"
+                        )
 
         return VerifiedDevice(
             device_id=device_id,

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
+from eidolon_agent.app.transport.pairing.token import user_revocation_keys
 from eidolon_agent.core.errors import TokenRevokedError, UnauthenticatedError
 
 router = APIRouter()
@@ -78,7 +79,8 @@ async def revoke_user_sessions(user_id: str, request: Request) -> RevokeUserSess
     # Value can be anything truthy — verifier just checks key existence.
     # Store the timestamp for ops-side audit ("when was this revoked").
     timestamp = datetime.now(timezone.utc).isoformat()
-    await kv.put(f"revoked.user.{user_id}", timestamp.encode("utf-8"))
+    for key in user_revocation_keys(user_id):
+        await kv.put(key, timestamp.encode("utf-8"))
     return RevokeUserSessionsResponse(user_id=user_id, revoked=True)
 
 
