@@ -43,7 +43,7 @@ from eidolon_agent.domain.personas import (
 from eidolon_agent.domain.personas.ports import PersonaEventPort
 from eidolon_agent.domain.signals import SignalBus
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
-from eidolon_agent.domain.tools.builtin import EmitEventTool, GetTimeTool
+from eidolon_agent.domain.tools.builtin import EmitEventTool, GetTimeTool, SubmitLongTaskTool
 from eidolon_agent.infra.events import NatsEventBus, NatsKVStore
 from eidolon_agent.infra.events.nats_bus import ensure_buckets
 from eidolon_agent.infra.llm import LLMRouter
@@ -176,6 +176,7 @@ async def build_application(
     tool_registry = ToolRegistry()
     tool_registry.register(GetTimeTool())
     tool_registry.register(EmitEventTool(event_bus=container.event_bus))
+    tool_registry.register(SubmitLongTaskTool(event_bus=container.event_bus))
     idemp_kv = container.kv_buckets.get("EIDOLON_TOOL_IDEMP")
     tool_dispatcher = ToolDispatcher(
         tool_registry,

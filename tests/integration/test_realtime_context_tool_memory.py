@@ -9,7 +9,7 @@ from dataclasses import replace
 import pytest
 
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
-from eidolon_agent.core.types.messages import ChatMessage
+from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEventKind
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import EmitEventTool, GetTimeTool
@@ -37,6 +37,154 @@ async def test_tool_turn_dispatches_result_and_continues_llm(turn_engine_factory
     assert "工具完成" in "".join(
         ev.data.get("text", "") for ev in events if ev.kind is TurnEventKind.DELTA
     )
+
+
+async def test_tool_call_announces_real_tool_before_dispatch_and_feeds_result_to_llm(
+    turn_engine_factory,
+) -> None:
+    llm = _ScriptedCapturingLLM(
+        [
+            [{"kind": "tool_call", "name": "get_time", "arguments": {"timezone": "Asia/Shanghai"}}],
+            [{"kind": "text", "text": "我看到了工具结果。"}],
+        ]
+    )
+    engine = turn_engine_factory(llm=llm)
+
+    events = [ev async for ev in engine.run(make_turn_input("现在几点？"))]
+
+    tool_call_idx = next(i for i, ev in enumerate(events) if ev.kind is TurnEventKind.TOOL_CALL)
+    prior_deltas = [
+        ev.data.get("text", "")
+        for ev in events[:tool_call_idx]
+        if ev.kind is TurnEventKind.DELTA
+    ]
+    assert prior_deltas[-1] == "我先看一下当前时间。"
+    tool_results = [ev for ev in events if ev.kind is TurnEventKind.TOOL_RESULT]
+    assert tool_results[0].data["ok"] is True
+    assert tool_results[0].data["name"] == "get_time"
+    assert len(llm.messages_by_call) == 2
+    tool_messages = [
+        msg for msg in llm.messages_by_call[1]
+        if msg.role is MessageRole.TOOL and msg.tool_name == "get_time"
+    ]
+    assert tool_messages
+    assert "Asia/Shanghai" in tool_messages[0].content
+    assert "我看到了工具结果" in "".join(
+        ev.data.get("text", "") for ev in events if ev.kind is TurnEventKind.DELTA
+    )
+
+
+async def test_llm_selected_long_task_publishes_handoff_without_waiting_for_worker(
+    turn_engine_factory,
+    event_bus,
+) -> None:
+    submitted = []
+
+    async def _on_submit(ev):
+        submitted.append(ev.payload)
+
+    await event_bus.subscribe("agent.workstation.task.submit", _on_submit)
+    llm = _ScriptedCapturingLLM(
+        [
+            [
+                {
+                    "kind": "tool_call",
+                    "name": "submit_long_task",
+                    "arguments": {
+                        "task": "帮我订下周三去上海的机票",
+                        "task_type": "booking",
+                        "urgency": "normal",
+                        "expected_output": "可选航班和预订进度",
+                        "context_summary": "用户希望处理订机票事项。",
+                    },
+                }
+            ],
+            [{"kind": "text", "text": "我已经交给后台处理，会继续跟进。"}],
+        ]
+    )
+    engine = turn_engine_factory(llm=llm)
+
+    events = [
+        ev async for ev in engine.run(make_turn_input("帮我订下周三去上海的机票"))
+    ]
+    await _drain_background_tasks()
+
+    assert any(
+        ev.kind is TurnEventKind.DELTA
+        and ev.data.get("text") == "收到，我已经开始处理这个长任务，会继续跟进。"
+        for ev in events
+    )
+    tool_result = next(ev for ev in events if ev.kind is TurnEventKind.TOOL_RESULT)
+    assert tool_result.data["name"] == "submit_long_task"
+    assert tool_result.data["ok"] is True
+    assert tool_result.data["content"]["accepted"] is True
+    handoff = next(ev for ev in events if ev.kind is TurnEventKind.HANDOFF)
+    assert handoff.data["task_id"] == tool_result.data["content"]["task_id"]
+    assert handoff.data["progress_subject"] == tool_result.data["content"]["progress_subject"]
+    assert submitted
+    payload = submitted[0]
+    assert payload["tenant_id"] == "t"
+    assert payload["user_id"] == "alice"
+    assert payload["conversation_id"] == "c1"
+    assert payload["turn_id"] == "t1"
+    assert payload["trace_id"] == "tr"
+    assert payload["natural_language"] == "帮我订下周三去上海的机票"
+    assert payload["task_type"] == "booking"
+    assert payload["expected_output"] == "可选航班和预订进度"
+
+
+async def test_temporary_long_task_does_not_fanout_to_memory(
+    turn_engine_factory,
+    event_bus,
+) -> None:
+    memory_fanout = []
+
+    async def _on_memory(ev):
+        memory_fanout.append(ev.payload)
+
+    await event_bus.subscribe("agent.memory.conversation.turn.alice", _on_memory)
+    llm = _ScriptedCapturingLLM(
+        [
+            [{"kind": "tool_call", "name": "submit_long_task", "arguments": {"task": "整理资料"}}],
+            [{"kind": "text", "text": "已开始处理。"}],
+        ]
+    )
+    ti = make_turn_input("临时模式下帮我整理资料")
+    ti.metadata["temporary"] = True
+    engine = turn_engine_factory(llm=llm)
+
+    events = [ev async for ev in engine.run(ti)]
+    await _drain_background_tasks()
+
+    assert any(ev.kind is TurnEventKind.HANDOFF for ev in events)
+    assert memory_fanout == []
+
+
+async def test_compiled_prompt_contains_tool_policy(turn_engine_factory) -> None:
+    llm = _CapturingLLM()
+    engine = turn_engine_factory(llm=llm)
+
+    events = [ev async for ev in engine.run(make_turn_input("你好"))]
+
+    assert events[-1].kind is TurnEventKind.DONE
+    system_prompt = llm.messages[0].content
+    assert "工具使用策略" in system_prompt
+    assert "submit_long_task" in system_prompt
+    assert "不要编造最终结果" in system_prompt
+
+
+async def test_builtin_tool_schemas_describe_usage_boundaries(turn_engine_factory) -> None:
+    engine = turn_engine_factory()
+    schemas = {schema.name: schema for schema in engine._tool_schemas()}
+
+    assert "submit_long_task" in schemas
+    long_task_spec = schemas["submit_long_task"].to_openai_function()
+    description = long_task_spec["function"]["description"]
+    assert "asynchronous" in description
+    assert "Do not use it for ordinary conversation" in description
+    assert "task" in long_task_spec["function"]["parameters"]["required"]
+    assert "calendar events" in schemas["get_time"].description
+    assert "side-effectful event" in schemas["emit_event"].description
 
 
 async def test_tool_permission_error_is_returned_to_llm_without_side_effect(
@@ -321,6 +469,47 @@ class _CapturingLLM:
         self.messages = messages
         yield LLMDelta(text_delta="我在。")
         yield LLMDelta(finish=LLMFinishReason.STOP)
+
+    async def count_tokens(self, messages: list[ChatMessage]) -> int:
+        return sum(max(1, len(m.content) // 3) for m in messages)
+
+
+class _ScriptedCapturingLLM:
+    model_id = "fake:scripted-capturing"
+
+    def __init__(self, scripts: list[list[dict]]) -> None:
+        self.scripts = scripts
+        self.calls = 0
+        self.messages_by_call: list[list[ChatMessage]] = []
+
+    async def stream(
+        self,
+        messages: list[ChatMessage],
+        **_,
+    ) -> AsyncIterator[LLMDelta]:
+        self.messages_by_call.append(messages)
+        idx = min(self.calls, len(self.scripts) - 1)
+        self.calls += 1
+        script = self.scripts[idx]
+        for step in script:
+            if step["kind"] == "tool_call":
+                from eidolon_agent.core.types.tool import ToolCall
+
+                yield LLMDelta(
+                    tool_call=ToolCall(
+                        id=step.get("call_id") or f"call-{self.calls}",
+                        name=step["name"],
+                        arguments=step.get("arguments") or {},
+                    )
+                )
+            elif step["kind"] == "text":
+                yield LLMDelta(text_delta=step["text"])
+        finish = (
+            LLMFinishReason.TOOL_CALLS
+            if script and script[-1].get("kind") == "tool_call"
+            else LLMFinishReason.STOP
+        )
+        yield LLMDelta(finish=finish)
 
     async def count_tokens(self, messages: list[ChatMessage]) -> int:
         return sum(max(1, len(m.content) // 3) for m in messages)

@@ -27,11 +27,12 @@ class PersonaCompiler:
         )
         identity_block = _identity_block(instance)
         style_block, trace = _style_block(instance, effective_knobs)
+        tool_policy_block = _tool_policy_block()
         memory_block = _memory_block(adapted_memory)
         runtime_state_block = _runtime_state_block(runtime_state)
         realtime_block = _realtime_block(realtime)
 
-        parts = [identity_block, style_block]
+        parts = [identity_block, style_block, tool_policy_block]
         if runtime_state_block:
             parts.append(runtime_state_block)
         if memory_block:
@@ -90,6 +91,19 @@ def _style_block(
                 trace.append(f"{knob_name}={knob.current:.3f} -> [{lo:.2f}, {hi:.2f}]")
                 break
     return "\n".join(lines), trace
+
+
+def _tool_policy_block() -> str:
+    return "\n".join(
+        [
+            "工具使用策略：",
+            "- 能直接回答的问题，直接简洁回答，不要为了展示能力而调用工具。",
+            "- 需要真实外部动作、查询、系统事件或异步处理时，必须调用合适工具；不要假装已经完成。",
+            "- 需要多步骤、长耗时、外部智能体处理或稍后回流结果的任务，调用 submit_long_task。",
+            "- 调用 submit_long_task 后，不要编造最终结果；只说明任务已开始，等待后续进度或结果。",
+            "- 工具结果返回后，再基于真实结果总结给用户；工具失败时如实说明并给出可行下一步。",
+        ]
+    )
 
 
 def _memory_block(adapted_memory: AdaptedMemoryContext) -> str:

@@ -17,7 +17,7 @@ from eidolon_agent.domain.personas import (
     YamlPersonaInstanceStore,
 )
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
-from eidolon_agent.domain.tools.builtin import EmitEventTool, GetTimeTool
+from eidolon_agent.domain.tools.builtin import EmitEventTool, GetTimeTool, SubmitLongTaskTool
 from eidolon_agent.infra.events import InMemoryEventBus, InMemoryKVStore
 from eidolon_agent.infra.llm import LLMRouter
 from eidolon_agent.infra.llm.providers.fake import FakeLLM
@@ -81,6 +81,7 @@ async def turn_engine_factory(personas_service, event_bus):
             tools = ToolRegistry()
             tools.register(GetTimeTool())
             tools.register(EmitEventTool(event_bus=event_bus))
+            tools.register(SubmitLongTaskTool(event_bus=event_bus))
             tool_dispatcher = ToolDispatcher(tools)
 
         def loc(_tenant, _user, _conv):

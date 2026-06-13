@@ -15,12 +15,23 @@ from eidolon_agent.core.types.tool import ToolCall, ToolResult, ToolSchema
 class GetTimeTool:
     schema = ToolSchema(
         name="get_time",
-        description="Return the current local time. Optionally accepts a timezone name (IANA, e.g. 'Asia/Shanghai').",
+        description=(
+            "Return the current date/time for a timezone. Use only for current time, "
+            "current date, timezone conversion anchored on now, or simple 'what time is it' "
+            "questions. Do not use for calendar events, reminders, scheduling, or inferring "
+            "historical/future facts."
+        ),
         json_schema={
             "type": "object",
             "properties": {
-                "timezone": {"type": "string", "description": "IANA tz name; defaults to caller locale."},
-                "format": {"type": "string", "description": "strftime fmt; default '%Y-%m-%d %H:%M:%S %Z'."},
+                "timezone": {
+                    "type": "string",
+                    "description": "IANA timezone name, for example 'Asia/Shanghai'. Defaults to caller locale.",
+                },
+                "format": {
+                    "type": "string",
+                    "description": "Optional strftime format. Defaults to '%Y-%m-%d %H:%M:%S %Z'.",
+                },
             },
             "additionalProperties": False,
         },

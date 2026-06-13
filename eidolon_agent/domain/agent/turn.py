@@ -41,6 +41,7 @@ from eidolon_agent.core.types import (
     MessageRole,
     PersonaTrace,
     ToolCall,
+    ToolResult,
     ToolTrace,
     TurnTrace,
     classify_memory_write,
@@ -215,14 +216,10 @@ class TurnEngine:
             ts_triage_ms = int((time.monotonic() - t0) * 1000)
             yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.THINKING, time.time())
 
-            # ---- COMPLEX_LONG branch ---------------------------------------
-            if triage_kind is TriageKind.COMPLEX_LONG and self._bus is not None:
-                assistant_text_for_persist = _COMPLEX_HOLDING
-                async for ev in self._handle_complex(ti, seq, t0):
-                    yield ev
-                first_delta_ms = first_delta_ms or int((time.monotonic() - t0) * 1000)
-                status = TurnStatus.HANDED_OFF
-                return
+            # ``COMPLEX_LONG`` remains a trace signal, but long-task submission
+            # is now unified through the LLM tool-call path via
+            # ``submit_long_task``. That keeps parameter extraction, tool
+            # announcements, and result handling on one path.
 
             # ---- Compile context -------------------------------------------
             messages = await self._compiler.compile(ti)
@@ -244,6 +241,17 @@ class TurnEngine:
                         yield TurnEvent.delta(ti.turn_id, seq.next(), delta.text_delta, time.time())
                     if delta.tool_call is not None:
                         tool_calls.append(delta.tool_call)
+                        announcement = _tool_announcement(delta.tool_call)
+                        if announcement:
+                            if first_delta_ms is None:
+                                first_delta_ms = int((time.monotonic() - t0) * 1000)
+                            assistant_text_parts.append(announcement)
+                            yield TurnEvent.delta(
+                                ti.turn_id,
+                                seq.next(),
+                                announcement,
+                                time.time(),
+                            )
                         yield TurnEvent(
                             turn_id=ti.turn_id,
                             seq=seq.next(),
@@ -285,7 +293,13 @@ class TurnEngine:
                     tool_t0 = time.monotonic()
                     results = await self._tools.dispatch_batch(
                         tool_calls,
-                        ctx=ToolInvocationContext(caller=ti.caller, turn_id=ti.turn_id),
+                        ctx=ToolInvocationContext(
+                            caller=ti.caller,
+                            turn_id=ti.turn_id,
+                            conversation_id=ti.conversation_id,
+                            session_id=ti.session_id,
+                            user_text=ti.text or "",
+                        ),
                     )
                     tool_ms_total += int((time.monotonic() - tool_t0) * 1000)
                     tool_trace.extend(
@@ -314,6 +328,13 @@ class TurnEngine:
                             },
                             ts=time.time(),
                         )
+                        handoff = _handoff_from_tool_result(
+                            turn_id=ti.turn_id,
+                            seq=seq,
+                            result=r,
+                        )
+                        if handoff is not None:
+                            yield handoff
                         messages = [
                             *messages,
                             ChatMessage(
@@ -749,6 +770,40 @@ class _SeqGen:
     def next(self) -> int:
         self._n += 1
         return self._n
+
+
+def _tool_announcement(call: ToolCall) -> str:
+    """User-visible status for a tool call the model actually requested."""
+
+    if call.name == "get_time":
+        return "我先看一下当前时间。"
+    if call.name == "emit_event":
+        return "我来发送这个事件。"
+    if call.name == "submit_long_task":
+        return "收到，我已经开始处理这个长任务，会继续跟进。"
+    return "我先调用相关工具处理一下。"
+
+
+def _handoff_from_tool_result(
+    *,
+    turn_id: str,
+    seq: _SeqGen,
+    result: ToolResult,
+) -> TurnEvent | None:
+    if result.name != "submit_long_task" or not result.ok:
+        return None
+    content = result.content if isinstance(result.content, dict) else {}
+    task_id = content.get("task_id")
+    progress_subject = content.get("progress_subject")
+    if not task_id or not progress_subject:
+        return None
+    return TurnEvent(
+        turn_id=turn_id,
+        seq=seq.next(),
+        kind=TurnEventKind.HANDOFF,
+        data={"task_id": task_id, "progress_subject": progress_subject},
+        ts=time.time(),
+    )
 
 
 def _log_turn_timings(

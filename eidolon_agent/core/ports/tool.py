@@ -15,6 +15,9 @@ class ToolInvocationContext:
 
     caller: CallerContext
     turn_id: str
+    conversation_id: str | None = None
+    session_id: str | None = None
+    user_text: str | None = None
     dry_run: bool = False
 
 

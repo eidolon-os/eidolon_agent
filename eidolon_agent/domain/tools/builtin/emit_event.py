@@ -10,12 +10,23 @@ from eidolon_agent.core.types.tool import Permission, ToolCall, ToolResult, Tool
 class EmitEventTool:
     schema = ToolSchema(
         name="emit_event",
-        description="Publish an event to the internal bus (e.g. to notify a tool / schedule a follow-up).",
+        description=(
+            "Publish a side-effectful event to the internal agent bus. Use only when an "
+            "internal system action, notification, or follow-up event must be emitted. "
+            "Requires a concrete subject and optional JSON payload; do not use for ordinary "
+            "conversation or external long-running work."
+        ),
         json_schema={
             "type": "object",
             "properties": {
-                "subject": {"type": "string"},
-                "payload": {"type": "object"},
+                "subject": {
+                    "type": "string",
+                    "description": "Internal event subject to publish, for example 'agent.test.example'.",
+                },
+                "payload": {
+                    "type": "object",
+                    "description": "JSON object payload for subscribers. Defaults to an empty object.",
+                },
             },
             "required": ["subject"],
             "additionalProperties": False,
