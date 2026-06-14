@@ -379,6 +379,37 @@ class SqlLongTaskRepository:
         ).scalars().all()
         return [_row_to_long_task(row) for row in rows]
 
+    async def list_for_admin(
+        self,
+        *,
+        tenant_id: str | None = None,
+        user_id: str | None = None,
+        status: str | None = None,
+        provider: str | None = None,
+        task_type: str | None = None,
+        limit: int = 50,
+        before: datetime | None = None,
+    ) -> list[LongTaskRecord]:
+        stmt = select(LongTaskRow)
+        if tenant_id:
+            stmt = stmt.where(LongTaskRow.tenant_id == tenant_id)
+        if user_id:
+            stmt = stmt.where(LongTaskRow.user_id == user_id)
+        if status:
+            stmt = stmt.where(LongTaskRow.status == status)
+        if provider:
+            stmt = stmt.where(LongTaskRow.provider == provider)
+        if task_type:
+            stmt = stmt.where(LongTaskRow.task_type == task_type)
+        if before is not None:
+            stmt = stmt.where(LongTaskRow.created_at < before)
+        rows = (
+            await self._session.execute(
+                stmt.order_by(LongTaskRow.created_at.desc()).limit(limit)
+            )
+        ).scalars().all()
+        return [_row_to_long_task(row) for row in rows]
+
     async def find_latest_mementos_session(
         self,
         session_key: str,
