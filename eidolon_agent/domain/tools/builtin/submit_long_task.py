@@ -1,25 +1,33 @@
-"""``submit_long_task`` — hand off async work to the workstation/mementos agent."""
+"""``submit_long_task`` — enqueue async work for the local mementos worker."""
 
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
+from eidolon_agent.core.ports.long_tasks import LongTaskQueueFullError, LongTaskSubmitter
 from eidolon_agent.core.ports.tool import ToolInvocationContext
-from eidolon_agent.core.types.event import Event
+from eidolon_agent.core.types.long_task import (
+    LongTaskRecord,
+    LongTaskStatus,
+    session_key_for,
+    task_key_for,
+)
 from eidolon_agent.core.types.tool import Permission, ToolCall, ToolResult, ToolSchema
-from eidolon_agent.core.types.topics import Topics
 
 
 class SubmitLongTaskTool:
     schema = ToolSchema(
         name="submit_long_task",
         description=(
-            "Submit an asynchronous long-running task to the external mementos/workstation "
-            "agent. Use this only when the user asks for multi-step work, external "
-            "follow-up, research/booking/automation, or any task whose final result should "
-            "arrive later. Do not use it for ordinary conversation, quick questions, or "
-            "anything you can answer immediately. After calling it, do not invent the final "
-            "result; tell the user the task has started and wait for progress/result events."
+            "Submit an asynchronous long-running task to the local background queue. "
+            "A worker will call the mementos coworker and update progress/results later. "
+            "Use this only when the user asks for multi-step work, external follow-up, "
+            "research/booking/automation, or any task whose final result should arrive "
+            "later. Do not use it for ordinary conversation, quick questions, or anything "
+            "you can answer immediately. After calling it, do not invent the final result; "
+            "tell the user the task has started and wait for progress/result events."
         ),
         json_schema={
             "type": "object",
@@ -37,7 +45,10 @@ class SubmitLongTaskTool:
                 },
                 "urgency": {
                     "type": "string",
-                    "description": "Urgency label: low, normal, high, or urgent. Defaults to normal.",
+                    "description": (
+                        "Urgency label: low, normal, high, or urgent. "
+                        "Defaults to normal."
+                    ),
                 },
                 "expected_output": {
                     "type": "string",
@@ -56,20 +67,20 @@ class SubmitLongTaskTool:
         },
         permissions=frozenset({Permission.SYSTEM}),
         side_effect=True,
-        timeout_s=0.5,
+        timeout_s=1.0,
     )
 
-    def __init__(self, event_bus=None) -> None:
-        self._bus = event_bus
+    def __init__(self, long_task_submitter: LongTaskSubmitter | None = None) -> None:
+        self._submitter = long_task_submitter
 
     async def invoke(self, call: ToolCall, *, ctx: ToolInvocationContext) -> ToolResult:
-        if self._bus is None:
+        if self._submitter is None:
             return ToolResult(
                 call_id=call.id,
                 name=self.schema.name,
                 ok=False,
-                error_code="event_bus_unavailable",
-                error_message="EventBus not wired",
+                error_code="long_task_submitter_unavailable",
+                error_message="Long task submitter not wired",
             )
 
         task = str(call.arguments.get("task") or "").strip()
@@ -83,15 +94,25 @@ class SubmitLongTaskTool:
             )
 
         task_id = uuid.uuid4().hex
-        progress_subject = Topics.workstation_progress(task_id)
+        progress_subject = f"long_task.progress.{task_id}"
+        now = _localized_now(ctx.caller.locale)
+        task_date = now.date().isoformat()
+        session_key = session_key_for(ctx.caller.user_id, now.date())
+        task_key = task_key_for(session_key, task_id)
         payload = {
             "task_id": task_id,
             "tenant_id": ctx.caller.tenant_id,
             "user_id": ctx.caller.user_id,
+            "agent_instance_id": ctx.caller.agent_instance_id,
             "conversation_id": ctx.conversation_id,
             "session_id": ctx.session_id,
             "turn_id": ctx.turn_id,
             "trace_id": ctx.caller.trace_id,
+            "tool_call_id": call.id,
+            "session_key": session_key,
+            "task_key": task_key,
+            "task_date": task_date,
+            "mementos_session_id": session_key,
             "natural_language": task,
             "source_user_text": ctx.user_text or "",
             "task_type": call.arguments.get("task_type") or "other",
@@ -100,16 +121,48 @@ class SubmitLongTaskTool:
             "context_summary": call.arguments.get("context_summary") or "",
             "progress_subject": progress_subject,
         }
-        await self._bus.publish(
-            Event(
-                subject=Topics.workstation_submit(),
-                payload=payload,
-                trace_id=ctx.caller.trace_id,
-                source="tool.submit_long_task",
-                metadata={"msg_id": task_id},
-            ),
-            persistent=True,
+        record = LongTaskRecord(
+            id=task_id,
+            provider="mementos",
+            status=LongTaskStatus.ACCEPTED,
+            tenant_id=ctx.caller.tenant_id,
+            user_id=ctx.caller.user_id,
+            agent_instance_id=ctx.caller.agent_instance_id,
+            conversation_id=ctx.conversation_id,
+            turn_id=ctx.turn_id,
+            session_id=ctx.session_id,
+            trace_id=ctx.caller.trace_id,
+            tool_call_id=call.id,
+            session_key=session_key,
+            task_date=task_date,
+            task_key=task_key,
+            task=task,
+            user_text=ctx.user_text or "",
+            task_type=payload["task_type"],
+            urgency=payload["urgency"],
+            expected_output=payload["expected_output"],
+            context_summary=payload["context_summary"],
+            request_payload=payload,
+            callback_subject=progress_subject,
         )
+        try:
+            await self._submitter.submit(record)
+        except LongTaskQueueFullError as exc:
+            return ToolResult(
+                call_id=call.id,
+                name=self.schema.name,
+                ok=False,
+                error_code="long_task_queue_full",
+                error_message=str(exc),
+            )
+        except Exception as exc:
+            return ToolResult(
+                call_id=call.id,
+                name=self.schema.name,
+                ok=False,
+                error_code="long_task_submit_failed",
+                error_message=str(exc),
+            )
         return ToolResult(
             call_id=call.id,
             name=self.schema.name,
@@ -118,5 +171,19 @@ class SubmitLongTaskTool:
                 "accepted": True,
                 "task_id": task_id,
                 "progress_subject": progress_subject,
+                "session_key": session_key,
+                "task_key": task_key,
+                "task_date": task_date,
             },
         )
+
+
+def _localized_now(locale: str) -> datetime:
+    timezone_name = {
+        "zh-CN": "Asia/Shanghai",
+        "zh-HK": "Asia/Hong_Kong",
+        "zh-TW": "Asia/Taipei",
+        "ja-JP": "Asia/Tokyo",
+        "en-US": "America/Los_Angeles",
+    }.get(locale, "UTC")
+    return datetime.now(ZoneInfo(timezone_name))

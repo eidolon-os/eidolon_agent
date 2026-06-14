@@ -21,7 +21,11 @@ from eidolon_agent.domain.tools.builtin import EmitEventTool, GetTimeTool, Submi
 from eidolon_agent.infra.events import InMemoryEventBus, InMemoryKVStore
 from eidolon_agent.infra.llm import LLMRouter
 from eidolon_agent.infra.llm.providers.fake import FakeLLM
-from eidolon_agent.infra.persistence import build_history_hydrator, build_turn_persister
+from eidolon_agent.infra.persistence import (
+    SqlLongTaskStore,
+    build_history_hydrator,
+    build_turn_persister,
+)
 
 
 @pytest.fixture
@@ -81,7 +85,17 @@ async def turn_engine_factory(personas_service, event_bus):
             tools = ToolRegistry()
             tools.register(GetTimeTool())
             tools.register(EmitEventTool(event_bus=event_bus))
-            tools.register(SubmitLongTaskTool(event_bus=event_bus))
+            tools.register(
+                SubmitLongTaskTool(
+                    long_task_submitter=_ImmediateLongTaskSubmitter(
+                        (
+                            SqlLongTaskStore(session_factory)
+                            if session_factory is not None
+                            else None
+                        )
+                    ),
+                )
+            )
             tool_dispatcher = ToolDispatcher(tools)
 
         def loc(_tenant, _user, _conv):
@@ -123,3 +137,14 @@ async def turn_engine_factory(personas_service, event_bus):
 
 
 # Non-fixture test helpers (e.g. make_turn_input) live in tests.helpers.
+
+
+class _ImmediateLongTaskSubmitter:
+    def __init__(self, store: SqlLongTaskStore | None = None) -> None:
+        self.store = store
+        self.records = []
+
+    async def submit(self, record):
+        self.records.append(record)
+        if self.store is not None:
+            await self.store.accept(record)

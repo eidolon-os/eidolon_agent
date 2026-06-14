@@ -48,6 +48,8 @@ from eidolon_agent.infra.events import NatsEventBus, NatsKVStore
 from eidolon_agent.infra.events.nats_bus import ensure_buckets
 from eidolon_agent.infra.llm import LLMRouter
 from eidolon_agent.infra.llm.providers.fake import FakeLLM
+from eidolon_agent.infra.long_tasks import MementosHttpClient, MementosLongTaskWorker
+from eidolon_agent.infra.long_tasks.mementos import MementosWorkerConfig
 from eidolon_agent.infra.memory import EidolonMemoryPort
 from eidolon_agent.infra.memory.discovery import build_initial_memory_routes
 from eidolon_agent.infra.memory.mcp_client import McpClientPool
@@ -55,6 +57,7 @@ from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
 from eidolon_agent.infra.observability import configure_logging
 from eidolon_agent.infra.persistence import (
     SqlEvolutionHistoryStore,
+    SqlLongTaskStore,
     SqlPersonaInstanceStore,
     build_history_hydrator,
     build_turn_persister,
@@ -173,10 +176,33 @@ async def build_application(
     container.triage_classifier = TaskClassifier()
 
     # 9. Tools -----------------------------------------------------------------
+    long_task_worker = None
+    if settings.long_task.transport == "mementos_http":
+        long_task_worker = MementosLongTaskWorker(
+            store=SqlLongTaskStore(session_factory),
+            client=MementosHttpClient(
+                base_url=settings.long_task.mementos_base_url,
+                timeout_s=settings.long_task.worker_http_timeout_s,
+            ),
+            config=MementosWorkerConfig(
+                base_url=settings.long_task.mementos_base_url,
+                queue_size=settings.long_task.queue_size,
+                poll_interval_s=settings.long_task.worker_poll_interval_s,
+                task_timeout_s=settings.long_task.worker_task_timeout_s,
+                http_timeout_s=settings.long_task.worker_http_timeout_s,
+                lease_s=settings.long_task.worker_lease_s,
+            ),
+        )
+        long_task_worker.start()
+        container.extras["long_task_worker"] = long_task_worker
     tool_registry = ToolRegistry()
     tool_registry.register(GetTimeTool())
     tool_registry.register(EmitEventTool(event_bus=container.event_bus))
-    tool_registry.register(SubmitLongTaskTool(event_bus=container.event_bus))
+    tool_registry.register(
+        SubmitLongTaskTool(
+            long_task_submitter=long_task_worker,
+        )
+    )
     idemp_kv = container.kv_buckets.get("EIDOLON_TOOL_IDEMP")
     tool_dispatcher = ToolDispatcher(
         tool_registry,
@@ -198,9 +224,6 @@ async def build_application(
             await llm_router.warmup_default(timeout_s=settings.llm.startup_warm_timeout_s)
         except Exception:
             _log.warning("llm warmup failed; continuing startup", exc_info=True)
-
-    # (Workstation dispatch is now a one-line NATS publish from the Turn
-    # pipeline; see domain/agent/workstation.py. No long-lived client to wire.)
 
     # 8. Pairing ---------------------------------------------------------------
     jwt_secret = settings.pairing.jwt_secret

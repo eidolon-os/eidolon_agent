@@ -58,8 +58,12 @@ llm:
   startup_warm_enabled: true # prime DNS/TCP/TLS + upstream model at boot
   startup_warm_timeout_s: 10.0
 
-workstation:
-  transport: nats
+long_task:
+  transport: mementos_http
+  mementos_base_url: http://127.0.0.1:18765
+  queue_size: 256
+  worker_poll_interval_s: 1.0
+  worker_task_timeout_s: 1800.0
 
 persona:
   templates_dir: eidolon_agent/domain/personas/templates

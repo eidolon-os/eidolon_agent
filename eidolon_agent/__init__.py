@@ -2,7 +2,7 @@
 
 This package is the *brain*: it is invoked by external LiveKit voice pipelines
 via gRPC, talks to the external eidolon-memory service over MCP + NATS, and
-forwards complex tasks to the workstation agent.
+queues complex tasks for the local mementos long-task worker.
 
 Public surface is intentionally narrow — most consumers should depend on the
 Protocol types in :mod:`eidolon_agent.core.ports` or the data structures in

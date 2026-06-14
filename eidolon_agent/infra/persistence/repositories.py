@@ -15,6 +15,11 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eidolon_agent.core.errors import NotFoundError
+from eidolon_agent.core.types.long_task import (
+    CallbackStatus,
+    LongTaskRecord,
+    LongTaskStatus,
+)
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnResult
 from eidolon_agent.domain.personas.types import PersonaEvolutionResult, PersonaInstance
@@ -23,6 +28,7 @@ from eidolon_agent.infra.persistence.models import (
     ConversationRow,
     DeviceRow,
     EvolutionHistoryRow,
+    LongTaskRow,
     PersonaInstanceRow,
     TurnRow,
 )
@@ -334,6 +340,354 @@ class SqlDeviceRepository:
             row.last_seen_at = datetime.now(timezone.utc)
 
 
+class SqlLongTaskRepository:
+    """Persistence for async coworker tasks.
+
+    The repository is deliberately provider-aware but not provider-coupled:
+    mementos is the first provider, while callback/runner code can update the
+    same row through task id, mementos ids, or session key later.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(self, record: LongTaskRecord) -> None:
+        now = datetime.now(timezone.utc)
+        self._session.add(_long_task_to_row(record, now=now))
+
+    async def get(self, task_id: str) -> LongTaskRecord | None:
+        row = await self._session.get(LongTaskRow, task_id)
+        return _row_to_long_task(row) if row is not None else None
+
+    async def list_by_user(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        limit: int = 50,
+    ) -> list[LongTaskRecord]:
+        rows = (
+            await self._session.execute(
+                select(LongTaskRow)
+                .where(
+                    LongTaskRow.tenant_id == tenant_id,
+                    LongTaskRow.user_id == user_id,
+                )
+                .order_by(LongTaskRow.created_at.desc())
+                .limit(limit)
+            )
+        ).scalars().all()
+        return [_row_to_long_task(row) for row in rows]
+
+    async def find_latest_mementos_session(
+        self,
+        session_key: str,
+    ) -> str | None:
+        row = (
+            await self._session.execute(
+                select(LongTaskRow)
+                .where(
+                    LongTaskRow.session_key == session_key,
+                    LongTaskRow.mementos_session_id.is_not(None),
+                )
+                .order_by(LongTaskRow.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        return row.mementos_session_id if row is not None else None
+
+    async def update_status(
+        self,
+        task_id: str,
+        status: LongTaskStatus,
+        *,
+        progress_summary: str | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        error_payload: dict | None = None,
+    ) -> LongTaskRecord | None:
+        row = await self._session.get(LongTaskRow, task_id)
+        if row is None:
+            return None
+        now = datetime.now(timezone.utc)
+        row.status = status.value
+        row.updated_at = now
+        if status is LongTaskStatus.SUBMITTED:
+            row.submitted_at = row.submitted_at or now
+        if status is LongTaskStatus.QUEUED:
+            row.submitted_at = row.submitted_at or now
+        if status is LongTaskStatus.RUNNING:
+            row.started_at = row.started_at or now
+            row.last_progress_at = now
+        if status in {
+            LongTaskStatus.SUCCEEDED,
+            LongTaskStatus.FAILED,
+            LongTaskStatus.CANCELLED,
+            LongTaskStatus.TIMED_OUT,
+        }:
+            row.completed_at = row.completed_at or now
+            row.external_status = status.value
+        if progress_summary is not None:
+            row.progress_summary = progress_summary
+        if error_code is not None:
+            row.error_code = error_code
+        if error_message is not None:
+            row.error_message = error_message
+        if error_payload is not None:
+            row.error_payload = error_payload
+        return _row_to_long_task(row)
+
+    async def mark_worker_claimed(
+        self,
+        task_id: str,
+        *,
+        worker_id: str,
+        lease_until: datetime | None = None,
+    ) -> LongTaskRecord | None:
+        row = await self._session.get(LongTaskRow, task_id)
+        if row is None:
+            return None
+        now = datetime.now(timezone.utc)
+        row.status = LongTaskStatus.QUEUED.value
+        row.worker_id = worker_id
+        row.lease_until = lease_until
+        row.attempt_count = (row.attempt_count or 0) + 1
+        row.submitted_at = row.submitted_at or now
+        row.updated_at = now
+        return _row_to_long_task(row)
+
+    async def attach_mementos_run(
+        self,
+        task_id: str,
+        *,
+        mementos_session_id: str | None = None,
+        mementos_conversation_id: str | None = None,
+        mementos_run_id: str | None = None,
+        latest_seq: int | None = None,
+        workspace_dir: str | None = None,
+        external_status: str | None = None,
+    ) -> LongTaskRecord | None:
+        row = await self._session.get(LongTaskRow, task_id)
+        if row is None:
+            return None
+        now = datetime.now(timezone.utc)
+        row.status = LongTaskStatus.RUNNING.value
+        row.started_at = row.started_at or now
+        row.last_progress_at = now
+        row.updated_at = now
+        if mementos_session_id is not None:
+            row.mementos_session_id = mementos_session_id
+        if mementos_conversation_id is not None:
+            row.mementos_conversation_id = mementos_conversation_id
+        if mementos_run_id is not None:
+            row.mementos_run_id = mementos_run_id
+        if latest_seq is not None:
+            row.mementos_latest_seq = latest_seq
+        if workspace_dir is not None:
+            row.mementos_workspace_dir = workspace_dir
+        if external_status is not None:
+            row.external_status = external_status
+        return _row_to_long_task(row)
+
+    async def append_progress(
+        self,
+        task_id: str,
+        event: dict,
+        *,
+        summary: str | None = None,
+        latest_seq: int | None = None,
+    ) -> LongTaskRecord | None:
+        row = await self._session.get(LongTaskRow, task_id)
+        if row is None:
+            return None
+        now = datetime.now(timezone.utc)
+        row.status = LongTaskStatus.RUNNING.value
+        row.started_at = row.started_at or now
+        row.last_progress_at = now
+        row.last_polled_at = now
+        row.updated_at = now
+        events = list(row.progress_events or [])
+        events.append(event)
+        row.progress_events = events
+        if summary is not None:
+            row.progress_summary = summary
+        if latest_seq is not None:
+            row.mementos_latest_seq = latest_seq
+        return _row_to_long_task(row)
+
+    async def complete(
+        self,
+        task_id: str,
+        *,
+        result_text: str | None = None,
+        result_payload: dict | None = None,
+        artifact_paths: list[str] | None = None,
+    ) -> LongTaskRecord | None:
+        row = await self._session.get(LongTaskRow, task_id)
+        if row is None:
+            return None
+        now = datetime.now(timezone.utc)
+        row.status = LongTaskStatus.SUCCEEDED.value
+        row.external_status = LongTaskStatus.SUCCEEDED.value
+        row.result_text = result_text
+        row.result_payload = result_payload
+        row.artifact_paths = artifact_paths or []
+        row.completed_at = now
+        row.last_polled_at = now
+        row.updated_at = now
+        return _row_to_long_task(row)
+
+    async def touch_poll(
+        self,
+        task_id: str,
+        *,
+        latest_seq: int | None = None,
+        external_status: str | None = None,
+    ) -> LongTaskRecord | None:
+        row = await self._session.get(LongTaskRow, task_id)
+        if row is None:
+            return None
+        now = datetime.now(timezone.utc)
+        row.last_polled_at = now
+        row.updated_at = now
+        if latest_seq is not None:
+            row.mementos_latest_seq = latest_seq
+        if external_status is not None:
+            row.external_status = external_status
+        return _row_to_long_task(row)
+
+    async def fail(
+        self,
+        task_id: str,
+        *,
+        error_code: str,
+        error_message: str,
+        error_payload: dict | None = None,
+        status: LongTaskStatus = LongTaskStatus.FAILED,
+    ) -> LongTaskRecord | None:
+        return await self.update_status(
+            task_id,
+            status,
+            error_code=error_code,
+            error_message=error_message,
+            error_payload=error_payload,
+        )
+
+
+def _long_task_to_row(record: LongTaskRecord, *, now: datetime) -> LongTaskRow:
+    return LongTaskRow(
+        id=record.id,
+        provider=record.provider,
+        status=record.status.value,
+        tenant_id=record.tenant_id,
+        user_id=record.user_id,
+        agent_instance_id=record.agent_instance_id,
+        conversation_id=record.conversation_id,
+        turn_id=record.turn_id,
+        session_id=record.session_id,
+        trace_id=record.trace_id,
+        tool_call_id=record.tool_call_id,
+        session_key=record.session_key,
+        task_date=record.task_date,
+        task_key=record.task_key,
+        task=record.task,
+        user_text=record.user_text,
+        task_type=record.task_type,
+        urgency=record.urgency,
+        expected_output=record.expected_output,
+        context_summary=record.context_summary,
+        attachments=record.attachments,
+        request_payload=record.request_payload,
+        mementos_session_id=record.mementos_session_id,
+        mementos_conversation_id=record.mementos_conversation_id,
+        mementos_run_id=record.mementos_run_id,
+        mementos_latest_seq=record.mementos_latest_seq,
+        mementos_workspace_dir=record.mementos_workspace_dir,
+        progress_summary=record.progress_summary,
+        progress_events=record.progress_events,
+        result_text=record.result_text,
+        result_payload=record.result_payload,
+        artifact_paths=record.artifact_paths,
+        error_code=record.error_code,
+        error_message=record.error_message,
+        error_payload=record.error_payload,
+        callback_subject=record.callback_subject,
+        callback_status=record.callback_status.value,
+        callback_attempts=record.callback_attempts,
+        callback_last_error=record.callback_last_error,
+        callback_delivered_at=record.callback_delivered_at,
+        worker_id=record.worker_id,
+        lease_until=record.lease_until,
+        attempt_count=record.attempt_count,
+        next_retry_at=record.next_retry_at,
+        external_status=record.external_status,
+        created_at=record.created_at or now,
+        updated_at=record.updated_at or now,
+        started_at=record.started_at,
+        submitted_at=record.submitted_at,
+        last_progress_at=record.last_progress_at,
+        last_polled_at=record.last_polled_at,
+        completed_at=record.completed_at,
+    )
+
+
+def _row_to_long_task(row: LongTaskRow) -> LongTaskRecord:
+    return LongTaskRecord(
+        id=row.id,
+        provider=row.provider,
+        status=LongTaskStatus(row.status),
+        tenant_id=row.tenant_id,
+        user_id=row.user_id,
+        agent_instance_id=row.agent_instance_id,
+        conversation_id=row.conversation_id,
+        turn_id=row.turn_id,
+        session_id=row.session_id,
+        trace_id=row.trace_id,
+        tool_call_id=row.tool_call_id,
+        session_key=row.session_key,
+        task_date=row.task_date,
+        task_key=row.task_key,
+        task=row.task,
+        user_text=row.user_text or "",
+        task_type=row.task_type,
+        urgency=row.urgency,
+        expected_output=row.expected_output or "",
+        context_summary=row.context_summary or "",
+        attachments=list(row.attachments or []),
+        request_payload=dict(row.request_payload or {}),
+        mementos_session_id=row.mementos_session_id,
+        mementos_conversation_id=row.mementos_conversation_id,
+        mementos_run_id=row.mementos_run_id,
+        mementos_latest_seq=row.mementos_latest_seq,
+        mementos_workspace_dir=row.mementos_workspace_dir,
+        progress_summary=row.progress_summary,
+        progress_events=list(row.progress_events or []),
+        result_text=row.result_text,
+        result_payload=row.result_payload,
+        artifact_paths=list(row.artifact_paths or []),
+        error_code=row.error_code,
+        error_message=row.error_message,
+        error_payload=row.error_payload,
+        callback_subject=row.callback_subject,
+        callback_status=CallbackStatus(row.callback_status),
+        callback_attempts=row.callback_attempts,
+        callback_last_error=row.callback_last_error,
+        callback_delivered_at=row.callback_delivered_at,
+        worker_id=row.worker_id,
+        lease_until=row.lease_until,
+        attempt_count=row.attempt_count,
+        next_retry_at=row.next_retry_at,
+        external_status=row.external_status,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        started_at=row.started_at,
+        submitted_at=row.submitted_at,
+        last_progress_at=row.last_progress_at,
+        last_polled_at=row.last_polled_at,
+        completed_at=row.completed_at,
+    )
+
+
 class SqlEvolutionHistoryRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -481,5 +835,6 @@ __all__ = [
     "SqlConversationRepository",
     "SqlDeviceRepository",
     "SqlEvolutionHistoryRepository",
+    "SqlLongTaskRepository",
     "SqlPersonaInstanceRepository",
 ]

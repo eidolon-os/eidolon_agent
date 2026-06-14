@@ -85,22 +85,10 @@ class Topics:
     def emotion_proposed_pattern() -> str:
         return "agent.persona.evolution.proposed.*"
 
-    # --- Workstation dispatch -------------------------------------------------
-
-    @staticmethod
-    def workstation_submit() -> str:
-        return "agent.workstation.task.submit"
-
-    @staticmethod
-    def workstation_progress(task_id: str) -> str:
-        return f"agent.workstation.task.progress.{task_id}"
-
-
 # JetStream-persistent subjects (these go through JetStream, others are core NATS).
 PERSISTENT_PREFIXES = (
     "agent.memory.",
     "agent.emotion.",
-    "agent.workstation.",
     "agent.evolution.",
 )
 

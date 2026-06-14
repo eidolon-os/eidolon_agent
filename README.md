@@ -1,10 +1,10 @@
 # eidolon-agent
 
 > 桌面陪伴中控大脑。被 LiveKit 语音 pipeline 通过 gRPC 当作 LLM 调用；对接外部
-> `eidolon-memory` 服务（MCP+NATS）；通过 NATS 与"情感进化""工作站智能体"协作。
+> `eidolon-memory` 服务（MCP+NATS）；通过本地 long-task worker 调用 mementos coworker。
 
 实时陪伴中控的 **快速应答内核**：热路径只做 prompt 拼装 + LLM 流式回复 + safety check，
-其它一切（持久化、记忆写入、人格演化、工作站任务）都通过 event bus 异步派发。
+其它一切（持久化、记忆写入、人格演化、长任务执行）都走异步链路。
 
 ---
 
@@ -77,13 +77,13 @@
         │    via LiteLLM)         │   └──┬─────┬───────┘
         └─────────────────────────┘      │     │
                                          │     │
-                ┌────────────────────────┘     └──────────────┐
+                ┌────────────────────────┘
                 ▼                                              ▼
    ┌─────────────────────────┐               ┌────────────────────────┐
-   │  eidolon-memory          │               │  workstation-agent       │
-   │  (external service)      │               │  (external service)       │
-   │   ┌──────────────────┐   │               │  consumes                 │
-   │   │ MCP HTTP (read)  │◀──┤ MCP recall    │  agent.workstation.task.* │
+   │  eidolon-memory          │               │  mementos sidecar       │
+   │  (external service)      │               │  (local HTTP service)   │
+   │   ┌──────────────────┐   │               │  long-task worker calls │
+   │   │ MCP HTTP (read)  │◀──┤ MCP recall    │  /api/v1/chat/...       │
    │   │ NATS (write)     │◀──┤ NATS turn pub │                            │
    │   └──────────────────┘   │               └────────────────────────────┘
    └─────────────────────────┘
@@ -94,7 +94,7 @@
 2. **进来的**：运维 / 脚本 →（HTTP）→ eidolon-agent admin :8081
 3. **出去的**：eidolon-agent →（HTTPS）→ LLM endpoint
 4. **出去的**：eidolon-agent →（MCP HTTP / NATS publish）→ eidolon-memory
-5. **出去的**：eidolon-agent →（NATS publish）→ workstation-agent
+5. **出去的**：eidolon-agent →（HTTP worker）→ mementos sidecar
 
 > ⚠️ **LLM 出口与代理**：代理策略由**部署层**统一管理，agent 代码本身不感知。在
 > admin/supervisord 启动的栈里，`NO_PROXY=127.0.0.1,localhost,::1,*.local` 由 supervisord
@@ -122,7 +122,7 @@ eidolon_agent/
 │
 ├── domain/            # L1 — 业务逻辑，只允许 import core/
 │   ├── agent/         #   TurnEngine（热路径） + Registry + Companion
-│   │                  #   + Triage + workstation handoff
+│   │                  #   + Triage + LLM tool-call loop
 │   ├── personas/      #   PersonasService + 模板/实例存储 + 异步演化 worker
 │   │                  #   + memory adapter + signal adapter
 │   ├── context/       #   ContextCompiler — 直接拼装 persona + memory + history
@@ -208,7 +208,7 @@ TurnEngine.run(ti)   ← 以下为热路径，逐步 yield TurnEvent
    │
    ├─ 2. triage.classify(ti.text)               [< 1ms]
    │     ├─ TOOL_DIRECT  → 简化路径（未来）
-   │     └─ COMPLEX_LONG → submit_to_workstation(NATS publish) + 返回 "I'll handle"
+   │     └─ COMPLEX_LONG → 仅作为 trace；长任务由 LLM 调用 submit_long_task
    │
    ├─ 3. yield STATE(thinking)
    │
@@ -268,10 +268,9 @@ NATS 是核心总线。**进程内** fire-and-forget 直接 `asyncio.create_task
 | **外部出站** | `agent.emotion.turn.<user>` | turn 完成 → emotion 服务 | **是** |
 | **外部入站** | `agent.memory.event.*` | memory 服务推送（promise_due 等） | **是** |
 | **外部入站** | `agent.persona.evolution.proposed.*` | emotion 服务提出的演化 | **是** |
-| **工作站** | `agent.workstation.task.submit` | 提交复杂任务 | **是** |
-| **工作站** | `agent.workstation.task.progress.<task_id>` | 进度回流 | **是** |
+长任务不再使用 NATS subject；`submit_long_task` 写入 SQLite receipt 后进入本地内存队列，由 mementos worker 通过 HTTP 执行。
 
-JetStream 持久化前缀：`agent.memory.*` / `agent.emotion.*` / `agent.workstation.*` / `agent.evolution.*`。`is_persistent(subject)` 自动判定。
+JetStream 持久化前缀：`agent.memory.*` / `agent.emotion.*` / `agent.evolution.*`。`is_persistent(subject)` 自动判定。
 
 ### KV Buckets
 
@@ -373,7 +372,7 @@ Pydantic settings 顶层段：
 | `memory` | endpoints / discovery_url / recall_timeout_s |
 | `sqlite` | path / WAL / busy_timeout / synchronous |
 | `llm` | models 列表 + default_model（LiteLLM 命名） |
-| `workstation` | transport (nats) / 超时 |
+| `long_task` | mementos_base_url / 队列 / worker 超时 |
 | `persona` | templates_dir / instances_dir |
 | `observability` | log_level / log_dir |
 | `pairing` | jwt_secret / 算法 / TTL |

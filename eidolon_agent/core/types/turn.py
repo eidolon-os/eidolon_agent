@@ -28,7 +28,7 @@ class TriageKind(str, Enum):
     """How the input was classified."""
 
     SIMPLE = "simple"  # short conversational reply
-    COMPLEX_LONG = "complex_long"  # offload to workstation agent
+    COMPLEX_LONG = "complex_long"  # trace signal; LLM uses submit_long_task
     TOOL_DIRECT = "tool_direct"  # bypass LLM, run tool directly
 
 
@@ -51,8 +51,8 @@ class TurnEventKind(str, Enum):
     DONE = "done"
     ERROR = "error"
     ACK = "ack"  # complex task accepted
-    PROGRESS = "progress"  # streaming progress from workstation
-    HANDOFF = "handoff"  # delegating to external agent
+    PROGRESS = "progress"  # streaming progress from a background worker
+    HANDOFF = "handoff"  # delegated to a background worker
 
 
 class FSMState(str, Enum):

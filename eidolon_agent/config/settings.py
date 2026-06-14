@@ -181,14 +181,16 @@ class LLMSettings(BaseModel):
         return data
 
 
-class WorkstationSettings(BaseModel):
+class LongTaskSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    transport: Literal["nats", "grpc", "disabled"] = "nats"
-    nats_submit_subject: str = "agent.workstation.task.submit"
-    nats_progress_subject_prefix: str = "agent.workstation.task.progress."
-    grpc_endpoint: str | None = None
-    request_timeout_s: float = 5.0
+    transport: Literal["mementos_http", "disabled"] = "mementos_http"
+    mementos_base_url: str = "http://127.0.0.1:18765"
+    queue_size: int = 256
+    worker_poll_interval_s: float = 1.0
+    worker_task_timeout_s: float = 1800.0
+    worker_http_timeout_s: float = 30.0
+    worker_lease_s: float = 3600.0
 
 
 class PersonaSettings(BaseModel):
@@ -329,7 +331,7 @@ class Settings(BaseSettings):
     memory: MemorySettings = Field(default_factory=MemorySettings)
     sqlite: SqliteSettings = Field(default_factory=SqliteSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
-    workstation: WorkstationSettings = Field(default_factory=WorkstationSettings)
+    long_task: LongTaskSettings = Field(default_factory=LongTaskSettings)
     persona: PersonaSettings = Field(default_factory=PersonaSettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     pairing: PairingSettings = Field(default_factory=PairingSettings)

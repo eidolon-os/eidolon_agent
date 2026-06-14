@@ -134,6 +134,78 @@ class ChatMessageRow(Base):
 
 
 # ---------------------------------------------------------------------------
+# Long-running coworker tasks
+# ---------------------------------------------------------------------------
+
+
+class LongTaskRow(Base):
+    __tablename__ = "long_tasks"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32), default="mementos", index=True)
+    status: Mapped[str] = mapped_column(String(24), index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    user_id: Mapped[str] = mapped_column(String(128), index=True)
+    agent_instance_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    conversation_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    turn_id: Mapped[str] = mapped_column(String(64), index=True)
+    session_id: Mapped[str | None] = mapped_column(String(64))
+    trace_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    tool_call_id: Mapped[str | None] = mapped_column(String(128))
+    session_key: Mapped[str] = mapped_column(String(192), index=True)
+    task_date: Mapped[str] = mapped_column(String(10), index=True)
+    task_key: Mapped[str] = mapped_column(String(256), unique=True)
+    task: Mapped[str] = mapped_column(Text)
+    user_text: Mapped[str | None] = mapped_column(Text)
+    task_type: Mapped[str] = mapped_column(String(64), default="other", index=True)
+    urgency: Mapped[str] = mapped_column(String(32), default="normal")
+    expected_output: Mapped[str | None] = mapped_column(Text)
+    context_summary: Mapped[str | None] = mapped_column(Text)
+    attachments: Mapped[list | None] = mapped_column(JSON)
+    request_payload: Mapped[dict | None] = mapped_column(JSON)
+    mementos_session_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    mementos_conversation_id: Mapped[str | None] = mapped_column(
+        String(128), index=True
+    )
+    mementos_run_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    mementos_latest_seq: Mapped[int | None] = mapped_column(Integer)
+    mementos_workspace_dir: Mapped[str | None] = mapped_column(Text)
+    progress_summary: Mapped[str | None] = mapped_column(Text)
+    progress_events: Mapped[list | None] = mapped_column(JSON)
+    result_text: Mapped[str | None] = mapped_column(Text)
+    result_payload: Mapped[dict | None] = mapped_column(JSON)
+    artifact_paths: Mapped[list | None] = mapped_column(JSON)
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    error_payload: Mapped[dict | None] = mapped_column(JSON)
+    callback_subject: Mapped[str | None] = mapped_column(String(256))
+    callback_status: Mapped[str] = mapped_column(
+        String(24), default="pending", index=True
+    )
+    callback_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    callback_last_error: Mapped[str | None] = mapped_column(Text)
+    callback_delivered_at: Mapped[datetime | None] = mapped_column(DateTime)
+    worker_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime, index=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)
+    external_status: Mapped[str | None] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_progress_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_polled_at: Mapped[datetime | None] = mapped_column(DateTime)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (
+        Index("ix_long_tasks_user_created", "tenant_id", "user_id", "created_at"),
+        Index("ix_long_tasks_status_updated", "status", "updated_at"),
+        Index("ix_long_tasks_session_created", "session_key", "created_at"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Devices
 # ---------------------------------------------------------------------------
 
@@ -249,6 +321,7 @@ __all__ = [
     "ConversationRow",
     "DeviceRow",
     "EvolutionHistoryRow",
+    "LongTaskRow",
     "PersonaInstanceRow",
     "PersonaTemplateCustomRow",
     "TurnRow",

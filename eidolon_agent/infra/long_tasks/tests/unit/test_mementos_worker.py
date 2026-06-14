@@ -1,0 +1,132 @@
+"""Mementos long-task worker behavior."""
+
+from __future__ import annotations
+
+import pytest
+
+from eidolon_agent.config.settings import SqliteSettings
+from eidolon_agent.core.types.long_task import (
+    LongTaskRecord,
+    LongTaskStatus,
+    session_key_for,
+    task_key_for,
+)
+from eidolon_agent.infra.long_tasks.mementos import (
+    MementosLongTaskWorker,
+    MementosWorkerConfig,
+)
+from eidolon_agent.infra.persistence import (
+    SqlAlchemyUnitOfWork,
+    SqlLongTaskStore,
+    create_engine,
+    create_session_factory,
+    ensure_schema,
+)
+
+pytestmark = pytest.mark.asyncio
+
+
+async def test_worker_keeps_tool_path_to_accepted_then_completes(tmp_path) -> None:
+    engine = create_engine(SqliteSettings(path=tmp_path / "agent.sqlite3"))
+    await ensure_schema(engine)
+    session_factory = create_session_factory(engine)
+    store = SqlLongTaskStore(session_factory)
+    client = _FakeMementosClient()
+    worker = MementosLongTaskWorker(
+        store=store,
+        client=client,
+        config=MementosWorkerConfig(poll_interval_s=0.01, task_timeout_s=5),
+        worker_id="worker-test",
+    )
+    record = _record("task-1")
+
+    await worker.submit(record)
+
+    async with SqlAlchemyUnitOfWork(session_factory) as uow:
+        accepted = await uow.long_tasks.get("task-1")
+
+    assert accepted is not None
+    assert accepted.status is LongTaskStatus.ACCEPTED
+    assert accepted.mementos_session_id is None
+
+    drained = await worker.drain_once()
+
+    async with SqlAlchemyUnitOfWork(session_factory) as uow:
+        completed = await uow.long_tasks.get("task-1")
+    await client.close()
+    await engine.dispose()
+
+    assert drained is True
+    assert completed is not None
+    assert completed.status is LongTaskStatus.SUCCEEDED
+    assert completed.worker_id == "worker-test"
+    assert completed.attempt_count == 1
+    assert completed.mementos_session_id == "m-session-1"
+    assert completed.mementos_conversation_id == "m-conv-1"
+    assert completed.result_text == "mementos coworker 已收到 eidolon_agent 的测试任务。"
+    assert client.prompts == [
+        "测试任务\n期望输出：确认收到\n上下文摘要：端到端测试"
+    ]
+
+
+def _record(task_id: str) -> LongTaskRecord:
+    session_key = session_key_for("alice", "2026-06-14")
+    return LongTaskRecord(
+        id=task_id,
+        provider="mementos",
+        status=LongTaskStatus.ACCEPTED,
+        tenant_id="t",
+        user_id="alice",
+        conversation_id="c1",
+        turn_id="turn-1",
+        session_id="s1",
+        trace_id="trace-1",
+        session_key=session_key,
+        task_date="2026-06-14",
+        task_key=task_key_for(session_key, task_id),
+        task="测试任务",
+        expected_output="确认收到",
+        context_summary="端到端测试",
+    )
+
+
+class _FakeMementosClient:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    async def close(self) -> None:
+        return None
+
+    async def create_session(self, *, title: str) -> dict:
+        assert title == "e.alice.20260614"
+        return {"session": {"id": "m-session-1"}}
+
+    async def post_message(
+        self,
+        *,
+        session_id: str,
+        prompt: str,
+        file_list: list[str] | None = None,
+    ) -> dict:
+        assert session_id == "m-session-1"
+        assert file_list == []
+        self.prompts.append(prompt)
+        return {
+            "conversation_id": "m-conv-1",
+            "latest_seq": 0,
+            "session_state": "running",
+        }
+
+    async def get_messages(self, *, session_id: str, limit: int = 500) -> dict:
+        assert session_id == "m-session-1"
+        return {
+            "messages": [
+                {
+                    "event_type": "RUN_END",
+                    "status": "finish",
+                    "payload": {
+                        "content": "mementos coworker 已收到 eidolon_agent 的测试任务。"
+                    },
+                }
+            ]
+        }

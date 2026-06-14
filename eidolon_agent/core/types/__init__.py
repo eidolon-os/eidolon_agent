@@ -15,6 +15,16 @@ from __future__ import annotations
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason, LLMUsage
+from eidolon_agent.core.types.long_task import (
+    CallbackStatus,
+    LongTaskRecord,
+    LongTaskStatus,
+    parse_session_key,
+    safe_user_key,
+    session_key_for,
+    task_key_for,
+    user_id_from_safe_key,
+)
 from eidolon_agent.core.types.memory import (
     MemoryHit,
     MemoryItem,
@@ -62,6 +72,15 @@ __all__ = [  # noqa: RUF022 - grouped by domain rather than alphabetical for rea
     "LLMDelta",
     "LLMFinishReason",
     "LLMUsage",
+    # long task
+    "CallbackStatus",
+    "LongTaskRecord",
+    "LongTaskStatus",
+    "parse_session_key",
+    "safe_user_key",
+    "session_key_for",
+    "task_key_for",
+    "user_id_from_safe_key",
     # memory
     "MemoryHit",
     "MemoryItem",

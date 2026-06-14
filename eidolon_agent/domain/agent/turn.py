@@ -9,8 +9,8 @@ This is the heart of the whole architecture. Hot path:
 Three Triage outcomes diverge:
 
 * SIMPLE      — standard LLM stream + tool loop.
-* COMPLEX_LONG — emit ACK + holding DELTA + HANDOFF, then submit to workstation
-                 and forward Progress events.
+* COMPLEX_LONG — trace signal only; long tasks are submitted through the
+                 LLM tool-call path via ``submit_long_task``.
 * TOOL_DIRECT — skip LLM, dispatch a single explicit tool (caller hint or
                 first registered matching tool name in input text), return result.
 
@@ -56,7 +56,6 @@ from eidolon_agent.core.types.turn import (
     TurnStatus,
 )
 from eidolon_agent.domain.agent.triage import TaskClassifier
-from eidolon_agent.domain.agent.workstation import submit_to_workstation
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails.crisis import CrisisHandler
 from eidolon_agent.domain.guardrails.input_filter import InputGuardrail, SafetyAction
@@ -68,7 +67,6 @@ from eidolon_agent.domain.runtime_policy import TurnRuntimePolicy
 from eidolon_agent.domain.tools.dispatcher import ToolDispatcher
 
 _log = logging.getLogger(__name__)
-_COMPLEX_HOLDING = "好的，我让工作站去帮你做。"
 
 
 class TurnEngine:
@@ -541,53 +539,6 @@ class TurnEngine:
 
     def _tool_schemas(self) -> list:
         return list(self._tools._registry.list_schemas())
-
-    async def _handle_complex(
-        self,
-        ti: TurnInput,
-        seq: _SeqGen,
-        t0: float,
-    ) -> AsyncIterator[TurnEvent]:
-        """Fire-and-forget workstation handoff.
-
-        We publish to NATS, emit a holding utterance + HANDOFF event, then
-        return. Progress flows independently through whatever subscriber the
-        workstation service publishes to — not back through this Turn stream.
-        """
-        yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.SPEAKING, time.time())
-        holding = _COMPLEX_HOLDING
-        yield TurnEvent.delta(ti.turn_id, seq.next(), holding, time.time())
-        yield TurnEvent(
-            turn_id=ti.turn_id,
-            seq=seq.next(),
-            kind=TurnEventKind.ACK,
-            data={"intent": "complex_long"},
-            ts=time.time(),
-        )
-        task_id = await submit_to_workstation(self._bus, ti)
-        if not task_id:
-            yield TurnEvent.error(
-                ti.turn_id, seq.next(), "dispatch_failed", "workstation unavailable", time.time()
-            )
-            yield TurnEvent.done(ti.turn_id, seq.next(), TurnStatus.ERRORED, time.time())
-            return
-        yield TurnEvent(
-            turn_id=ti.turn_id,
-            seq=seq.next(),
-            kind=TurnEventKind.HANDOFF,
-            data={"task_id": task_id, "progress_subject": Topics.workstation_progress(task_id)},
-            ts=time.time(),
-        )
-        await self._persist_messages(ti, ti.text or "", holding)
-        await self._submit_persona_interaction(
-            ti=ti,
-            kind="turn_completed",
-            user_text=ti.text or "",
-            assistant_text=holding,
-        )
-        yield TurnEvent.done(
-            ti.turn_id, seq.next(), TurnStatus.HANDED_OFF, time.time(), task_id=task_id
-        )
 
     async def _persist_turn(
         self,

@@ -26,10 +26,11 @@ llm:
   api_key: EIDOLON_AGENT_LLM_API_KEY
   models:
   - name: openai/deepseek-v4-flash
-    api_base: http://mopai.geni.dyxnet.com.cn/v1
+    api_base: https://api.deepseek.com/v1
   default_model: openai/deepseek-v4-flash
-workstation:
-  transport: nats
+long_task:
+  transport: mementos_http
+  mementos_base_url: http://127.0.0.1:18765
 persona:
   templates_dir: eidolon_agent/domain/personas/templates
   instances_dir: ~/eidolon/personas/instances

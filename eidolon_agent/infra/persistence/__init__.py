@@ -12,12 +12,14 @@ from eidolon_agent.infra.persistence.engine import (
     create_session_factory,
     ensure_schema,
 )
+from eidolon_agent.infra.persistence.long_task_store import SqlLongTaskStore
 from eidolon_agent.infra.persistence.sql_evolution_history_store import (
     SqlEvolutionHistoryStore,
 )
 from eidolon_agent.infra.persistence.repositories import (
     SqlChatMessageRepository,
     SqlConversationRepository,
+    SqlLongTaskRepository,
 )
 from eidolon_agent.infra.persistence.sql_custom_template_store import (
     CustomTemplateAlreadyExists,
@@ -38,6 +40,8 @@ __all__ = [
     "SqlConversationRepository",
     "SqlCustomTemplateStore",
     "SqlEvolutionHistoryStore",
+    "SqlLongTaskRepository",
+    "SqlLongTaskStore",
     "SqlPersonaInstanceStore",
     "build_history_hydrator",
     "build_turn_persister",

@@ -7,13 +7,21 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 
 import pytest
+from sqlalchemy import select
 
+from eidolon_agent.config.settings import SqliteSettings
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEventKind
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import EmitEventTool, GetTimeTool
 from eidolon_agent.infra.llm.providers.fake import FakeLLM
+from eidolon_agent.infra.persistence import (
+    create_engine,
+    create_session_factory,
+    ensure_schema,
+)
+from eidolon_agent.infra.persistence.models import LongTaskRow
 from tests.helpers import make_turn_input
 
 pytestmark = pytest.mark.integration
@@ -74,16 +82,9 @@ async def test_tool_call_announces_real_tool_before_dispatch_and_feeds_result_to
     )
 
 
-async def test_llm_selected_long_task_publishes_handoff_without_waiting_for_worker(
+async def test_llm_selected_long_task_returns_handoff_without_waiting_for_worker(
     turn_engine_factory,
-    event_bus,
 ) -> None:
-    submitted = []
-
-    async def _on_submit(ev):
-        submitted.append(ev.payload)
-
-    await event_bus.subscribe("agent.workstation.task.submit", _on_submit)
     llm = _ScriptedCapturingLLM(
         [
             [
@@ -120,17 +121,76 @@ async def test_llm_selected_long_task_publishes_handoff_without_waiting_for_work
     assert tool_result.data["content"]["accepted"] is True
     handoff = next(ev for ev in events if ev.kind is TurnEventKind.HANDOFF)
     assert handoff.data["task_id"] == tool_result.data["content"]["task_id"]
-    assert handoff.data["progress_subject"] == tool_result.data["content"]["progress_subject"]
-    assert submitted
-    payload = submitted[0]
-    assert payload["tenant_id"] == "t"
-    assert payload["user_id"] == "alice"
-    assert payload["conversation_id"] == "c1"
-    assert payload["turn_id"] == "t1"
-    assert payload["trace_id"] == "tr"
-    assert payload["natural_language"] == "帮我订下周三去上海的机票"
-    assert payload["task_type"] == "booking"
-    assert payload["expected_output"] == "可选航班和预订进度"
+    assert (
+        handoff.data["progress_subject"]
+        == tool_result.data["content"]["progress_subject"]
+    )
+    content = tool_result.data["content"]
+    assert content["session_key"].startswith("e.alice.")
+    assert content["task_key"].startswith(f"{content['session_key']}.")
+
+
+async def test_llm_selected_long_task_persists_minimal_receipt_record(
+    turn_engine_factory,
+    tmp_path,
+) -> None:
+    sql_engine = create_engine(SqliteSettings(path=tmp_path / "agent.sqlite3"))
+    await ensure_schema(sql_engine)
+    session_factory = create_session_factory(sql_engine)
+    llm = _ScriptedCapturingLLM(
+        [
+            [
+                {
+                    "kind": "tool_call",
+                    "name": "submit_long_task",
+                    "arguments": {
+                        "task": "整理我最近的项目资料并给出行动清单",
+                        "task_type": "document_work",
+                        "expected_output": "一份结构化行动清单",
+                        "context_summary": "用户在测试 mementos 长任务。",
+                    },
+                }
+            ],
+            [{"kind": "text", "text": "已经开始处理，我会继续跟进。"}],
+        ]
+    )
+    engine = turn_engine_factory(llm=llm, session_factory=session_factory)
+
+    events = [
+        ev async for ev in engine.run(make_turn_input("整理我最近的项目资料"))
+    ]
+    await _drain_background_tasks()
+
+    tool_result = next(ev for ev in events if ev.kind is TurnEventKind.TOOL_RESULT)
+    content = tool_result.data["content"]
+    async with session_factory() as session:
+        row = (
+            await session.execute(
+                select(LongTaskRow).where(LongTaskRow.id == content["task_id"])
+            )
+        ).scalar_one_or_none()
+    await sql_engine.dispose()
+
+    assert row is not None
+    assert row.status == "accepted"
+    assert row.tenant_id == "t"
+    assert row.user_id == "alice"
+    assert row.conversation_id == "c1"
+    assert row.turn_id == "t1"
+    assert row.trace_id == "tr"
+    assert row.session_key == content["session_key"]
+    assert row.task_key == content["task_key"]
+    assert row.task_date == content["task_date"]
+    assert row.session_key.startswith("e.alice.")
+    assert len(row.session_key.removeprefix("e.alice.")) == 8
+    assert row.mementos_session_id is None
+    assert row.task_type == "document_work"
+    assert row.expected_output == "一份结构化行动清单"
+    assert row.context_summary == "用户在测试 mementos 长任务。"
+    assert row.request_payload["session_key"] == row.session_key
+    assert row.request_payload["task_key"] == row.task_key
+    assert row.request_payload["mementos_session_id"] == row.session_key
+    assert row.callback_subject == content["progress_subject"]
 
 
 async def test_temporary_long_task_does_not_fanout_to_memory(
