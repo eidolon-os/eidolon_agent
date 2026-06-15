@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 
+from eidolon_sdk.memory import ConversationTurnPayload
+
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.topics import Topics
 from eidolon_agent.domain.history.ports import MemoryTurnSubjectResolver
@@ -50,15 +52,15 @@ class HistoryFanout:
         }
         if metadata:
             payload_metadata.update(metadata)
-        memory_payload = {
-            "turn_id": turn_id,
-            "user_id": user_id,
-            "session_id": session_id,
-            "timestamp": timestamp_iso,
-            "user_text": user_text,
-            "assistant_text": assistant_text,
-            "metadata": payload_metadata,
-        }
+        memory_payload = ConversationTurnPayload(
+            turn_id=turn_id,
+            user_id=user_id,
+            session_id=session_id,
+            timestamp=timestamp_iso,
+            user_text=user_text,
+            assistant_text=assistant_text,
+            metadata=payload_metadata,
+        ).model_dump(mode="json")
         try:
             memory_subject = (
                 await self._memory_routes.render_turn_subject(user_id)

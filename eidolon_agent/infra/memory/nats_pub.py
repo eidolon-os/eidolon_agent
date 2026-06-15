@@ -6,6 +6,8 @@ import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from eidolon_sdk.memory import ConversationTurnPayload, KgAddTripleCommand
+
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.topics import Topics
 from eidolon_agent.infra.memory.discovery import MemoryRoutingTable
@@ -28,15 +30,15 @@ class MemoryNatsPublisher:
         assistant_text: str,
         metadata: dict | None = None,
     ) -> None:
-        payload = {
-            "turn_id": turn_id,
-            "user_id": user_id,
-            "session_id": session_id,
-            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "user_text": user_text,
-            "assistant_text": assistant_text,
-            "metadata": metadata or {"source": "eidolon-agent"},
-        }
+        payload = ConversationTurnPayload(
+            turn_id=turn_id,
+            user_id=user_id,
+            session_id=session_id,
+            timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            user_text=user_text,
+            assistant_text=assistant_text,
+            metadata=metadata or {"source": "eidolon-agent"},
+        ).model_dump(mode="json")
         subject = (
             await self._routes.render_turn_subject(user_id)
             if self._routes is not None
@@ -65,21 +67,20 @@ class MemoryNatsPublisher:
     ) -> None:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         request_id = uuid4().hex
-        payload = {
-            "kind": "kg_add_triple",
-            "request_id": request_id,
-            "user_id": user_id,
-            "issued_at": now,
-            "issuer": "agent",
-            "subject": subject,
-            "predicate": predicate,
-            "object": object_,
-            "confidence": confidence,
-            "valid_from": valid_from.isoformat() if valid_from else None,
-            "valid_to": valid_to.isoformat() if valid_to else None,
-            "source_drawer_id": f"req:{request_id}",
-            "adapter_name": "agent",
-        }
+        payload = KgAddTripleCommand(
+            request_id=request_id,
+            user_id=user_id,
+            issued_at=now,
+            issuer="agent",
+            subject=subject,
+            predicate=predicate,
+            object=object_,
+            confidence=confidence,
+            valid_from=valid_from.isoformat() if valid_from else None,
+            valid_to=valid_to.isoformat() if valid_to else None,
+            source_drawer_id=f"req:{request_id}",
+            adapter_name="agent",
+        ).model_dump(mode="json")
         nats_subject = (
             await self._routes.render_cmd_subject(user_id)
             if self._routes is not None

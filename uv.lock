@@ -751,6 +751,7 @@ runtime = [
 requires-dist = [
     { name = "aiosqlite", marker = "extra == 'db'", specifier = ">=0.20" },
     { name = "hatchling", marker = "extra == 'dev'", specifier = ">=1.25" },
+    { name = "httpx", marker = "extra == 'http'", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2.8" },
     { name = "pyjwt", marker = "extra == 'runtime'", specifier = ">=2.8" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
@@ -758,7 +759,7 @@ requires-dist = [
     { name = "pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'db'", specifier = ">=2.0" },
 ]
-provides-extras = ["db", "runtime", "dev"]
+provides-extras = ["db", "runtime", "http", "dev"]
 
 [[package]]
 name = "exceptiongroup"
