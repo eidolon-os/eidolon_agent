@@ -148,9 +148,10 @@ class _StubService:
         user_id,
         instance_id,
         dry_run=False,
+        auto_apply=True,
         limit=50,
     ):
-        self.calls.append(("run_reflection", instance_id, dry_run, limit))
+        self.calls.append(("run_reflection", instance_id, dry_run, auto_apply, limit))
         return list(self._proposals.values())
 
     async def get_evolution_proposal(self, proposal_id: str):
@@ -295,7 +296,7 @@ def test_reflect_endpoint_uses_service(client: TestClient, stub_service: _StubSe
     )
     assert r.status_code == 200
     assert r.json()[0]["id"] == "proposal-1"
-    assert ("run_reflection", "inst-1", True, 3) in stub_service.calls
+    assert ("run_reflection", "inst-1", True, True, 3) in stub_service.calls
 
 
 def test_proposal_detail_and_decisions(client: TestClient, stub_service: _StubService) -> None:

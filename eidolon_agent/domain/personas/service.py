@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ from eidolon_agent.core.errors import (
     ValidationError,
 )
 from eidolon_agent.core.types.memory import MemoryHit, MemoryQueryPlan
+from eidolon_agent.domain.personas.auto_evolution import PersonaAutoEvolutionPolicy
 from eidolon_agent.domain.personas.compiler import PersonaCompiler
 from eidolon_agent.domain.personas.evolution import PersonaEvolutionEngine
 from eidolon_agent.domain.personas.instance_store import YamlPersonaInstanceStore
@@ -74,6 +76,7 @@ class PersonasService:
         observation_repo: PersonaObservationRepository | None = None,
         proposal_repo: PersonaEvolutionProposalRepository | None = None,
         reflection: PersonaReflectionEngine | None = None,
+        auto_evolution: PersonaAutoEvolutionPolicy | None = None,
         memory_timeout_s: float = 0.2,
     ) -> None:
         self._registry = registry
@@ -91,7 +94,11 @@ class PersonasService:
         self._observation_repo = observation_repo
         self._proposal_repo = proposal_repo
         self._reflection = reflection or PersonaReflectionEngine()
+        self._auto_evolution = auto_evolution or PersonaAutoEvolutionPolicy()
         self._memory_timeout_s = memory_timeout_s
+        self._reflection_queue: asyncio.Queue[tuple[str, str, str]] = asyncio.Queue()
+        self._reflection_pending: set[tuple[str, str, str]] = set()
+        self._reflection_task: asyncio.Task | None = None
         self._worker = worker or PersonaEvolutionWorker(
             instances=self._instances,
             runtime_state=self._runtime,
@@ -102,8 +109,20 @@ class PersonasService:
 
     async def start(self) -> None:
         await self._worker.start()
+        if self._auto_reflection_ready() and self._reflection_task is None:
+            self._reflection_task = asyncio.create_task(
+                self._run_auto_reflection_loop(),
+                name="persona-auto-reflection-worker",
+            )
 
     async def stop(self) -> None:
+        if self._reflection_task is not None:
+            self._reflection_task.cancel()
+            try:
+                await self._reflection_task
+            except asyncio.CancelledError:
+                pass
+            self._reflection_task = None
         await self._worker.stop()
 
     async def list_templates(self) -> list[PersonaTemplateSummary]:
@@ -234,6 +253,7 @@ class PersonasService:
                     evidence={"query": user_text[:500], "degraded": degraded},
                     memory_ids=tuple(hit.id for hit in hits),
                 )
+                self._schedule_reflection(tenant_id, user_id, instance_id)
             except Exception:
                 _log.exception("record persona memory observation failed")
         return self._compiler.compile(
@@ -271,7 +291,11 @@ class PersonasService:
         observation = _interaction_to_observation(normalized)
         if observation is not None and self._observation_repo is not None:
             await self._observation_repo.add(observation)
-        self._worker.submit(normalized)
+            self._schedule_reflection(event.tenant_id, event.user_id, event.instance_id)
+        if observation is not None and self._auto_reflection_ready():
+            self._worker.submit(normalized.model_copy(update={"template_id": None}))
+        else:
+            self._worker.submit(normalized)
 
     async def submit_signal(self, signal: PersonaSignalInput) -> None:
         update = self._signal_adapter.to_runtime_update(signal)
@@ -390,6 +414,11 @@ class PersonasService:
 
     async def drain_evolution_queue(self) -> None:
         await self._worker.join()
+        if self._reflection_task is None:
+            while await self._drain_auto_reflection_once():
+                pass
+        else:
+            await self._reflection_queue.join()
 
     # ---- Admin surface --------------------------------------------------
 
@@ -493,6 +522,11 @@ class PersonasService:
         if self._observation_repo is None:
             return
         await self._observation_repo.add(observation)
+        self._schedule_reflection(
+            observation.tenant_id,
+            observation.user_id,
+            observation.instance_id,
+        )
 
     async def _record_triggered_observations(
         self,
@@ -549,6 +583,7 @@ class PersonasService:
         user_id: str,
         instance_id: str,
         dry_run: bool = False,
+        auto_apply: bool | None = None,
         limit: int = 50,
     ) -> list[PersonaEvolutionProposal]:
         """Aggregate observations into bounded evolution proposals."""
@@ -569,15 +604,48 @@ class PersonasService:
         )
         if dry_run or self._proposal_repo is None:
             return proposals
+        auto_apply = self._auto_evolution.enabled if auto_apply is None else auto_apply
+        stored: list[PersonaEvolutionProposal] = []
+        evidence_by_id = {obs.id: obs for obs in observations}
         for proposal in proposals:
             await self._proposal_repo.add(proposal)
+            current = proposal
+            if auto_apply:
+                decision = self._auto_evolution.evaluate(
+                    instance=instance,
+                    proposal=proposal,
+                    evidence=[
+                        evidence_by_id[item]
+                        for item in proposal.evidence_ids
+                        if item in evidence_by_id
+                    ],
+                )
+                if decision.apply:
+                    await self._apply_evolution_proposal(
+                        proposal,
+                        actor="auto-evolution",
+                        decision_reason=decision.reason,
+                        publish_reason="proposal_auto_applied",
+                    )
+                    refreshed = await self._proposal_repo.get(proposal.id)
+                    if refreshed is not None:
+                        current = refreshed
+                    instance = await self.get_instance(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        instance_id=instance_id,
+                    )
+                else:
+                    current = proposal.model_copy(update={"decision_reason": decision.reason})
+                    await self._proposal_repo.save(current)
             if self._observation_repo is not None:
                 for observation_id in proposal.evidence_ids:
                     await self._observation_repo.set_status(
                         observation_id,
                         "converted",
                     )
-        return proposals
+            stored.append(current)
+        return stored
 
     async def list_evolution_proposals(
         self,
@@ -613,34 +681,11 @@ class PersonasService:
         proposal = await self.get_evolution_proposal(proposal_id)
         if proposal.status != "pending":
             raise ConflictError(f"proposal is not pending: {proposal.status}")
-        instance = await self.get_instance(
-            tenant_id=proposal.tenant_id,
-            user_id=proposal.user_id,
-            instance_id=proposal.instance_id,
+        return await self._apply_evolution_proposal(
+            proposal,
+            actor=actor,
+            publish_reason="proposal_approved",
         )
-        evolved, result = _apply_proposal(instance=instance, proposal=proposal)
-        decided = proposal.model_copy(
-            update={
-                "status": "applied",
-                "updated_at": datetime.now(timezone.utc),
-                "decided_by": actor,
-                "decided_at": datetime.now(timezone.utc),
-            }
-        )
-        if result.applied:
-            evolved = evolved.model_copy(update={"overlay_version": instance.overlay_version + 1})
-            await self._instances.save(evolved, reason=f"proposal:{proposal.id}")
-            await self._audit.record_evolution(result)
-            await self._events.publish_evolution_applied(
-                proposal.instance_id,
-                result.model_dump(mode="json"),
-            )
-            await self._events.publish_persona_updated(
-                proposal.instance_id,
-                {"reason": "proposal_approved", "proposal_id": proposal.id},
-            )
-        await self._proposal_repo.save(decided)
-        return result
 
     async def reject_evolution_proposal(
         self,
@@ -665,6 +710,89 @@ class PersonasService:
         )
         await self._proposal_repo.save(rejected)
         return rejected
+
+    def _auto_reflection_ready(self) -> bool:
+        return (
+            self._auto_evolution.enabled
+            and self._observation_repo is not None
+            and self._proposal_repo is not None
+        )
+
+    def _schedule_reflection(self, tenant_id: str, user_id: str, instance_id: str) -> None:
+        if not self._auto_reflection_ready():
+            return
+        key = (tenant_id, user_id, instance_id)
+        if key in self._reflection_pending:
+            return
+        self._reflection_pending.add(key)
+        self._reflection_queue.put_nowait(key)
+
+    async def _run_auto_reflection_loop(self) -> None:
+        while True:
+            await self._process_auto_reflection_key(await self._reflection_queue.get())
+
+    async def _drain_auto_reflection_once(self) -> bool:
+        try:
+            key = self._reflection_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return False
+        await self._process_auto_reflection_key(key)
+        return True
+
+    async def _process_auto_reflection_key(self, key: tuple[str, str, str]) -> None:
+        self._reflection_pending.discard(key)
+        tenant_id, user_id, instance_id = key
+        try:
+            await self.run_reflection(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                instance_id=instance_id,
+                auto_apply=True,
+            )
+        except Exception:
+            _log.exception("persona auto reflection failed")
+        finally:
+            self._reflection_queue.task_done()
+
+    async def _apply_evolution_proposal(
+        self,
+        proposal: PersonaEvolutionProposal,
+        *,
+        actor: str,
+        decision_reason: str | None = None,
+        publish_reason: str,
+    ) -> PersonaEvolutionResult:
+        if self._proposal_repo is None:
+            raise NotFoundError("evolution proposal repository not wired")
+        instance = await self.get_instance(
+            tenant_id=proposal.tenant_id,
+            user_id=proposal.user_id,
+            instance_id=proposal.instance_id,
+        )
+        evolved, result = _apply_proposal(instance=instance, proposal=proposal)
+        decided = proposal.model_copy(
+            update={
+                "status": "applied",
+                "updated_at": datetime.now(timezone.utc),
+                "decided_by": actor,
+                "decided_at": datetime.now(timezone.utc),
+                "decision_reason": decision_reason,
+            }
+        )
+        if result.applied:
+            evolved = evolved.model_copy(update={"overlay_version": instance.overlay_version + 1})
+            await self._instances.save(evolved, reason=f"proposal:{proposal.id}")
+            await self._audit.record_evolution(result)
+            await self._events.publish_evolution_applied(
+                proposal.instance_id,
+                result.model_dump(mode="json"),
+            )
+            await self._events.publish_persona_updated(
+                proposal.instance_id,
+                {"reason": publish_reason, "proposal_id": proposal.id},
+            )
+        await self._proposal_repo.save(decided)
+        return result
 
 
 async def build_default_personas_service(

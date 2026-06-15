@@ -5,6 +5,7 @@ for tests and local composition, but application modules should depend on the
 service interface.
 """
 
+from eidolon_agent.domain.personas.auto_evolution import PersonaAutoEvolutionPolicy
 from eidolon_agent.domain.personas.compiler import PersonaCompiler
 from eidolon_agent.domain.personas.evolution import PersonaEvolutionEngine
 from eidolon_agent.domain.personas.instance_store import YamlPersonaInstanceStore
@@ -43,6 +44,7 @@ __all__ = [
     "CompiledPersona",
     "Energy",
     "MoodVector",
+    "PersonaAutoEvolutionPolicy",
     "PersonaCompiler",
     "PersonaEvolutionEngine",
     "PersonaEvolutionEvent",

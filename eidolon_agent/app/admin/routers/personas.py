@@ -51,6 +51,7 @@ class RollbackRequest(BaseModel):
 
 class ReflectRequest(BaseModel):
     dry_run: bool = False
+    auto_apply: bool = True
     limit: int = Field(default=50, ge=1, le=500)
 
 
@@ -250,6 +251,7 @@ async def reflect_instance(
             user_id=user_id,
             instance_id=instance_id,
             dry_run=body.dry_run,
+            auto_apply=body.auto_apply,
             limit=body.limit,
         )
     except NotFoundError as exc:

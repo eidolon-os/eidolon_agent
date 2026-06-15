@@ -15,6 +15,7 @@ from eidolon_agent.domain.personas.memory_adapter import PersonaMemoryAdapter
 from eidolon_agent.domain.personas.types import (
     PersonaEvolutionEvent,
     PersonaEvolutionProposal,
+    PersonaInteractionEvent,
     PersonaObservation,
     PersonaProposalPatch,
 )
@@ -331,6 +332,7 @@ async def test_reflection_proposal_approval_applies_clamped_knob_delta(
         tenant_id="t",
         user_id="u",
         instance_id="i-prop",
+        auto_apply=False,
     )
     assert generated
     assert generated[0].status == "pending"
@@ -343,6 +345,155 @@ async def test_reflection_proposal_approval_applies_clamped_knob_delta(
         after.behavioral_knobs["structure"].current > before.behavioral_knobs["structure"].current
     )
     assert proposals.rows[generated[0].id].status == "applied"
+
+
+@pytest.mark.asyncio
+async def test_reflection_auto_applies_low_risk_proposal(
+    canonical_template_registry,
+    persona_instance_store,
+):
+    from eidolon_agent.domain.personas.service import PersonasService
+
+    observations = _ObservationRepo()
+    proposals = _ProposalRepo()
+    service = PersonasService(
+        registry=canonical_template_registry,
+        instances=persona_instance_store,
+        observation_repo=observations,
+        proposal_repo=proposals,
+    )
+    await service.create_instance(
+        tenant_id="t",
+        user_id="u",
+        instance_id="i-auto",
+        template_id="caretaker_jiezhi",
+    )
+    await service.record_observation(
+        PersonaObservation(
+            id="obs-auto",
+            tenant_id="t",
+            user_id="u",
+            instance_id="i-auto",
+            kind="positive_feedback_received",
+            confidence=0.9,
+            strength=0.8,
+        )
+    )
+    before = await service.get_instance(tenant_id="t", user_id="u", instance_id="i-auto")
+    generated = await service.run_reflection(
+        tenant_id="t",
+        user_id="u",
+        instance_id="i-auto",
+    )
+    after = await service.get_instance(tenant_id="t", user_id="u", instance_id="i-auto")
+    assert generated[0].status == "applied"
+    assert generated[0].decided_by == "auto-evolution"
+    assert after.overlay_version == before.overlay_version + 1
+    assert after.behavioral_knobs["intimacy"].current == pytest.approx(
+        before.behavioral_knobs["intimacy"].current + 0.03
+    )
+
+
+@pytest.mark.asyncio
+async def test_reflection_leaves_higher_risk_proposal_pending(
+    canonical_template_registry,
+    persona_instance_store,
+):
+    from eidolon_agent.domain.personas.service import PersonasService
+
+    observations = _ObservationRepo()
+    proposals = _ProposalRepo()
+    service = PersonasService(
+        registry=canonical_template_registry,
+        instances=persona_instance_store,
+        observation_repo=observations,
+        proposal_repo=proposals,
+    )
+    await service.create_instance(
+        tenant_id="t",
+        user_id="u",
+        instance_id="i-review",
+        template_id="caretaker_jiezhi",
+    )
+    await service.record_observation(
+        PersonaObservation(
+            id="obs-review",
+            tenant_id="t",
+            user_id="u",
+            instance_id="i-review",
+            kind="stressor_memory_recalled",
+            confidence=0.9,
+            strength=0.8,
+        )
+    )
+    before = await service.get_instance(tenant_id="t", user_id="u", instance_id="i-review")
+    generated = await service.run_reflection(
+        tenant_id="t",
+        user_id="u",
+        instance_id="i-review",
+    )
+    after = await service.get_instance(tenant_id="t", user_id="u", instance_id="i-review")
+    assert generated[0].status == "pending"
+    assert "requires review" in (generated[0].decision_reason or "")
+    assert after.overlay_version == before.overlay_version
+
+
+@pytest.mark.asyncio
+async def test_submit_interaction_auto_evolves_without_legacy_double_apply(
+    canonical_template_registry,
+    persona_instance_store,
+):
+    from eidolon_agent.domain.personas.service import PersonasService
+
+    observations = _ObservationRepo()
+    proposals = _ProposalRepo()
+    service = PersonasService(
+        registry=canonical_template_registry,
+        instances=persona_instance_store,
+        observation_repo=observations,
+        proposal_repo=proposals,
+    )
+    await service.create_instance(
+        tenant_id="t",
+        user_id="u",
+        instance_id="i-auto-interaction",
+        template_id="caretaker_jiezhi",
+    )
+    before = await service.get_instance(
+        tenant_id="t",
+        user_id="u",
+        instance_id="i-auto-interaction",
+    )
+    await service.submit_interaction(
+        PersonaInteractionEvent(
+            tenant_id="t",
+            user_id="u",
+            instance_id="i-auto-interaction",
+            template_id="caretaker_jiezhi",
+            kind="positive_feedback_received",
+            payload={"confidence": 0.9, "strength": 0.8},
+        )
+    )
+    immediate = await service.get_instance(
+        tenant_id="t",
+        user_id="u",
+        instance_id="i-auto-interaction",
+    )
+    assert (
+        immediate.behavioral_knobs["intimacy"].current
+        == before.behavioral_knobs["intimacy"].current
+    )
+
+    await service._worker.drain_once()
+    await service.drain_evolution_queue()
+    after = await service.get_instance(
+        tenant_id="t",
+        user_id="u",
+        instance_id="i-auto-interaction",
+    )
+    assert after.behavioral_knobs["intimacy"].current == pytest.approx(
+        before.behavioral_knobs["intimacy"].current + 0.03
+    )
 
 
 @pytest.mark.asyncio
