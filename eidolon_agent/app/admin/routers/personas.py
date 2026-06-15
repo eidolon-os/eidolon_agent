@@ -6,7 +6,12 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from eidolon_agent.core.errors import NotFoundError
+from eidolon_agent.core.errors import (
+    ConflictError,
+    EvolutionGuardError,
+    NotFoundError,
+    ValidationError,
+)
 from eidolon_agent.core.types.memory import MemoryHit, MemoryKind
 from eidolon_agent.domain.personas import PersonaEvolutionEvent, render_template_markdown
 
@@ -42,6 +47,16 @@ class MockMemoryTriggerRequest(BaseModel):
 
 class RollbackRequest(BaseModel):
     delta_id: str
+
+
+class ReflectRequest(BaseModel):
+    dry_run: bool = False
+    limit: int = Field(default=50, ge=1, le=500)
+
+
+class ProposalDecisionRequest(BaseModel):
+    actor: str = "admin"
+    reason: str | None = None
 
 
 @router.get("/personas/templates")
@@ -156,14 +171,14 @@ async def get_instance(tenant_id: str, user_id: str, instance_id: str, request: 
 
 
 @router.get("/personas/instances/{tenant_id}/{user_id}/{instance_id}/snapshot")
-async def get_instance_snapshot(
-    tenant_id: str, user_id: str, instance_id: str, request: Request
-):
+async def get_instance_snapshot(tenant_id: str, user_id: str, instance_id: str, request: Request):
     """Current snapshot: instance + runtime state + prompt hint."""
     service = _service(request)
     try:
         snapshot = await service.get_snapshot(
-            tenant_id=tenant_id, user_id=user_id, instance_id=instance_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            instance_id=instance_id,
         )
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=exc.message) from exc
@@ -182,6 +197,115 @@ async def list_instance_evolution(
     service = _service(request)
     history = await service.list_evolution_history(instance_id, limit=limit)
     return [r.model_dump(mode="json") for r in history]
+
+
+@router.get("/personas/instances/{tenant_id}/{user_id}/{instance_id}/observations")
+async def list_instance_observations(
+    tenant_id: str,
+    user_id: str,
+    instance_id: str,
+    request: Request,
+    status: str | None = None,
+    limit: int = 50,
+):
+    service = _service(request)
+    observations = await service.list_observations(
+        instance_id,
+        status=status,
+        limit=limit,
+    )
+    return [row.model_dump(mode="json") for row in observations]
+
+
+@router.get("/personas/instances/{tenant_id}/{user_id}/{instance_id}/proposals")
+async def list_instance_proposals(
+    tenant_id: str,
+    user_id: str,
+    instance_id: str,
+    request: Request,
+    status: str | None = None,
+    limit: int = 50,
+):
+    service = _service(request)
+    proposals = await service.list_evolution_proposals(
+        instance_id,
+        status=status,
+        limit=limit,
+    )
+    return [row.model_dump(mode="json") for row in proposals]
+
+
+@router.post("/personas/instances/{tenant_id}/{user_id}/{instance_id}/reflect")
+async def reflect_instance(
+    tenant_id: str,
+    user_id: str,
+    instance_id: str,
+    body: ReflectRequest,
+    request: Request,
+):
+    service = _service(request)
+    try:
+        proposals = await service.run_reflection(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            instance_id=instance_id,
+            dry_run=body.dry_run,
+            limit=body.limit,
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.message) from exc
+    return [row.model_dump(mode="json") for row in proposals]
+
+
+@router.get("/personas/evolution-proposals/{proposal_id}")
+async def get_evolution_proposal(proposal_id: str, request: Request):
+    service = _service(request)
+    try:
+        proposal = await service.get_evolution_proposal(proposal_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.message) from exc
+    return proposal.model_dump(mode="json")
+
+
+@router.post("/personas/evolution-proposals/{proposal_id}/approve")
+async def approve_evolution_proposal(
+    proposal_id: str,
+    body: ProposalDecisionRequest,
+    request: Request,
+):
+    service = _service(request)
+    try:
+        result = await service.approve_evolution_proposal(
+            proposal_id,
+            actor=body.actor,
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.message) from exc
+    except ConflictError as exc:
+        raise HTTPException(status_code=409, detail=exc.message) from exc
+    except (EvolutionGuardError, ValidationError) as exc:
+        raise HTTPException(status_code=422, detail=exc.message) from exc
+    return result.model_dump(mode="json")
+
+
+@router.post("/personas/evolution-proposals/{proposal_id}/reject")
+async def reject_evolution_proposal(
+    proposal_id: str,
+    body: ProposalDecisionRequest,
+    request: Request,
+):
+    service = _service(request)
+    try:
+        proposal = await service.reject_evolution_proposal(
+            proposal_id,
+            actor=body.actor,
+            reason=body.reason,
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.message) from exc
+    except ConflictError as exc:
+        raise HTTPException(status_code=409, detail=exc.message) from exc
+    return proposal.model_dump(mode="json")
 
 
 @router.post("/personas/instances/{tenant_id}/{user_id}/{instance_id}/rollback")
@@ -210,13 +334,9 @@ async def rollback_evolution(
 
 
 @router.delete("/personas/instances/{tenant_id}/{user_id}/{instance_id}")
-async def delete_instance(
-    tenant_id: str, user_id: str, instance_id: str, request: Request
-):
+async def delete_instance(tenant_id: str, user_id: str, instance_id: str, request: Request):
     service = _service(request)
-    await service.delete_instance(
-        tenant_id=tenant_id, user_id=user_id, instance_id=instance_id
-    )
+    await service.delete_instance(tenant_id=tenant_id, user_id=user_id, instance_id=instance_id)
     return {"deleted": instance_id}
 
 

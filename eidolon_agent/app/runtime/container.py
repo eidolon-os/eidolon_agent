@@ -22,6 +22,8 @@ class Container:
     session_factory: object | None = None
 
     persona_instance_store: object | None = None
+    persona_observation_store: object | None = None
+    persona_proposal_store: object | None = None
     personas_service: object | None = None
     # Phase 29.D: operator-authored custom templates (SQL-backed). Distinct
     # from ``personas_service`` which composes the registry + instance store.

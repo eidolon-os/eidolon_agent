@@ -10,8 +10,10 @@ from typing import Protocol, runtime_checkable
 
 from eidolon_agent.core.types.memory import MemoryQueryPlan, MemoryRecallResult
 from eidolon_agent.domain.personas.types import (
+    PersonaEvolutionProposal,
     PersonaEvolutionResult,
     PersonaInstance,
+    PersonaObservation,
     PersonaTemplate,
 )
 
@@ -105,6 +107,40 @@ class PersonaEvolutionRepository(Protocol):
     ) -> list[PersonaEvolutionResult]: ...
 
     async def get(self, delta_id: str) -> PersonaEvolutionResult | None: ...
+
+
+@runtime_checkable
+class PersonaObservationRepository(Protocol):
+    async def add(self, observation: PersonaObservation) -> None: ...
+
+    async def list_for_instance(
+        self,
+        instance_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[PersonaObservation]: ...
+
+    async def get(self, observation_id: str) -> PersonaObservation | None: ...
+
+    async def set_status(self, observation_id: str, status: str) -> None: ...
+
+
+@runtime_checkable
+class PersonaEvolutionProposalRepository(Protocol):
+    async def add(self, proposal: PersonaEvolutionProposal) -> None: ...
+
+    async def save(self, proposal: PersonaEvolutionProposal) -> None: ...
+
+    async def list_for_instance(
+        self,
+        instance_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[PersonaEvolutionProposal]: ...
+
+    async def get(self, proposal_id: str) -> PersonaEvolutionProposal | None: ...
 
 
 class NullPersonaEventPort:

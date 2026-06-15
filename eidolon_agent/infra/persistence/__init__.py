@@ -13,9 +13,6 @@ from eidolon_agent.infra.persistence.engine import (
     ensure_schema,
 )
 from eidolon_agent.infra.persistence.long_task_store import SqlLongTaskStore
-from eidolon_agent.infra.persistence.sql_evolution_history_store import (
-    SqlEvolutionHistoryStore,
-)
 from eidolon_agent.infra.persistence.repositories import (
     SqlChatMessageRepository,
     SqlConversationRepository,
@@ -26,6 +23,13 @@ from eidolon_agent.infra.persistence.sql_custom_template_store import (
     CustomTemplateNotFound,
     SqlCustomTemplateStore,
 )
+from eidolon_agent.infra.persistence.sql_evolution_history_store import (
+    SqlEvolutionHistoryStore,
+)
+from eidolon_agent.infra.persistence.sql_persona_evolution_store import (
+    SqlPersonaEvolutionProposalStore,
+    SqlPersonaObservationStore,
+)
 from eidolon_agent.infra.persistence.sql_persona_instance_store import (
     SqlPersonaInstanceStore,
 )
@@ -33,16 +37,18 @@ from eidolon_agent.infra.persistence.turn_io import build_history_hydrator, buil
 from eidolon_agent.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
 __all__ = [
-    "SqlAlchemyUnitOfWork",
     "CustomTemplateAlreadyExists",
     "CustomTemplateNotFound",
+    "SqlAlchemyUnitOfWork",
     "SqlChatMessageRepository",
     "SqlConversationRepository",
     "SqlCustomTemplateStore",
     "SqlEvolutionHistoryStore",
     "SqlLongTaskRepository",
     "SqlLongTaskStore",
+    "SqlPersonaEvolutionProposalStore",
     "SqlPersonaInstanceStore",
+    "SqlPersonaObservationStore",
     "build_history_hydrator",
     "build_turn_persister",
     "create_engine",

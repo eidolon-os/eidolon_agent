@@ -24,7 +24,9 @@ async def test_admin_personas_external_interface(
 
     listed = client.get("/api/admin/personas/templates")
     assert listed.status_code == 200
-    assert listed.json()[0]["template_id"] == "caretaker_jiezhi"
+    template_ids = {row["template_id"] for row in listed.json()}
+    assert "caretaker_jiezhi" in template_ids
+    assert len(template_ids) == 8
 
     created = client.post(
         "/api/admin/personas/instances",

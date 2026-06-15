@@ -10,10 +10,19 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy import text
 
-from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.config.settings import SqliteSettings
+from eidolon_agent.core.types.messages import ChatMessage, MessageRole
+from eidolon_agent.domain.personas.types import (
+    PersonaEvolutionProposal,
+    PersonaObservation,
+    PersonaProposalPatch,
+)
 from eidolon_agent.infra.persistence import create_engine, create_session_factory, ensure_schema
 from eidolon_agent.infra.persistence.repositories import SqlLongTaskRepository
+from eidolon_agent.infra.persistence.sql_persona_evolution_store import (
+    SqlPersonaEvolutionProposalStore,
+    SqlPersonaObservationStore,
+)
 
 pytestmark = pytest.mark.functional
 
@@ -51,13 +60,21 @@ async def test_chat_message_roundtrip(uow_factory):
         )
         await uow.chat_messages.append(
             turn_id,
-            ChatMessage(id=uuid.uuid4().hex, role=MessageRole.USER, content="你好",
-                       created_at=datetime.now(timezone.utc)),
+            ChatMessage(
+                id=uuid.uuid4().hex,
+                role=MessageRole.USER,
+                content="你好",
+                created_at=datetime.now(timezone.utc),
+            ),
         )
         await uow.chat_messages.append(
             turn_id,
-            ChatMessage(id=uuid.uuid4().hex, role=MessageRole.ASSISTANT, content="嗨",
-                       created_at=datetime.now(timezone.utc)),
+            ChatMessage(
+                id=uuid.uuid4().hex,
+                role=MessageRole.ASSISTANT,
+                content="嗨",
+                created_at=datetime.now(timezone.utc),
+            ),
         )
         await uow.commit()
 
@@ -144,5 +161,73 @@ async def test_ensure_schema_patches_early_long_tasks_table(tmp_path):
         factory = create_session_factory(engine)
         async with factory() as session:
             assert await SqlLongTaskRepository(session).list_for_admin(limit=5) == []
+    finally:
+        await engine.dispose()
+
+
+async def test_persona_observations_and_proposals_roundtrip(tmp_path):
+    engine = create_engine(SqliteSettings(path=tmp_path / "agent.sqlite3"))
+    try:
+        await ensure_schema(engine)
+        factory = create_session_factory(engine)
+        observations = SqlPersonaObservationStore(factory)
+        proposals = SqlPersonaEvolutionProposalStore(factory)
+
+        observation = PersonaObservation(
+            id="obs-1",
+            tenant_id="t",
+            user_id="u",
+            instance_id="i",
+            kind="positive_feedback_received",
+            source="test",
+            strength=0.8,
+            confidence=0.9,
+            summary="user liked the current tone",
+            evidence={"turn_id": "turn-1"},
+            memory_ids=("m1",),
+        )
+        await observations.add(observation)
+        listed_obs = await observations.list_for_instance("i", status="active")
+        assert len(listed_obs) == 1
+        assert listed_obs[0].id == observation.id
+        assert listed_obs[0].evidence == {"turn_id": "turn-1"}
+        assert listed_obs[0].memory_ids == ("m1",)
+
+        await observations.set_status("obs-1", "converted")
+        assert await observations.list_for_instance("i", status="active") == []
+        converted = await observations.get("obs-1")
+        assert converted is not None
+        assert converted.status == "converted"
+
+        proposal = PersonaEvolutionProposal(
+            id="proposal-1",
+            tenant_id="t",
+            user_id="u",
+            instance_id="i",
+            patches=(
+                PersonaProposalPatch(
+                    type="knob_delta",
+                    target="behavioral_knobs.intimacy",
+                    delta=0.03,
+                    rationale="positive feedback",
+                ),
+            ),
+            confidence=0.9,
+            rationale="raise intimacy slightly",
+            evidence_ids=("obs-1",),
+        )
+        await proposals.add(proposal)
+        listed_props = await proposals.list_for_instance("i", status="pending")
+        assert len(listed_props) == 1
+        assert listed_props[0].id == proposal.id
+        assert listed_props[0].patches == proposal.patches
+        assert listed_props[0].evidence_ids == ("obs-1",)
+
+        applied = proposal.model_copy(update={"status": "applied"})
+        await proposals.save(applied)
+        assert await proposals.list_for_instance("i", status="pending") == []
+        saved = await proposals.get("proposal-1")
+        assert saved is not None
+        assert saved.status == "applied"
     finally:
         await engine.dispose()

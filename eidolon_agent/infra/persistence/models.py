@@ -24,6 +24,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -67,9 +68,7 @@ class ConversationRow(Base):
         back_populates="conversation", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (
-        Index("ix_conv_user_started", "tenant_id", "user_id", "started_at"),
-    )
+    __table_args__ = (Index("ix_conv_user_started", "tenant_id", "user_id", "started_at"),)
 
 
 class TurnRow(Base):
@@ -102,9 +101,7 @@ class TurnRow(Base):
         back_populates="turn", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (
-        UniqueConstraint("conversation_id", "seq", name="uq_turn_conv_seq"),
-    )
+    __table_args__ = (UniqueConstraint("conversation_id", "seq", name="uq_turn_conv_seq"),)
 
 
 class ChatMessageRow(Base):
@@ -128,9 +125,7 @@ class ChatMessageRow(Base):
 
     turn: Mapped[TurnRow] = relationship(back_populates="messages")
 
-    __table_args__ = (
-        Index("ix_msg_turn_created", "turn_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_msg_turn_created", "turn_id", "created_at"),)
 
 
 # ---------------------------------------------------------------------------
@@ -164,9 +159,7 @@ class LongTaskRow(Base):
     attachments: Mapped[list | None] = mapped_column(JSON)
     request_payload: Mapped[dict | None] = mapped_column(JSON)
     mementos_session_id: Mapped[str | None] = mapped_column(String(128), index=True)
-    mementos_conversation_id: Mapped[str | None] = mapped_column(
-        String(128), index=True
-    )
+    mementos_conversation_id: Mapped[str | None] = mapped_column(String(128), index=True)
     mementos_run_id: Mapped[str | None] = mapped_column(String(128), index=True)
     mementos_latest_seq: Mapped[int | None] = mapped_column(Integer)
     mementos_workspace_dir: Mapped[str | None] = mapped_column(Text)
@@ -179,9 +172,7 @@ class LongTaskRow(Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     error_payload: Mapped[dict | None] = mapped_column(JSON)
     callback_subject: Mapped[str | None] = mapped_column(String(256))
-    callback_status: Mapped[str] = mapped_column(
-        String(24), default="pending", index=True
-    )
+    callback_status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
     callback_attempts: Mapped[int] = mapped_column(Integer, default=0)
     callback_last_error: Mapped[str | None] = mapped_column(Text)
     callback_delivered_at: Mapped[datetime | None] = mapped_column(DateTime)
@@ -247,6 +238,57 @@ class EvolutionHistoryRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, index=True)
 
 
+class PersonaObservationRow(Base):
+    """Durable evidence for long-term personal-instance evolution."""
+
+    __tablename__ = "persona_observations"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    instance_id: Mapped[str] = mapped_column(String(64), index=True)
+    kind: Mapped[str] = mapped_column(String(96), index=True)
+    source: Mapped[str] = mapped_column(String(64), default="system")
+    status: Mapped[str] = mapped_column(String(24), default="active", index=True)
+    strength: Mapped[float] = mapped_column(Float, default=0.5)
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    evidence: Mapped[dict | None] = mapped_column(JSON)
+    memory_ids: Mapped[list | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, index=True)
+
+    __table_args__ = (
+        Index("ix_persona_obs_instance_created", "instance_id", "created_at"),
+        Index("ix_persona_obs_instance_status", "instance_id", "status"),
+    )
+
+
+class PersonaEvolutionProposalRow(Base):
+    """Reviewable proposal generated from persona observations."""
+
+    __tablename__ = "persona_evolution_proposals"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    instance_id: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    patches: Mapped[list | None] = mapped_column(JSON)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    rationale: Mapped[str] = mapped_column(Text, default="")
+    evidence_ids: Mapped[list | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, index=True)
+    decided_by: Mapped[str | None] = mapped_column(String(128))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime)
+    decision_reason: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        Index("ix_persona_prop_instance_created", "instance_id", "created_at"),
+        Index("ix_persona_prop_instance_status", "instance_id", "status"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Persona instances (per-user overlay snapshots)
 # ---------------------------------------------------------------------------
@@ -298,9 +340,7 @@ class PersonaTemplateCustomRow(Base):
     __tablename__ = "persona_templates_custom"
 
     template_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    tenant_id: Mapped[str] = mapped_column(
-        String(64), default="default", index=True
-    )
+    tenant_id: Mapped[str] = mapped_column(String(64), default="default", index=True)
     display_name: Mapped[str] = mapped_column(String(255))
     archetype: Mapped[str] = mapped_column(String(64), default="custom")
     # The raw YAML text. Stored verbatim so the operator can round-trip
@@ -322,7 +362,9 @@ __all__ = [
     "DeviceRow",
     "EvolutionHistoryRow",
     "LongTaskRow",
+    "PersonaEvolutionProposalRow",
     "PersonaInstanceRow",
+    "PersonaObservationRow",
     "PersonaTemplateCustomRow",
     "TurnRow",
 ]

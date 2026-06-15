@@ -58,7 +58,9 @@ from eidolon_agent.infra.observability import configure_logging
 from eidolon_agent.infra.persistence import (
     SqlEvolutionHistoryStore,
     SqlLongTaskStore,
+    SqlPersonaEvolutionProposalStore,
     SqlPersonaInstanceStore,
+    SqlPersonaObservationStore,
     build_history_hydrator,
     build_turn_persister,
     create_engine,
@@ -127,6 +129,7 @@ async def build_application(
     from eidolon_agent.infra.persistence.sql_custom_template_store import (
         SqlCustomTemplateStore,
     )
+
     custom_template_store = SqlCustomTemplateStore(session_factory)
     tpl_reg = PersonaTemplateRegistry(
         Path(settings.persona.templates_dir),
@@ -140,15 +143,15 @@ async def build_application(
     # script. ``persona.storage`` in config lets ops fall back to YAML for
     # diagnostic / forensic scenarios.
     if settings.persona.storage == "yaml":
-        instance_store: object = YamlPersonaInstanceStore(
-            Path(settings.persona.instances_dir)
-        )
+        instance_store: object = YamlPersonaInstanceStore(Path(settings.persona.instances_dir))
     else:
         instance_store = SqlPersonaInstanceStore(session_factory)
     # One adapter satisfies both PersonaAuditPort (write) and
     # PersonaEvolutionRepository (read) so worker writes audit rows AND admin
     # can paginate them. NullPersonaAuditPort is no longer used in production.
     evolution_history = SqlEvolutionHistoryStore(session_factory)
+    persona_observations = SqlPersonaObservationStore(session_factory)
+    persona_proposals = SqlPersonaEvolutionProposalStore(session_factory)
     personas_service = PersonasService(
         registry=tpl_reg,
         instances=instance_store,
@@ -157,10 +160,14 @@ async def build_application(
         event_port=_PersonasEventAdapter(container.event_bus),
         audit_port=evolution_history,
         evolution_repo=evolution_history,
+        observation_repo=persona_observations,
+        proposal_repo=persona_proposals,
         memory_timeout_s=settings.memory.recall_timeout_s,
     )
     await personas_service.start()
     container.persona_instance_store = instance_store
+    container.persona_observation_store = persona_observations
+    container.persona_proposal_store = persona_proposals
     container.personas_service = personas_service
 
     # 7. Cross-cutting services -----------------------------------------------

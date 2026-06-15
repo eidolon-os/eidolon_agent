@@ -312,6 +312,63 @@ class PersonaEvolutionEvent(BaseModel):
     created_at: datetime | None = None
 
 
+class PersonaObservation(BaseModel):
+    """Evidence about how a personal instance should evolve.
+
+    Observations are durable evidence, not direct persona edits. The reflection
+    step may convert several observations into a bounded proposal.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    tenant_id: str
+    user_id: str
+    instance_id: str
+    kind: str
+    source: str = "system"
+    status: Literal["active", "dismissed", "converted"] = "active"
+    strength: float = Field(0.5, ge=0.0, le=1.0)
+    confidence: float = Field(0.5, ge=0.0, le=1.0)
+    summary: str = ""
+    evidence: dict = Field(default_factory=dict)
+    memory_ids: tuple[str, ...] = ()
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class PersonaProposalPatch(BaseModel):
+    """A narrow, auditable change proposed for a persona overlay."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    type: Literal["knob_delta", "memory_policy_hint", "style_preference_hint"]
+    target: str
+    delta: float | None = Field(default=None, ge=-1.0, le=1.0)
+    value: str | None = None
+    rationale: str = ""
+
+
+class PersonaEvolutionProposal(BaseModel):
+    """Admin-reviewable evolution proposal for a personal instance."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    tenant_id: str
+    user_id: str
+    instance_id: str
+    status: Literal["pending", "applied", "rejected"] = "pending"
+    patches: tuple[PersonaProposalPatch, ...] = ()
+    confidence: float = Field(0.0, ge=0.0, le=1.0)
+    rationale: str = ""
+    evidence_ids: tuple[str, ...] = ()
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    decided_by: str | None = None
+    decided_at: datetime | None = None
+    decision_reason: str | None = None
+
+
 class PersonaInteractionEvent(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

@@ -12,17 +12,58 @@ from eidolon_agent.domain.personas import (
 )
 from eidolon_agent.domain.personas.evolution import PersonaEvolutionEngine
 from eidolon_agent.domain.personas.memory_adapter import PersonaMemoryAdapter
-from eidolon_agent.domain.personas.types import PersonaEvolutionEvent
+from eidolon_agent.domain.personas.types import (
+    PersonaEvolutionEvent,
+    PersonaEvolutionProposal,
+    PersonaObservation,
+    PersonaProposalPatch,
+)
 
 pytestmark = pytest.mark.functional
+
 
 @pytest.mark.asyncio
 async def test_registry_loads_canonical_template(canonical_template_registry):
     summaries = canonical_template_registry.list_templates()
-    assert [s.template_id for s in summaries] == ["caretaker_jiezhi"]
+    assert [s.template_id for s in summaries] == [
+        "accountability_partner_lixing",
+        "caretaker_jiezhi",
+        "quiet_listener_xibai",
+        "reflective_mirror_qinglan",
+        "secure_base_anyu",
+        "spark_companion_yuguang",
+        "story_weaver_lanxu",
+        "strategic_mentor_xingqiao",
+    ]
     template = canonical_template_registry.get("caretaker_jiezhi")
     assert template.metadata.name == "解之"
     assert "intimacy" in template.behavioral_knobs
+
+
+@pytest.mark.asyncio
+async def test_all_builtin_templates_compile_with_medium_length_style(personas_service):
+    summaries = await personas_service.list_templates()
+    seen_instructions: set[str] = set()
+    for summary in summaries:
+        instance_id = f"i-{summary.template_id}"
+        await personas_service.create_instance(
+            tenant_id="t",
+            user_id="u",
+            instance_id=instance_id,
+            template_id=summary.template_id,
+        )
+        compiled = await personas_service.compile_prompt(
+            tenant_id="t",
+            user_id="u",
+            instance_id=instance_id,
+            user_text="今天有点累",
+        )
+        assert "默认回复保持中等长度" in compiled.system_prompt
+        assert "避免一句话敷衍" in compiled.system_prompt
+        assert "不写长篇报告式回答" in compiled.system_prompt
+        assert compiled.debug_trace
+        seen_instructions.add(compiled.style_block.splitlines()[1])
+    assert len(seen_instructions) >= 8
 
 
 @pytest.mark.asyncio
@@ -48,7 +89,9 @@ async def test_instance_is_full_copy(canonical_template_registry, tmp_path):
     loaded = await store.load("t", "u", "i")
     assert loaded == instance
     assert loaded.origin_template_id == "caretaker_jiezhi"
-    assert loaded.behavioral_knobs["intimacy"].current == template.behavioral_knobs["intimacy"].current
+    assert (
+        loaded.behavioral_knobs["intimacy"].current == template.behavioral_knobs["intimacy"].current
+    )
 
 
 @pytest.mark.asyncio
@@ -196,6 +239,148 @@ async def test_memory_adapter_degrades_without_metadata(canonical_template_regis
     assert adapted.content == "普通记忆"
     assert adapted.degraded is True
     assert adapted.instructions == ()
+
+
+class _ObservationRepo:
+    def __init__(self) -> None:
+        self.rows: dict[str, PersonaObservation] = {}
+
+    async def add(self, observation: PersonaObservation) -> None:
+        self.rows[observation.id] = observation
+
+    async def list_for_instance(
+        self,
+        instance_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[PersonaObservation]:
+        rows = [row for row in self.rows.values() if row.instance_id == instance_id]
+        if status is not None:
+            rows = [row for row in rows if row.status == status]
+        return rows[:limit]
+
+    async def get(self, observation_id: str) -> PersonaObservation | None:
+        return self.rows.get(observation_id)
+
+    async def set_status(self, observation_id: str, status: str) -> None:
+        row = self.rows.get(observation_id)
+        if row is not None:
+            self.rows[observation_id] = row.model_copy(update={"status": status})
+
+
+class _ProposalRepo:
+    def __init__(self) -> None:
+        self.rows: dict[str, PersonaEvolutionProposal] = {}
+
+    async def add(self, proposal: PersonaEvolutionProposal) -> None:
+        self.rows[proposal.id] = proposal
+
+    async def save(self, proposal: PersonaEvolutionProposal) -> None:
+        self.rows[proposal.id] = proposal
+
+    async def list_for_instance(
+        self,
+        instance_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[PersonaEvolutionProposal]:
+        rows = [row for row in self.rows.values() if row.instance_id == instance_id]
+        if status is not None:
+            rows = [row for row in rows if row.status == status]
+        return rows[:limit]
+
+    async def get(self, proposal_id: str) -> PersonaEvolutionProposal | None:
+        return self.rows.get(proposal_id)
+
+
+@pytest.mark.asyncio
+async def test_reflection_proposal_approval_applies_clamped_knob_delta(
+    canonical_template_registry,
+    persona_instance_store,
+):
+    from eidolon_agent.domain.personas.service import PersonasService
+
+    observations = _ObservationRepo()
+    proposals = _ProposalRepo()
+    service = PersonasService(
+        registry=canonical_template_registry,
+        instances=persona_instance_store,
+        observation_repo=observations,
+        proposal_repo=proposals,
+    )
+    await service.create_instance(
+        tenant_id="t",
+        user_id="u",
+        instance_id="i-prop",
+        template_id="strategic_mentor_xingqiao",
+    )
+    await service.record_observation(
+        PersonaObservation(
+            id="obs-1",
+            tenant_id="t",
+            user_id="u",
+            instance_id="i-prop",
+            kind="goal_progress_shared",
+            confidence=0.9,
+            strength=0.8,
+        )
+    )
+    generated = await service.run_reflection(
+        tenant_id="t",
+        user_id="u",
+        instance_id="i-prop",
+    )
+    assert generated
+    assert generated[0].status == "pending"
+    before = await service.get_instance(tenant_id="t", user_id="u", instance_id="i-prop")
+    result = await service.approve_evolution_proposal(generated[0].id)
+    after = await service.get_instance(tenant_id="t", user_id="u", instance_id="i-prop")
+    assert result.applied is True
+    assert after.overlay_version == before.overlay_version + 1
+    assert (
+        after.behavioral_knobs["structure"].current > before.behavioral_knobs["structure"].current
+    )
+    assert proposals.rows[generated[0].id].status == "applied"
+
+
+@pytest.mark.asyncio
+async def test_proposal_rejects_non_knob_targets(
+    canonical_template_registry,
+    persona_instance_store,
+):
+    from eidolon_agent.core.errors import EvolutionGuardError
+    from eidolon_agent.domain.personas.service import PersonasService
+
+    proposals = _ProposalRepo()
+    service = PersonasService(
+        registry=canonical_template_registry,
+        instances=persona_instance_store,
+        proposal_repo=proposals,
+    )
+    await service.create_instance(
+        tenant_id="t",
+        user_id="u",
+        instance_id="i-bad-prop",
+        template_id="caretaker_jiezhi",
+    )
+    bad = PersonaEvolutionProposal(
+        id="proposal-bad",
+        tenant_id="t",
+        user_id="u",
+        instance_id="i-bad-prop",
+        patches=(
+            PersonaProposalPatch(
+                type="knob_delta",
+                target="identity_core.values",
+                delta=0.5,
+            ),
+        ),
+    )
+    await proposals.add(bad)
+    with pytest.raises(EvolutionGuardError):
+        await service.approve_evolution_proposal("proposal-bad")
 
 
 def _hit(content: str, *, metadata: dict | None = None) -> MemoryHit:

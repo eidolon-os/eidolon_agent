@@ -10,6 +10,7 @@ from eidolon_agent.domain.personas.evolution import PersonaEvolutionEngine
 from eidolon_agent.domain.personas.instance_store import YamlPersonaInstanceStore
 from eidolon_agent.domain.personas.memory_adapter import PersonaMemoryAdapter
 from eidolon_agent.domain.personas.ports import PersonaInstanceStore
+from eidolon_agent.domain.personas.reflection import PersonaReflectionEngine
 from eidolon_agent.domain.personas.registry import PersonaTemplateRegistry
 from eidolon_agent.domain.personas.runtime_state import PersonaRuntimeStateStore
 from eidolon_agent.domain.personas.service import PersonasService, build_default_personas_service
@@ -21,11 +22,14 @@ from eidolon_agent.domain.personas.types import (
     Energy,
     MoodVector,
     PersonaEvolutionEvent,
+    PersonaEvolutionProposal,
     PersonaEvolutionResult,
     PersonaInstance,
     PersonaInteractionEvent,
     PersonaMockResult,
+    PersonaObservation,
     PersonaProactiveDecision,
+    PersonaProposalPatch,
     PersonaRuntimeState,
     PersonaSignalInput,
     PersonaSnapshot,
@@ -42,13 +46,17 @@ __all__ = [
     "PersonaCompiler",
     "PersonaEvolutionEngine",
     "PersonaEvolutionEvent",
+    "PersonaEvolutionProposal",
     "PersonaEvolutionResult",
     "PersonaInstance",
     "PersonaInstanceStore",
     "PersonaInteractionEvent",
     "PersonaMemoryAdapter",
     "PersonaMockResult",
+    "PersonaObservation",
     "PersonaProactiveDecision",
+    "PersonaProposalPatch",
+    "PersonaReflectionEngine",
     "PersonaRuntimeState",
     "PersonaRuntimeStateStore",
     "PersonaSignalInput",

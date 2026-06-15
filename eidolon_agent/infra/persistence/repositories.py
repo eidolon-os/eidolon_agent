@@ -22,14 +22,22 @@ from eidolon_agent.core.types.long_task import (
 )
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnResult
-from eidolon_agent.domain.personas.types import PersonaEvolutionResult, PersonaInstance
+from eidolon_agent.domain.personas.types import (
+    PersonaEvolutionProposal,
+    PersonaEvolutionResult,
+    PersonaInstance,
+    PersonaObservation,
+    PersonaProposalPatch,
+)
 from eidolon_agent.infra.persistence.models import (
     ChatMessageRow,
     ConversationRow,
     DeviceRow,
     EvolutionHistoryRow,
     LongTaskRow,
+    PersonaEvolutionProposalRow,
     PersonaInstanceRow,
+    PersonaObservationRow,
     TurnRow,
 )
 
@@ -76,12 +84,16 @@ class SqlChatMessageRepository:
 
     async def list_for_turn(self, turn_id: str) -> list[ChatMessage]:
         rows = (
-            await self._session.execute(
-                select(ChatMessageRow)
-                .where(ChatMessageRow.turn_id == turn_id)
-                .order_by(ChatMessageRow.created_at)
+            (
+                await self._session.execute(
+                    select(ChatMessageRow)
+                    .where(ChatMessageRow.turn_id == turn_id)
+                    .order_by(ChatMessageRow.created_at)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [_row_to_message(r) for r in rows]
 
     async def list_for_conversation(
@@ -367,16 +379,20 @@ class SqlLongTaskRepository:
         limit: int = 50,
     ) -> list[LongTaskRecord]:
         rows = (
-            await self._session.execute(
-                select(LongTaskRow)
-                .where(
-                    LongTaskRow.tenant_id == tenant_id,
-                    LongTaskRow.user_id == user_id,
+            (
+                await self._session.execute(
+                    select(LongTaskRow)
+                    .where(
+                        LongTaskRow.tenant_id == tenant_id,
+                        LongTaskRow.user_id == user_id,
+                    )
+                    .order_by(LongTaskRow.created_at.desc())
+                    .limit(limit)
                 )
-                .order_by(LongTaskRow.created_at.desc())
-                .limit(limit)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [_row_to_long_task(row) for row in rows]
 
     async def list_for_admin(
@@ -404,10 +420,10 @@ class SqlLongTaskRepository:
         if before is not None:
             stmt = stmt.where(LongTaskRow.created_at < before)
         rows = (
-            await self._session.execute(
-                stmt.order_by(LongTaskRow.created_at.desc()).limit(limit)
-            )
-        ).scalars().all()
+            (await self._session.execute(stmt.order_by(LongTaskRow.created_at.desc()).limit(limit)))
+            .scalars()
+            .all()
+        )
         return [_row_to_long_task(row) for row in rows]
 
     async def find_latest_mementos_session(
@@ -746,13 +762,17 @@ class SqlEvolutionHistoryRepository:
         self, instance_id: str, *, limit: int = 50
     ) -> list[PersonaEvolutionResult]:
         rows = (
-            await self._session.execute(
-                select(EvolutionHistoryRow)
-                .where(EvolutionHistoryRow.instance_id == instance_id)
-                .order_by(EvolutionHistoryRow.created_at.desc())
-                .limit(limit)
+            (
+                await self._session.execute(
+                    select(EvolutionHistoryRow)
+                    .where(EvolutionHistoryRow.instance_id == instance_id)
+                    .order_by(EvolutionHistoryRow.created_at.desc())
+                    .limit(limit)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [_row_to_evolution(r) for r in rows]
 
     async def get(self, delta_id: str) -> PersonaEvolutionResult | None:
@@ -770,6 +790,86 @@ def _row_to_evolution(r: EvolutionHistoryRow) -> PersonaEvolutionResult:
     )
 
 
+class SqlPersonaObservationRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, observation: PersonaObservation) -> None:
+        self._session.add(_observation_to_row(observation))
+
+    async def list_for_instance(
+        self,
+        instance_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[PersonaObservation]:
+        stmt = (
+            select(PersonaObservationRow)
+            .where(PersonaObservationRow.instance_id == instance_id)
+            .order_by(PersonaObservationRow.created_at.desc())
+            .limit(limit)
+        )
+        if status is not None:
+            stmt = stmt.where(PersonaObservationRow.status == status)
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [_row_to_observation(row) for row in rows]
+
+    async def get(self, observation_id: str) -> PersonaObservation | None:
+        row = await self._session.get(PersonaObservationRow, observation_id)
+        return _row_to_observation(row) if row is not None else None
+
+    async def set_status(self, observation_id: str, status: str) -> None:
+        row = await self._session.get(PersonaObservationRow, observation_id)
+        if row is not None:
+            row.status = status
+
+
+class SqlPersonaEvolutionProposalRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, proposal: PersonaEvolutionProposal) -> None:
+        self._session.add(_proposal_to_row(proposal))
+
+    async def save(self, proposal: PersonaEvolutionProposal) -> None:
+        row = await self._session.get(PersonaEvolutionProposalRow, proposal.id)
+        if row is None:
+            self._session.add(_proposal_to_row(proposal))
+            return
+        row.status = proposal.status
+        row.patches = [patch.model_dump(mode="json") for patch in proposal.patches]
+        row.confidence = proposal.confidence
+        row.rationale = proposal.rationale
+        row.evidence_ids = list(proposal.evidence_ids)
+        row.updated_at = proposal.updated_at
+        row.decided_by = proposal.decided_by
+        row.decided_at = proposal.decided_at
+        row.decision_reason = proposal.decision_reason
+
+    async def list_for_instance(
+        self,
+        instance_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[PersonaEvolutionProposal]:
+        stmt = (
+            select(PersonaEvolutionProposalRow)
+            .where(PersonaEvolutionProposalRow.instance_id == instance_id)
+            .order_by(PersonaEvolutionProposalRow.created_at.desc())
+            .limit(limit)
+        )
+        if status is not None:
+            stmt = stmt.where(PersonaEvolutionProposalRow.status == status)
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [_row_to_proposal(row) for row in rows]
+
+    async def get(self, proposal_id: str) -> PersonaEvolutionProposal | None:
+        row = await self._session.get(PersonaEvolutionProposalRow, proposal_id)
+        return _row_to_proposal(row) if row is not None else None
+
+
 class SqlPersonaInstanceRepository:
     """CRUD for the ``persona_instances`` table.
 
@@ -781,27 +881,19 @@ class SqlPersonaInstanceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def get(
-        self, tenant_id: str, user_id: str, instance_id: str
-    ) -> PersonaInstance | None:
+    async def get(self, tenant_id: str, user_id: str, instance_id: str) -> PersonaInstance | None:
         row = await self._session.get(PersonaInstanceRow, instance_id)
         if row is None or row.tenant_id != tenant_id or row.user_id != user_id:
             return None
         return _row_to_persona_instance(row)
 
-    async def load(
-        self, tenant_id: str, user_id: str, instance_id: str
-    ) -> PersonaInstance:
+    async def load(self, tenant_id: str, user_id: str, instance_id: str) -> PersonaInstance:
         instance = await self.get(tenant_id, user_id, instance_id)
         if instance is None:
-            raise NotFoundError(
-                f"persona instance not found: {tenant_id}/{user_id}/{instance_id}"
-            )
+            raise NotFoundError(f"persona instance not found: {tenant_id}/{user_id}/{instance_id}")
         return instance
 
-    async def upsert(
-        self, instance: PersonaInstance, *, mark_active: bool = True
-    ) -> None:
+    async def upsert(self, instance: PersonaInstance, *, mark_active: bool = True) -> None:
         now = datetime.now(timezone.utc)
         row = await self._session.get(PersonaInstanceRow, instance.instance_id)
         overlay = instance.model_dump(mode="json")
@@ -838,17 +930,19 @@ class SqlPersonaInstanceRepository:
             )
         )
 
-    async def list_all(
-        self, *, limit: int = 500, offset: int = 0
-    ) -> list[PersonaInstance]:
+    async def list_all(self, *, limit: int = 500, offset: int = 0) -> list[PersonaInstance]:
         rows = (
-            await self._session.execute(
-                select(PersonaInstanceRow)
-                .order_by(PersonaInstanceRow.last_active_at.desc().nulls_last())
-                .limit(limit)
-                .offset(offset)
+            (
+                await self._session.execute(
+                    select(PersonaInstanceRow)
+                    .order_by(PersonaInstanceRow.last_active_at.desc().nulls_last())
+                    .limit(limit)
+                    .offset(offset)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [_row_to_persona_instance(r) for r in rows]
 
     async def touch_last_active(self, instance_id: str) -> None:
@@ -861,11 +955,87 @@ def _row_to_persona_instance(row: PersonaInstanceRow) -> PersonaInstance:
     return PersonaInstance.model_validate(row.overlay_json)
 
 
+def _observation_to_row(observation: PersonaObservation) -> PersonaObservationRow:
+    return PersonaObservationRow(
+        id=observation.id,
+        tenant_id=observation.tenant_id,
+        user_id=observation.user_id,
+        instance_id=observation.instance_id,
+        kind=observation.kind,
+        source=observation.source,
+        status=observation.status,
+        strength=observation.strength,
+        confidence=observation.confidence,
+        summary=observation.summary,
+        evidence=observation.evidence,
+        memory_ids=list(observation.memory_ids),
+        created_at=observation.created_at,
+    )
+
+
+def _row_to_observation(row: PersonaObservationRow) -> PersonaObservation:
+    return PersonaObservation(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        user_id=row.user_id,
+        instance_id=row.instance_id,
+        kind=row.kind,
+        source=row.source,
+        status=row.status,
+        strength=row.strength,
+        confidence=row.confidence,
+        summary=row.summary or "",
+        evidence=dict(row.evidence or {}),
+        memory_ids=tuple(row.memory_ids or ()),
+        created_at=row.created_at,
+    )
+
+
+def _proposal_to_row(proposal: PersonaEvolutionProposal) -> PersonaEvolutionProposalRow:
+    return PersonaEvolutionProposalRow(
+        id=proposal.id,
+        tenant_id=proposal.tenant_id,
+        user_id=proposal.user_id,
+        instance_id=proposal.instance_id,
+        status=proposal.status,
+        patches=[patch.model_dump(mode="json") for patch in proposal.patches],
+        confidence=proposal.confidence,
+        rationale=proposal.rationale,
+        evidence_ids=list(proposal.evidence_ids),
+        created_at=proposal.created_at,
+        updated_at=proposal.updated_at,
+        decided_by=proposal.decided_by,
+        decided_at=proposal.decided_at,
+        decision_reason=proposal.decision_reason,
+    )
+
+
+def _row_to_proposal(row: PersonaEvolutionProposalRow) -> PersonaEvolutionProposal:
+    return PersonaEvolutionProposal(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        user_id=row.user_id,
+        instance_id=row.instance_id,
+        status=row.status,
+        patches=tuple(PersonaProposalPatch.model_validate(patch) for patch in (row.patches or ())),
+        confidence=row.confidence,
+        rationale=row.rationale or "",
+        evidence_ids=tuple(row.evidence_ids or ()),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        decided_by=row.decided_by,
+        decided_at=row.decided_at,
+        decision_reason=row.decision_reason,
+    )
+
+
 __all__ = [
     "SqlChatMessageRepository",
     "SqlConversationRepository",
     "SqlDeviceRepository",
     "SqlEvolutionHistoryRepository",
     "SqlLongTaskRepository",
+    "SqlPersonaEvolutionProposalRepository",
     "SqlPersonaInstanceRepository",
+    "SqlPersonaObservationRepository",
 ]
