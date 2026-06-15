@@ -20,12 +20,14 @@ import logging
 import secrets
 from pathlib import Path
 
+from eidolon_sdk.runtime import PairingTokenVerifier
+
 from eidolon_agent.app.admin import build_admin_app
 from eidolon_agent.app.runtime.container import Container
 from eidolon_agent.app.transport.grpc import GrpcServer
 from eidolon_agent.app.transport.grpc.chat_servicer import EidolonAgentServicer
 from eidolon_agent.app.transport.http import build_http_app
-from eidolon_agent.app.transport.pairing import PairingCoordinator, PairingTokenVerifier
+from eidolon_agent.app.transport.pairing import PairingCoordinator
 from eidolon_agent.config.settings import Settings, load_settings
 from eidolon_agent.core.types.tool import Permission
 from eidolon_agent.domain.agent.companion import CompanionAgent

@@ -5,26 +5,24 @@ Two layers under test:
 1. Endpoint: ``POST /api/admin/users/{user_id}/revoke-sessions`` writes
    ``revoked.user.<user_id>`` to the DEVICE_REVOCATIONS KV.
 2. Verifier: ``PairingTokenVerifier.verify`` checks this key on every
-   call and raises ``TokenRevokedError`` when present — regardless of
+   call and raises ``RuntimeTokenRevokedError`` when present — regardless of
    how recently the token was minted.
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
-
 import httpx
 import pytest
-from fastapi import FastAPI
-
-from eidolon_agent.app.admin.routers import devices as devices_router
-from eidolon_agent.app.transport.pairing.token import (
+from eidolon_sdk.runtime import (
     PairingTokenVerifier,
+    RuntimeTokenRevokedError,
     device_revocation_keys,
     sign_device_token,
     user_revocation_keys,
 )
-from eidolon_agent.core.errors import TokenRevokedError
+from fastapi import FastAPI
+
+from eidolon_agent.app.admin.routers import devices as devices_router
 
 pytestmark = pytest.mark.functional
 
@@ -108,7 +106,7 @@ async def test_revoke_user_sessions_503_when_kv_missing() -> None:
 async def test_verifier_rejects_token_after_user_revoke() -> None:
     """The whole point of this phase: a freshly-minted, not-expired
     token whose ``user_id`` is in ``revoked.user.<id>`` must fail
-    verification with ``TokenRevokedError``.
+    verification with ``RuntimeTokenRevokedError``.
 
     Mirrors the runtime flow: channel signed a JWT for manson; admin
     operator then revoked manson; next chat() turn that calls
@@ -137,7 +135,7 @@ async def test_verifier_rejects_token_after_user_revoke() -> None:
     assert r.status_code == 200
 
     # Same token now rejected.
-    with pytest.raises(TokenRevokedError) as exc_info:
+    with pytest.raises(RuntimeTokenRevokedError) as exc_info:
         await verifier.verify(token)
     assert "manson" in str(exc_info.value)
 
@@ -164,7 +162,7 @@ async def test_verifier_user_revoke_does_not_affect_other_users() -> None:
     ) as client:
         await client.post("/api/admin/users/manson/revoke-sessions")
 
-    with pytest.raises(TokenRevokedError):
+    with pytest.raises(RuntimeTokenRevokedError):
         await verifier.verify(manson_token)
     # default still works.
     verified = await verifier.verify(default_token)
@@ -186,7 +184,7 @@ async def test_verifier_device_level_revoke_still_works() -> None:
     # this scope yet — comes from pairing flow today).
     await kv.put("revoked.dev-x", b"manual-test")
 
-    with pytest.raises(TokenRevokedError) as exc_info:
+    with pytest.raises(RuntimeTokenRevokedError) as exc_info:
         await verifier.verify(token)
     assert "dev-x" in str(exc_info.value)
 
@@ -224,6 +222,6 @@ async def test_verifier_rejects_mac_device_id_with_encoded_revocation_key() -> N
     )
     await kv.put(device_revocation_keys(device_id)[0], b"manual-test")
 
-    with pytest.raises(TokenRevokedError) as exc_info:
+    with pytest.raises(RuntimeTokenRevokedError) as exc_info:
         await verifier.verify(token)
     assert device_id in str(exc_info.value)

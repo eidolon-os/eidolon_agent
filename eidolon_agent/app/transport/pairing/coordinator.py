@@ -9,7 +9,8 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from eidolon_agent.app.transport.pairing.token import VerifiedDevice, sign_device_token
+from eidolon_sdk.runtime import VerifiedDevice, sign_device_token
+
 from eidolon_agent.core.errors import NotFoundError, UnauthenticatedError
 
 _ALPHABET = string.ascii_uppercase + string.digits  # no lowercase to avoid confusion

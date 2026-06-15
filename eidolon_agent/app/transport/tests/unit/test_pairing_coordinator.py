@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from eidolon_sdk.runtime import PairingTokenVerifier, RuntimeUnauthenticatedError
 
-from eidolon_agent.app.transport.pairing import PairingCoordinator, PairingTokenVerifier
+from eidolon_agent.app.transport.pairing import PairingCoordinator
 from eidolon_agent.core.errors import NotFoundError, UnauthenticatedError
 
 pytestmark = pytest.mark.unit
@@ -102,5 +103,5 @@ async def test_token_verifier_rejects_wrong_secret() -> None:
     )
     issued = await c.exchange(code=rec.code, device_id=None)
     bad = PairingTokenVerifier(secret="some-other-32+chars-different-secret-x", algorithm="HS256")
-    with pytest.raises(UnauthenticatedError):
+    with pytest.raises(RuntimeUnauthenticatedError):
         await bad.verify(issued.token)

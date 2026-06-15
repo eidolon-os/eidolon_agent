@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from eidolon_sdk.runtime import (
+    RuntimeTokenRevokedError,
+    RuntimeUnauthenticatedError,
+    user_revocation_keys,
+)
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
-
-from eidolon_agent.app.transport.pairing.token import user_revocation_keys
-from eidolon_agent.core.errors import TokenRevokedError, UnauthenticatedError
 
 router = APIRouter()
 
@@ -55,7 +57,7 @@ async def revoke_user_sessions(user_id: str, request: Request) -> RevokeUserSess
     Writes ``revoked.user.<user_id>`` to the ``DEVICE_REVOCATIONS`` KV
     bucket. ``PairingTokenVerifier.verify`` checks this key on every
     gRPC call — so the next chat() turn for any session of this user
-    fails with ``TokenRevokedError`` → LK session aborts → web client
+    fails with ``RuntimeTokenRevokedError`` → LK session aborts → web client
     sees ``transport.sidecar_unavailable`` and must re-connect (which
     will fail at hub /api/config 404 if admin also disabled the user).
 
@@ -94,9 +96,9 @@ async def rotate_device_token(device_id: str, request: Request) -> RotateDeviceT
     token = _bearer_token(request)
     try:
         verified = await verifier.verify(token)
-    except TokenRevokedError as exc:
+    except RuntimeTokenRevokedError as exc:
         raise HTTPException(status_code=401, detail=exc.message) from exc
-    except UnauthenticatedError as exc:
+    except RuntimeUnauthenticatedError as exc:
         raise HTTPException(status_code=401, detail=exc.message) from exc
 
     if verified.device_id != device_id:
