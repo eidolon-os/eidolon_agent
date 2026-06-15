@@ -22,8 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import grpc
 import httpx
+from eidolon_sdk.grpc import authorization_metadata, create_aio_channel
 
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
 from eidolon_agent.infra.replay import load_replay_scenarios, render_replay_markdown
@@ -195,7 +195,7 @@ async def _issue_token(
     )
     resp.raise_for_status()
     code = resp.json()["code"]
-    async with grpc.aio.insecure_channel(grpc_target) as channel:
+    async with create_aio_channel(grpc_target) as channel:
         stub = pbg.EidolonAgentStub(channel)
         exchanged = await stub.ExchangePairingCode(
             pb.ExchangeRequest(
@@ -220,9 +220,9 @@ async def _run_scenarios(
     admin_delay_s: float,
     admin_timeout_s: float,
 ) -> dict[str, Any]:
-    metadata = (("authorization", f"Bearer {token}"),)
+    metadata = authorization_metadata(token)
     scenario_reports = []
-    async with grpc.aio.insecure_channel(grpc_target) as channel:
+    async with create_aio_channel(grpc_target) as channel:
         stub = pbg.EidolonAgentStub(channel)
         for scenario in scenarios:
             scenario_id = str(scenario.get("id") or uuid.uuid4().hex[:8])

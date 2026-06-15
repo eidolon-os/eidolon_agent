@@ -20,8 +20,8 @@ import os
 import sys
 import uuid
 
-import grpc
 import httpx
+from eidolon_sdk.grpc import authorization_metadata, create_aio_channel
 
 # Make the in-repo proto package importable without installing the wheel.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -47,7 +47,7 @@ async def main(text: str, http_base: str, grpc_target: str) -> None:
         )
 
     # 3. Exchange code → token over gRPC (no auth needed)
-    async with grpc.aio.insecure_channel(grpc_target) as channel:
+    async with create_aio_channel(grpc_target) as channel:
         stub = pbg.EidolonAgentStub(channel)
         exch = await stub.ExchangePairingCode(
             pb.ExchangeRequest(pairing_code=code, device_id="dev-sim", device_name="LiveKit sim")
@@ -55,7 +55,7 @@ async def main(text: str, http_base: str, grpc_target: str) -> None:
         print(f"got device_token (len={len(exch.device_token)}); user_id={exch.user_id}")
 
         # 4. Open Chat bidi
-        metadata = (("authorization", f"Bearer {exch.device_token}"),)
+        metadata = authorization_metadata(exch.device_token)
 
         async def _requests():
             yield pb.ChatRequest(

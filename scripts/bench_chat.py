@@ -30,8 +30,8 @@ import sys
 import time
 import uuid
 
-import grpc
 import httpx
+from eidolon_sdk.grpc import authorization_metadata, create_aio_channel
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -68,7 +68,7 @@ async def _issue_token(
     r.raise_for_status()
     code = r.json()["code"]
 
-    async with grpc.aio.insecure_channel(grpc_target) as channel:
+    async with create_aio_channel(grpc_target) as channel:
         stub = pbg.EidolonAgentStub(channel)
         exch = await stub.ExchangePairingCode(
             pb.ExchangeRequest(
@@ -85,11 +85,11 @@ async def _bench_one_turn_per_stream(
 ) -> list[dict]:
     """Open a fresh bidi stream per turn — matches the 'channel reconnects' case."""
     results = []
-    metadata = (("authorization", f"Bearer {token}"),)
+    metadata = authorization_metadata(token)
     for i in range(turns):
         prompt = PROMPTS[i % len(PROMPTS)]
         turn_id = uuid.uuid4().hex
-        async with grpc.aio.insecure_channel(grpc_target) as channel:
+        async with create_aio_channel(grpc_target) as channel:
             stub = pbg.EidolonAgentStub(channel)
             results.append(await _run_one_turn(stub, metadata, conv_id, turn_id, prompt))
     return results
@@ -100,9 +100,9 @@ async def _bench_reused_stream(
 ) -> list[dict]:
     """Single bidi stream for N turns — matches the 'channel keeps connection open' case."""
     results = []
-    metadata = (("authorization", f"Bearer {token}"),)
+    metadata = authorization_metadata(token)
 
-    async with grpc.aio.insecure_channel(grpc_target) as channel:
+    async with create_aio_channel(grpc_target) as channel:
         stub = pbg.EidolonAgentStub(channel)
 
         send_queue: asyncio.Queue = asyncio.Queue()
