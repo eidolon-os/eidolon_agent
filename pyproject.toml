@@ -31,7 +31,7 @@ dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.27.0",
     "PyJWT[crypto]>=2.8.0",
-    "eidolon-sdk[grpc,runtime]",
+    "eidolon-sdk",
 
     # Infra: NATS (event bus + KV + JetStream), SQLite, config
     "nats-py>=2.7.0",
@@ -78,7 +78,7 @@ dev = [
 eidolon-agent = "eidolon_agent.app.runtime.cli:main"
 
 [tool.uv.sources]
-eidolon-sdk = { path = "../eidolon_sdk", editable = true }
+eidolon-sdk = { path = "../eidolon_sdk" }
 
 [tool.setuptools.packages.find]
 where = ["."]
