@@ -166,6 +166,7 @@ class LongTaskRow(Base):
     progress_summary: Mapped[str | None] = mapped_column(Text)
     progress_events: Mapped[list | None] = mapped_column(JSON)
     result_text: Mapped[str | None] = mapped_column(Text)
+    result_tts_summary: Mapped[str | None] = mapped_column(Text)
     result_payload: Mapped[dict | None] = mapped_column(JSON)
     artifact_paths: Mapped[list | None] = mapped_column(JSON)
     error_code: Mapped[str | None] = mapped_column(String(64))

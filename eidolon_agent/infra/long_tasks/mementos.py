@@ -8,7 +8,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 
@@ -105,6 +105,11 @@ class MementosHttpClient:
         raise last_exc
 
 
+class LongTaskResultSummarizerPort(Protocol):
+    async def summarize(self, record: LongTaskRecord, result_text: str) -> str | None:
+        ...
+
+
 class MementosLongTaskWorker:
     """Fast submitter plus background Mementos executor.
 
@@ -119,11 +124,13 @@ class MementosLongTaskWorker:
         store: SqlLongTaskStore,
         client: MementosHttpClient,
         config: MementosWorkerConfig | None = None,
+        result_summarizer: LongTaskResultSummarizerPort | None = None,
         worker_id: str | None = None,
     ) -> None:
         self._store = store
         self._client = client
         self._config = config or MementosWorkerConfig()
+        self._result_summarizer = result_summarizer
         self._worker_id = worker_id or f"agent-{uuid.uuid4().hex[:8]}"
         self._queue: asyncio.Queue[LongTaskRecord] = asyncio.Queue(
             maxsize=self._config.queue_size
@@ -236,6 +243,7 @@ class MementosLongTaskWorker:
                         result_text=content,
                         result_payload=terminal,
                     )
+                    await self._summarize_result_for_tts(record, content)
                     return
                 await self._store.mark_failed(
                     record.id,
@@ -256,6 +264,21 @@ class MementosLongTaskWorker:
             error_message="mementos task timed out",
             status=LongTaskStatus.TIMED_OUT,
         )
+
+    async def _summarize_result_for_tts(
+        self,
+        record: LongTaskRecord,
+        result_text: str,
+    ) -> None:
+        if self._result_summarizer is None or not result_text.strip():
+            return
+        try:
+            summary = await self._result_summarizer.summarize(record, result_text)
+        except Exception:
+            _log.exception("long task result TTS summary failed: task_id=%s", record.id)
+            return
+        if summary:
+            await self._store.set_result_tts_summary(record.id, summary)
 
 
 def _prompt_for_record(record: LongTaskRecord) -> str:

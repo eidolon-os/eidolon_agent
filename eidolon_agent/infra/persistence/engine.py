@@ -96,6 +96,7 @@ async def _ensure_long_tasks_schema(conn) -> None:
         "next_retry_at": "DATETIME",
         "external_status": "VARCHAR(64)",
         "last_polled_at": "DATETIME",
+        "result_tts_summary": "TEXT",
     }
     for name, ddl in columns.items():
         if name not in existing:

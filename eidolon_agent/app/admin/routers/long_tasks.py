@@ -33,6 +33,7 @@ class LongTaskSummary(BaseModel):
     expected_output: str | None
     progress_summary: str | None
     result_text: str | None
+    result_tts_summary: str | None
     error_code: str | None
     error_message: str | None
     worker_id: str | None
@@ -146,6 +147,7 @@ def _summary(record: LongTaskRecord) -> LongTaskSummary:
         expected_output=record.expected_output,
         progress_summary=record.progress_summary,
         result_text=record.result_text,
+        result_tts_summary=record.result_tts_summary,
         error_code=record.error_code,
         error_message=record.error_message,
         worker_id=record.worker_id,

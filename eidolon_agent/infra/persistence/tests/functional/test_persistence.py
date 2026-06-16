@@ -156,6 +156,7 @@ async def test_ensure_schema_patches_early_long_tasks_table(tmp_path):
             "next_retry_at",
             "external_status",
             "last_polled_at",
+            "result_tts_summary",
         }.issubset(columns)
 
         factory = create_session_factory(engine)

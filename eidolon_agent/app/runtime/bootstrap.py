@@ -37,6 +37,7 @@ from eidolon_agent.domain.agent.turn import TurnEngine
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.domain.history import HistoryFanout, HistoryManager
+from eidolon_agent.domain.long_tasks import LongTaskResultSummarizer
 from eidolon_agent.domain.personas import (
     PersonasService,
     PersonaTemplateRegistry,
@@ -184,7 +185,16 @@ async def build_application(
     container.output_guardrail = OutputGuardrail()
     container.triage_classifier = TaskClassifier()
 
-    # 9. Tools -----------------------------------------------------------------
+    # 9. LLM router ------------------------------------------------------------
+    llm_router = _build_llm_router(settings)
+    container.llm_router = llm_router
+    if settings.runtime.warmup_enabled and settings.llm.startup_warm_enabled:
+        try:
+            await llm_router.warmup_default(timeout_s=settings.llm.startup_warm_timeout_s)
+        except Exception:
+            _log.warning("llm warmup failed; continuing startup", exc_info=True)
+
+    # 10. Tools ----------------------------------------------------------------
     long_task_worker = None
     if settings.long_task.transport == "mementos_http":
         long_task_worker = MementosLongTaskWorker(
@@ -201,6 +211,7 @@ async def build_application(
                 http_timeout_s=settings.long_task.worker_http_timeout_s,
                 lease_s=settings.long_task.worker_lease_s,
             ),
+            result_summarizer=LongTaskResultSummarizer(llm_router),
         )
         long_task_worker.start()
         container.extras["long_task_worker"] = long_task_worker
@@ -223,16 +234,6 @@ async def build_application(
     )
     container.tool_registry = tool_registry
     container.tool_dispatcher = tool_dispatcher
-
-    # 11. LLM router (provider wiring is intentionally minimal — fake by default;
-    # production replaces via settings.llm.providers).
-    llm_router = _build_llm_router(settings)
-    container.llm_router = llm_router
-    if settings.runtime.warmup_enabled and settings.llm.startup_warm_enabled:
-        try:
-            await llm_router.warmup_default(timeout_s=settings.llm.startup_warm_timeout_s)
-        except Exception:
-            _log.warning("llm warmup failed; continuing startup", exc_info=True)
 
     # 8. Pairing ---------------------------------------------------------------
     jwt_secret = settings.pairing.jwt_secret

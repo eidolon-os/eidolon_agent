@@ -77,6 +77,10 @@ async def test_long_task_repository_records_lifecycle(uow_factory) -> None:
             result_payload={"summary": "整理完成"},
             artifact_paths=["/tmp/report.md"],
         )
+        await uow.long_tasks.set_result_tts_summary(
+            "task-1",
+            "会议纪要已整理完成，包含摘要和行动项。",
+        )
         await uow.commit()
 
     async with uow_factory() as uow:
@@ -96,6 +100,7 @@ async def test_long_task_repository_records_lifecycle(uow_factory) -> None:
     assert stored.mementos_session_id == session_key
     assert stored.mementos_latest_seq == 4
     assert stored.progress_events == [{"seq": 4, "text": "已完成资料收集"}]
+    assert stored.result_tts_summary == "会议纪要已整理完成，包含摘要和行动项。"
     assert stored.result_payload == {"summary": "整理完成"}
     assert stored.artifact_paths == ["/tmp/report.md"]
     assert [task.id for task in user_tasks] == ["task-1"]

@@ -584,6 +584,19 @@ class SqlLongTaskRepository:
         row.updated_at = now
         return _row_to_long_task(row)
 
+    async def set_result_tts_summary(
+        self,
+        task_id: str,
+        summary: str,
+    ) -> LongTaskRecord | None:
+        row = await self._session.get(LongTaskRow, task_id)
+        if row is None:
+            return None
+        now = datetime.now(timezone.utc)
+        row.result_tts_summary = summary
+        row.updated_at = now
+        return _row_to_long_task(row)
+
     async def touch_poll(
         self,
         task_id: str,
@@ -653,6 +666,7 @@ def _long_task_to_row(record: LongTaskRecord, *, now: datetime) -> LongTaskRow:
         progress_summary=record.progress_summary,
         progress_events=record.progress_events,
         result_text=record.result_text,
+        result_tts_summary=record.result_tts_summary,
         result_payload=record.result_payload,
         artifact_paths=record.artifact_paths,
         error_code=record.error_code,
@@ -710,6 +724,7 @@ def _row_to_long_task(row: LongTaskRow) -> LongTaskRecord:
         progress_summary=row.progress_summary,
         progress_events=list(row.progress_events or []),
         result_text=row.result_text,
+        result_tts_summary=row.result_tts_summary,
         result_payload=row.result_payload,
         artifact_paths=list(row.artifact_paths or []),
         error_code=row.error_code,

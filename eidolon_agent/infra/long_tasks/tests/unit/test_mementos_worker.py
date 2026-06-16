@@ -36,6 +36,7 @@ async def test_worker_keeps_tool_path_to_accepted_then_completes(tmp_path) -> No
         store=store,
         client=client,
         config=MementosWorkerConfig(poll_interval_s=0.01, task_timeout_s=5),
+        result_summarizer=_FakeResultSummarizer(),
         worker_id="worker-test",
     )
     record = _record("task-1")
@@ -64,6 +65,7 @@ async def test_worker_keeps_tool_path_to_accepted_then_completes(tmp_path) -> No
     assert completed.mementos_session_id == "m-session-1"
     assert completed.mementos_conversation_id == "m-conv-1"
     assert completed.result_text == "mementos coworker 已收到 eidolon_agent 的测试任务。"
+    assert completed.result_tts_summary == "测试任务已完成，Mementos 已确认收到。"
     assert client.prompts == [
         "测试任务\n期望输出：确认收到\n上下文摘要：端到端测试"
     ]
@@ -130,3 +132,10 @@ class _FakeMementosClient:
                 }
             ]
         }
+
+
+class _FakeResultSummarizer:
+    async def summarize(self, record: LongTaskRecord, result_text: str) -> str:
+        assert record.id == "task-1"
+        assert result_text == "mementos coworker 已收到 eidolon_agent 的测试任务。"
+        return "测试任务已完成，Mementos 已确认收到。"

@@ -127,6 +127,16 @@ class SqlLongTaskStore:
             await uow.commit()
             return record
 
+    async def set_result_tts_summary(
+        self,
+        task_id: str,
+        summary: str,
+    ) -> LongTaskRecord | None:
+        async with SqlAlchemyUnitOfWork(self._session_factory) as uow:
+            record = await uow.long_tasks.set_result_tts_summary(task_id, summary)
+            await uow.commit()
+            return record
+
     async def mark_failed(
         self,
         task_id: str,

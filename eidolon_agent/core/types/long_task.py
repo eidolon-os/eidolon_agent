@@ -60,6 +60,7 @@ class LongTaskRecord:
     progress_summary: str | None = None
     progress_events: list[dict[str, Any]] = field(default_factory=list)
     result_text: str | None = None
+    result_tts_summary: str | None = None
     result_payload: dict[str, Any] | None = None
     artifact_paths: list[str] = field(default_factory=list)
     error_code: str | None = None
