@@ -61,6 +61,16 @@ class _StubMemory:
         )
 
 
+class _StubSummary:
+    def __init__(self, summary: str | None) -> None:
+        self._summary = summary
+        self.calls: list[str] = []
+
+    async def latest_summary(self, *, conversation_id: str) -> str | None:
+        self.calls.append(conversation_id)
+        return self._summary
+
+
 def _locator(_t, _u, _c):
     return ("inst-test", "tpl-x")
 
@@ -280,6 +290,70 @@ async def test_context_ledger_metadata_is_written_without_prompt_text() -> None:
     assert snapshot["memory"]["hit_count"] == 1
 
 
+async def test_summary_provider_injects_existing_summary_without_moving_current_turn() -> None:
+    summary = _StubSummary("之前用户在比较两个方案，希望保持简短。")
+    ti = make_turn_input("那现在你建议选哪个？")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas("[PERSONA]\nhi"),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        summary_provider=summary,
+    )
+
+    msgs = await compiler.compile(ti)
+
+    assert "[CONVERSATION SUMMARY]\n之前用户在比较两个方案" in msgs[0].content
+    assert msgs[-1].role is MessageRole.USER
+    assert msgs[-1].content == "那现在你建议选哪个？"
+    assert ti.metadata["summary_trace"]["attempted"] is True
+    assert ti.metadata["summary_trace"]["context_injected"] is True
+    assert ti.metadata["context_focus"] == {
+        "current_user_last": True,
+        "current_user_token_estimate": 3,
+        "summary_injected": True,
+        "raw_history_message_count": 0,
+    }
+    assert "之前用户在比较" not in str(ti.metadata["summary_trace"])
+    assert summary.calls == ["c1"]
+
+
+async def test_summary_provider_is_skipped_when_history_context_is_private() -> None:
+    summary = _StubSummary("should-not-appear")
+    ti = make_turn_input("private turn")
+    ti.metadata["private"] = True
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas("[PERSONA]\nhi"),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        summary_provider=summary,
+    )
+
+    msgs = await compiler.compile(ti)
+
+    assert "should-not-appear" not in msgs[0].content
+    assert summary.calls == []
+    assert ti.metadata["summary_trace"]["attempted"] is False
+
+
+async def test_budget_can_drop_summary_before_current_turn() -> None:
+    ti = make_turn_input("当前问题")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas("[P]"),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        summary_provider=_StubSummary("summary " * 120),
+        context_budget_tokens=20,
+    )
+
+    msgs = await compiler.compile(ti)
+
+    assert "[CONVERSATION SUMMARY]" not in msgs[0].content
+    assert msgs[-1].content == "当前问题"
+    assert ti.metadata["summary_trace"]["context_injected"] is False
+    dropped = ti.metadata["context_ledger"]["dropped_segments"]
+    assert any(s["kind"] == "summary" for s in dropped)
+
+
 async def test_memory_trace_records_ids_and_degraded_without_content() -> None:
     ti = make_turn_input("帮我回忆一下")
     compiler = ContextCompiler(
@@ -412,7 +486,7 @@ async def test_budget_keeps_recent_history_before_older_history() -> None:
         personas_service=_StubPersonas("[P]"),
         instance_locator=_locator,
         history_manager=history,
-        context_budget_tokens=173,
+        context_budget_tokens=190,
     )
 
     ti = make_turn_input("now")

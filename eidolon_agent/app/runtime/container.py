@@ -35,6 +35,7 @@ class Container:
 
     history_manager: object | None = None
     history_fanout: object | None = None
+    background_tasks: object | None = None
     signal_bus: object | None = None
     crisis_handler: object | None = None
     input_guardrail: object | None = None

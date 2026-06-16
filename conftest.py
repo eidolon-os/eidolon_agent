@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from eidolon_sdk.runtime import BackgroundTaskRunner
 
 from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.context.compiler import ContextCompiler
@@ -87,11 +88,7 @@ async def turn_engine_factory(personas_service, event_bus):
             tools.register(GetTimeTool())
             tools.register(EmitEventTool(event_bus=event_bus))
             long_task_submitter = _ImmediateLongTaskSubmitter(
-                (
-                    SqlLongTaskStore(session_factory)
-                    if session_factory is not None
-                    else None
-                )
+                SqlLongTaskStore(session_factory) if session_factory is not None else None
             )
             tools.register(SubmitLongTaskTool(long_task_submitter=long_task_submitter))
             tools.register_alias(
@@ -114,6 +111,7 @@ async def turn_engine_factory(personas_service, event_bus):
             history_window=20,
         )
         llm_router = LLMRouter(providers={"fake": llm or FakeLLM()}, default="fake")
+        background_tasks = BackgroundTaskRunner(component="agent.test")
         return TurnEngine(
             compiler=compiler,
             llm=llm_router,
@@ -136,6 +134,7 @@ async def turn_engine_factory(personas_service, event_bus):
                 if session_factory is not None
                 else None
             ),
+            background_tasks=background_tasks,
         )
 
     return _factory

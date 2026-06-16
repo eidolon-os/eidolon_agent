@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -14,9 +15,12 @@ HARNESS_POLICY_SOURCE = "realtime_agent_harness"
 class HarnessBudget:
     memory_timeout_ms: int = 200
     history_timeout_ms: int = 50
-    history_window: int = 20
+    history_window: int = 4
     max_tool_iters: int = 4
     first_delta_budget_ms: int = 300
+    message_budget_tokens: int = 1800
+    tool_schema_budget_tokens: int = 800
+    output_reserve_tokens: int = 500
 
     def to_metadata(self) -> dict[str, int]:
         return {
@@ -25,6 +29,9 @@ class HarnessBudget:
             "history_window": self.history_window,
             "max_tool_iters": self.max_tool_iters,
             "first_delta_budget_ms": self.first_delta_budget_ms,
+            "message_budget_tokens": self.message_budget_tokens,
+            "tool_schema_budget_tokens": self.tool_schema_budget_tokens,
+            "output_reserve_tokens": self.output_reserve_tokens,
         }
 
 
@@ -72,6 +79,19 @@ class RealtimeAgentHarness:
     def visible_tool_schemas(self, schemas: list[ToolSchema]) -> list[ToolSchema]:
         return [schema for schema in schemas if schema.name not in self._hidden_tool_names]
 
+    def tool_schema_budget(self, schemas: list[ToolSchema]) -> dict[str, Any]:
+        tokens_by_name = {
+            schema.name: _estimate_tool_schema_tokens(schema) for schema in schemas
+        }
+        total = sum(tokens_by_name.values())
+        return {
+            "schema_count": len(schemas),
+            "schema_token_estimate": total,
+            "schema_budget_tokens": self.budget.tool_schema_budget_tokens,
+            "schema_budget_exceeded": total > self.budget.tool_schema_budget_tokens,
+            "tokens_by_name": tokens_by_name,
+        }
+
     def snapshot(
         self,
         *,
@@ -80,14 +100,18 @@ class RealtimeAgentHarness:
         memory: dict[str, Any],
         history: dict[str, Any],
         tools: list[str] | None = None,
+        tool_budget: dict[str, Any] | None = None,
         handoffs: list[dict[str, Any]] | None = None,
     ) -> HarnessSnapshot:
+        tools_snapshot = {"visible_names": list(tools or [])}
+        if tool_budget:
+            tools_snapshot.update(tool_budget)
         return HarnessSnapshot(
             segment_kinds=tuple(segment_kinds),
             budget=dict(budget),
             memory=dict(memory),
             history=dict(history),
-            tools={"visible_names": list(tools or [])},
+            tools=tools_snapshot,
             handoffs=tuple(handoffs or ()),
         )
 
@@ -97,6 +121,7 @@ def realtime_harness_policy_prompt() -> str:
         [
             "Realtime Agent Harness 策略：",
             "- 你是 realtime agent：优先完成当场对话、澄清和简短答复。",
+            "- 当前用户 turn 是最高优先级；历史、记忆和摘要只作为辅助证据，不要盖过当前问题。",
             "- 能直接回答的问题，直接简洁回答，不要为了展示能力而调用工具。",
             "- 需要真实外部动作、查询、系统事件或异步处理时，必须调用合适工具；不要假装已经完成。",
             "- 对复杂、多步骤、耗时、需要外部执行或需要稍后回流结果的任务，调用 delegate_to_coworker 委托后台 cowork。",
@@ -106,3 +131,9 @@ def realtime_harness_policy_prompt() -> str:
             "- 首响优先：不要在当前回复里等待后台 cowork 完成。",
         ]
     )
+
+
+def _estimate_tool_schema_tokens(schema: ToolSchema) -> int:
+    payload = schema.to_openai_function()
+    text = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return max(1, len(text) // 3)

@@ -33,8 +33,10 @@ def test_default_budget_is_realtime_safe() -> None:
 
     assert budget.memory_timeout_ms == 200
     assert budget.history_timeout_ms == 50
-    assert budget.history_window == 20
+    assert budget.history_window == 4
     assert budget.first_delta_budget_ms == 300
+    assert budget.tool_schema_budget_tokens == 800
+    assert budget.output_reserve_tokens == 500
 
 
 def test_visible_tool_schemas_hide_legacy_alias_only() -> None:
@@ -58,10 +60,24 @@ def test_snapshot_is_prompt_safe_shape() -> None:
         memory={"degraded": False, "hit_count": 2},
         history={"message_count": 1},
         tools=["get_time", "delegate_to_coworker"],
+        tool_budget={"schema_token_estimate": 42},
         handoffs=[{"tool_name": "delegate_to_coworker", "task_id": "task-1"}],
     ).to_metadata()
 
     assert snapshot["kind"] == "realtime_agent_harness"
     assert snapshot["segment_kinds"] == ["persona", "harness_policy", "current_user"]
     assert snapshot["tools"]["visible_names"] == ["get_time", "delegate_to_coworker"]
+    assert snapshot["tools"]["schema_token_estimate"] == 42
     assert "secret prompt" not in str(snapshot)
+
+
+def test_tool_schema_budget_estimates_prompt_visible_schema_cost() -> None:
+    harness = RealtimeAgentHarness(budget=HarnessBudget(tool_schema_budget_tokens=1))
+
+    budget = harness.tool_schema_budget([_schema("delegate_to_coworker")])
+
+    assert budget["schema_count"] == 1
+    assert budget["schema_token_estimate"] > 1
+    assert budget["schema_budget_tokens"] == 1
+    assert budget["schema_budget_exceeded"] is True
+    assert set(budget["tokens_by_name"]) == {"delegate_to_coworker"}

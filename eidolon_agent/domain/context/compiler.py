@@ -12,7 +12,9 @@ import asyncio
 import logging
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+from typing import Protocol
 
 from eidolon_agent.core.types.memory import MemoryQueryPlan
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
@@ -32,6 +34,12 @@ from eidolon_agent.domain.runtime_policy import TurnRuntimePolicy
 _log = logging.getLogger(__name__)
 
 
+class ConversationSummaryProvider(Protocol):
+    async def latest_summary(self, *, conversation_id: str) -> str | None:
+        """Return a prompt-ready rolling summary if one already exists."""
+        ...
+
+
 class ContextCompiler:
     """Assemble the LLM message list for a Turn.
 
@@ -46,11 +54,15 @@ class ContextCompiler:
         instance_locator,
         history_manager,
         memory_port=None,
-        history_window: int = 20,
+        history_window: int = 4,
         memory_timeout_s: float = 0.2,
         memory_top_k: int = 5,
         context_budget_tokens: int | None = None,
         context_budget_mode: str = "enabled",
+        summary_provider: ConversationSummaryProvider
+        | Callable[..., Awaitable[str | None] | str | None]
+        | None = None,
+        summary_timeout_s: float = 0.025,
         harness: RealtimeAgentHarness | None = None,
     ) -> None:
         self._personas = personas_service
@@ -62,6 +74,8 @@ class ContextCompiler:
         self._memory_top_k = memory_top_k
         self._context_budget_tokens = context_budget_tokens
         self._context_budget_mode = _normalize_budget_mode(context_budget_mode)
+        self._summary_provider = summary_provider
+        self._summary_timeout_s = summary_timeout_s
         self._harness = harness or RealtimeAgentHarness()
 
     async def compile(self, ti: TurnInput) -> list[ChatMessage]:
@@ -70,8 +84,8 @@ class ContextCompiler:
         )
         policy = TurnRuntimePolicy.from_metadata(ti.metadata)
 
-        # ---- Run the three independent fetches concurrently ----------------
-        # Persona compile, memory recall, and history window have no data
+        # ---- Run the independent fetches concurrently ----------------------
+        # Persona compile, summary read, memory recall, and history window have no data
         # dependency on each other; awaiting them sequentially costs ~250ms
         # in production. ``return_exceptions=True`` keeps a single fetch
         # failure from poisoning the others — each branch handles its own
@@ -90,6 +104,7 @@ class ContextCompiler:
             ),
         )
         memory_task = _timed("memory", self._memory_recall(ti))
+        summary_task = _timed("summary", self._summary_context(ti, policy))
         history_coro = (
             _empty_history()
             if not policy.history_context_allowed
@@ -101,11 +116,15 @@ class ContextCompiler:
         history_task = _timed("history", history_coro)
 
         results = await asyncio.gather(
-            persona_task, memory_task, history_task, return_exceptions=True
+            persona_task,
+            memory_task,
+            summary_task,
+            history_task,
+            return_exceptions=True,
         )
         # Each _timed task yields (value, elapsed_ms) on success; on exception
         # asyncio.gather replaces the tuple with the exception itself.
-        persona_res, memory_res, history_res = results
+        persona_res, memory_res, summary_res, history_res = results
 
         def _unpack(res):  # type: ignore[no-untyped-def]
             if isinstance(res, BaseException):
@@ -114,15 +133,17 @@ class ContextCompiler:
 
         persona, persona_ms = _unpack(persona_res)
         memory_payload, memory_ms = _unpack(memory_res)
+        summary_text, summary_ms = _unpack(summary_res)
         history, history_ms = _unpack(history_res)
 
         gather_ms = int((time.monotonic() - compile_t0) * 1000)
         _log.info(
-            "compile_timings conv=%s gather_ms=%d persona=%s memory=%s history=%s",
+            "compile_timings conv=%s gather_ms=%d persona=%s memory=%s summary=%s history=%s",
             ti.conversation_id,
             gather_ms,
             persona_ms,
             memory_ms,
+            summary_ms,
             history_ms,
         )
 
@@ -156,6 +177,27 @@ class ContextCompiler:
         )
         segments.append(harness_policy_segment)
         system_parts_by_segment[id(harness_policy_segment)] = harness_policy
+
+        summary_degraded = isinstance(summary_text, BaseException)
+        summary_segment: ContextSegment | None = None
+        if summary_degraded:
+            _log.warning("conversation summary raised: %s", summary_text)
+            degraded_sources.append("summary")
+            summary_text = None
+        if isinstance(summary_text, str) and summary_text.strip():
+            cleaned_summary = summary_text.strip()
+            summary_segment = ContextSegment(
+                kind=ContextSegmentKind.SUMMARY,
+                content="",
+                source="conversation_summary",
+                token_estimate=_estimate_tokens(cleaned_summary),
+                priority=70,
+                metadata={"chars": len(cleaned_summary)},
+            )
+            segments.append(summary_segment)
+            system_parts_by_segment[id(summary_segment)] = (
+                f"[CONVERSATION SUMMARY]\n{cleaned_summary}"
+            )
 
         memory_text: str | None = None
         memory_degraded = False
@@ -240,6 +282,17 @@ class ContextCompiler:
             ledger.mark_degraded(source)
         kept_ids = {id(seg) for seg in kept_segments}
         memory_kept = memory_segment is not None and id(memory_segment) in kept_ids
+        summary_kept = summary_segment is not None and id(summary_segment) in kept_ids
+        summary_attempted = (
+            self._summary_provider is not None and policy.history_context_allowed
+        )
+        ti.metadata["summary_trace"] = {
+            "attempted": summary_attempted,
+            "degraded": summary_degraded,
+            "elapsed_ms": summary_ms,
+            "timeout_ms": int(self._summary_timeout_s * 1000),
+            "context_injected": summary_kept,
+        }
         ti.metadata["memory_trace"] = {
             "attempted": (
                 self._memory is not None
@@ -292,6 +345,18 @@ class ContextCompiler:
                     created_at=now,
                 )
             )
+        ti.metadata["context_focus"] = {
+            "current_user_last": bool(
+                out
+                and out[-1].role is MessageRole.USER
+                and out[-1].content == (ti.text or "")
+            ),
+            "current_user_token_estimate": (
+                current_user_segment.token_estimate if current_user_segment else 0
+            ),
+            "summary_injected": summary_kept,
+            "raw_history_message_count": len(kept_history),
+        }
         ti.metadata["context_ledger"] = ledger.to_metadata()
         ti.metadata.setdefault("development_guards", {})["context_budget"] = budget_guard
         ti.metadata["harness_snapshot"] = self._harness.snapshot(
@@ -308,6 +373,8 @@ class ContextCompiler:
             history={
                 "allowed": policy.history_context_allowed,
                 "message_count": len(kept_history),
+                "summary_injected": summary_kept,
+                "summary_degraded": summary_degraded,
             },
         ).to_metadata()
         return out
@@ -316,6 +383,11 @@ class ContextCompiler:
         self, segments: list[ContextSegment]
     ) -> tuple[list[ContextSegment], ContextLedger, dict]:
         unbudgeted = ContextLedger(kept_segments=list(segments))
+        totals = _budget_totals(segments)
+        runtime_budget = {
+            "message_budget_tokens": self._harness.budget.message_budget_tokens,
+            "output_reserve_tokens": self._harness.budget.output_reserve_tokens,
+        }
         if self._context_budget_tokens is None:
             return segments, unbudgeted, {
                 "mode": "disabled",
@@ -323,6 +395,8 @@ class ContextCompiler:
                 "applied": False,
                 "max_tokens": None,
                 "kept_token_estimate": unbudgeted.total_token_estimate,
+                **runtime_budget,
+                **totals,
                 "dropped_count": 0,
                 "shadow_dropped_count": 0,
                 "shadow_dropped_kinds": [],
@@ -340,6 +414,8 @@ class ContextCompiler:
                 if self._context_budget_mode == "enabled"
                 else unbudgeted.total_token_estimate
             ),
+            **runtime_budget,
+            **totals,
             "dropped_count": (
                 len(pruned_ledger.dropped_segments)
                 if self._context_budget_mode == "enabled"
@@ -429,6 +505,29 @@ class ContextCompiler:
                 [],
             )
 
+    async def _summary_context(
+        self, ti: TurnInput, policy: TurnRuntimePolicy
+    ) -> str | None:
+        """Read an already-computed rolling summary without blocking TTFT."""
+
+        if self._summary_provider is None or not policy.history_context_allowed:
+            return None
+        try:
+            return await asyncio.wait_for(
+                _call_summary_provider(
+                    self._summary_provider,
+                    conversation_id=ti.conversation_id,
+                ),
+                timeout=self._summary_timeout_s,
+            )
+        except asyncio.TimeoutError:
+            _log.warning(
+                "conversation summary timed out for conv=%s after %.3fs",
+                ti.conversation_id,
+                self._summary_timeout_s,
+            )
+            raise
+
     async def _memory_recall_query(self, ti: TurnInput) -> tuple[str, str]:
         """Build a recall query with a tiny history peek for anaphora.
 
@@ -483,6 +582,16 @@ async def _empty_history() -> list[ChatMessage]:
     return []
 
 
+async def _call_summary_provider(provider, *, conversation_id: str) -> str | None:  # type: ignore[no-untyped-def]
+    if hasattr(provider, "latest_summary"):
+        result = provider.latest_summary(conversation_id=conversation_id)
+    else:
+        result = provider(conversation_id=conversation_id)
+    if isinstance(result, Awaitable):
+        result = await result
+    return str(result).strip() if result else None
+
+
 def _exception_degraded_reason(exc: BaseException) -> str:
     details = getattr(exc, "details", None)
     if isinstance(details, dict):
@@ -530,6 +639,24 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 3) if text else 0
 
 
+def _budget_totals(segments: list[ContextSegment]) -> dict[str, int]:
+    protected_kinds = {
+        ContextSegmentKind.PERSONA,
+        ContextSegmentKind.HARNESS_POLICY,
+        ContextSegmentKind.CURRENT_USER,
+    }
+    protected = sum(
+        seg.token_estimate
+        for seg in segments
+        if seg.kind in protected_kinds or not seg.droppable
+    )
+    total = sum(seg.token_estimate for seg in segments)
+    return {
+        "protected_token_estimate": protected,
+        "optional_token_estimate": max(0, total - protected),
+    }
+
+
 def _truncate_for_query(text: str, limit: int = 120) -> str:
     text = text.strip()
     return text if len(text) <= limit else text[:limit] + "…"
@@ -540,10 +667,9 @@ def _kg_triple_ids(triples: object) -> list[str]:
         return []
     ids: list[str] = []
     for triple in triples:
-        if isinstance(triple, dict):
-            triple_id = triple.get("id")
-        else:
-            triple_id = getattr(triple, "id", None)
+        triple_id = (
+            triple.get("id") if isinstance(triple, dict) else getattr(triple, "id", None)
+        )
         if triple_id:
             ids.append(str(triple_id))
     return ids

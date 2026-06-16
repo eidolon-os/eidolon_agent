@@ -28,6 +28,8 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
+from eidolon_sdk.runtime import BackgroundTaskRunner
+
 from eidolon_agent.core.errors import GuardrailBlockedError, TurnCancelledError
 from eidolon_agent.core.ports.llm import LLMPort
 from eidolon_agent.core.ports.tool import ToolInvocationContext
@@ -55,10 +57,6 @@ from eidolon_agent.core.types.turn import (
     TurnInput,
     TurnStatus,
 )
-from eidolon_agent.domain.tools.builtin.submit_long_task import (
-    DELEGATE_TO_COWORKER_TOOL,
-    SUBMIT_LONG_TASK_LEGACY_TOOL,
-)
 from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails.crisis import CrisisHandler
@@ -69,6 +67,10 @@ from eidolon_agent.domain.history.fanout import HistoryFanout
 from eidolon_agent.domain.history.manager import HistoryManager
 from eidolon_agent.domain.personas.types import PersonaInteractionEvent
 from eidolon_agent.domain.runtime_policy import TurnRuntimePolicy
+from eidolon_agent.domain.tools.builtin.submit_long_task import (
+    DELEGATE_TO_COWORKER_TOOL,
+    SUBMIT_LONG_TASK_LEGACY_TOOL,
+)
 from eidolon_agent.domain.tools.dispatcher import ToolDispatcher
 
 _log = logging.getLogger(__name__)
@@ -105,6 +107,7 @@ class TurnEngine:
         taboos_provider=lambda: (),  # () -> tuple[str, ...]
         turn_persister=None,  # async callable; None disables durable turn persistence
         harness: RealtimeAgentHarness | None = None,
+        background_tasks: BackgroundTaskRunner | None = None,
     ) -> None:
         self._compiler = compiler
         self._llm = llm
@@ -126,6 +129,7 @@ class TurnEngine:
         self._taboos_provider = taboos_provider
         self._turn_persister = turn_persister
         self._harness = harness or RealtimeAgentHarness()
+        self._background = background_tasks or BackgroundTaskRunner()
 
     async def run(self, ti: TurnInput) -> AsyncIterator[TurnEvent]:
         """Run a single Turn. Yields TurnEvents until DONE or ERROR."""
@@ -177,8 +181,11 @@ class TurnEngine:
                     crisis=True,
                     resources=list(crisis.crisis_resources),
                 )
-                # Persist user + crisis assistant message but do NOT fan out.
-                await self._persist_messages(ti, ti.text or "", crisis.text, is_private=True)
+                # Persist user + crisis assistant message after DONE, but do NOT fan out.
+                self._background.create(
+                    self._persist_messages(ti, ti.text or "", crisis.text, is_private=True),
+                    name=f"turn-{ti.turn_id}-crisis-history",
+                )
                 return
             if verdict.action is SafetyAction.REFUSE:
                 refuse = "我不能那样做，不过我可以继续陪你聊点别的。"
@@ -233,7 +240,15 @@ class TurnEngine:
 
             # ---- LLM stream (with tool loop) -------------------------------
             tools = self._tool_schemas()
-            _update_harness_snapshot_tools(ti, [schema.name for schema in tools])
+            tool_budget = self._harness.tool_schema_budget(tools)
+            ti.metadata.setdefault("development_guards", {})[
+                "tool_schema_budget"
+            ] = tool_budget
+            _update_harness_snapshot_tools(
+                ti,
+                [schema.name for schema in tools],
+                tool_budget=tool_budget,
+            )
             yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.SPEAKING, time.time())
 
             tool_iters = 0
@@ -421,13 +436,14 @@ class TurnEngine:
 
             # User has their answer; persistence + fanout can take their time.
             post_turn_scheduled = True
-            asyncio.create_task(  # noqa: RUF006 — fire-and-forget by design
+            self._background.create(
                 self._post_turn(
                     ti,
                     final_text,
                     started_at,
                     history_already_persisted=recent_history_persisted,
-                )
+                ),
+                name=f"turn-{ti.turn_id}-post-turn",
             )
 
         except asyncio.CancelledError:
@@ -516,7 +532,7 @@ class TurnEngine:
                 # the top of the method, so it's safe to read here in
                 # the finally — empty list on exception paths produces
                 # "" (and _persist_turn no-ops the message append).
-                asyncio.create_task(  # noqa: RUF006 — fire-and-forget by design
+                self._background.create(
                     self._persist_turn(
                         ti=ti,
                         status=status,
@@ -532,40 +548,33 @@ class TurnEngine:
                         user_text=ti.text or "",
                         assistant_text=assistant_text_for_persist,
                         is_private=runtime_policy.mark_messages_private,
-                    )
+                    ),
+                    name=f"turn-{ti.turn_id}-persist-turn",
                 )
             if post_turn_allowed and not post_turn_scheduled:
-                asyncio.create_task(  # noqa: RUF006 — fire-and-forget by design
+                self._background.create(
                     self._post_turn(
                         ti,
                         assistant_text_for_persist,
                         started_at,
                         history_already_persisted=recent_history_persisted,
-                    )
+                    ),
+                    name=f"turn-{ti.turn_id}-post-turn",
                 )
             if self._bus is not None:
-                try:
-                    await self._bus.publish(
-                        Event(
-                            subject=Topics.turn_completed(ti.conversation_id),
-                            payload={
-                                "turn_id": ti.turn_id,
-                                "status": status.value,
-                                "triage": triage_kind.value,
-                            },
-                            trace_id=ti.caller.trace_id,
-                            source="agent.turn",
-                        )
-                    )
-                except Exception:
-                    _log.exception("publish turn.completed failed")
+                self._background.create(
+                    self._publish_turn_completed(
+                        ti=ti,
+                        status=status,
+                        triage_kind=triage_kind,
+                    ),
+                    name=f"turn-{ti.turn_id}-completed-event",
+                )
 
     # ---- helpers -------------------------------------------------------------
 
     def _tool_schemas(self) -> list:
-        return self._harness.visible_tool_schemas(
-            list(self._tools._registry.list_schemas())
-        )
+        return self._harness.visible_tool_schemas(self._tools.list_schemas())
 
     async def _persist_turn(
         self,
@@ -612,6 +621,31 @@ class TurnEngine:
             )
         except Exception:
             _log.exception("persist turn %s failed", ti.turn_id)
+
+    async def _publish_turn_completed(
+        self,
+        *,
+        ti: TurnInput,
+        status: TurnStatus,
+        triage_kind: TriageKind,
+    ) -> None:
+        if self._bus is None:
+            return
+        try:
+            await self._bus.publish(
+                Event(
+                    subject=Topics.turn_completed(ti.conversation_id),
+                    payload={
+                        "turn_id": ti.turn_id,
+                        "status": status.value,
+                        "triage": triage_kind.value,
+                    },
+                    trace_id=ti.caller.trace_id,
+                    source="agent.turn",
+                )
+            )
+        except Exception:
+            _log.exception("publish turn.completed failed")
 
     async def _post_turn(
         self,
@@ -797,10 +831,15 @@ def _handoff_summary_from_tool_result(result: ToolResult) -> dict:
     }
 
 
-def _update_harness_snapshot_tools(ti: TurnInput, names: list[str]) -> None:
+def _update_harness_snapshot_tools(
+    ti: TurnInput, names: list[str], *, tool_budget: dict | None = None
+) -> None:
     snapshot = dict(ti.metadata.get("harness_snapshot") or {})
     snapshot.setdefault("kind", "realtime_agent_harness")
-    snapshot["tools"] = {"visible_names": list(names)}
+    tools = {"visible_names": list(names)}
+    if tool_budget:
+        tools.update(tool_budget)
+    snapshot["tools"] = tools
     ti.metadata["harness_snapshot"] = snapshot
 
 

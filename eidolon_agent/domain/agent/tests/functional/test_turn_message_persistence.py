@@ -10,7 +10,6 @@ USER + ASSISTANT chat_messages exist after the fire-and-forget
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
@@ -72,13 +71,7 @@ async def test_turn_persists_user_and_assistant_messages(
     ti = make_turn_input("铁锤几岁了？")
     _events = [ev async for ev in test_engine.run(ti)]
 
-    # _persist_turn is fire-and-forget. Yield to the loop until the
-    # task has had time to complete the write. Three yields is plenty
-    # for an in-process SQLite write.
-    for _ in range(5):
-        await asyncio.sleep(0)
-    # Some CI hardware is slow; give one bounded real wait too.
-    await asyncio.sleep(0.05)
+    await test_engine._background.drain(timeout_s=1)
 
     async with session_factory() as session:
         turn_row = (
@@ -219,9 +212,7 @@ async def test_crisis_turn_persists_private_user_and_assistant_messages(
     events = [ev async for ev in engine.run(ti)]
     assert events[-1].data.get("crisis") is True
 
-    for _ in range(5):
-        await asyncio.sleep(0)
-    await asyncio.sleep(0.05)
+    await engine._background.drain(timeout_s=1)
 
     async with session_factory() as session:
         turn_row = (

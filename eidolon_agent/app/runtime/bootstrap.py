@@ -20,7 +20,7 @@ import logging
 import secrets
 from pathlib import Path
 
-from eidolon_sdk.runtime import PairingTokenVerifier
+from eidolon_sdk.runtime import BackgroundTaskRunner, PairingTokenVerifier
 
 from eidolon_agent.app.admin import build_admin_app
 from eidolon_agent.app.runtime.container import Container
@@ -36,6 +36,7 @@ from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.agent.turn import TurnEngine
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
+from eidolon_agent.domain.harness import HarnessBudget, RealtimeAgentHarness
 from eidolon_agent.domain.history import HistoryFanout, HistoryManager
 from eidolon_agent.domain.long_tasks import LongTaskResultSummarizer
 from eidolon_agent.domain.personas import (
@@ -181,9 +182,11 @@ async def build_application(
     # 7. Cross-cutting services -----------------------------------------------
     history = HistoryManager(hydrate_messages=build_history_hydrator(session_factory))
     fanout = HistoryFanout(event_bus=container.event_bus, memory_routes=memory_routes)
+    background_tasks = BackgroundTaskRunner(component="agent")
     sig_bus = SignalBus()
     container.history_manager = history
     container.history_fanout = fanout
+    container.background_tasks = background_tasks
     container.signal_bus = sig_bus
     container.crisis_handler = CrisisHandler(event_bus=container.event_bus)
     container.input_guardrail = InputGuardrail()
@@ -384,15 +387,27 @@ def _build_turn_engine(
     def locator(_tenant_id: str, _user_id: str, _conv_id: str):
         return (instance_id, template_id)
 
+    harness = RealtimeAgentHarness(
+        budget=HarnessBudget(
+            memory_timeout_ms=container.settings.turn.memory_recall_soft_timeout_ms,
+            history_window=container.settings.turn.history_context_window,
+            max_tool_iters=container.settings.turn.max_tool_iters,
+            first_delta_budget_ms=container.settings.turn.first_delta_slo_p95_ms,
+            message_budget_tokens=container.settings.turn.max_token_budget,
+            tool_schema_budget_tokens=container.settings.turn.tool_schema_budget_tokens,
+            output_reserve_tokens=container.settings.turn.output_reserve_tokens,
+        )
+    )
     compiler = ContextCompiler(
         personas_service=container.personas_service,
         instance_locator=locator,
         history_manager=container.history_manager,
         memory_port=container.memory_port,
-        history_window=20,
+        history_window=harness.budget.history_window,
         memory_timeout_s=container.settings.memory.recall_timeout_s,
         context_budget_tokens=container.settings.turn.max_token_budget,
         context_budget_mode=container.settings.turn.context_budget_mode,
+        harness=harness,
     )
     return TurnEngine(
         compiler=compiler,
@@ -417,6 +432,8 @@ def _build_turn_engine(
             container.session_factory,
             model_id_provider=lambda: getattr(container.llm_router, "model_id", None),
         ),
+        harness=harness,
+        background_tasks=container.background_tasks,
     )
 
 

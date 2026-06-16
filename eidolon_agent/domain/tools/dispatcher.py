@@ -20,7 +20,7 @@ from typing import Any
 
 from eidolon_agent.core.errors import ToolError, ToolPermissionError, ToolTimeoutError
 from eidolon_agent.core.ports.tool import ToolInvocationContext, ToolPort
-from eidolon_agent.core.types.tool import ToolCall, ToolResult
+from eidolon_agent.core.types.tool import ToolCall, ToolResult, ToolSchema
 from eidolon_agent.domain.tools.registry import ToolRegistry
 
 _log = logging.getLogger(__name__)
@@ -73,6 +73,9 @@ class ToolDispatcher:
                 )
                 for c in calls
             ]
+
+    def list_schemas(self) -> list[ToolSchema]:
+        return self._registry.list_schemas()
 
     async def _dispatch_batch_inner(
         self,

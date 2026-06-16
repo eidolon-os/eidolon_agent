@@ -22,7 +22,6 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
-
 _ENV_PLACEHOLDER_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
@@ -271,8 +270,11 @@ class TurnSettings(BaseModel):
     memory_recall_soft_timeout_ms: int = 200
     first_delta_slo_p50_ms: int = 200
     first_delta_slo_p95_ms: int = 300
+    history_context_window: int = 4
     max_tool_iters: int = 4
     max_token_budget: int = 6000
+    tool_schema_budget_tokens: int = 800
+    output_reserve_tokens: int = 500
     enable_filler_phrases: bool = True
 
 

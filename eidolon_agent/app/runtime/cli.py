@@ -83,6 +83,8 @@ async def _run(args) -> int:  # type: ignore[no-untyped-def]
     long_task_worker = container.extras.get("long_task_worker")
     if long_task_worker is not None and hasattr(long_task_worker, "stop"):
         await long_task_worker.stop()
+    if container.background_tasks is not None and hasattr(container.background_tasks, "drain"):
+        await container.background_tasks.drain(timeout_s=settings.runtime.drain_timeout_s)
     if container.personas_service is not None and hasattr(container.personas_service, "stop"):
         await container.personas_service.stop()
     if container.memory_port is not None and hasattr(container.memory_port, "close"):

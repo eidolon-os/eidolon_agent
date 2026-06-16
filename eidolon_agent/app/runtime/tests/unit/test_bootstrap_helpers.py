@@ -19,8 +19,8 @@ from pathlib import Path
 import pytest
 
 from eidolon_agent.app.runtime.bootstrap import (
-    _build_turn_engine,
     _build_llm_router,
+    _build_turn_engine,
     _generate_persisted_secret,
 )
 from eidolon_agent.app.runtime.container import Container
@@ -76,7 +76,13 @@ def test_persisted_secret_is_stable_across_calls(tmp_path: Path) -> None:
 
 
 def test_build_turn_engine_wires_context_budget() -> None:
-    settings = Settings(turn={"max_token_budget": 1234})
+    settings = Settings(
+        turn={
+            "max_token_budget": 1234,
+            "history_context_window": 3,
+            "tool_schema_budget_tokens": 456,
+        }
+    )
     container = Container(settings=settings)
     container.personas_service = object()
     container.history_manager = object()
@@ -98,3 +104,5 @@ def test_build_turn_engine_wires_context_budget() -> None:
     )
 
     assert engine._compiler._context_budget_tokens == 1234  # type: ignore[attr-defined]
+    assert engine._compiler._history_window == 3  # type: ignore[attr-defined]
+    assert engine._harness.budget.tool_schema_budget_tokens == 456  # type: ignore[attr-defined]

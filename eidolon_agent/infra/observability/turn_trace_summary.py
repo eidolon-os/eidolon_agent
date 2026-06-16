@@ -92,14 +92,26 @@ def _development_guard_summary(guards: dict[str, Any]) -> dict[str, Any]:
     context = guards.get("context_budget") or {}
     memory_write = guards.get("memory_write_policy") or {}
     tool = guards.get("tool_policy") or {}
+    tool_schema = guards.get("tool_schema_budget") or {}
     return {
         "context_budget": {
             "mode": context.get("mode"),
             "applied": bool(context.get("applied")),
             "max_tokens": context.get("max_tokens"),
+            "protected_token_estimate": context.get("protected_token_estimate") or 0,
+            "optional_token_estimate": context.get("optional_token_estimate") or 0,
+            "output_reserve_tokens": context.get("output_reserve_tokens"),
             "dropped_count": context.get("dropped_count") or 0,
             "shadow_dropped_count": context.get("shadow_dropped_count") or 0,
             "shadow_dropped_kinds": list(context.get("shadow_dropped_kinds") or []),
+        },
+        "tool_schema_budget": {
+            "schema_count": tool_schema.get("schema_count") or 0,
+            "schema_token_estimate": tool_schema.get("schema_token_estimate") or 0,
+            "schema_budget_tokens": tool_schema.get("schema_budget_tokens"),
+            "schema_budget_exceeded": bool(
+                tool_schema.get("schema_budget_exceeded")
+            ),
         },
         "memory_write_policy": {
             "mode": memory_write.get("mode"),
