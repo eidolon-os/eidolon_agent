@@ -7,9 +7,6 @@ across the codebase. This makes refactoring trivial and lets us enforce the
 
 from __future__ import annotations
 
-from eidolon_sdk.memory import conversation_turn_subject, memory_command_subject
-
-
 class Topics:
     """Subject builders. All methods return strings; instances are stateless."""
 
@@ -64,14 +61,6 @@ class Topics:
         return "agent.pairing.revoked"
 
     # --- External outbound ----------------------------------------------------
-
-    @staticmethod
-    def memory_conversation_turn(user_id: str) -> str:
-        return conversation_turn_subject(user_id)
-
-    @staticmethod
-    def memory_cmd(user_id: str) -> str:
-        return memory_command_subject(user_id)
 
     @staticmethod
     def emotion_turn(user_id: str) -> str:

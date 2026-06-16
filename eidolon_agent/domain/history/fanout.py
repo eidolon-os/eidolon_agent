@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from eidolon_sdk.memory import ConversationTurnPayload
+from eidolon_sdk.memory import ConversationTurnPayload, conversation_turn_subject
 
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.topics import Topics
@@ -65,7 +65,7 @@ class HistoryFanout:
             memory_subject = (
                 await self._memory_routes.render_turn_subject(user_id)
                 if self._memory_routes is not None
-                else Topics.memory_conversation_turn(user_id)
+                else conversation_turn_subject(user_id)
             )
             await self._bus.publish(
                 Event(

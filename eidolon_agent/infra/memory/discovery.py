@@ -13,10 +13,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import httpx
+from eidolon_sdk.memory import conversation_turn_subject, memory_command_subject
 from pydantic import BaseModel, ConfigDict, Field
 
 from eidolon_agent.config.settings import MemoryEndpoint, MemorySettings, NatsSettings
-from eidolon_agent.core.types.topics import Topics
 
 _log = logging.getLogger(__name__)
 
@@ -172,12 +172,12 @@ class MemoryRoutingTable:
     async def render_turn_subject(self, user_id: str) -> str:
         async with self._lock:
             template = self._nats.turn_subject_template
-        return _render_subject(template, user_id, Topics.memory_conversation_turn(user_id))
+        return _render_subject(template, user_id, conversation_turn_subject(user_id))
 
     async def render_cmd_subject(self, user_id: str) -> str:
         async with self._lock:
             template = self._nats.cmd_subject_template
-        return _render_subject(template, user_id, Topics.memory_cmd(user_id))
+        return _render_subject(template, user_id, memory_command_subject(user_id))
 
 
 class MemoryDiscoveryClient:

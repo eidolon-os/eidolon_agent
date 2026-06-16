@@ -6,10 +6,14 @@ import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from eidolon_sdk.memory import ConversationTurnPayload, KgAddTripleCommand
+from eidolon_sdk.memory import (
+    ConversationTurnPayload,
+    KgAddTripleCommand,
+    conversation_turn_subject,
+    memory_command_subject,
+)
 
 from eidolon_agent.core.types.event import Event
-from eidolon_agent.core.types.topics import Topics
 from eidolon_agent.infra.memory.discovery import MemoryRoutingTable
 
 _log = logging.getLogger(__name__)
@@ -42,7 +46,7 @@ class MemoryNatsPublisher:
         subject = (
             await self._routes.render_turn_subject(user_id)
             if self._routes is not None
-            else Topics.memory_conversation_turn(user_id)
+            else conversation_turn_subject(user_id)
         )
         await self._bus.publish(
             Event(
@@ -84,7 +88,7 @@ class MemoryNatsPublisher:
         nats_subject = (
             await self._routes.render_cmd_subject(user_id)
             if self._routes is not None
-            else Topics.memory_cmd(user_id)
+            else memory_command_subject(user_id)
         )
         await self._bus.publish(
             Event(
