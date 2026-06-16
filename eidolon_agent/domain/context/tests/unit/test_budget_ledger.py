@@ -26,33 +26,37 @@ def _seg(kind: ContextSegmentKind, tokens: int, *, priority: int = 50) -> Contex
 
 def test_persona_and_current_user_are_kept_even_over_budget() -> None:
     persona = _seg(ContextSegmentKind.PERSONA, 80)
+    policy = _seg(ContextSegmentKind.HARNESS_POLICY, 60)
     memory = _seg(ContextSegmentKind.MEMORY, 30)
     current = _seg(ContextSegmentKind.CURRENT_USER, 80)
 
-    kept, ledger = ContextBudget(max_tokens=50).prune([persona, memory, current])
+    kept, ledger = ContextBudget(max_tokens=50).prune([persona, policy, memory, current])
 
     assert [s.kind for s in kept] == [
         ContextSegmentKind.PERSONA,
+        ContextSegmentKind.HARNESS_POLICY,
         ContextSegmentKind.CURRENT_USER,
     ]
-    assert ledger.total_token_estimate == 160
+    assert ledger.total_token_estimate == 220
     assert ledger.dropped_segments[0].kind is ContextSegmentKind.MEMORY
     assert ledger.dropped_segments[0].reason == "token_budget_exceeded"
 
 
 def test_optional_segments_are_pruned_by_priority() -> None:
     persona = _seg(ContextSegmentKind.PERSONA, 10)
+    policy = _seg(ContextSegmentKind.HARNESS_POLICY, 10)
     memory = _seg(ContextSegmentKind.MEMORY, 30, priority=90)
     history = _seg(ContextSegmentKind.HISTORY, 30, priority=20)
     summary = _seg(ContextSegmentKind.SUMMARY, 20, priority=70)
     current = _seg(ContextSegmentKind.CURRENT_USER, 10)
 
-    kept, ledger = ContextBudget(max_tokens=70).prune(
-        [persona, history, memory, summary, current]
+    kept, ledger = ContextBudget(max_tokens=80).prune(
+        [persona, policy, history, memory, summary, current]
     )
 
     assert [s.kind for s in kept] == [
         ContextSegmentKind.PERSONA,
+        ContextSegmentKind.HARNESS_POLICY,
         ContextSegmentKind.MEMORY,
         ContextSegmentKind.SUMMARY,
         ContextSegmentKind.CURRENT_USER,

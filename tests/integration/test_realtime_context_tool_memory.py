@@ -21,7 +21,7 @@ from eidolon_agent.infra.persistence import (
     create_session_factory,
     ensure_schema,
 )
-from eidolon_agent.infra.persistence.models import LongTaskRow
+from eidolon_agent.infra.persistence.models import LongTaskRow, TurnRow
 from tests.helpers import make_turn_input
 
 pytestmark = pytest.mark.integration
@@ -252,10 +252,10 @@ async def test_compiled_prompt_contains_tool_policy(turn_engine_factory) -> None
 
     assert events[-1].kind is TurnEventKind.DONE
     system_prompt = llm.messages[0].content
-    assert "工具使用策略" in system_prompt
+    assert "Realtime Agent Harness 策略" in system_prompt
     assert "delegate_to_coworker" in system_prompt
     assert "realtime agent" in system_prompt
-    assert "coworker" in system_prompt
+    assert "cowork" in system_prompt
     assert "不要编造最终结果" in system_prompt
 
 
@@ -272,6 +272,53 @@ async def test_builtin_tool_schemas_describe_usage_boundaries(turn_engine_factor
     assert "instruction" in long_task_spec["function"]["parameters"]["required"]
     assert "calendar events" in schemas["get_time"].description
     assert "side-effectful event" in schemas["emit_event"].description
+
+
+async def test_turn_trace_contains_harness_snapshot_for_coworker_handoff(
+    turn_engine_factory,
+    tmp_path,
+) -> None:
+    sql_engine = create_engine(SqliteSettings(path=tmp_path / "agent.sqlite3"))
+    await ensure_schema(sql_engine)
+    session_factory = create_session_factory(sql_engine)
+    llm = _ScriptedCapturingLLM(
+        [
+            [
+                {
+                    "kind": "tool_call",
+                    "name": "delegate_to_coworker",
+                    "arguments": {"instruction": "整理资料"},
+                }
+            ],
+            [{"kind": "text", "text": "已交给后台。"}],
+        ]
+    )
+    engine = turn_engine_factory(llm=llm, session_factory=session_factory)
+
+    events = [ev async for ev in engine.run(make_turn_input("帮我整理资料"))]
+    await _drain_background_tasks()
+
+    assert any(ev.kind is TurnEventKind.HANDOFF for ev in events)
+    row = None
+    for _ in range(50):
+        async with session_factory() as session:
+            row = (
+                await session.execute(select(TurnRow).where(TurnRow.id == "t1"))
+            ).scalar_one_or_none()
+        if row is not None:
+            break
+        await asyncio.sleep(0.01)
+    await sql_engine.dispose()
+
+    assert row is not None
+    trace = (row.metadata_ or {})["turn_trace"]
+    harness = trace["harness"]
+    assert harness["kind"] == "realtime_agent_harness"
+    assert "harness_policy" in harness["segment_kinds"]
+    assert "delegate_to_coworker" in harness["tools"]["visible_names"]
+    assert "submit_long_task" not in harness["tools"]["visible_names"]
+    assert harness["handoffs"][0]["tool_name"] == "delegate_to_coworker"
+    assert harness["handoffs"][0]["accepted"] is True
 
 
 async def test_tool_permission_error_is_returned_to_llm_without_side_effect(

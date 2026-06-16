@@ -1,9 +1,9 @@
 """Direct prompt compilation — no pluggable providers.
 
-The hot path is fixed: persona prompt + memory recall + realtime digest as a
-single system message, recent history as user/assistant messages, current
-user input as the trailing user message. If a future segment is needed it
-goes here, not behind an abstraction.
+The hot path is fixed: persona prompt + realtime harness policy + memory
+recall + realtime digest as a single system message, recent history as
+user/assistant messages, current user input as the trailing user message.
+If a future segment is needed it goes here, not behind an abstraction.
 """
 
 from __future__ import annotations
@@ -22,6 +22,10 @@ from eidolon_agent.domain.context.types import (
     ContextLedger,
     ContextSegment,
     ContextSegmentKind,
+)
+from eidolon_agent.domain.harness import (
+    HARNESS_POLICY_SOURCE,
+    RealtimeAgentHarness,
 )
 from eidolon_agent.domain.runtime_policy import TurnRuntimePolicy
 
@@ -47,6 +51,7 @@ class ContextCompiler:
         memory_top_k: int = 5,
         context_budget_tokens: int | None = None,
         context_budget_mode: str = "enabled",
+        harness: RealtimeAgentHarness | None = None,
     ) -> None:
         self._personas = personas_service
         self._locator = instance_locator
@@ -57,6 +62,7 @@ class ContextCompiler:
         self._memory_top_k = memory_top_k
         self._context_budget_tokens = context_budget_tokens
         self._context_budget_mode = _normalize_budget_mode(context_budget_mode)
+        self._harness = harness or RealtimeAgentHarness()
 
     async def compile(self, ti: TurnInput) -> list[ChatMessage]:
         instance_id, template_id = self._locator(
@@ -139,6 +145,17 @@ class ContextCompiler:
         )
         segments.append(persona_segment)
         system_parts_by_segment[id(persona_segment)] = persona.system_prompt
+
+        harness_policy = self._harness.policy_prompt()
+        harness_policy_segment = ContextSegment(
+            kind=ContextSegmentKind.HARNESS_POLICY,
+            content="",
+            source=HARNESS_POLICY_SOURCE,
+            token_estimate=_estimate_tokens(harness_policy),
+            droppable=False,
+        )
+        segments.append(harness_policy_segment)
+        system_parts_by_segment[id(harness_policy_segment)] = harness_policy
 
         memory_text: str | None = None
         memory_degraded = False
@@ -277,6 +294,22 @@ class ContextCompiler:
             )
         ti.metadata["context_ledger"] = ledger.to_metadata()
         ti.metadata.setdefault("development_guards", {})["context_budget"] = budget_guard
+        ti.metadata["harness_snapshot"] = self._harness.snapshot(
+            segment_kinds=[seg.kind.value for seg in kept_segments],
+            budget=budget_guard,
+            memory={
+                "attempted": ti.metadata["memory_trace"]["attempted"],
+                "degraded": memory_degraded,
+                "degraded_reason": memory_degraded_reason,
+                "context_injected": memory_kept,
+                "hit_count": len(memory_hit_ids),
+                "kg_triple_count": len(memory_kg_triple_ids),
+            },
+            history={
+                "allowed": policy.history_context_allowed,
+                "message_count": len(kept_history),
+            },
+        ).to_metadata()
         return out
 
     def _apply_budget(

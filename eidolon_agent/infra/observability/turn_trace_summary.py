@@ -24,6 +24,7 @@ def build_turn_observability_summary(
     privacy = trace.get("privacy") or {}
     latency = trace.get("latency") or {}
     development_guards = trace.get("development_guards") or {}
+    harness = trace.get("harness") or {}
     snapshot = snapshot_from_turn_trace(trace, fallback_key="turn")
 
     return {
@@ -54,6 +55,7 @@ def build_turn_observability_summary(
             "cached_count": sum(1 for t in tools if bool(t.get("cached"))),
             "total_latency_ms": sum(_int_or_zero(t.get("latency_ms")) for t in tools),
         },
+        "harness": _harness_summary(harness),
         "latency": {
             "guard_ms": latency.get("guard_ms"),
             "triage_ms": latency.get("triage_ms"),
@@ -113,6 +115,20 @@ def _development_guard_summary(guards: dict[str, Any]) -> dict[str, Any]:
             ),
             "max_tool_iters": tool.get("max_tool_iters"),
         },
+    }
+
+
+def _harness_summary(harness: dict[str, Any]) -> dict[str, Any]:
+    tools = harness.get("tools") or {}
+    handoffs = harness.get("handoffs") or []
+    return {
+        "kind": harness.get("kind"),
+        "segment_kinds": list(harness.get("segment_kinds") or []),
+        "visible_tool_names": list(tools.get("visible_names") or []),
+        "handoff_count": len(handoffs),
+        "handoff_tool_names": [
+            item.get("tool_name") for item in handoffs if item.get("tool_name")
+        ],
     }
 
 

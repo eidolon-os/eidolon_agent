@@ -64,6 +64,7 @@ from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails.crisis import CrisisHandler
 from eidolon_agent.domain.guardrails.input_filter import InputGuardrail, SafetyAction
 from eidolon_agent.domain.guardrails.output_filter import OutputGuardrail
+from eidolon_agent.domain.harness import RealtimeAgentHarness
 from eidolon_agent.domain.history.fanout import HistoryFanout
 from eidolon_agent.domain.history.manager import HistoryManager
 from eidolon_agent.domain.personas.types import PersonaInteractionEvent
@@ -103,6 +104,7 @@ class TurnEngine:
         require_idempotency_for_side_effect_tools: bool = False,
         taboos_provider=lambda: (),  # () -> tuple[str, ...]
         turn_persister=None,  # async callable; None disables durable turn persistence
+        harness: RealtimeAgentHarness | None = None,
     ) -> None:
         self._compiler = compiler
         self._llm = llm
@@ -123,6 +125,7 @@ class TurnEngine:
         self._require_idempotency_for_side_effect_tools = require_idempotency_for_side_effect_tools
         self._taboos_provider = taboos_provider
         self._turn_persister = turn_persister
+        self._harness = harness or RealtimeAgentHarness()
 
     async def run(self, ti: TurnInput) -> AsyncIterator[TurnEvent]:
         """Run a single Turn. Yields TurnEvents until DONE or ERROR."""
@@ -145,6 +148,7 @@ class TurnEngine:
         ts_output_ms: int | None = None
         tool_ms_total = 0
         tool_trace: list[ToolTrace] = []
+        handoff_summaries: list[dict] = []
         runtime_policy = TurnRuntimePolicy.from_metadata(ti.metadata)
         post_turn_allowed = False
         post_turn_scheduled = False
@@ -229,6 +233,7 @@ class TurnEngine:
 
             # ---- LLM stream (with tool loop) -------------------------------
             tools = self._tool_schemas()
+            _update_harness_snapshot_tools(ti, [schema.name for schema in tools])
             yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.SPEAKING, time.time())
 
             tool_iters = 0
@@ -336,6 +341,10 @@ class TurnEngine:
                             result=r,
                         )
                         if handoff is not None:
+                            handoff_summaries.append(
+                                _handoff_summary_from_tool_result(r)
+                            )
+                            _update_harness_snapshot_handoffs(ti, handoff_summaries)
                             yield handoff
                         messages = [
                             *messages,
@@ -473,6 +482,7 @@ class TurnEngine:
                     ),
                     privacy=runtime_policy.privacy,
                     proactive_reason=ti.metadata.get("proactive_reason"),
+                    harness_snapshot=ti.metadata.get("harness_snapshot"),
                     development_guards=development_guards,
                     usage={"tokens_in": usage_in, "tokens_out": usage_out},
                 ).to_metadata()
@@ -542,7 +552,9 @@ class TurnEngine:
     # ---- helpers -------------------------------------------------------------
 
     def _tool_schemas(self) -> list:
-        return list(self._tools._registry.list_schemas())
+        return self._harness.visible_tool_schemas(
+            list(self._tools._registry.list_schemas())
+        )
 
     async def _persist_turn(
         self,
@@ -762,6 +774,33 @@ def _handoff_from_tool_result(
         data={"task_id": task_id, "progress_subject": progress_subject},
         ts=time.time(),
     )
+
+
+def _handoff_summary_from_tool_result(result: ToolResult) -> dict:
+    content = result.content if isinstance(result.content, dict) else {}
+    return {
+        "tool_name": result.name,
+        "task_id": content.get("task_id"),
+        "accepted": bool(content.get("accepted")),
+        "latency_ms": result.latency_ms,
+    }
+
+
+def _update_harness_snapshot_tools(ti: TurnInput, names: list[str]) -> None:
+    snapshot = dict(ti.metadata.get("harness_snapshot") or {})
+    snapshot.setdefault("kind", "realtime_agent_harness")
+    snapshot["tools"] = {"visible_names": list(names)}
+    ti.metadata["harness_snapshot"] = snapshot
+
+
+def _update_harness_snapshot_handoffs(
+    ti: TurnInput,
+    handoff_summaries: list[dict],
+) -> None:
+    snapshot = dict(ti.metadata.get("harness_snapshot") or {})
+    snapshot.setdefault("kind", "realtime_agent_harness")
+    snapshot["handoffs"] = [dict(item) for item in handoff_summaries]
+    ti.metadata["harness_snapshot"] = snapshot
 
 
 def _log_turn_timings(

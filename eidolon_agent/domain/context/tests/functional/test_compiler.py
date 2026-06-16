@@ -266,9 +266,18 @@ async def test_context_ledger_metadata_is_written_without_prompt_text() -> None:
 
     ledger = ti.metadata["context_ledger"]
     assert ledger["total_token_estimate"] > 0
-    assert {s["kind"] for s in ledger["segments"]} >= {"persona", "memory", "current_user"}
+    assert {s["kind"] for s in ledger["segments"]} >= {
+        "persona",
+        "harness_policy",
+        "memory",
+        "current_user",
+    }
     assert "secret-system-prompt" not in str(ledger)
     assert "recalled-private-detail" not in str(ledger)
+    snapshot = ti.metadata["harness_snapshot"]
+    assert snapshot["kind"] == "realtime_agent_harness"
+    assert "harness_policy" in snapshot["segment_kinds"]
+    assert snapshot["memory"]["hit_count"] == 1
 
 
 async def test_memory_trace_records_ids_and_degraded_without_content() -> None:
@@ -403,7 +412,7 @@ async def test_budget_keeps_recent_history_before_older_history() -> None:
         personas_service=_StubPersonas("[P]"),
         instance_locator=_locator,
         history_manager=history,
-        context_budget_tokens=35,
+        context_budget_tokens=173,
     )
 
     ti = make_turn_input("now")

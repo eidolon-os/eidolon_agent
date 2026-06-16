@@ -112,6 +112,8 @@ async def test_compile_prompt_uses_style_mapping(personas_service):
     assert "你是「解之」" in compiled.system_prompt
     assert "保持礼貌、温和但有分寸的距离" in compiled.system_prompt
     assert any(trace.startswith("intimacy=") for trace in compiled.debug_trace)
+    assert "delegate_to_coworker" not in compiled.system_prompt
+    assert "Realtime Agent Harness" not in compiled.system_prompt
 
 
 @pytest.mark.asyncio

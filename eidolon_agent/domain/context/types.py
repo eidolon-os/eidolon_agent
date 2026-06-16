@@ -9,6 +9,7 @@ from typing import Any
 
 class ContextSegmentKind(str, Enum):
     PERSONA = "persona"
+    HARNESS_POLICY = "harness_policy"
     REALTIME = "realtime"
     MEMORY = "memory"
     SUMMARY = "summary"
@@ -83,6 +84,7 @@ class ContextBudget:
     def prune(self, segments: list[ContextSegment]) -> tuple[list[ContextSegment], ContextLedger]:
         mandatory_kinds = {
             ContextSegmentKind.PERSONA,
+            ContextSegmentKind.HARNESS_POLICY,
             ContextSegmentKind.CURRENT_USER,
         }
         kept: list[ContextSegment] = []

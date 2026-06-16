@@ -67,6 +67,18 @@ def test_summary_is_prompt_safe_and_operator_friendly() -> None:
                 },
             ],
             "privacy": {"mode": "normal"},
+            "harness": {
+                "kind": "realtime_agent_harness",
+                "segment_kinds": ["persona", "harness_policy", "current_user"],
+                "tools": {"visible_names": ["get_time", "delegate_to_coworker"]},
+                "handoffs": [
+                    {
+                        "tool_name": "delegate_to_coworker",
+                        "task_id": "task-1",
+                        "accepted": True,
+                    }
+                ],
+            },
             "development_guards": {
                 "context_budget": {
                     "mode": "enabled",
@@ -105,6 +117,18 @@ def test_summary_is_prompt_safe_and_operator_friendly() -> None:
     assert summary["tools"]["error_count"] == 1
     assert summary["tools"]["cached_count"] == 1
     assert summary["tools"]["total_latency_ms"] == 6
+    assert summary["harness"]["kind"] == "realtime_agent_harness"
+    assert summary["harness"]["segment_kinds"] == [
+        "persona",
+        "harness_policy",
+        "current_user",
+    ]
+    assert summary["harness"]["visible_tool_names"] == [
+        "get_time",
+        "delegate_to_coworker",
+    ]
+    assert summary["harness"]["handoff_count"] == 1
+    assert summary["harness"]["handoff_tool_names"] == ["delegate_to_coworker"]
     assert summary["latency"]["compile_ms"] == 12
     assert summary["development_guards"]["context_budget"]["mode"] == "enabled"
     assert summary["development_guards"]["context_budget"]["dropped_count"] == 1

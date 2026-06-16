@@ -121,6 +121,7 @@ class TurnTrace:
     persona: PersonaTrace = field(default_factory=PersonaTrace)
     privacy: PrivacyTrace = field(default_factory=PrivacyTrace)
     proactive_reason: dict[str, Any] | None = None
+    harness_snapshot: dict[str, Any] | None = None
     development_guards: DevelopmentGuardTrace = field(
         default_factory=DevelopmentGuardTrace
     )
@@ -147,6 +148,7 @@ class TurnTrace:
             "persona": self.persona.to_metadata(),
             "privacy": self.privacy.to_metadata(),
             "proactive_reason": self.proactive_reason,
+            "harness": self.harness_snapshot,
             "development_guards": self.development_guards.to_metadata(),
             "usage": dict(self.usage),
         }
