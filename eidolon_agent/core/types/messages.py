@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+from eidolon_agent.core.types.tool import ToolCall
+
 
 class MessageRole(str, Enum):
     USER = "user"
@@ -34,6 +36,7 @@ class ChatMessage:
     tool_call_id: str | None = None
     tool_name: str | None = None
     tool_arguments: dict | None = None
+    tool_calls: tuple[ToolCall, ...] = ()
     metadata: dict = field(default_factory=dict)
 
     def with_content(self, content: str) -> ChatMessage:
@@ -49,5 +52,6 @@ class ChatMessage:
             tool_call_id=self.tool_call_id,
             tool_name=self.tool_name,
             tool_arguments=self.tool_arguments,
+            tool_calls=self.tool_calls,
             metadata=self.metadata,
         )

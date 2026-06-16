@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from google.protobuf import struct_pb2
+from eidolon_sdk.protobuf import protobuf_struct_to_dict
 
 from eidolon_agent.app.transport.grpc.proto import pb
 from eidolon_agent.core.types.turn import TurnEvent, TurnEventKind
@@ -34,6 +35,4 @@ def turn_event_to_proto(ev: TurnEvent) -> pb.TurnEvent:
 
 
 def struct_to_dict(struct: struct_pb2.Struct | None) -> dict:
-    if struct is None:
-        return {}
-    return dict(struct)
+    return protobuf_struct_to_dict(struct)

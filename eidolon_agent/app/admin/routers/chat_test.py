@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import uuid
 
 import grpc
+from eidolon_sdk.streaming import encode_sse_event
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from eidolon_agent.app.transport.grpc.codec import struct_to_dict
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
 
 _log = logging.getLogger(__name__)
@@ -59,8 +59,6 @@ async def chat_test(body: ChatTestRequest, request: Request):
             )
             yield _sse("status", {"message": "paired", "user_id": exch.user_id})
 
-            done_event = asyncio.Event()
-
             async def _requests():
                 yield pb.ChatRequest(
                     start=pb.StartTurn(
@@ -69,30 +67,22 @@ async def chat_test(body: ChatTestRequest, request: Request):
                         text=body.text,
                     )
                 )
-                # Hold the request stream open until the response stream emits
-                # DONE/ERROR; otherwise the server's `async for frame` keeps
-                # waiting indefinitely.
-                await done_event.wait()
 
             stream = stub.Chat(
                 _requests(),
                 metadata=(("authorization", f"Bearer {exch.device_token}"),),
             )
-            try:
-                async for ev in stream:
-                    kind = pb.TurnEvent.Kind.Name(ev.kind)
-                    data = dict(ev.data) if ev.data else {}
-                    yield _sse("event", {
-                        "turn_id": ev.turn_id,
-                        "seq": ev.seq,
-                        "kind": kind,
-                        "data": data,
-                    })
-                    if kind in ("DONE", "ERROR"):
-                        done_event.set()
-                        break
-            finally:
-                done_event.set()  # unblock _requests() if we exit early
+            async for ev in stream:
+                kind = pb.TurnEvent.Kind.Name(ev.kind)
+                data = struct_to_dict(ev.data) if ev.data else {}
+                yield _sse("event", {
+                    "turn_id": ev.turn_id,
+                    "seq": ev.seq,
+                    "kind": kind,
+                    "data": data,
+                })
+                if kind in ("DONE", "ERROR"):
+                    break
         except grpc.aio.AioRpcError as exc:
             _log.warning("chat test gRPC error: %s", exc.details())
             yield _sse("event", {"kind": "ERROR", "data": {"message": exc.details()}})
@@ -103,4 +93,4 @@ async def chat_test(body: ChatTestRequest, request: Request):
 
 
 def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+    return encode_sse_event(event, data).decode("utf-8")

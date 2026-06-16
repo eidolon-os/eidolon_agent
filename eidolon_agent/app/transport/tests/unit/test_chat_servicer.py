@@ -246,6 +246,66 @@ async def test_chat_cancels_active_turn_when_context_is_cancelled() -> None:
     assert cancelled_during_turn.is_set()
 
 
+async def test_chat_does_not_cancel_active_turn_when_context_is_done_but_not_cancelled() -> None:
+    """``context.done()`` can become true while the client is still draining
+    responses. Only ``cancelled()`` should interrupt the active turn."""
+    import asyncio
+
+    from eidolon_agent.core.types.turn import TurnEvent
+
+    cancelled_during_turn = asyncio.Event()
+    done_seen = asyncio.Event()
+    done_flag = {"v": False}
+
+    async def _turn(_ti):
+        try:
+            yield TurnEvent(turn_id="t", seq=0, kind=TurnEventKind.STATE, data={"state": "speaking"})
+            await asyncio.sleep(0.1)
+            yield TurnEvent(turn_id="t", seq=1, kind=TurnEventKind.DONE, data={})
+        except asyncio.CancelledError:
+            cancelled_during_turn.set()
+            raise
+
+    async def _write(ev):
+        if ev.kind == pb.TurnEvent.STATE:
+            done_flag["v"] = True
+        if ev.kind == pb.TurnEvent.DONE:
+            done_seen.set()
+
+    agent = MagicMock()
+    agent.run_turn = _turn
+
+    registry = MagicMock()
+    registry.resolve_for_caller = AsyncMock(
+        return_value=SimpleNamespace(instance_id="inst-1", agent=agent)
+    )
+    svc = EidolonAgentServicer(
+        agent_registry=registry, pairing=MagicMock(),
+        signals_bus=SimpleNamespace(recent=AsyncMock(return_value=[])),
+        proactive_bus=MagicMock(),
+    )
+
+    async def _req_iter():
+        yield pb.ChatRequest(
+            start=pb.StartTurn(turn_id="t1", conversation_id="c", text="hi")
+        )
+        await done_seen.wait()
+
+    ctx = _make_context()
+    ctx.write = AsyncMock(side_effect=_write)
+    ctx.cancelled = lambda: False
+    ctx.done = lambda: done_flag["v"]
+
+    token = _current_identity.set(_StubIdentity())
+    try:
+        await asyncio.wait_for(svc.Chat(_req_iter(), ctx), timeout=1.0)
+    finally:
+        _current_identity.reset(token)
+
+    assert done_seen.is_set()
+    assert not cancelled_during_turn.is_set()
+
+
 async def test_chat_start_inline_realtime_reaches_turn_input() -> None:
     from eidolon_agent.core.types.turn import TurnEvent
 

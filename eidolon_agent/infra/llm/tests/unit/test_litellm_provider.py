@@ -19,7 +19,8 @@ import pytest
 from eidolon_agent.core.errors import LLMUnavailableError
 from eidolon_agent.core.types.llm import LLMFinishReason
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
-from eidolon_agent.infra.llm.providers.litellm_provider import LiteLLMProvider
+from eidolon_agent.core.types.tool import ToolCall
+from eidolon_agent.infra.llm.providers.litellm_provider import LiteLLMProvider, _to_msg
 
 pytestmark = pytest.mark.unit
 
@@ -76,6 +77,35 @@ def _msg(content: str) -> ChatMessage:
         content=content,
         created_at=datetime.now(timezone.utc),
     )
+
+
+def test_assistant_tool_calls_render_as_openai_tool_call_messages() -> None:
+    msg = ChatMessage(
+        id=uuid.uuid4().hex,
+        role=MessageRole.ASSISTANT,
+        content="",
+        created_at=datetime.now(timezone.utc),
+        tool_calls=(
+            ToolCall(id="call-1", name="get_time", arguments={"timezone": "Asia/Shanghai"}),
+        ),
+    )
+
+    out = _to_msg(msg)
+
+    assert out == {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                    "name": "get_time",
+                    "arguments": '{"timezone": "Asia/Shanghai"}',
+                },
+            }
+        ],
+    }
 
 
 @pytest.fixture

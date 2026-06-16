@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 import httpx
 import litellm
+from eidolon_sdk.llm import render_openai_tool_calls, validate_openai_tool_transcript
 
 from eidolon_agent.core.errors import LLMUnavailableError
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason, LLMUsage
@@ -233,9 +234,11 @@ class LiteLLMProvider:
     ) -> dict:
         if self._shared_http_client:
             _ensure_shared_client()
+        openai_messages = [_to_msg(m) for m in messages]
+        validate_openai_tool_transcript(openai_messages)
         kwargs: dict = {
             "model": model or self._model,
-            "messages": [_to_msg(m) for m in messages],
+            "messages": openai_messages,
             "temperature": temperature,
             "stream": stream,
             "timeout": timeout_s,
@@ -289,6 +292,8 @@ def _to_msg(m: ChatMessage) -> dict:
         MessageRole.PROACTIVE: "user",
     }.get(m.role, "user")
     out: dict = {"role": role, "content": m.content}
+    if m.role is MessageRole.ASSISTANT and m.tool_calls:
+        out["tool_calls"] = render_openai_tool_calls(m.tool_calls)
     if m.role is MessageRole.TOOL:
         out["tool_call_id"] = m.tool_call_id
         out["name"] = m.tool_name

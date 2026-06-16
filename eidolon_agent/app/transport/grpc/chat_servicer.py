@@ -83,7 +83,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         # every in-flight turn so we stop pulling tokens from the LLM provider
         # and don't bill against a disconnected client.
         async def _on_rpc_cancelled() -> None:
-            while not context.cancelled() and not context.done():
+            while not context.cancelled():
                 await asyncio.sleep(0.05)
             for task in list(active_turns):
                 if not task.done():
@@ -172,7 +172,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
             # If the iterator returned because the RPC was cancelled, propagate
             # the cancel to any in-flight turn. Legitimate stream-end (client
             # closed cleanly) still wants to drain.
-            if context.cancelled() or context.done():
+            if context.cancelled():
                 for task in list(active_turns):
                     if not task.done():
                         task.cancel()

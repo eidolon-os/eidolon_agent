@@ -322,6 +322,7 @@ class TurnEngine:
                     )
                     # Feed results back into the conversation as TOOL messages.
                     now = datetime.now(timezone.utc)
+                    tool_result_messages: list[ChatMessage] = []
                     for r in results:
                         yield TurnEvent(
                             turn_id=ti.turn_id,
@@ -346,8 +347,7 @@ class TurnEngine:
                             )
                             _update_harness_snapshot_handoffs(ti, handoff_summaries)
                             yield handoff
-                        messages = [
-                            *messages,
+                        tool_result_messages.append(
                             ChatMessage(
                                 id=uuid.uuid4().hex,
                                 role=MessageRole.TOOL,
@@ -355,8 +355,19 @@ class TurnEngine:
                                 tool_call_id=r.call_id,
                                 tool_name=r.name,
                                 created_at=now,
-                            ),
-                        ]
+                            )
+                        )
+                    messages = [
+                        *messages,
+                        ChatMessage(
+                            id=uuid.uuid4().hex,
+                            role=MessageRole.ASSISTANT,
+                            content="",
+                            tool_calls=tuple(tool_calls),
+                            created_at=now,
+                        ),
+                        *tool_result_messages,
+                    ]
                     continue  # loop the LLM again with tool results in context
                 break
 
