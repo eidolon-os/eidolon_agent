@@ -28,7 +28,7 @@ class TriageKind(str, Enum):
     """How the input was classified."""
 
     SIMPLE = "simple"  # short conversational reply
-    COMPLEX_LONG = "complex_long"  # trace signal; LLM uses submit_long_task
+    COMPLEX_LONG = "complex_long"  # trace signal; LLM uses delegate_to_coworker
     TOOL_DIRECT = "tool_direct"  # bypass LLM, run tool directly
 
 

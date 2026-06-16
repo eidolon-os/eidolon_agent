@@ -1,10 +1,12 @@
-"""``submit_long_task`` — enqueue async work for the local mementos worker."""
+"""Delegate non-realtime work to the local coworker queue."""
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+from eidolon_sdk.long_tasks import progress_subject_for
 
 from eidolon_agent.core.ports.long_tasks import LongTaskQueueFullError, LongTaskSubmitter
 from eidolon_agent.core.ports.tool import ToolInvocationContext
@@ -16,61 +18,18 @@ from eidolon_agent.core.types.long_task import (
 )
 from eidolon_agent.core.types.tool import Permission, ToolCall, ToolResult, ToolSchema
 
+DELEGATE_TO_COWORKER_TOOL = "delegate_to_coworker"
+SUBMIT_LONG_TASK_LEGACY_TOOL = "submit_long_task"
+
 
 class SubmitLongTaskTool:
-    schema = ToolSchema(
-        name="submit_long_task",
-        description=(
-            "Submit an asynchronous long-running task to the local background queue. "
-            "A worker will call the mementos coworker and update progress/results later. "
-            "Use this only when the user asks for multi-step work, external follow-up, "
-            "research/booking/automation, or any task whose final result should arrive "
-            "later. Do not use it for ordinary conversation, quick questions, or anything "
-            "you can answer immediately. After calling it, do not invent the final result; "
-            "tell the user the task has started and wait for progress/result events."
-        ),
-        json_schema={
-            "type": "object",
-            "properties": {
-                "task": {
-                    "type": "string",
-                    "description": "The concrete user request to perform asynchronously.",
-                },
-                "task_type": {
-                    "type": "string",
-                    "description": (
-                        "Short category such as research, booking, scheduling, document_work, "
-                        "automation, or other."
-                    ),
-                },
-                "urgency": {
-                    "type": "string",
-                    "description": (
-                        "Urgency label: low, normal, high, or urgent. "
-                        "Defaults to normal."
-                    ),
-                },
-                "expected_output": {
-                    "type": "string",
-                    "description": "What the user expects back when the task completes.",
-                },
-                "context_summary": {
-                    "type": "string",
-                    "description": (
-                        "Brief relevant context from this conversation needed by the worker. "
-                        "Do not include unrelated private details."
-                    ),
-                },
-            },
-            "required": ["task"],
-            "additionalProperties": False,
-        },
-        permissions=frozenset({Permission.SYSTEM}),
-        side_effect=True,
-        timeout_s=1.0,
-    )
-
-    def __init__(self, long_task_submitter: LongTaskSubmitter | None = None) -> None:
+    def __init__(
+        self,
+        long_task_submitter: LongTaskSubmitter | None = None,
+        *,
+        legacy_schema: bool = False,
+    ) -> None:
+        self.schema = _legacy_schema() if legacy_schema else _delegate_schema()
         self._submitter = long_task_submitter
 
     async def invoke(self, call: ToolCall, *, ctx: ToolInvocationContext) -> ToolResult:
@@ -83,18 +42,19 @@ class SubmitLongTaskTool:
                 error_message="Long task submitter not wired",
             )
 
-        task = str(call.arguments.get("task") or "").strip()
-        if not task:
+        args = _normalize_arguments(call.arguments)
+        instruction = args["instruction"]
+        if not instruction:
             return ToolResult(
                 call_id=call.id,
                 name=self.schema.name,
                 ok=False,
                 error_code="invalid_long_task",
-                error_message="task is required",
+                error_message="instruction is required",
             )
 
         task_id = uuid.uuid4().hex
-        progress_subject = f"long_task.progress.{task_id}"
+        progress_subject = progress_subject_for(task_id)
         now = _localized_now(ctx.caller.locale)
         task_date = now.date().isoformat()
         session_key = session_key_for(ctx.caller.user_id, now.date())
@@ -113,12 +73,16 @@ class SubmitLongTaskTool:
             "task_key": task_key,
             "task_date": task_date,
             "mementos_session_id": session_key,
-            "natural_language": task,
+            "title": args["title"],
+            "instruction": instruction,
+            "natural_language": instruction,
             "source_user_text": ctx.user_text or "",
-            "task_type": call.arguments.get("task_type") or "other",
-            "urgency": call.arguments.get("urgency") or "normal",
-            "expected_output": call.arguments.get("expected_output") or "",
-            "context_summary": call.arguments.get("context_summary") or "",
+            "task_type": args["task_type"],
+            "urgency": args["urgency"],
+            "expected_result": args["expected_result"],
+            "expected_output": args["expected_result"],
+            "context": args["context"],
+            "context_summary": args["context"],
             "progress_subject": progress_subject,
         }
         record = LongTaskRecord(
@@ -136,7 +100,7 @@ class SubmitLongTaskTool:
             session_key=session_key,
             task_date=task_date,
             task_key=task_key,
-            task=task,
+            task=instruction,
             user_text=ctx.user_text or "",
             task_type=payload["task_type"],
             urgency=payload["urgency"],
@@ -176,6 +140,109 @@ class SubmitLongTaskTool:
                 "task_date": task_date,
             },
         )
+
+
+def _delegate_schema() -> ToolSchema:
+    return ToolSchema(
+        name=DELEGATE_TO_COWORKER_TOOL,
+        description=(
+            "Delegate work to a background coworker when the realtime agent should not "
+            "complete it inside the current response. Use this for complex, multi-step, "
+            "slow, external, or follow-up work such as research, booking, scheduling, "
+            "document preparation, automation, or anything whose final result should "
+            "arrive later. Do not use it for ordinary conversation, quick answers, or "
+            "tasks the realtime agent can finish now. After calling it, only tell the "
+            "user the coworker has started; do not invent the final result."
+        ),
+        json_schema={
+            "type": "object",
+            "properties": {
+                "instruction": {
+                    "type": "string",
+                    "description": (
+                        "The complete instruction for the background coworker. Include "
+                        "the concrete objective and any constraints needed to do the work."
+                    ),
+                },
+                "title": {
+                    "type": "string",
+                    "description": (
+                        "A short user-facing title for tracking this delegated task, "
+                        "for example '整理项目资料' or '查询上海航班'."
+                    ),
+                },
+                "task_type": {
+                    "type": "string",
+                    "description": (
+                        "Short category: research, booking, scheduling, document_work, "
+                        "automation, or other."
+                    ),
+                },
+                "urgency": {
+                    "type": "string",
+                    "description": "Urgency label: low, normal, high, or urgent. Defaults to normal.",
+                },
+                "expected_result": {
+                    "type": "string",
+                    "description": (
+                        "What the user should receive when the coworker finishes, such as "
+                        "a summary, options, a document, or completion status."
+                    ),
+                },
+                "context": {
+                    "type": "string",
+                    "description": (
+                        "Brief relevant conversation context the coworker needs. Include "
+                        "only necessary details; omit unrelated private information."
+                    ),
+                },
+            },
+            "required": ["instruction"],
+            "additionalProperties": False,
+        },
+        permissions=frozenset({Permission.SYSTEM}),
+        side_effect=True,
+        timeout_s=1.0,
+    )
+
+
+def _legacy_schema() -> ToolSchema:
+    return ToolSchema(
+        name=SUBMIT_LONG_TASK_LEGACY_TOOL,
+        description="Compatibility alias for delegate_to_coworker.",
+        json_schema={
+            "type": "object",
+            "properties": {
+                "task": {"type": "string"},
+                "task_type": {"type": "string"},
+                "urgency": {"type": "string"},
+                "expected_output": {"type": "string"},
+                "context_summary": {"type": "string"},
+            },
+            "required": ["task"],
+            "additionalProperties": False,
+        },
+        permissions=frozenset({Permission.SYSTEM}),
+        side_effect=True,
+        timeout_s=1.0,
+    )
+
+
+def _normalize_arguments(arguments: dict) -> dict[str, str]:
+    instruction = str(arguments.get("instruction") or arguments.get("task") or "").strip()
+    title = str(arguments.get("title") or "").strip()
+    if not title:
+        title = instruction[:48]
+    return {
+        "instruction": instruction,
+        "title": title,
+        "task_type": str(arguments.get("task_type") or "other").strip() or "other",
+        "urgency": str(arguments.get("urgency") or "normal").strip() or "normal",
+        "expected_result": str(
+            arguments.get("expected_result") or arguments.get("expected_output") or ""
+        ).strip(),
+        "context": str(arguments.get("context") or arguments.get("context_summary") or "").strip(),
+    }
 
 
 def _localized_now(locale: str) -> datetime:

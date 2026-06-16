@@ -90,13 +90,14 @@ async def test_llm_selected_long_task_returns_handoff_without_waiting_for_worker
             [
                 {
                     "kind": "tool_call",
-                    "name": "submit_long_task",
+                    "name": "delegate_to_coworker",
                     "arguments": {
-                        "task": "帮我订下周三去上海的机票",
+                        "title": "预订上海机票",
+                        "instruction": "帮我订下周三去上海的机票",
                         "task_type": "booking",
                         "urgency": "normal",
-                        "expected_output": "可选航班和预订进度",
-                        "context_summary": "用户希望处理订机票事项。",
+                        "expected_result": "可选航班和预订进度",
+                        "context": "用户希望处理订机票事项。",
                     },
                 }
             ],
@@ -112,11 +113,11 @@ async def test_llm_selected_long_task_returns_handoff_without_waiting_for_worker
 
     assert any(
         ev.kind is TurnEventKind.DELTA
-        and ev.data.get("text") == "收到，我已经开始处理这个长任务，会继续跟进。"
+        and ev.data.get("text") == "收到，我已交给后台 coworker 处理，会继续跟进。"
         for ev in events
     )
     tool_result = next(ev for ev in events if ev.kind is TurnEventKind.TOOL_RESULT)
-    assert tool_result.data["name"] == "submit_long_task"
+    assert tool_result.data["name"] == "delegate_to_coworker"
     assert tool_result.data["ok"] is True
     assert tool_result.data["content"]["accepted"] is True
     handoff = next(ev for ev in events if ev.kind is TurnEventKind.HANDOFF)
@@ -142,12 +143,13 @@ async def test_llm_selected_long_task_persists_minimal_receipt_record(
             [
                 {
                     "kind": "tool_call",
-                    "name": "submit_long_task",
+                    "name": "delegate_to_coworker",
                     "arguments": {
-                        "task": "整理我最近的项目资料并给出行动清单",
+                        "title": "整理项目资料",
+                        "instruction": "整理我最近的项目资料并给出行动清单",
                         "task_type": "document_work",
-                        "expected_output": "一份结构化行动清单",
-                        "context_summary": "用户在测试 mementos 长任务。",
+                        "expected_result": "一份结构化行动清单",
+                        "context": "用户在测试 coworker 委托任务。",
                     },
                 }
             ],
@@ -186,10 +188,14 @@ async def test_llm_selected_long_task_persists_minimal_receipt_record(
     assert row.mementos_session_id is None
     assert row.task_type == "document_work"
     assert row.expected_output == "一份结构化行动清单"
-    assert row.context_summary == "用户在测试 mementos 长任务。"
+    assert row.context_summary == "用户在测试 coworker 委托任务。"
     assert row.request_payload["session_key"] == row.session_key
     assert row.request_payload["task_key"] == row.task_key
     assert row.request_payload["mementos_session_id"] == row.session_key
+    assert row.request_payload["title"] == "整理项目资料"
+    assert row.request_payload["instruction"] == "整理我最近的项目资料并给出行动清单"
+    assert row.request_payload["expected_result"] == "一份结构化行动清单"
+    assert row.request_payload["context"] == "用户在测试 coworker 委托任务。"
     assert row.callback_subject == content["progress_subject"]
 
 
@@ -205,7 +211,7 @@ async def test_temporary_long_task_does_not_fanout_to_memory(
     await event_bus.subscribe("agent.memory.conversation.turn.alice", _on_memory)
     llm = _ScriptedCapturingLLM(
         [
-            [{"kind": "tool_call", "name": "submit_long_task", "arguments": {"task": "整理资料"}}],
+            [{"kind": "tool_call", "name": "delegate_to_coworker", "arguments": {"instruction": "整理资料"}}],
             [{"kind": "text", "text": "已开始处理。"}],
         ]
     )
@@ -220,6 +226,24 @@ async def test_temporary_long_task_does_not_fanout_to_memory(
     assert memory_fanout == []
 
 
+async def test_legacy_submit_long_task_alias_still_handoffs(turn_engine_factory) -> None:
+    llm = _ScriptedCapturingLLM(
+        [
+            [{"kind": "tool_call", "name": "submit_long_task", "arguments": {"task": "整理资料"}}],
+            [{"kind": "text", "text": "已开始处理。"}],
+        ]
+    )
+    engine = turn_engine_factory(llm=llm)
+
+    events = [ev async for ev in engine.run(make_turn_input("帮我整理资料"))]
+    await _drain_background_tasks()
+
+    tool_result = next(ev for ev in events if ev.kind is TurnEventKind.TOOL_RESULT)
+    assert tool_result.data["name"] == "submit_long_task"
+    assert tool_result.data["ok"] is True
+    assert any(ev.kind is TurnEventKind.HANDOFF for ev in events)
+
+
 async def test_compiled_prompt_contains_tool_policy(turn_engine_factory) -> None:
     llm = _CapturingLLM()
     engine = turn_engine_factory(llm=llm)
@@ -229,7 +253,9 @@ async def test_compiled_prompt_contains_tool_policy(turn_engine_factory) -> None
     assert events[-1].kind is TurnEventKind.DONE
     system_prompt = llm.messages[0].content
     assert "工具使用策略" in system_prompt
-    assert "submit_long_task" in system_prompt
+    assert "delegate_to_coworker" in system_prompt
+    assert "realtime agent" in system_prompt
+    assert "coworker" in system_prompt
     assert "不要编造最终结果" in system_prompt
 
 
@@ -237,12 +263,13 @@ async def test_builtin_tool_schemas_describe_usage_boundaries(turn_engine_factor
     engine = turn_engine_factory()
     schemas = {schema.name: schema for schema in engine._tool_schemas()}
 
-    assert "submit_long_task" in schemas
-    long_task_spec = schemas["submit_long_task"].to_openai_function()
+    assert "delegate_to_coworker" in schemas
+    assert "submit_long_task" not in schemas
+    long_task_spec = schemas["delegate_to_coworker"].to_openai_function()
     description = long_task_spec["function"]["description"]
-    assert "asynchronous" in description
+    assert "background coworker" in description
     assert "Do not use it for ordinary conversation" in description
-    assert "task" in long_task_spec["function"]["parameters"]["required"]
+    assert "instruction" in long_task_spec["function"]["parameters"]["required"]
     assert "calendar events" in schemas["get_time"].description
     assert "side-effectful event" in schemas["emit_event"].description
 

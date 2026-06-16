@@ -9,8 +9,8 @@ This is the heart of the whole architecture. Hot path:
 Three Triage outcomes diverge:
 
 * SIMPLE      — standard LLM stream + tool loop.
-* COMPLEX_LONG — trace signal only; long tasks are submitted through the
-                 LLM tool-call path via ``submit_long_task``.
+* COMPLEX_LONG — trace signal only; complex work is delegated through the
+                 LLM tool-call path via ``delegate_to_coworker``.
 * TOOL_DIRECT — skip LLM, dispatch a single explicit tool (caller hint or
                 first registered matching tool name in input text), return result.
 
@@ -54,6 +54,10 @@ from eidolon_agent.core.types.turn import (
     TurnEventKind,
     TurnInput,
     TurnStatus,
+)
+from eidolon_agent.domain.tools.builtin.submit_long_task import (
+    DELEGATE_TO_COWORKER_TOOL,
+    SUBMIT_LONG_TASK_LEGACY_TOOL,
 )
 from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.context.compiler import ContextCompiler
@@ -214,9 +218,9 @@ class TurnEngine:
             ts_triage_ms = int((time.monotonic() - t0) * 1000)
             yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.THINKING, time.time())
 
-            # ``COMPLEX_LONG`` remains a trace signal, but long-task submission
-            # is now unified through the LLM tool-call path via
-            # ``submit_long_task``. That keeps parameter extraction, tool
+            # ``COMPLEX_LONG`` remains a trace signal, but coworker delegation
+            # is unified through the LLM tool-call path via
+            # ``delegate_to_coworker``. That keeps parameter extraction, tool
             # announcements, and result handling on one path.
 
             # ---- Compile context -------------------------------------------
@@ -730,8 +734,8 @@ def _tool_announcement(call: ToolCall) -> str:
         return "我先看一下当前时间。"
     if call.name == "emit_event":
         return "我来发送这个事件。"
-    if call.name == "submit_long_task":
-        return "收到，我已经开始处理这个长任务，会继续跟进。"
+    if call.name in {DELEGATE_TO_COWORKER_TOOL, SUBMIT_LONG_TASK_LEGACY_TOOL}:
+        return "收到，我已交给后台 coworker 处理，会继续跟进。"
     return "我先调用相关工具处理一下。"
 
 
@@ -741,7 +745,10 @@ def _handoff_from_tool_result(
     seq: _SeqGen,
     result: ToolResult,
 ) -> TurnEvent | None:
-    if result.name != "submit_long_task" or not result.ok:
+    if (
+        result.name not in {DELEGATE_TO_COWORKER_TOOL, SUBMIT_LONG_TASK_LEGACY_TOOL}
+        or not result.ok
+    ):
         return None
     content = result.content if isinstance(result.content, dict) else {}
     task_id = content.get("task_id")

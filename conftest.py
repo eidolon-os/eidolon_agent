@@ -18,6 +18,7 @@ from eidolon_agent.domain.personas import (
 )
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import EmitEventTool, GetTimeTool, SubmitLongTaskTool
+from eidolon_agent.domain.tools.builtin.submit_long_task import SUBMIT_LONG_TASK_LEGACY_TOOL
 from eidolon_agent.infra.events import InMemoryEventBus, InMemoryKVStore
 from eidolon_agent.infra.llm import LLMRouter
 from eidolon_agent.infra.llm.providers.fake import FakeLLM
@@ -85,16 +86,20 @@ async def turn_engine_factory(personas_service, event_bus):
             tools = ToolRegistry()
             tools.register(GetTimeTool())
             tools.register(EmitEventTool(event_bus=event_bus))
-            tools.register(
-                SubmitLongTaskTool(
-                    long_task_submitter=_ImmediateLongTaskSubmitter(
-                        (
-                            SqlLongTaskStore(session_factory)
-                            if session_factory is not None
-                            else None
-                        )
-                    ),
+            long_task_submitter = _ImmediateLongTaskSubmitter(
+                (
+                    SqlLongTaskStore(session_factory)
+                    if session_factory is not None
+                    else None
                 )
+            )
+            tools.register(SubmitLongTaskTool(long_task_submitter=long_task_submitter))
+            tools.register_alias(
+                SUBMIT_LONG_TASK_LEGACY_TOOL,
+                SubmitLongTaskTool(
+                    long_task_submitter=long_task_submitter,
+                    legacy_schema=True,
+                ),
             )
             tool_dispatcher = ToolDispatcher(tools)
 

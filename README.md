@@ -208,7 +208,7 @@ TurnEngine.run(ti)   ← 以下为热路径，逐步 yield TurnEvent
    │
    ├─ 2. triage.classify(ti.text)               [< 1ms]
    │     ├─ TOOL_DIRECT  → 简化路径（未来）
-   │     └─ COMPLEX_LONG → 仅作为 trace；长任务由 LLM 调用 submit_long_task
+   │     └─ COMPLEX_LONG → 仅作为 trace；复杂任务由 LLM 调用 delegate_to_coworker
    │
    ├─ 3. yield STATE(thinking)
    │
@@ -268,7 +268,7 @@ NATS 是核心总线。**进程内** fire-and-forget 直接 `asyncio.create_task
 | **外部出站** | `agent.emotion.turn.<user>` | turn 完成 → emotion 服务 | **是** |
 | **外部入站** | `agent.memory.event.*` | memory 服务推送（promise_due 等） | **是** |
 | **外部入站** | `agent.persona.evolution.proposed.*` | emotion 服务提出的演化 | **是** |
-长任务不再使用 NATS subject；`submit_long_task` 写入 SQLite receipt 后进入本地内存队列，由 mementos worker 通过 HTTP 执行。
+长任务不再使用 NATS subject；`delegate_to_coworker` 写入 SQLite receipt 后进入本地内存队列，由 mementos worker 通过 HTTP 执行。`submit_long_task` 仅保留为兼容旧调用的隐藏别名。
 
 JetStream 持久化前缀：`agent.memory.*` / `agent.emotion.*` / `agent.evolution.*`。`is_persistent(subject)` 自动判定。
 
