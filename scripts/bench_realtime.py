@@ -39,7 +39,10 @@ from replay_live_service import (
     ensure_registry_user,
 )
 
+from eidolon_agent.app.runtime.bootstrap import _build_llm_router
+from eidolon_agent.config import load_settings
 from eidolon_agent.infra.benchmark import (
+    BenchmarkReportSummarizer,
     build_realtime_benchmark_report,
     write_benchmark_artifacts,
 )
@@ -70,6 +73,22 @@ async def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--baseline", type=Path, default=None)
     parser.add_argument("--no-latest", action="store_true")
+    parser.add_argument(
+        "--llm-summary",
+        action="store_true",
+        help="Use the configured project LLM to add a human-readable diagnosis to the report.",
+    )
+    parser.add_argument(
+        "--llm-summary-model",
+        default=None,
+        help="Optional configured model name to use for the benchmark diagnosis.",
+    )
+    parser.add_argument("--llm-summary-max-tokens", type=int, default=900)
+    parser.add_argument(
+        "--allow-fake-llm-summary",
+        action="store_true",
+        help="Allow the fake test provider for summary generation. Disabled by default.",
+    )
     parser.add_argument("--first-delta-p95-ms", type=int, default=None)
     parser.add_argument("--first-delta-p99-ms", type=int, default=None)
     parser.add_argument("--total-p95-ms", type=int, default=None)
@@ -138,6 +157,8 @@ async def main() -> int:
         source_reports=[_source_report_summary(source_report)],
         baseline_report=baseline_report,
     )
+    if args.llm_summary:
+        report["llm_summary"] = await _generate_llm_summary(report, args)
     output_json = args.output_dir.expanduser() / f"benchmark-{run_id}.json"
     artifacts = write_benchmark_artifacts(
         report,
@@ -322,6 +343,37 @@ def _source_report_summary(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _generate_llm_summary(
+    report: dict[str, Any],
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    router = None
+    try:
+        router = _build_llm_router(load_settings())
+        if router.model_id == "fake" and not args.allow_fake_llm_summary:
+            return {
+                "status": "skipped",
+                "error": (
+                    "configured default LLM resolved to fake; pass a real model in settings "
+                    "or use --allow-fake-llm-summary for tests"
+                ),
+                "model_id": router.model_id,
+            }
+        return await BenchmarkReportSummarizer(router).summarize(
+            report,
+            model=args.llm_summary_model,
+            max_tokens=args.llm_summary_max_tokens,
+        )
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    finally:
+        if router is not None:
+            await router.close()
+
+
 def _print_summary(report: dict[str, Any], artifacts: dict[str, str]) -> None:
     first = report["metrics"]["first_delta_ms"]
     total = report["metrics"]["total_ms"]
@@ -337,6 +389,9 @@ def _print_summary(report: dict[str, Any], artifacts: dict[str, str]) -> None:
     print(f"json={artifacts['json']}")
     print(f"markdown={artifacts['markdown']}")
     print(f"html={artifacts['html']}")
+    llm_summary = report.get("llm_summary") or {}
+    if llm_summary:
+        print(f"llm_summary={llm_summary.get('status')}")
 
 
 if __name__ == "__main__":

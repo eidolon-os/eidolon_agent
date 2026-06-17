@@ -124,6 +124,11 @@ def test_write_benchmark_artifacts_includes_human_reports_and_latest(tmp_path) -
         scenarios=scenarios,
         turns=turns,
     )
+    report["llm_summary"] = {
+        "status": "ok",
+        "model_id": "test-model",
+        "text": "总体看，首响稳定；暂无不达标项。",
+    }
 
     artifacts = write_benchmark_artifacts(
         report,
@@ -132,10 +137,13 @@ def test_write_benchmark_artifacts_includes_human_reports_and_latest(tmp_path) -
 
     payload = json.loads((tmp_path / "benchmark-artifact.json").read_text())
     assert payload["schema_version"] == SCHEMA_VERSION
+    assert payload["llm_summary"]["status"] == "ok"
     assert (tmp_path / "benchmark-artifact.md").read_text().startswith(
         "# Realtime Benchmark"
     )
+    assert "## LLM Summary" in (tmp_path / "benchmark-artifact.md").read_text()
     assert "<!doctype html>" in (tmp_path / "benchmark-artifact.html").read_text()
+    assert "LLM Summary" in (tmp_path / "benchmark-artifact.html").read_text()
     assert json.loads((tmp_path / "latest.json").read_text())["run_id"] == "artifact"
     assert json.loads((tmp_path / "latest-hotpath.json").read_text())["run_id"] == "artifact"
     assert artifacts["json"].endswith("benchmark-artifact.json")

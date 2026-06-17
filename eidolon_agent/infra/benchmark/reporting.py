@@ -286,6 +286,21 @@ def render_benchmark_markdown(report: dict[str, Any]) -> str:
     ]
     for key, value in (report.get("summary") or {}).items():
         lines.append(f"- {key}: `{value}`")
+    llm_summary = report.get("llm_summary") or {}
+    if llm_summary:
+        lines.extend(
+            [
+                "",
+                "## LLM Summary",
+                "",
+                f"- status: `{llm_summary.get('status')}`",
+                f"- model: `{llm_summary.get('model_id') or llm_summary.get('requested_model') or ''}`",
+                "",
+            ]
+        )
+        text = str(llm_summary.get("text") or llm_summary.get("error") or "").strip()
+        if text:
+            lines.extend([text, ""])
     lines.extend(["", "## Latency Metrics", "", "| metric | count | p50 | p95 | p99 | max | mean |", "|---|---:|---:|---:|---:|---:|---:|"])
     for field in _LATENCY_FIELDS:
         stat = metrics.get(field) or {}
@@ -343,6 +358,7 @@ def render_benchmark_html(report: dict[str, Any]) -> str:
     max_total = max([_number_or_none(t.get("total_ms")) or 0 for t in turns] or [1])
     rows = "\n".join(_turn_row_html(turn, max_total=max_total) for turn in turns)
     cards = "\n".join(_metric_card_html(name, report.get("metrics", {}).get(name) or {}) for name in _LATENCY_FIELDS)
+    summary_html = _llm_summary_html(report.get("llm_summary") or {})
     failed = report.get("failed_checks") or []
     failed_rows = "\n".join(
         "<tr>"
@@ -380,6 +396,7 @@ def render_benchmark_html(report: dict[str, Any]) -> str:
 <body>
   <h1>{_h(title)}</h1>
   <div class="meta">mode={_h(report.get('mode'))} profile={_h(report.get('profile'))} generated={_h(report.get('generated_at'))} passed=<b class="{ 'pass' if report.get('passed') else 'fail' }">{_h(report.get('passed'))}</b></div>
+  {summary_html}
   <div class="cards">{cards}</div>
   <h2>Turns</h2>
   <table>
@@ -558,6 +575,29 @@ def _metric_card_html(name: str, stat: dict[str, Any]) -> str:
         f"<div class=\"subtle\">p50 {_fmt_ms(stat.get('p50'))} / p99 {_fmt_ms(stat.get('p99'))}</div>"
         "</div>"
     )
+
+
+def _llm_summary_html(summary: dict[str, Any]) -> str:
+    if not summary:
+        return ""
+    text = str(summary.get("text") or summary.get("error") or "").strip()
+    if not text:
+        return ""
+    status = summary.get("status") or "unknown"
+    model = summary.get("model_id") or summary.get("requested_model") or ""
+    paragraphs = "".join(
+        f"<p>{_h(part)}</p>" for part in re_split_paragraphs(text)
+    )
+    return (
+        '<section class="card" style="margin-bottom:24px">'
+        f"<b>LLM Summary · {_h(status)} · {_h(model)}</b>"
+        f"{paragraphs}"
+        "</section>"
+    )
+
+
+def re_split_paragraphs(text: str) -> list[str]:
+    return [part.strip() for part in text.split("\n\n") if part.strip()]
 
 
 def _turn_row_html(turn: dict[str, Any], *, max_total: int) -> str:
