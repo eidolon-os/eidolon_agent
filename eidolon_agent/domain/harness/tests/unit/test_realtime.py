@@ -39,18 +39,25 @@ def test_default_budget_is_realtime_safe() -> None:
     assert budget.output_reserve_tokens == 500
 
 
-def test_visible_tool_schemas_hide_legacy_alias_only() -> None:
+def test_visible_tool_schemas_keep_only_prompt_visible_tools() -> None:
     harness = RealtimeAgentHarness()
 
     visible = harness.visible_tool_schemas(
         [
-            _schema("get_time"),
+            _schema("emit_event"),
             _schema("delegate_to_coworker"),
-            _schema("submit_long_task"),
         ]
     )
 
-    assert [schema.name for schema in visible] == ["get_time", "delegate_to_coworker"]
+    assert [schema.name for schema in visible] == ["delegate_to_coworker"]
+
+
+def test_visible_tool_schemas_can_override_hidden_tools() -> None:
+    harness = RealtimeAgentHarness(hidden_tool_names=set())
+
+    visible = harness.visible_tool_schemas([_schema("emit_event")])
+
+    assert [schema.name for schema in visible] == ["emit_event"]
 
 
 def test_snapshot_is_prompt_safe_shape() -> None:
@@ -59,14 +66,14 @@ def test_snapshot_is_prompt_safe_shape() -> None:
         budget={"mode": "enabled"},
         memory={"degraded": False, "hit_count": 2},
         history={"message_count": 1},
-        tools=["get_time", "delegate_to_coworker"],
+        tools=["delegate_to_coworker"],
         tool_budget={"schema_token_estimate": 42},
         handoffs=[{"tool_name": "delegate_to_coworker", "task_id": "task-1"}],
     ).to_metadata()
 
     assert snapshot["kind"] == "realtime_agent_harness"
     assert snapshot["segment_kinds"] == ["persona", "harness_policy", "current_user"]
-    assert snapshot["tools"]["visible_names"] == ["get_time", "delegate_to_coworker"]
+    assert snapshot["tools"]["visible_names"] == ["delegate_to_coworker"]
     assert snapshot["tools"]["schema_token_estimate"] == 42
     assert "secret prompt" not in str(snapshot)
 

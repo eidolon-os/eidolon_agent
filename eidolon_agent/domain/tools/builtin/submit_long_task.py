@@ -19,17 +19,14 @@ from eidolon_agent.core.types.long_task import (
 from eidolon_agent.core.types.tool import Permission, ToolCall, ToolResult, ToolSchema
 
 DELEGATE_TO_COWORKER_TOOL = "delegate_to_coworker"
-SUBMIT_LONG_TASK_LEGACY_TOOL = "submit_long_task"
 
 
 class SubmitLongTaskTool:
     def __init__(
         self,
         long_task_submitter: LongTaskSubmitter | None = None,
-        *,
-        legacy_schema: bool = False,
     ) -> None:
-        self.schema = _legacy_schema() if legacy_schema else _delegate_schema()
+        self.schema = _delegate_schema()
         self._submitter = long_task_submitter
 
     async def invoke(self, call: ToolCall, *, ctx: ToolInvocationContext) -> ToolResult:
@@ -206,30 +203,8 @@ def _delegate_schema() -> ToolSchema:
     )
 
 
-def _legacy_schema() -> ToolSchema:
-    return ToolSchema(
-        name=SUBMIT_LONG_TASK_LEGACY_TOOL,
-        description="Compatibility alias for delegate_to_coworker.",
-        json_schema={
-            "type": "object",
-            "properties": {
-                "task": {"type": "string"},
-                "task_type": {"type": "string"},
-                "urgency": {"type": "string"},
-                "expected_output": {"type": "string"},
-                "context_summary": {"type": "string"},
-            },
-            "required": ["task"],
-            "additionalProperties": False,
-        },
-        permissions=frozenset({Permission.SYSTEM}),
-        side_effect=True,
-        timeout_s=1.0,
-    )
-
-
 def _normalize_arguments(arguments: dict) -> dict[str, str]:
-    instruction = str(arguments.get("instruction") or arguments.get("task") or "").strip()
+    instruction = str(arguments.get("instruction") or "").strip()
     title = str(arguments.get("title") or "").strip()
     if not title:
         title = instruction[:48]
@@ -238,10 +213,8 @@ def _normalize_arguments(arguments: dict) -> dict[str, str]:
         "title": title,
         "task_type": str(arguments.get("task_type") or "other").strip() or "other",
         "urgency": str(arguments.get("urgency") or "normal").strip() or "normal",
-        "expected_result": str(
-            arguments.get("expected_result") or arguments.get("expected_output") or ""
-        ).strip(),
-        "context": str(arguments.get("context") or arguments.get("context_summary") or "").strip(),
+        "expected_result": str(arguments.get("expected_result") or "").strip(),
+        "context": str(arguments.get("context") or "").strip(),
     }
 
 

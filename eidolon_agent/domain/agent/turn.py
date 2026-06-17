@@ -69,7 +69,6 @@ from eidolon_agent.domain.personas.types import PersonaInteractionEvent
 from eidolon_agent.domain.runtime_policy import TurnRuntimePolicy
 from eidolon_agent.domain.tools.builtin.submit_long_task import (
     DELEGATE_TO_COWORKER_TOOL,
-    SUBMIT_LONG_TASK_LEGACY_TOOL,
 )
 from eidolon_agent.domain.tools.dispatcher import ToolDispatcher
 
@@ -787,11 +786,9 @@ class _SeqGen:
 def _tool_announcement(call: ToolCall) -> str:
     """User-visible status for a tool call the model actually requested."""
 
-    if call.name == "get_time":
-        return "我先看一下当前时间。"
     if call.name == "emit_event":
         return "我来发送这个事件。"
-    if call.name in {DELEGATE_TO_COWORKER_TOOL, SUBMIT_LONG_TASK_LEGACY_TOOL}:
+    if call.name == DELEGATE_TO_COWORKER_TOOL:
         return "收到，我已交给后台 coworker 处理，会继续跟进。"
     return "我先调用相关工具处理一下。"
 
@@ -802,10 +799,7 @@ def _handoff_from_tool_result(
     seq: _SeqGen,
     result: ToolResult,
 ) -> TurnEvent | None:
-    if (
-        result.name not in {DELEGATE_TO_COWORKER_TOOL, SUBMIT_LONG_TASK_LEGACY_TOOL}
-        or not result.ok
-    ):
+    if result.name != DELEGATE_TO_COWORKER_TOOL or not result.ok:
         return None
     content = result.content if isinstance(result.content, dict) else {}
     task_id = content.get("task_id")

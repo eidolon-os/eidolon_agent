@@ -54,7 +54,7 @@ def test_summary_is_prompt_safe_and_operator_friendly() -> None:
             },
             "tool_trace": [
                 {
-                    "name": "get_time",
+                    "name": "delegate_to_coworker",
                     "ok": True,
                     "latency_ms": 4,
                     "cached": True,
@@ -70,7 +70,7 @@ def test_summary_is_prompt_safe_and_operator_friendly() -> None:
             "harness": {
                 "kind": "realtime_agent_harness",
                 "segment_kinds": ["persona", "harness_policy", "current_user"],
-                "tools": {"visible_names": ["get_time", "delegate_to_coworker"]},
+                "tools": {"visible_names": ["delegate_to_coworker"]},
                 "handoffs": [
                     {
                         "tool_name": "delegate_to_coworker",
@@ -123,10 +123,7 @@ def test_summary_is_prompt_safe_and_operator_friendly() -> None:
         "harness_policy",
         "current_user",
     ]
-    assert summary["harness"]["visible_tool_names"] == [
-        "get_time",
-        "delegate_to_coworker",
-    ]
+    assert summary["harness"]["visible_tool_names"] == ["delegate_to_coworker"]
     assert summary["harness"]["handoff_count"] == 1
     assert summary["harness"]["handoff_tool_names"] == ["delegate_to_coworker"]
     assert summary["latency"]["compile_ms"] == 12

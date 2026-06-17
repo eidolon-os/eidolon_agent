@@ -158,7 +158,7 @@ async def _seed_turn(
                         "tool_trace": [
                             {
                                 "call_id": "tc-1",
-                                "name": "get_time",
+                                "name": "delegate_to_coworker",
                                 "ok": True,
                                 "latency_ms": 4,
                                 "cached": False,
@@ -299,7 +299,7 @@ async def test_get_turn_returns_messages_in_order(tmp_path) -> None:
     assert summary["memory"]["degraded"] is True
     assert summary["memory"]["degraded_reason"] == "no_memory_route"
     assert summary["memory_write"]["disposition"] == "semantic_upsert"
-    assert summary["tools"]["names"] == ["get_time"]
+    assert summary["tools"]["names"] == ["delegate_to_coworker"]
     assert summary["latency"]["compile_ms"] == 3
     assert "prompt_fingerprint" in summary
     roles = [m["role"] for m in body["messages"]]

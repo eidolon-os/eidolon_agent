@@ -37,7 +37,7 @@ def test_gate_blocks_prompt_shape_drift_over_threshold() -> None:
 
 def test_gate_blocks_tool_decision_drift() -> None:
     report = compare_replay_snapshots(
-        [_snap("t1", tools=("get_time:True:",))],
+        [_snap("t1", tools=("delegate_to_coworker:True:",))],
         [_snap("t1", tools=("emit_event:False:eidolon.tool_permission_denied",))],
     )
 
@@ -105,7 +105,7 @@ def test_snapshots_from_turn_trace_artifact_are_prompt_safe() -> None:
                         },
                         "tool_trace": [
                             {
-                                "name": "get_time",
+                                "name": "delegate_to_coworker",
                                 "ok": True,
                                 "error_code": None,
                             }
@@ -120,7 +120,7 @@ def test_snapshots_from_turn_trace_artifact_are_prompt_safe() -> None:
     snapshots = snapshots_from_artifact(artifact)
 
     assert snapshots[0].key == "t1"
-    assert snapshots[0].tool_decision == ("get_time:True:",)
+    assert snapshots[0].tool_decision == ("delegate_to_coworker:True:",)
     assert snapshots[0].first_delta_ms == 50
     assert "secret" not in snapshots[0].prompt_fingerprint
 

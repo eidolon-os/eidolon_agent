@@ -28,7 +28,9 @@ def test_turn_trace_metadata_shape_is_prompt_safe() -> None:
         context_ledger={"segments": [{"kind": "memory"}]},
         memory_trace={"hit_ids": ["m1"], "context_injected": True},
         memory_write_trace={"disposition": "semantic_upsert", "fanout_allowed": True},
-        tool_trace=[ToolTrace(call_id="tc1", name="get_time", ok=True, latency_ms=2)],
+        tool_trace=[
+            ToolTrace(call_id="tc1", name="delegate_to_coworker", ok=True, latency_ms=2)
+        ],
         persona=PersonaTrace(instance_id="inst", template_id="tpl"),
         usage={"tokens_in": 10, "tokens_out": 5},
     ).to_metadata()
@@ -39,5 +41,5 @@ def test_turn_trace_metadata_shape_is_prompt_safe() -> None:
     assert trace["latency"]["compile_ms"] == 20
     assert trace["memory_trace"]["hit_ids"] == ["m1"]
     assert trace["memory_write_trace"]["disposition"] == "semantic_upsert"
-    assert trace["tool_trace"][0]["name"] == "get_time"
+    assert trace["tool_trace"][0]["name"] == "delegate_to_coworker"
     assert "prompt" not in str(trace).lower()

@@ -49,10 +49,8 @@ from eidolon_agent.domain.signals import SignalBus
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import (
     EmitEventTool,
-    GetTimeTool,
     SubmitLongTaskTool,
 )
-from eidolon_agent.domain.tools.builtin.submit_long_task import SUBMIT_LONG_TASK_LEGACY_TOOL
 from eidolon_agent.infra.events import NatsEventBus, NatsKVStore
 from eidolon_agent.infra.events.nats_bus import ensure_buckets
 from eidolon_agent.infra.llm import LLMRouter
@@ -224,16 +222,11 @@ async def build_application(
         long_task_worker.start()
         container.extras["long_task_worker"] = long_task_worker
     tool_registry = ToolRegistry()
-    tool_registry.register(GetTimeTool())
     tool_registry.register(EmitEventTool(event_bus=container.event_bus))
     delegate_tool = SubmitLongTaskTool(
         long_task_submitter=long_task_worker,
     )
     tool_registry.register(delegate_tool)
-    tool_registry.register_alias(
-        SUBMIT_LONG_TASK_LEGACY_TOOL,
-        SubmitLongTaskTool(long_task_submitter=long_task_worker, legacy_schema=True),
-    )
     idemp_kv = container.kv_buckets.get("EIDOLON_TOOL_IDEMP")
     tool_dispatcher = ToolDispatcher(
         tool_registry,

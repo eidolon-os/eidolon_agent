@@ -13,7 +13,7 @@ def test_live_turn_checks_read_admin_observability_summary() -> None:
             "memory_fanout_allowed": True,
             "privacy_mode": "normal",
             "context_contains_segments": ["persona", "memory"],
-            "tool_names": ["get_time"],
+            "tool_names": ["delegate_to_coworker"],
             "tool_error_count": 0,
             "required_event_kinds": ["TOOL_CALL", "TOOL_RESULT", "DONE"],
             "max_first_delta_ms": 300,
@@ -34,7 +34,7 @@ def test_live_turn_checks_read_admin_observability_summary() -> None:
                     "fanout_allowed": True,
                 },
                 "memory": {"degraded": False},
-                "tools": {"names": ["get_time"], "error_count": 0},
+                "tools": {"names": ["delegate_to_coworker"], "error_count": 0},
                 "development_guards": {},
             }
         },

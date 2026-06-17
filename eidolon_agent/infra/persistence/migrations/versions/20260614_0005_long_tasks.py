@@ -5,7 +5,7 @@ Revises: 0004_persona_templates_custom
 Create Date: 2026-06-14 00:00:00 UTC
 
 Durable records for long-running coworker tasks submitted through
-``submit_long_task``. Mementos is the first provider, but the table stores the
+``delegate_to_coworker``. Mementos is the first provider, but the table stores the
 agent-side lifecycle and callback metadata independently so later progress
 callbacks can update one row without rehydrating turn history.
 """

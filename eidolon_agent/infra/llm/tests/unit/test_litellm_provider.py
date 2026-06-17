@@ -86,7 +86,11 @@ def test_assistant_tool_calls_render_as_openai_tool_call_messages() -> None:
         content="",
         created_at=datetime.now(timezone.utc),
         tool_calls=(
-            ToolCall(id="call-1", name="get_time", arguments={"timezone": "Asia/Shanghai"}),
+            ToolCall(
+                id="call-1",
+                name="delegate_to_coworker",
+                arguments={"instruction": "整理资料"},
+            ),
         ),
     )
 
@@ -100,8 +104,8 @@ def test_assistant_tool_calls_render_as_openai_tool_call_messages() -> None:
                 "id": "call-1",
                 "type": "function",
                 "function": {
-                    "name": "get_time",
-                    "arguments": '{"timezone": "Asia/Shanghai"}',
+                    "name": "delegate_to_coworker",
+                    "arguments": '{"instruction": "整理资料"}',
                 },
             }
         ],
@@ -171,7 +175,11 @@ async def test_tool_call_buffered_across_chunks(monkeypatch: pytest.MonkeyPatch,
     # split across two chunks.
     chunks = [
         _Chunk(choices=[_Choice(delta=_Delta(tool_calls=[
-            _ToolCallChunk(index=0, id="call-1", function=_ToolCallFunc(name="get_time"))
+            _ToolCallChunk(
+                index=0,
+                id="call-1",
+                function=_ToolCallFunc(name="delegate_to_coworker"),
+            )
         ]))]),
         _Chunk(choices=[_Choice(delta=_Delta(tool_calls=[
             _ToolCallChunk(index=0, function=_ToolCallFunc(arguments='{"tz":"'))
@@ -190,7 +198,7 @@ async def test_tool_call_buffered_across_chunks(monkeypatch: pytest.MonkeyPatch,
     tcs = [d.tool_call for d in out if d.tool_call]
     assert len(tcs) == 1
     assert tcs[0].id == "call-1"
-    assert tcs[0].name == "get_time"
+    assert tcs[0].name == "delegate_to_coworker"
     assert tcs[0].arguments == {"tz": "UTC"}
     finishes = [d.finish for d in out if d.finish is not None]
     assert finishes == [LLMFinishReason.TOOL_CALLS]

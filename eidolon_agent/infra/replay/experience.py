@@ -30,7 +30,7 @@ from eidolon_agent.domain.agent import TaskClassifier, TurnEngine
 from eidolon_agent.domain.context import ContextCompiler
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.domain.history import HistoryFanout, HistoryManager
-from eidolon_agent.domain.tools import EmitEventTool, GetTimeTool, ToolDispatcher, ToolRegistry
+from eidolon_agent.domain.tools import EmitEventTool, ToolDispatcher, ToolRegistry
 from eidolon_agent.infra.events import InMemoryEventBus
 
 SCHEMA_VERSION = "eidolon_agent.experience_replay_report.v1"
@@ -249,7 +249,6 @@ class _ReplayHarness:
 
     def _build_engine(self, *, llm: _CapturingLLM) -> TurnEngine:
         registry = ToolRegistry()
-        registry.register(GetTimeTool())
         registry.register(EmitEventTool(event_bus=self.event_bus))
         compiler = ContextCompiler(
             personas_service=_ReplayPersonas(),

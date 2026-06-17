@@ -71,7 +71,9 @@ class RealtimeAgentHarness:
         hidden_tool_names: set[str] | None = None,
     ) -> None:
         self.budget = budget or HarnessBudget()
-        self._hidden_tool_names = set(hidden_tool_names or {"submit_long_task"})
+        self._hidden_tool_names = (
+            {"emit_event"} if hidden_tool_names is None else set(hidden_tool_names)
+        )
 
     def policy_prompt(self) -> str:
         return realtime_harness_policy_prompt()

@@ -14,7 +14,7 @@ from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEventKind
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
-from eidolon_agent.domain.tools.builtin import EmitEventTool, GetTimeTool
+from eidolon_agent.domain.tools.builtin import EmitEventTool
 from eidolon_agent.infra.llm.providers.fake import FakeLLM
 from eidolon_agent.infra.persistence import (
     create_engine,
@@ -27,38 +27,25 @@ from tests.helpers import make_turn_input
 pytestmark = pytest.mark.integration
 
 
-async def test_tool_turn_dispatches_result_and_continues_llm(turn_engine_factory) -> None:
-    llm = FakeLLM(
-        script=[
-            [{"kind": "tool_call", "name": "get_time", "arguments": {"timezone": "Asia/Shanghai"}}],
-            [{"kind": "text", "text": "工具完成。"}],
-        ],
-        per_token_delay_s=0,
-    )
-    engine = turn_engine_factory(llm=llm)
-
-    events = [ev async for ev in engine.run(make_turn_input("现在几点？"))]
-
-    assert any(ev.kind is TurnEventKind.TOOL_CALL for ev in events)
-    tool_results = [ev for ev in events if ev.kind is TurnEventKind.TOOL_RESULT]
-    assert tool_results and tool_results[0].data["ok"] is True
-    assert "工具完成" in "".join(
-        ev.data.get("text", "") for ev in events if ev.kind is TurnEventKind.DELTA
-    )
-
-
 async def test_tool_call_announces_real_tool_before_dispatch_and_feeds_result_to_llm(
     turn_engine_factory,
 ) -> None:
     llm = _ScriptedCapturingLLM(
         [
-            [{"kind": "tool_call", "name": "get_time", "arguments": {"timezone": "Asia/Shanghai"}}],
+            [
+                {
+                    "kind": "tool_call",
+                    "name": "delegate_to_coworker",
+                    "arguments": {"instruction": "整理资料"},
+                }
+            ],
             [{"kind": "text", "text": "我看到了工具结果。"}],
         ]
     )
     engine = turn_engine_factory(llm=llm)
 
-    events = [ev async for ev in engine.run(make_turn_input("现在几点？"))]
+    events = [ev async for ev in engine.run(make_turn_input("帮我整理资料"))]
+    await _drain_background_tasks()
 
     tool_call_idx = next(i for i, ev in enumerate(events) if ev.kind is TurnEventKind.TOOL_CALL)
     prior_deltas = [
@@ -66,17 +53,17 @@ async def test_tool_call_announces_real_tool_before_dispatch_and_feeds_result_to
         for ev in events[:tool_call_idx]
         if ev.kind is TurnEventKind.DELTA
     ]
-    assert prior_deltas[-1] == "我先看一下当前时间。"
+    assert prior_deltas[-1] == "收到，我已交给后台 coworker 处理，会继续跟进。"
     tool_results = [ev for ev in events if ev.kind is TurnEventKind.TOOL_RESULT]
     assert tool_results[0].data["ok"] is True
-    assert tool_results[0].data["name"] == "get_time"
+    assert tool_results[0].data["name"] == "delegate_to_coworker"
     assert len(llm.messages_by_call) == 2
     tool_messages = [
         msg for msg in llm.messages_by_call[1]
-        if msg.role is MessageRole.TOOL and msg.tool_name == "get_time"
+        if msg.role is MessageRole.TOOL and msg.tool_name == "delegate_to_coworker"
     ]
     assert tool_messages
-    assert "Asia/Shanghai" in tool_messages[0].content
+    assert "task_id" in tool_messages[0].content
     assert "我看到了工具结果" in "".join(
         ev.data.get("text", "") for ev in events if ev.kind is TurnEventKind.DELTA
     )
@@ -226,24 +213,6 @@ async def test_temporary_long_task_does_not_fanout_to_memory(
     assert memory_fanout == []
 
 
-async def test_legacy_submit_long_task_alias_still_handoffs(turn_engine_factory) -> None:
-    llm = _ScriptedCapturingLLM(
-        [
-            [{"kind": "tool_call", "name": "submit_long_task", "arguments": {"task": "整理资料"}}],
-            [{"kind": "text", "text": "已开始处理。"}],
-        ]
-    )
-    engine = turn_engine_factory(llm=llm)
-
-    events = [ev async for ev in engine.run(make_turn_input("帮我整理资料"))]
-    await _drain_background_tasks()
-
-    tool_result = next(ev for ev in events if ev.kind is TurnEventKind.TOOL_RESULT)
-    assert tool_result.data["name"] == "submit_long_task"
-    assert tool_result.data["ok"] is True
-    assert any(ev.kind is TurnEventKind.HANDOFF for ev in events)
-
-
 async def test_compiled_prompt_contains_tool_policy(turn_engine_factory) -> None:
     llm = _CapturingLLM()
     engine = turn_engine_factory(llm=llm)
@@ -264,14 +233,12 @@ async def test_builtin_tool_schemas_describe_usage_boundaries(turn_engine_factor
     schemas = {schema.name: schema for schema in engine._tool_schemas()}
 
     assert "delegate_to_coworker" in schemas
-    assert "submit_long_task" not in schemas
+    assert "emit_event" not in schemas
     long_task_spec = schemas["delegate_to_coworker"].to_openai_function()
     description = long_task_spec["function"]["description"]
     assert "background coworker" in description
     assert "Do not use it for ordinary conversation" in description
     assert "instruction" in long_task_spec["function"]["parameters"]["required"]
-    assert "calendar events" in schemas["get_time"].description
-    assert "side-effectful event" in schemas["emit_event"].description
 
 
 async def test_turn_trace_contains_harness_snapshot_for_coworker_handoff(
@@ -316,7 +283,7 @@ async def test_turn_trace_contains_harness_snapshot_for_coworker_handoff(
     assert harness["kind"] == "realtime_agent_harness"
     assert "harness_policy" in harness["segment_kinds"]
     assert "delegate_to_coworker" in harness["tools"]["visible_names"]
-    assert "submit_long_task" not in harness["tools"]["visible_names"]
+    assert "emit_event" not in harness["tools"]["visible_names"]
     assert harness["handoffs"][0]["tool_name"] == "delegate_to_coworker"
     assert harness["handoffs"][0]["accepted"] is True
 
@@ -403,7 +370,7 @@ async def test_forget_intent_calls_memory_port(turn_engine_factory) -> None:
 
     events = [ev async for ev in engine.run(make_turn_input("请忘记这件事"))]
 
-    done = [ev for ev in events if ev.kind is TurnEventKind.DONE][0]
+    done = next(ev for ev in events if ev.kind is TurnEventKind.DONE)
     assert done.data["action"] == "memory_forget"
     assert done.data["removed"] == 3
     assert memory.calls == [("alice", "请忘记这件事")]

@@ -41,7 +41,11 @@ async def test_custom_script_streams_text_and_tool_call() -> None:
     llm = FakeLLM(
         script=[
             {"kind": "text", "text": "hello"},
-            {"kind": "tool_call", "name": "get_time", "arguments": {"timezone": "UTC"}},
+            {
+                "kind": "tool_call",
+                "name": "delegate_to_coworker",
+                "arguments": {"instruction": "整理资料"},
+            },
             {"kind": "text", "text": " world"},
         ],
         per_token_delay_s=0,
@@ -51,8 +55,8 @@ async def test_custom_script_streams_text_and_tool_call() -> None:
     assert text == "hello world"
     tcs = [d.tool_call for d in deltas if d.tool_call]
     assert len(tcs) == 1
-    assert tcs[0].name == "get_time"
-    assert tcs[0].arguments == {"timezone": "UTC"}
+    assert tcs[0].name == "delegate_to_coworker"
+    assert tcs[0].arguments == {"instruction": "整理资料"}
     assert deltas[-1].finish is LLMFinishReason.STOP
 
 
