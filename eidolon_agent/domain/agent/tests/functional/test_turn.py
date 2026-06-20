@@ -7,6 +7,7 @@ import asyncio
 import pytest
 
 from eidolon_agent.core.types.messages import MessageRole
+from eidolon_agent.infra.llm.providers.fake import FakeLLM
 from tests.helpers import make_turn_input
 
 pytestmark = pytest.mark.functional
@@ -108,6 +109,46 @@ async def test_forget_intent_returns_action_marker(turn_engine_factory):
     events = [ev async for ev in engine.run(make_turn_input("请忘记我刚才说的"))]
     done = [e for e in events if e.kind.value == "done"]
     assert done and done[0].data.get("action") == "memory_forget"
+
+
+@pytest.mark.asyncio
+async def test_tool_preamble_spoken_once_per_turn(turn_engine_factory):
+    """A retried tool call must not re-speak the same filler preamble.
+
+    Regression: a failing tool (e.g. get_weather) made the LLM retry across
+    several loop iterations, and the engine streamed the generic preamble
+    "我先调用相关工具处理一下。" as answer text on *every* iteration — the user
+    heard it 3x. The preamble is a status line and must be spoken at most once.
+    """
+    from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
+    from eidolon_agent.domain.tools.builtin.weather import GetWeatherTool
+
+    async def _always_fail(_location: str, _lang: str):
+        raise RuntimeError("weather backend unavailable")
+
+    registry = ToolRegistry()
+    registry.register(GetWeatherTool(fetcher=_always_fail))
+    dispatcher = ToolDispatcher(registry)
+
+    # Call get_weather twice (each fails), then give up with an apology.
+    llm = FakeLLM(
+        script=[
+            [{"kind": "tool_call", "name": "get_weather", "arguments": {}}],
+            [{"kind": "tool_call", "name": "get_weather", "arguments": {}}],
+            [{"kind": "text", "text": "抱歉，天气接口暂时没有响应。"}],
+        ]
+    )
+    engine = turn_engine_factory(llm=llm, tool_dispatcher=dispatcher)
+
+    events = [ev async for ev in engine.run(make_turn_input("查一下北京天气"))]
+    delta_texts = [e.data["text"] for e in events if e.kind.value == "delta"]
+
+    assert delta_texts.count("我先调用相关工具处理一下。") == 1
+    # The real answer still streams.
+    assert any("抱歉" in t for t in delta_texts)
+    # The tool was still attempted twice (retry behavior preserved).
+    tool_calls = [e for e in events if e.kind.value == "tool_call"]
+    assert len(tool_calls) == 2
 
 
 @pytest.mark.asyncio

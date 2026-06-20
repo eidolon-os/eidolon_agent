@@ -251,6 +251,11 @@ class TurnEngine:
             yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.SPEAKING, time.time())
 
             tool_iters = 0
+            # Tool preambles ("我先调用相关工具处理一下。") are status lines, not
+            # answer content. A retried/looping tool call must not re-speak the
+            # same preamble — track what we've already announced this turn so the
+            # user hears each distinct status at most once.
+            announced_preambles: set[str] = set()
             while True:
                 tool_calls: list[ToolCall] = []
                 finish_reason: LLMFinishReason | None = None
@@ -263,7 +268,8 @@ class TurnEngine:
                     if delta.tool_call is not None:
                         tool_calls.append(delta.tool_call)
                         announcement = _tool_announcement(delta.tool_call)
-                        if announcement:
+                        if announcement and announcement not in announced_preambles:
+                            announced_preambles.add(announcement)
                             if first_delta_ms is None:
                                 first_delta_ms = int((time.monotonic() - t0) * 1000)
                             assistant_text_parts.append(announcement)
