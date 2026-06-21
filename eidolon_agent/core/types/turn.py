@@ -115,10 +115,16 @@ class TurnEvent:
         ts: float,
         *,
         prosody: ProsodyHints | None = None,
+        role: str | None = None,
     ) -> TurnEvent:
+        # ``role`` distinguishes spoken *answer* content from non-answer status
+        # lines (e.g. a tool preamble). Omitted for plain answer deltas so the
+        # wire stays unchanged and consumers default missing role to "answer".
         data: dict[str, Any] = {"text": text}
         if prosody is not None:
             data["prosody"] = prosody.__dict__
+        if role is not None:
+            data["role"] = role
         return cls(turn_id, seq, TurnEventKind.DELTA, data, ts)
 
     @classmethod

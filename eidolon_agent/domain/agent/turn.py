@@ -267,17 +267,26 @@ class TurnEngine:
                         yield TurnEvent.delta(ti.turn_id, seq.next(), delta.text_delta, time.time())
                     if delta.tool_call is not None:
                         tool_calls.append(delta.tool_call)
-                        announcement = _tool_announcement(delta.tool_call)
+                        announcement, announce_kind = _tool_announcement(delta.tool_call)
                         if announcement and announcement not in announced_preambles:
                             announced_preambles.add(announcement)
                             if first_delta_ms is None:
                                 first_delta_ms = int((time.monotonic() - t0) * 1000)
-                            assistant_text_parts.append(announcement)
+                            # A substantive announcement (e.g. the coworker
+                            # delegation ack) IS the turn's answer: count it as
+                            # answer text and stream it with the default role.
+                            # A preamble is transient status chrome: tag the role
+                            # so the channel speaks it at most once and never as
+                            # answer, and keep it out of the persisted/memorized
+                            # answer text.
+                            if announce_kind == "answer":
+                                assistant_text_parts.append(announcement)
                             yield TurnEvent.delta(
                                 ti.turn_id,
                                 seq.next(),
                                 announcement,
                                 time.time(),
+                                role=None if announce_kind == "answer" else "tool_preamble",
                             )
                         yield TurnEvent(
                             turn_id=ti.turn_id,
@@ -789,14 +798,24 @@ class _SeqGen:
         return self._n
 
 
-def _tool_announcement(call: ToolCall) -> str:
-    """User-visible status for a tool call the model actually requested."""
+def _tool_announcement(call: ToolCall) -> tuple[str, str]:
+    """User-visible line for a tool call the model actually requested.
 
-    if call.name == "emit_event":
-        return "我来发送这个事件。"
+    Returns ``(text, kind)`` where ``kind`` is:
+
+    * ``"answer"`` — substantive assistant reply for this turn. The harness
+      policy tells the model to *not* add a final result after delegating, so
+      this acknowledgement IS the turn's answer; it must be persisted and
+      counted as answer text.
+    * ``"preamble"`` — transient pre-tool status chrome (filler). Spoken at
+      most once per turn, never persisted or memorized as answer.
+    """
+
     if call.name == DELEGATE_TO_COWORKER_TOOL:
-        return "收到，我已交给后台 coworker 处理，会继续跟进。"
-    return "我先调用相关工具处理一下。"
+        return "收到，我已交给后台 coworker 处理，会继续跟进。", "answer"
+    if call.name == "emit_event":
+        return "我来发送这个事件。", "preamble"
+    return "我先调用相关工具处理一下。", "preamble"
 
 
 def _handoff_from_tool_result(

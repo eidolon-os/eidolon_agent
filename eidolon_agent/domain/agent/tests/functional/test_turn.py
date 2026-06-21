@@ -140,8 +140,10 @@ async def test_tool_preamble_spoken_once_per_turn(turn_engine_factory):
     )
     engine = turn_engine_factory(llm=llm, tool_dispatcher=dispatcher)
 
-    events = [ev async for ev in engine.run(make_turn_input("查一下北京天气"))]
-    delta_texts = [e.data["text"] for e in events if e.kind.value == "delta"]
+    ti = make_turn_input("查一下北京天气")
+    events = [ev async for ev in engine.run(ti)]
+    deltas = [e for e in events if e.kind.value == "delta"]
+    delta_texts = [e.data["text"] for e in deltas]
 
     assert delta_texts.count("我先调用相关工具处理一下。") == 1
     # The real answer still streams.
@@ -149,6 +151,65 @@ async def test_tool_preamble_spoken_once_per_turn(turn_engine_factory):
     # The tool was still attempted twice (retry behavior preserved).
     tool_calls = [e for e in events if e.kind.value == "tool_call"]
     assert len(tool_calls) == 2
+
+    # ② role-tagging: the preamble is tagged as a status line (not answer);
+    # real answer deltas carry no preamble role.
+    preamble_deltas = [e for e in deltas if e.data["text"] == "我先调用相关工具处理一下。"]
+    assert all(e.data.get("role") == "tool_preamble" for e in preamble_deltas)
+    answer_deltas = [e for e in deltas if "抱歉" in e.data["text"]]
+    assert answer_deltas and all(
+        e.data.get("role") != "tool_preamble" for e in answer_deltas
+    )
+
+    # The preamble must not pollute the persisted assistant answer text.
+    recent = await engine._history.recent_window(
+        conversation_id=ti.conversation_id, window=10
+    )
+    assistant = [m for m in recent if m.role == MessageRole.ASSISTANT]
+    assert assistant and "我先调用相关工具处理一下。" not in assistant[-1].content
+
+
+@pytest.mark.asyncio
+async def test_coworker_delegation_ack_is_persisted_as_answer(turn_engine_factory):
+    """The delegation acknowledgement is the turn's answer, not a preamble.
+
+    Regression guard for the ② role-tagging change: the harness tells the model
+    not to add a final result after delegating, so the brain-injected ack
+    ("收到，我已交给后台 coworker 处理…") IS the substantive reply. It must be
+    streamed as answer (no preamble role) and persisted — even when the model
+    emits no follow-up text after the tool result.
+    """
+    ack = "收到，我已交给后台 coworker 处理，会继续跟进。"
+    llm = FakeLLM(
+        script=[
+            [
+                {
+                    "kind": "tool_call",
+                    "name": "delegate_to_coworker",
+                    "arguments": {"instruction": "整理项目资料"},
+                }
+            ],
+            # After the tool result is fed back, the model adds no text.
+            [{"kind": "finish", "finish": "stop"}],
+        ]
+    )
+    engine = turn_engine_factory(llm=llm)
+
+    ti = make_turn_input("帮我整理一下项目资料")
+    events = [ev async for ev in engine.run(ti)]
+    deltas = [e for e in events if e.kind.value == "delta"]
+
+    ack_deltas = [e for e in deltas if e.data["text"] == ack]
+    assert ack_deltas, "delegation ack should be streamed"
+    # Answer, not a preamble: no tool_preamble role tag.
+    assert all(e.data.get("role") != "tool_preamble" for e in ack_deltas)
+
+    # And it must be persisted as the assistant answer (not dropped to "").
+    recent = await engine._history.recent_window(
+        conversation_id=ti.conversation_id, window=10
+    )
+    assistant = [m for m in recent if m.role == MessageRole.ASSISTANT]
+    assert assistant and ack in assistant[-1].content
 
 
 @pytest.mark.asyncio
