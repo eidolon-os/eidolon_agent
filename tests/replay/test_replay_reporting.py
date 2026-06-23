@@ -3,6 +3,7 @@ from __future__ import annotations
 from eidolon_agent.app.replay import (
     compare_replay_reports,
     render_comparison_markdown,
+    render_replay_html,
     render_replay_markdown,
 )
 
@@ -131,3 +132,42 @@ def test_render_comparison_markdown_is_operator_readable() -> None:
     assert "Scenario Status Changes" in out
     assert "Latency Regressions" in out
     assert "Failed Checks" in out
+
+
+def test_render_replay_html_includes_metrics_and_categories() -> None:
+    out = render_replay_html(
+        {
+            "generated_at": "2026-06-23T00:00:00Z",
+            "passed": True,
+            "summary": {"scenario_count": 1},
+            "metrics": {
+                "turn_count": 2,
+                "check_count": 4,
+                "check_pass_rate": 1.0,
+                "first_delta_ms": {"p95": 12},
+                "total_ms": {"p95": 18},
+                "categories": {
+                    "context_authority": {
+                        "scenario_count": 1,
+                        "turn_count": 2,
+                        "passed": 1,
+                        "failed": 0,
+                    }
+                },
+            },
+            "scenarios": [
+                {
+                    "scenario_id": "s",
+                    "category": "context_authority",
+                    "description": "topic switch",
+                    "passed": True,
+                    "turns": [{"checks": []}],
+                }
+            ],
+        }
+    )
+
+    assert "<!doctype html>" in out
+    assert "context_authority" in out
+    assert "Check Pass Rate" in out
+    assert "topic switch" in out

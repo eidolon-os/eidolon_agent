@@ -597,6 +597,32 @@ class SqlLongTaskRepository:
         row.updated_at = now
         return _row_to_long_task(row)
 
+    async def claim_callback_delivery(
+        self,
+        task_id: str,
+        *,
+        subject: str,
+    ) -> bool:
+        """Atomically transition the callback from PENDING to DELIVERED.
+
+        Returns True only for the caller that performed the transition, so a
+        completion that is observed more than once (worker restart, replayed
+        poll) publishes its proactive report exactly once. A missing row or a
+        callback already past PENDING returns False without mutating state.
+        """
+        row = await self._session.get(LongTaskRow, task_id)
+        if row is None:
+            return False
+        if row.callback_status != CallbackStatus.PENDING.value:
+            return False
+        now = datetime.now(timezone.utc)
+        row.callback_status = CallbackStatus.DELIVERED.value
+        row.callback_subject = subject
+        row.callback_attempts = (row.callback_attempts or 0) + 1
+        row.callback_delivered_at = now
+        row.updated_at = now
+        return True
+
     async def touch_poll(
         self,
         task_id: str,

@@ -51,8 +51,8 @@ from eidolon_agent.infra.benchmark.reporting import (
     normalize_flat_turns,
     normalize_live_service_report,
 )
-from eidolon_agent.infra.replay import load_replay_scenarios
-from eidolon_agent.infra.replay.experience import ExperienceReplayRunner
+from eidolon_agent.app.replay import load_replay_scenarios
+from eidolon_agent.app.replay.experience import ExperienceReplayRunner
 
 DEFAULT_OUTPUT_DIR = Path("~/eidolon/debug/reports/realtime")
 DEFAULT_IN_PROCESS_FIXTURE = Path("tests/replay/fixtures/core_experience.jsonl")

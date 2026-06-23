@@ -12,9 +12,16 @@ from typing import Any, Protocol
 
 import httpx
 
+from eidolon_agent.core.ports.events import EventBus
 from eidolon_agent.core.ports.long_tasks import LongTaskQueueFullError
+from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.long_task import LongTaskRecord, LongTaskStatus
+from eidolon_agent.core.types.topics import Topics
 from eidolon_agent.infra.persistence.long_task_store import SqlLongTaskStore
+
+# Longest fallback report spoken aloud when no TTS summary was produced — the
+# raw result text is truncated so the companion never reads a wall of text.
+_FALLBACK_REPORT_MAX_CHARS = 200
 
 _log = logging.getLogger(__name__)
 
@@ -125,12 +132,14 @@ class MementosLongTaskWorker:
         client: MementosHttpClient,
         config: MementosWorkerConfig | None = None,
         result_summarizer: LongTaskResultSummarizerPort | None = None,
+        event_bus: EventBus | None = None,
         worker_id: str | None = None,
     ) -> None:
         self._store = store
         self._client = client
         self._config = config or MementosWorkerConfig()
         self._result_summarizer = result_summarizer
+        self._event_bus = event_bus
         self._worker_id = worker_id or f"agent-{uuid.uuid4().hex[:8]}"
         self._queue: asyncio.Queue[LongTaskRecord] = asyncio.Queue(
             maxsize=self._config.queue_size
@@ -243,7 +252,8 @@ class MementosLongTaskWorker:
                         result_text=content,
                         result_payload=terminal,
                     )
-                    await self._summarize_result_for_tts(record, content)
+                    summary = await self._summarize_result_for_tts(record, content)
+                    await self._publish_proactive_report(record, summary, content)
                     return
                 await self._store.mark_failed(
                     record.id,
@@ -269,16 +279,77 @@ class MementosLongTaskWorker:
         self,
         record: LongTaskRecord,
         result_text: str,
-    ) -> None:
+    ) -> str | None:
         if self._result_summarizer is None or not result_text.strip():
-            return
+            return None
         try:
             summary = await self._result_summarizer.summarize(record, result_text)
         except Exception:
             _log.exception("long task result TTS summary failed: task_id=%s", record.id)
-            return
+            return None
         if summary:
             await self._store.set_result_tts_summary(record.id, summary)
+        return summary or None
+
+    async def _publish_proactive_report(
+        self,
+        record: LongTaskRecord,
+        summary: str | None,
+        result_text: str,
+    ) -> None:
+        """Announce a finished task so the companion can speak it unprompted.
+
+        Publishes ``agent.proactive.triggered.<instance_id>`` carrying the
+        spoken text. The publish is gated on an atomic callback claim so a
+        completion seen more than once is announced exactly once. Anything that
+        prevents a clean announcement (no bus, no instance, empty text, store or
+        bus error) is logged and skipped — it must never fail the task.
+        """
+        if self._event_bus is None:
+            return
+        instance_id = record.agent_instance_id
+        if not instance_id:
+            _log.info(
+                "proactive report skipped: no agent_instance_id task_id=%s",
+                record.id,
+            )
+            return
+        report_text = (summary or result_text[:_FALLBACK_REPORT_MAX_CHARS]).strip()
+        if not report_text:
+            return
+        subject = Topics.proactive_triggered(instance_id)
+        try:
+            claimed = await self._store.claim_callback_delivery(
+                record.id,
+                subject=subject,
+            )
+        except Exception:
+            _log.exception(
+                "proactive report callback claim failed: task_id=%s", record.id
+            )
+            return
+        if not claimed:
+            _log.debug("proactive report already delivered: task_id=%s", record.id)
+            return
+        event = Event(
+            subject=subject,
+            payload={
+                "instance_id": instance_id,
+                "intent": "long_task_done",
+                "text": report_text,
+                "style_hint": "report",
+            },
+            trace_id=record.trace_id,
+            source="mementos-long-task-worker",
+        )
+        try:
+            await self._event_bus.publish(event)
+        except Exception:
+            _log.exception(
+                "proactive report publish failed: task_id=%s subject=%s",
+                record.id,
+                subject,
+            )
 
 
 def _prompt_for_record(record: LongTaskRecord) -> str:

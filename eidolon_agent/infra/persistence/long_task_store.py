@@ -137,6 +137,20 @@ class SqlLongTaskStore:
             await uow.commit()
             return record
 
+    async def claim_callback_delivery(
+        self,
+        task_id: str,
+        *,
+        subject: str,
+    ) -> bool:
+        async with SqlAlchemyUnitOfWork(self._session_factory) as uow:
+            claimed = await uow.long_tasks.claim_callback_delivery(
+                task_id,
+                subject=subject,
+            )
+            await uow.commit()
+            return claimed
+
     async def mark_failed(
         self,
         task_id: str,

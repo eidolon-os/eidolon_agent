@@ -25,8 +25,16 @@ from typing import Any
 import httpx
 from eidolon_sdk.grpc import authorization_metadata, create_aio_channel
 
+from eidolon_agent.app.replay import (
+    load_replay_scenarios,
+    render_replay_html,
+    render_replay_markdown,
+)
+from eidolon_agent.app.replay.benchmarks import (
+    LIVE_AGENT_MEMORY_BENCHMARK_NAME,
+    live_agent_memory_experience_scenarios,
+)
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
-from eidolon_agent.app.replay import load_replay_scenarios, render_replay_markdown
 
 DEFAULT_REPORT = Path("~/eidolon/debug/reports/replay/live-service-latest.json")
 
@@ -34,6 +42,14 @@ DEFAULT_REPORT = Path("~/eidolon/debug/reports/replay/live-service-latest.json")
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture", action="append", type=Path, default=[])
+    parser.add_argument(
+        "--agent-memory-benchmark",
+        action="store_true",
+        help=(
+            "Run the live real-service benchmark for agent + memory experience "
+            f"({LIVE_AGENT_MEMORY_BENCHMARK_NAME})."
+        ),
+    )
     parser.add_argument("--http", default="http://127.0.0.1:8081")
     parser.add_argument("--grpc", default="127.0.0.1:45051")
     parser.add_argument(
@@ -60,13 +76,17 @@ async def main() -> int:
         help="JSON report path. Defaults to the agent admin reports directory.",
     )
     parser.add_argument("--markdown", type=Path, default=None)
+    parser.add_argument("--html", type=Path, default=None)
     parser.add_argument("--admin-delay-s", type=float, default=0.2)
     parser.add_argument("--admin-timeout-s", type=float, default=5.0)
     parser.add_argument("--http-timeout-s", type=float, default=20.0)
     args = parser.parse_args()
 
-    fixtures = args.fixture or [Path("tests/replay/fixtures/live_service_smoke.jsonl")]
-    scenarios = load_replay_scenarios(fixtures)
+    if args.agent_memory_benchmark:
+        scenarios = live_agent_memory_experience_scenarios()
+    else:
+        fixtures = args.fixture or [Path("tests/replay/fixtures/live_service_smoke.jsonl")]
+        scenarios = load_replay_scenarios(fixtures)
     user_id = args.user or f"replay-live-{uuid.uuid4().hex[:8]}"
     try:
         async with httpx.AsyncClient(timeout=args.http_timeout_s, trust_env=False) as http:
@@ -124,6 +144,13 @@ async def main() -> int:
         markdown.parent.mkdir(parents=True, exist_ok=True)
         markdown.write_text(render_replay_markdown(report), encoding="utf-8")
         print(f"wrote readable report to {markdown}")
+    html = args.html.expanduser() if args.html is not None else None
+    if html is None and args.output is not None:
+        html = args.output.expanduser().with_suffix(".html")
+    if html is not None:
+        html.parent.mkdir(parents=True, exist_ok=True)
+        html.write_text(render_replay_html(report), encoding="utf-8")
+        print(f"wrote HTML report to {html}")
     return 0 if report["passed"] else 1
 
 
@@ -246,6 +273,7 @@ async def _run_scenarios(
     turns = [turn for s in scenario_reports for turn in s["turns"]]
     first = [t["first_delta_ms"] for t in turns if t.get("first_delta_ms") is not None]
     total = [t["total_ms"] for t in turns if t.get("total_ms") is not None]
+    categories = _category_metrics(scenario_reports)
     return {
         "schema_version": "eidolon_agent.live_service_replay_report.v1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -265,6 +293,23 @@ async def _run_scenarios(
         },
         "metrics": {
             "turn_count": len(turns),
+            "check_count": _check_count(scenario_reports),
+            "check_pass_rate": _check_pass_rate(scenario_reports),
+            "scenario_pass_rate": _ratio(
+                sum(1 for s in scenario_reports if s["passed"]),
+                len(scenario_reports),
+            ),
+            "categories": categories,
+            "first_delta_ms": {
+                "p50": _median(first),
+                "p95": _p95(first),
+                "max": max(first) if first else None,
+            },
+            "total_ms": {
+                "p50": _median(total),
+                "p95": _p95(total),
+                "max": max(total) if total else None,
+            },
             "first_delta_p50_ms": _median(first),
             "first_delta_p95_ms": _p95(first),
             "total_p50_ms": _median(total),
@@ -292,6 +337,10 @@ async def _run_scenario(
     for idx, turn in enumerate(scenario.get("turns") or []):
         logical_turn_id = str(turn.get("turn_id") or f"{scenario_id}-{idx + 1}")
         turn_id = f"{logical_turn_id}-{uuid.uuid4().hex[:6]}"
+        expect = _merge_expectations(
+            scenario.get("default_turn_expect") or {},
+            turn.get("expect") or {},
+        )
         turn_reports.append(
             await _run_turn(
                 stub=stub,
@@ -304,7 +353,7 @@ async def _run_scenario(
                 text=str(turn.get("user") or ""),
                 turn_metadata=dict(turn.get("metadata") or {}),
                 realtime=dict(turn.get("realtime") or {}),
-                expect=dict(turn.get("expect") or {}),
+                expect=expect,
                 admin_delay_s=admin_delay_s,
                 admin_timeout_s=admin_timeout_s,
             )
@@ -313,6 +362,8 @@ async def _run_scenario(
     return {
         "scenario_id": scenario_id,
         "description": scenario.get("description") or "",
+        "category": scenario.get("category") or "uncategorized",
+        "tags": list(scenario.get("tags") or []),
         "passed": all(t["passed"] for t in turn_reports)
         and all(c["passed"] for c in scenario_checks),
         "turns": turn_reports,
@@ -466,6 +517,7 @@ def _turn_checks(
     tools = obs.get("tools") or {}
     guards = obs.get("development_guards") or {}
     privacy_mode = obs.get("privacy_mode")
+    context_tags = obs.get("context_tags") or []
 
     add("stream_done", total_ms is not None)
     add("admin_trace_available", bool(obs), detail.get("error") or "")
@@ -473,6 +525,44 @@ def _turn_checks(
         add(f"required_assistant:{item}", item in assistant_text)
     for item in expect.get("forbidden_assistant_substrings") or []:
         add(f"forbidden_assistant:{item}", item not in assistant_text)
+    if expect.get("no_tool_calls"):
+        called = [e for e in events if e["kind"] == "TOOL_CALL"]
+        add("no_tool_calls", not called, f"got={len(called)}")
+    if expect.get("current_request_authority"):
+        add(
+            "current_request_authority",
+            obs.get("context_structure_version") == "context_structure.v2"
+            and any(
+                isinstance(tag, dict)
+                and tag.get("kind") == "current_user"
+                and tag.get("authority") == "current_request"
+                and tag.get("actionability") == "may_execute"
+                for tag in context_tags
+            ),
+        )
+    if expect.get("background_non_actionable"):
+        add(
+            "background_non_actionable",
+            any(
+                isinstance(tag, dict)
+                and tag.get("kind") == "history"
+                and tag.get("authority") == "background"
+                and tag.get("actionability") == "must_not_execute"
+                for tag in context_tags
+            ),
+        )
+    if "context_structure_version" in expect:
+        add(
+            "context_structure_version",
+            obs.get("context_structure_version") == expect["context_structure_version"],
+            f"got={obs.get('context_structure_version')}",
+        )
+    if "history_presentation" in expect:
+        add(
+            "history_presentation",
+            obs.get("history_presentation") == expect["history_presentation"],
+            f"got={obs.get('history_presentation')}",
+        )
     if "memory_write_disposition" in expect:
         add(
             "memory_write_disposition",
@@ -497,6 +587,12 @@ def _turn_checks(
             memory.get("degraded_reason") == expect["memory_recall_degraded_reason"],
             f"got={memory.get('degraded_reason')}",
         )
+    if "memory_context_injected" in expect:
+        add(
+            "memory_context_injected",
+            bool(memory.get("context_injected")) is bool(expect["memory_context_injected"]),
+            f"got={memory.get('context_injected')}",
+        )
     if "privacy_mode" in expect:
         add("privacy_mode", privacy_mode == expect["privacy_mode"], f"got={privacy_mode}")
     if "context_contains_segments" in expect:
@@ -511,11 +607,22 @@ def _turn_checks(
         names = tools.get("names") or []
         for name in expect["tool_names"]:
             add(f"tool_name:{name}", name in names, f"got={names}")
+    if "forbidden_tool_names" in expect:
+        names = tools.get("names") or []
+        for name in expect["forbidden_tool_names"]:
+            add(f"forbidden_tool:{name}", name not in names, f"got={names}")
     if "tool_error_count" in expect:
         add(
             "tool_error_count",
             int(tools.get("error_count") or 0) == int(expect["tool_error_count"]),
             f"got={tools.get('error_count')}",
+        )
+    if "max_tool_repeat_suppressed" in expect:
+        actual = int(tools.get("repeat_suppressed_count") or 0)
+        add(
+            "max_tool_repeat_suppressed",
+            actual <= int(expect["max_tool_repeat_suppressed"]),
+            f"got={actual}",
         )
     if "context_budget_shadow_dropped_count_min" in expect:
         budget = guards.get("context_budget") or {}
@@ -598,6 +705,12 @@ def _startup_failure_report(
         },
         "metrics": {
             "turn_count": 0,
+            "check_count": 0,
+            "check_pass_rate": 0,
+            "scenario_pass_rate": 0,
+            "categories": {},
+            "first_delta_ms": {"p50": None, "p95": None, "max": None},
+            "total_ms": {"p50": None, "p95": None, "max": None},
             "first_delta_p50_ms": None,
             "first_delta_p95_ms": None,
             "total_p50_ms": None,
@@ -607,6 +720,8 @@ def _startup_failure_report(
             {
                 "scenario_id": str(s.get("id") or "scenario"),
                 "description": str(s.get("description") or ""),
+                "category": str(s.get("category") or "startup"),
+                "tags": list(s.get("tags") or []),
                 "passed": False,
                 "turns": [],
                 "checks": [
@@ -634,6 +749,77 @@ def _p95(values: list[int]) -> int | None:
     ordered = sorted(values)
     idx = min(len(ordered) - 1, int((len(ordered) - 1) * 0.95))
     return ordered[idx]
+
+
+def _merge_expectations(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    if override.get("skip_default_expect"):
+        return {
+            key: value
+            for key, value in override.items()
+            if key != "skip_default_expect"
+        }
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, list) and isinstance(merged.get(key), list):
+            merged[key] = [*merged[key], *value]
+        else:
+            merged[key] = value
+    return merged
+
+
+def _category_metrics(scenarios: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    categories: dict[str, dict[str, int]] = {}
+    for scenario in scenarios:
+        category = str(scenario.get("category") or "uncategorized")
+        bucket = categories.setdefault(
+            category,
+            {"scenario_count": 0, "passed": 0, "failed": 0, "turn_count": 0},
+        )
+        bucket["scenario_count"] += 1
+        bucket["turn_count"] += len(scenario.get("turns") or [])
+        if bool(scenario.get("passed")):
+            bucket["passed"] += 1
+        else:
+            bucket["failed"] += 1
+    return categories
+
+
+def _check_count(scenarios: list[dict[str, Any]]) -> int:
+    return sum(
+        1
+        for scenario in scenarios
+        for turn in scenario.get("turns") or []
+        for check in turn.get("checks") or []
+        if not check.get("skipped")
+    ) + sum(
+        1
+        for scenario in scenarios
+        for check in scenario.get("checks") or []
+        if not check.get("skipped")
+    )
+
+
+def _check_pass_rate(scenarios: list[dict[str, Any]]) -> float:
+    checks = [
+        check
+        for scenario in scenarios
+        for turn in scenario.get("turns") or []
+        for check in turn.get("checks") or []
+        if not check.get("skipped")
+    ]
+    checks.extend(
+        check
+        for scenario in scenarios
+        for check in scenario.get("checks") or []
+        if not check.get("skipped")
+    )
+    return _ratio(sum(1 for check in checks if bool(check.get("passed"))), len(checks))
+
+
+def _ratio(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 1.0
+    return round(numerator / denominator, 4)
 
 
 if __name__ == "__main__":

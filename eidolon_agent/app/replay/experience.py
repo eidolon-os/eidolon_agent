@@ -132,6 +132,8 @@ class ScenarioReplayResult:
     scenario_id: str
     description: str
     turns: list[TurnReplayResult]
+    category: str = "uncategorized"
+    tags: list[str] = field(default_factory=list)
     checks: list[dict[str, Any]] = field(default_factory=list)
 
     @property
@@ -142,6 +144,8 @@ class ScenarioReplayResult:
         return {
             "scenario_id": self.scenario_id,
             "description": self.description,
+            "category": self.category,
+            "tags": list(self.tags),
             "passed": self.passed,
             "turns": [t.to_metadata() for t in self.turns],
             "checks": self.checks,
@@ -168,6 +172,7 @@ class ExperienceReplayRunner:
                 "passed": sum(1 for r in results if r.passed),
                 "failed": sum(1 for r in results if not r.passed),
             },
+            "metrics": _report_metrics(results),
             "scenarios": [r.to_metadata() for r in results],
         }
         if memory_report is not None:
@@ -188,6 +193,8 @@ class ExperienceReplayRunner:
         return ScenarioReplayResult(
             scenario_id=str(scenario.get("id") or uuid.uuid4().hex),
             description=str(scenario.get("description") or ""),
+            category=str(scenario.get("category") or "uncategorized"),
+            tags=[str(tag) for tag in scenario.get("tags") or []],
             turns=turn_results,
             checks=scenario_checks,
         )
@@ -271,7 +278,14 @@ class _ReplayHarness:
             events=events,
             memory_fanouts=list(self.memory_fanouts),
         )
-        result.checks = _check_turn_expectations(spec.get("expect") or {}, result, self)
+        result.checks = _check_turn_expectations(
+            _merge_expectations(
+                self.scenario.get("default_turn_expect") or {},
+                spec.get("expect") or {},
+            ),
+            result,
+            self,
+        )
         return result
 
     async def _on_memory_fanout(self, ev: Event) -> None:
@@ -407,6 +421,18 @@ async def run_replay_files(
     )
 
 
+async def run_replay_scenarios(
+    scenarios: Iterable[dict[str, Any]],
+    *,
+    memory_report_path: Path | None = None,
+) -> dict[str, Any]:
+    memory_report = None
+    if memory_report_path is not None:
+        memory_report = json.loads(memory_report_path.read_text(encoding="utf-8"))
+    runner = ExperienceReplayRunner()
+    return await runner.run_many(list(scenarios), memory_report=memory_report)
+
+
 def _check_turn_expectations(
     expect: dict[str, Any],
     result: TurnReplayResult,
@@ -432,11 +458,38 @@ def _check_turn_expectations(
     trace = result.turn_trace or {}
     write = trace.get("memory_write_trace") or {}
     recall = trace.get("memory_trace") or {}
+    context_tags = trace.get("context_tags") or []
     tool_call_names = [
         str((event.get("data") or {}).get("name"))
         for event in result.events
         if event.get("kind") == TurnEventKind.TOOL_CALL.value
     ]
+    if expect.get("no_tool_calls"):
+        add("no_tool_calls", not tool_call_names, f"got={tool_call_names}")
+    if expect.get("current_request_authority"):
+        add(
+            "current_request_authority",
+            "[CURRENT REQUEST]" in result.prompt_text
+            and any(
+                isinstance(tag, dict)
+                and tag.get("kind") == "current_user"
+                and tag.get("authority") == "current_request"
+                and tag.get("actionability") == "may_execute"
+                for tag in context_tags
+            ),
+        )
+    if expect.get("background_non_actionable"):
+        add(
+            "background_non_actionable",
+            "[BACKGROUND CONTEXT]" in result.prompt_text
+            and any(
+                isinstance(tag, dict)
+                and tag.get("kind") == "history"
+                and tag.get("authority") == "background"
+                and tag.get("actionability") == "must_not_execute"
+                for tag in context_tags
+            ),
+        )
     for name in expect.get("forbidden_tool_names") or []:
         add(f"forbidden_tool:{name}", str(name) not in tool_call_names)
     if "context_structure_version" in expect:
@@ -453,12 +506,11 @@ def _check_turn_expectations(
         )
     for required in expect.get("required_context_tags") or []:
         required_items = dict(required)
-        tags = trace.get("context_tags") or []
         add(
             f"required_context_tag:{required_items}",
             any(
                 all(tag.get(key) == value for key, value in required_items.items())
-                for tag in tags
+                for tag in context_tags
                 if isinstance(tag, dict)
             ),
         )
@@ -539,6 +591,89 @@ def _semantic_context_from_text(text: str) -> str:
     if "上海" in text:
         return "事实: 用户住在上海"
     return f"用户偏好: {text}"
+
+
+def _merge_expectations(
+    base: dict[str, Any],
+    override: dict[str, Any],
+) -> dict[str, Any]:
+    if override.get("skip_default_expect"):
+        return {
+            key: value
+            for key, value in override.items()
+            if key != "skip_default_expect"
+        }
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, list) and isinstance(merged.get(key), list):
+            merged[key] = [*merged[key], *value]
+        else:
+            merged[key] = value
+    return merged
+
+
+def _report_metrics(results: list[ScenarioReplayResult]) -> dict[str, Any]:
+    turns = [turn for scenario in results for turn in scenario.turns]
+    checks = [
+        check
+        for scenario in results
+        for turn in scenario.turns
+        for check in turn.checks
+        if not check.get("skipped")
+    ]
+    categories: dict[str, dict[str, int]] = {}
+    for scenario in results:
+        bucket = categories.setdefault(
+            scenario.category,
+            {"scenario_count": 0, "passed": 0, "failed": 0, "turn_count": 0},
+        )
+        bucket["scenario_count"] += 1
+        bucket["turn_count"] += len(scenario.turns)
+        if scenario.passed:
+            bucket["passed"] += 1
+        else:
+            bucket["failed"] += 1
+    return {
+        "turn_count": len(turns),
+        "check_count": len(checks),
+        "check_pass_rate": _ratio(
+            sum(1 for check in checks if bool(check.get("passed"))),
+            len(checks),
+        ),
+        "scenario_pass_rate": _ratio(
+            sum(1 for scenario in results if scenario.passed),
+            len(results),
+        ),
+        "first_delta_ms": _latency_summary(
+            turn.first_delta_ms for turn in turns if turn.first_delta_ms is not None
+        ),
+        "total_ms": _latency_summary(
+            turn.total_ms for turn in turns if turn.total_ms is not None
+        ),
+        "categories": categories,
+    }
+
+
+def _latency_summary(values: Iterable[int]) -> dict[str, int | None]:
+    ordered = sorted(int(value) for value in values)
+    if not ordered:
+        return {"p50": None, "p95": None, "max": None}
+    return {
+        "p50": _percentile(ordered, 0.50),
+        "p95": _percentile(ordered, 0.95),
+        "max": ordered[-1],
+    }
+
+
+def _percentile(values: list[int], percentile: float) -> int:
+    idx = min(len(values) - 1, max(0, round((len(values) - 1) * percentile)))
+    return values[idx]
+
+
+def _ratio(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 1.0
+    return round(numerator / denominator, 4)
 
 
 def _make_turn_input(

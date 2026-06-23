@@ -4,11 +4,13 @@ from eidolon_agent.app.replay.experience import (
     ExperienceReplayRunner,
     load_replay_scenarios,
     run_replay_files,
+    run_replay_scenarios,
 )
 from eidolon_agent.app.replay.reporting import (
     compare_replay_reports,
     load_report,
     render_comparison_markdown,
+    render_replay_html,
     render_replay_markdown,
 )
 
@@ -18,6 +20,8 @@ __all__ = [
     "load_replay_scenarios",
     "load_report",
     "render_comparison_markdown",
+    "render_replay_html",
     "render_replay_markdown",
     "run_replay_files",
+    "run_replay_scenarios",
 ]

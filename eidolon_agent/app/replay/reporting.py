@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -89,6 +90,82 @@ def render_replay_markdown(report: dict[str, Any]) -> str:
                 detail = f" ({check.get('detail')})" if check.get("detail") else ""
                 lines.append(f"- {mark} `{check.get('name')}`{detail}")
     return "\n".join(lines) + "\n"
+
+
+def render_replay_html(report: dict[str, Any]) -> str:
+    summary = report.get("summary") or {}
+    metrics = report.get("metrics") or {}
+    categories = (metrics.get("categories") or {}) if isinstance(metrics, dict) else {}
+    scenarios = report.get("scenarios") or []
+    failed = [
+        scenario
+        for scenario in scenarios
+        if isinstance(scenario, dict) and not bool(scenario.get("passed"))
+    ]
+    category_rows = []
+    for name, bucket in sorted(categories.items()):
+        category_rows.append(
+            "<tr>"
+            f"<td>{escape(str(name))}</td>"
+            f"<td>{bucket.get('scenario_count', 0)}</td>"
+            f"<td>{bucket.get('turn_count', 0)}</td>"
+            f"<td>{bucket.get('passed', 0)}</td>"
+            f"<td>{bucket.get('failed', 0)}</td>"
+            "</tr>"
+        )
+    scenario_rows = []
+    for scenario in scenarios:
+        if not isinstance(scenario, dict):
+            continue
+        status = "pass" if scenario.get("passed") else "fail"
+        checks_failed = _failed_check_count(scenario)
+        scenario_rows.append(
+            f"<tr class='{status}'>"
+            f"<td>{escape(str(scenario.get('scenario_id') or ''))}</td>"
+            f"<td>{escape(str(scenario.get('category') or ''))}</td>"
+            f"<td>{len(scenario.get('turns') or [])}</td>"
+            f"<td>{checks_failed}</td>"
+            f"<td>{escape(str(scenario.get('description') or ''))}</td>"
+            "</tr>"
+        )
+    first_delta = metrics.get("first_delta_ms") or {}
+    total = metrics.get("total_ms") or {}
+    return (
+        "<!doctype html>\n"
+        "<html><head><meta charset='utf-8'>"
+        "<title>Eidolon Replay Report</title>"
+        "<style>"
+        "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:24px;color:#202124;background:#f7f8fa}"
+        "h1,h2{margin:0 0 12px}section{margin:0 0 24px}table{border-collapse:collapse;width:100%;background:white}"
+        "th,td{border:1px solid #dde1e6;padding:8px;text-align:left;vertical-align:top}th{background:#eef2f7}"
+        ".cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}.card{background:white;border:1px solid #dde1e6;padding:12px}"
+        ".value{font-size:24px;font-weight:650}.pass td:first-child{border-left:4px solid #1f8f4d}.fail td:first-child{border-left:4px solid #c83f31}"
+        ".ok{color:#1f8f4d}.bad{color:#c83f31}"
+        "</style></head><body>"
+        "<h1>Eidolon Replay Report</h1>"
+        f"<p>generated_at: <code>{escape(str(report.get('generated_at') or 'unknown'))}</code></p>"
+        "<section class='cards'>"
+        f"{_metric_card('Passed', report.get('passed'))}"
+        f"{_metric_card('Scenarios', summary.get('scenario_count'))}"
+        f"{_metric_card('Turns', metrics.get('turn_count'))}"
+        f"{_metric_card('Checks', metrics.get('check_count'))}"
+        f"{_metric_card('Check Pass Rate', metrics.get('check_pass_rate'))}"
+        f"{_metric_card('TTFT p95', first_delta.get('p95'))}"
+        f"{_metric_card('Total p95', total.get('p95'))}"
+        f"{_metric_card('Failed Scenarios', len(failed))}"
+        "</section>"
+        "<section><h2>Categories</h2><table><thead><tr>"
+        "<th>Category</th><th>Scenarios</th><th>Turns</th><th>Passed</th><th>Failed</th>"
+        "</tr></thead><tbody>"
+        + "".join(category_rows)
+        + "</tbody></table></section>"
+        "<section><h2>Scenarios</h2><table><thead><tr>"
+        "<th>Scenario</th><th>Category</th><th>Turns</th><th>Failed Checks</th><th>Description</th>"
+        "</tr></thead><tbody>"
+        + "".join(scenario_rows)
+        + "</tbody></table></section>"
+        "</body></html>\n"
+    )
 
 
 def render_comparison_markdown(comparison: ReplayReportComparison | dict[str, Any]) -> str:
@@ -232,10 +309,35 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
+def _failed_check_count(scenario: dict[str, Any]) -> int:
+    count = 0
+    for turn in scenario.get("turns") or []:
+        for check in (turn or {}).get("checks") or []:
+            if check.get("passed") is False and not check.get("skipped"):
+                count += 1
+    for check in scenario.get("checks") or []:
+        if check.get("passed") is False and not check.get("skipped"):
+            count += 1
+    return count
+
+
+def _metric_card(label: str, value: Any) -> str:
+    klass = ""
+    if label == "Passed":
+        klass = " ok" if bool(value) else " bad"
+    return (
+        "<div class='card'>"
+        f"<div>{escape(label)}</div>"
+        f"<div class='value{klass}'>{escape(str(value))}</div>"
+        "</div>"
+    )
+
+
 __all__ = [
     "ReplayReportComparison",
     "compare_replay_reports",
     "load_report",
     "render_comparison_markdown",
+    "render_replay_html",
     "render_replay_markdown",
 ]

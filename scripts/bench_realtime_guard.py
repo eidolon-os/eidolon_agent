@@ -9,8 +9,8 @@ import statistics
 import sys
 from pathlib import Path
 
-from eidolon_agent.infra.replay import load_replay_scenarios
-from eidolon_agent.infra.replay.experience import ExperienceReplayRunner
+from eidolon_agent.app.replay import load_replay_scenarios
+from eidolon_agent.app.replay.experience import ExperienceReplayRunner
 
 
 async def main() -> int:

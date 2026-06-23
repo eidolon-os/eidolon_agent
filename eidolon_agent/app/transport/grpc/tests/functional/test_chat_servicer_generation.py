@@ -61,6 +61,83 @@ async def test_new_start_supersedes_old_turn_and_drops_late_events(monkeypatch) 
     assert all(event.turn_id != "old" for event in context.written)
 
 
+async def test_explicit_cancel_drops_late_events(monkeypatch) -> None:
+    identity = Identity(tenant_id="t", user_id="u", agent_instance_id="inst")
+    monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
+    cancelled_agent = _LateAfterCancelAgent("cancelled-late")
+    registry = _Registry([cancelled_agent])
+    context = _Context()
+    servicer = EidolonAgentServicer(
+        agent_registry=registry,
+        pairing=None,
+        signals_bus=_Signals(),
+        proactive_bus=None,
+    )
+
+    await servicer.Chat(
+        _Requests(
+            [
+                pb.ChatRequest(
+                    start=pb.StartTurn(
+                        turn_id="to-cancel",
+                        conversation_id="conv",
+                        text="old request",
+                    )
+                ),
+                pb.ChatRequest(cancel=pb.CancelTurn(turn_id="to-cancel")),
+            ]
+        ),
+        context,
+    )
+
+    assert context.written == []
+
+
+async def test_parallel_conversations_do_not_supersede_each_other(monkeypatch) -> None:
+    identity = Identity(tenant_id="t", user_id="u", agent_instance_id="inst")
+    monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
+    first_agent = _DelayedAgent("conv-a-answer", delay_s=0.01)
+    second_agent = _ImmediateAgent("conv-b-answer")
+    registry = _Registry([first_agent, second_agent])
+    context = _Context()
+    servicer = EidolonAgentServicer(
+        agent_registry=registry,
+        pairing=None,
+        signals_bus=_Signals(),
+        proactive_bus=None,
+    )
+
+    await servicer.Chat(
+        _Requests(
+            [
+                pb.ChatRequest(
+                    start=pb.StartTurn(
+                        turn_id="a",
+                        conversation_id="conv-a",
+                        text="first request",
+                    )
+                ),
+                pb.ChatRequest(
+                    start=pb.StartTurn(
+                        turn_id="b",
+                        conversation_id="conv-b",
+                        text="second request",
+                    )
+                ),
+            ]
+        ),
+        context,
+    )
+
+    written_text = [
+        event.data.fields["text"].string_value
+        for event in context.written
+        if event.kind == pb.TurnEvent.DELTA
+    ]
+    assert set(written_text) == {"conv-a-answer", "conv-b-answer"}
+    assert {event.turn_id for event in context.written} == {"a", "b"}
+
+
 class _Registry:
     def __init__(self, agents) -> None:
         self._agents = list(agents)
@@ -89,6 +166,17 @@ class _ImmediateAgent:
         self._text = text
 
     async def run_turn(self, ti):
+        yield TurnEvent.delta(ti.turn_id, 0, self._text, 0.0)
+        yield TurnEvent.done(ti.turn_id, 1, TurnStatus.OK, 0.0)
+
+
+class _DelayedAgent:
+    def __init__(self, text: str, *, delay_s: float) -> None:
+        self._text = text
+        self._delay_s = delay_s
+
+    async def run_turn(self, ti):
+        await asyncio.sleep(self._delay_s)
         yield TurnEvent.delta(ti.turn_id, 0, self._text, 0.0)
         yield TurnEvent.done(ti.turn_id, 1, TurnStatus.OK, 0.0)
 

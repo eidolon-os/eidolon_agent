@@ -49,6 +49,11 @@ from eidolon_agent.domain.signals import SignalBus
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import (
     EmitEventTool,
+    GetTimeTool,
+    GetWeatherTool,
+    MemoryAssertFactTool,
+    MemoryForgetTool,
+    MemorySearchTool,
     SubmitLongTaskTool,
 )
 from eidolon_agent.infra.events import NatsEventBus, NatsKVStore
@@ -218,10 +223,16 @@ async def build_application(
                 lease_s=settings.long_task.worker_lease_s,
             ),
             result_summarizer=LongTaskResultSummarizer(llm_router),
+            event_bus=container.event_bus,
         )
         long_task_worker.start()
         container.extras["long_task_worker"] = long_task_worker
     tool_registry = ToolRegistry()
+    tool_registry.register(GetTimeTool())
+    tool_registry.register(GetWeatherTool())
+    tool_registry.register(MemorySearchTool(memory_port))
+    tool_registry.register(MemoryAssertFactTool(memory_port))
+    tool_registry.register(MemoryForgetTool(memory_port))
     tool_registry.register(EmitEventTool(event_bus=container.event_bus))
     delegate_tool = SubmitLongTaskTool(
         long_task_submitter=long_task_worker,

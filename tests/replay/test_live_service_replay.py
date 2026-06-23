@@ -3,6 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from eidolon_agent.app.replay.benchmarks import live_agent_memory_experience_scenarios
 from scripts import replay_live_service
 
 
@@ -44,6 +45,104 @@ def test_live_turn_checks_read_admin_observability_summary() -> None:
 
     assert checks
     assert all(c["passed"] for c in checks)
+
+
+def test_live_agent_memory_benchmark_is_broad() -> None:
+    scenarios = live_agent_memory_experience_scenarios()
+
+    assert len(scenarios) >= 100
+    assert {scenario["category"] for scenario in scenarios} >= {
+        "context_authority",
+        "memory_use",
+        "memory_update",
+        "memory_privacy",
+        "agent_tool_control",
+        "interrupt_realtime",
+    }
+    assert all("default_turn_expect" in scenario for scenario in scenarios)
+
+
+def test_live_turn_checks_include_context_tags_and_tool_guards() -> None:
+    checks = replay_live_service._turn_checks(
+        expect={
+            "current_request_authority": True,
+            "background_non_actionable": True,
+            "context_structure_version": "context_structure.v2",
+            "history_presentation": "background_context",
+            "no_tool_calls": True,
+            "forbidden_tool_names": ["get_weather"],
+            "max_tool_repeat_suppressed": 0,
+            "memory_context_injected": True,
+        },
+        assistant_text="AMB-LIVE-001",
+        events=[{"kind": "DONE"}],
+        detail={
+            "observability_summary": {
+                "context_structure_version": "context_structure.v2",
+                "history_presentation": "background_context",
+                "context_tags": [
+                    {
+                        "kind": "current_user",
+                        "authority": "current_request",
+                        "actionability": "may_execute",
+                    },
+                    {
+                        "kind": "history",
+                        "authority": "background",
+                        "actionability": "must_not_execute",
+                    },
+                ],
+                "memory": {"context_injected": True},
+                "tools": {"names": [], "repeat_suppressed_count": 0},
+            }
+        },
+        first_delta_ms=10,
+        total_ms=20,
+    )
+
+    assert all(c["passed"] for c in checks)
+
+
+def test_live_default_expectations_can_be_merged_or_skipped() -> None:
+    assert replay_live_service._merge_expectations(
+        {"context_structure_version": "context_structure.v2", "required_event_kinds": ["DONE"]},
+        {"required_event_kinds": ["TOOL_CALL"]},
+    ) == {
+        "context_structure_version": "context_structure.v2",
+        "required_event_kinds": ["DONE", "TOOL_CALL"],
+    }
+    assert replay_live_service._merge_expectations(
+        {"context_structure_version": "context_structure.v2"},
+        {"skip_default_expect": True, "required_event_kinds": ["DONE"]},
+    ) == {"required_event_kinds": ["DONE"]}
+
+
+def test_live_report_category_metrics() -> None:
+    scenarios = [
+        {
+            "category": "context_authority",
+            "passed": True,
+            "turns": [{"checks": [{"passed": True}]}],
+            "checks": [],
+        },
+        {
+            "category": "context_authority",
+            "passed": False,
+            "turns": [{"checks": [{"passed": False}]}],
+            "checks": [],
+        },
+    ]
+
+    assert replay_live_service._category_metrics(scenarios) == {
+        "context_authority": {
+            "scenario_count": 2,
+            "passed": 1,
+            "failed": 1,
+            "turn_count": 2,
+        }
+    }
+    assert replay_live_service._check_count(scenarios) == 2
+    assert replay_live_service._check_pass_rate(scenarios) == 0.5
 
 
 def test_live_turn_checks_detects_missing_admin_trace() -> None:

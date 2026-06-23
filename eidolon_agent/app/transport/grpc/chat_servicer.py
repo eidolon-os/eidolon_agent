@@ -76,6 +76,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "no identity")
         active_turns: set[asyncio.Task] = set()
         active_by_conversation: dict[str, asyncio.Task] = {}
+        conversation_by_turn: dict[str, str] = {}
         generation_by_conversation: dict[str, int] = {}
         write_lock = asyncio.Lock()
         last_session_id: str | None = None
@@ -101,6 +102,11 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     # Explicit cancel of a specific turn from the client.
                     for task in list(active_turns):
                         if not task.done() and task.get_name() == f"turn-{frame.cancel.turn_id}":
+                            conv_id = conversation_by_turn.get(frame.cancel.turn_id)
+                            if conv_id:
+                                generation_by_conversation[conv_id] = (
+                                    generation_by_conversation.get(conv_id, 0) + 1
+                                )
                             task.cancel()
                     continue
                 if payload == "signal":
@@ -186,9 +192,13 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 task = asyncio.create_task(_emit_turn(), name=f"turn-{ti.turn_id}")
                 active_turns.add(task)
                 active_by_conversation[conversation_id] = task
+                conversation_by_turn[ti.turn_id] = conversation_id
 
-                def _discard_done(done_task, *, conv_id=conversation_id, gen=generation):
+                def _discard_done(
+                    done_task, *, conv_id=conversation_id, gen=generation, turn_id=ti.turn_id
+                ):
                     active_turns.discard(done_task)
+                    conversation_by_turn.pop(turn_id, None)
                     if (
                         generation_by_conversation.get(conv_id) == gen
                         and active_by_conversation.get(conv_id) is done_task
