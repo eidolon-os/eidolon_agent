@@ -26,7 +26,7 @@ import httpx
 from eidolon_sdk.grpc import authorization_metadata, create_aio_channel
 
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
-from eidolon_agent.infra.replay import load_replay_scenarios, render_replay_markdown
+from eidolon_agent.app.replay import load_replay_scenarios, render_replay_markdown
 
 DEFAULT_REPORT = Path("~/eidolon/debug/reports/replay/live-service-latest.json")
 

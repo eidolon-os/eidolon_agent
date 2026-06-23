@@ -73,6 +73,7 @@ from eidolon_agent.domain.tools.builtin.submit_long_task import (
 from eidolon_agent.domain.tools.dispatcher import ToolDispatcher
 
 _log = logging.getLogger(__name__)
+_MAX_FAILURES_PER_TOOL_PER_TURN = 1
 
 
 class TurnEngine:
@@ -151,6 +152,8 @@ class TurnEngine:
         ts_output_ms: int | None = None
         tool_ms_total = 0
         tool_trace: list[ToolTrace] = []
+        tool_failure_counts: dict[str, int] = {}
+        tool_repeat_suppressed_count = 0
         handoff_summaries: list[dict] = []
         runtime_policy = TurnRuntimePolicy.from_metadata(ti.metadata)
         post_turn_allowed = False
@@ -326,18 +329,42 @@ class TurnEngine:
                         )
                         break
                     tool_iters += 1
+                    dispatch_calls: list[ToolCall] = []
+                    suppressed_results: list[ToolResult] = []
+                    for call in tool_calls:
+                        if (
+                            tool_failure_counts.get(call.name, 0)
+                            >= _MAX_FAILURES_PER_TOOL_PER_TURN
+                        ):
+                            tool_repeat_suppressed_count += 1
+                            suppressed_results.append(_suppressed_tool_result(call))
+                        else:
+                            dispatch_calls.append(call)
                     tool_t0 = time.monotonic()
-                    results = await self._tools.dispatch_batch(
-                        tool_calls,
-                        ctx=ToolInvocationContext(
-                            caller=ti.caller,
-                            turn_id=ti.turn_id,
-                            conversation_id=ti.conversation_id,
-                            session_id=ti.session_id,
-                            user_text=ti.text or "",
-                        ),
-                    )
+                    dispatched_results: list[ToolResult] = []
+                    if dispatch_calls:
+                        dispatched_results = await self._tools.dispatch_batch(
+                            dispatch_calls,
+                            ctx=ToolInvocationContext(
+                                caller=ti.caller,
+                                turn_id=ti.turn_id,
+                                conversation_id=ti.conversation_id,
+                                session_id=ti.session_id,
+                                user_text=ti.text or "",
+                            ),
+                        )
                     tool_ms_total += int((time.monotonic() - tool_t0) * 1000)
+                    results = _merge_tool_results(
+                        tool_calls,
+                        [*dispatched_results, *suppressed_results],
+                    )
+                    for r in results:
+                        if r.ok:
+                            tool_failure_counts.pop(r.name, None)
+                        else:
+                            tool_failure_counts[r.name] = (
+                                tool_failure_counts.get(r.name, 0) + 1
+                            )
                     tool_trace.extend(
                         ToolTrace(
                             call_id=r.call_id,
@@ -524,6 +551,16 @@ class TurnEngine:
                     privacy=runtime_policy.privacy,
                     proactive_reason=ti.metadata.get("proactive_reason"),
                     harness_snapshot=ti.metadata.get("harness_snapshot"),
+                    context_structure_version=ti.metadata.get("context_structure_version"),
+                    history_presentation=ti.metadata.get("history_presentation"),
+                    context_tags=ti.metadata.get("context_tags") or [],
+                    interrupted_context_dropped_count=int(
+                        ti.metadata.get("interrupted_context_dropped_count") or 0
+                    ),
+                    stale_generation_dropped=int(
+                        ti.metadata.get("stale_generation_dropped") or 0
+                    ),
+                    tool_repeat_suppressed_count=tool_repeat_suppressed_count,
                     development_guards=development_guards,
                     usage={"tokens_in": usage_in, "tokens_out": usage_out},
                 ).to_metadata()
@@ -538,6 +575,18 @@ class TurnEngine:
                     "memory_trace": ti.metadata.get("memory_trace"),
                     "memory_write_trace": memory_write_trace,
                     "tool_trace": [t.to_metadata() for t in tool_trace],
+                    "context_structure_version": ti.metadata.get("context_structure_version"),
+                    "history_presentation": ti.metadata.get("history_presentation"),
+                    "context_tags": ti.metadata.get("context_tags") or [],
+                    "interrupted_context_dropped_count": ti.metadata.get(
+                        "interrupted_context_dropped_count"
+                    )
+                    or 0,
+                    "stale_generation_dropped": ti.metadata.get(
+                        "stale_generation_dropped"
+                    )
+                    or 0,
+                    "tool_repeat_suppressed_count": tool_repeat_suppressed_count,
                     "turn_trace": trace,
                 }
                 # Phase 34.C: thread user + assistant text through so
@@ -816,6 +865,34 @@ def _tool_announcement(call: ToolCall) -> tuple[str, str]:
     if call.name == "emit_event":
         return "我来发送这个事件。", "preamble"
     return "我先调用相关工具处理一下。", "preamble"
+
+
+def _suppressed_tool_result(call: ToolCall) -> ToolResult:
+    return ToolResult(
+        call_id=call.id,
+        name=call.name,
+        ok=False,
+        error_code="tool_repeat_suppressed",
+        error_message=(
+            f"tool {call.name} already failed in this turn; repeated call was "
+            "suppressed. Answer the user from the latest available failure/result "
+            "instead of retrying the same tool again."
+        ),
+        metadata={"repeat_suppressed": True},
+    )
+
+
+def _merge_tool_results(
+    calls: list[ToolCall],
+    results: list[ToolResult],
+) -> list[ToolResult]:
+    by_call_id = {result.call_id: result for result in results}
+    ordered: list[ToolResult] = []
+    for call in calls:
+        result = by_call_id.get(call.id)
+        if result is not None:
+            ordered.append(result)
+    return ordered
 
 
 def _handoff_from_tool_result(

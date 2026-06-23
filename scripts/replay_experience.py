@@ -14,7 +14,7 @@ import json
 import sys
 from pathlib import Path
 
-from eidolon_agent.infra.replay import render_replay_markdown, run_replay_files
+from eidolon_agent.app.replay import render_replay_markdown, run_replay_files
 
 
 async def main() -> int:

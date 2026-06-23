@@ -122,6 +122,12 @@ class TurnTrace:
     privacy: PrivacyTrace = field(default_factory=PrivacyTrace)
     proactive_reason: dict[str, Any] | None = None
     harness_snapshot: dict[str, Any] | None = None
+    context_structure_version: str | None = None
+    history_presentation: str | None = None
+    context_tags: list[dict[str, Any]] = field(default_factory=list)
+    interrupted_context_dropped_count: int = 0
+    stale_generation_dropped: int = 0
+    tool_repeat_suppressed_count: int = 0
     development_guards: DevelopmentGuardTrace = field(
         default_factory=DevelopmentGuardTrace
     )
@@ -149,6 +155,12 @@ class TurnTrace:
             "privacy": self.privacy.to_metadata(),
             "proactive_reason": self.proactive_reason,
             "harness": self.harness_snapshot,
+            "context_structure_version": self.context_structure_version,
+            "history_presentation": self.history_presentation,
+            "context_tags": [dict(tag) for tag in self.context_tags],
+            "interrupted_context_dropped_count": self.interrupted_context_dropped_count,
+            "stale_generation_dropped": self.stale_generation_dropped,
+            "tool_repeat_suppressed_count": self.tool_repeat_suppressed_count,
             "development_guards": self.development_guards.to_metadata(),
             "usage": dict(self.usage),
         }

@@ -1,11 +1,11 @@
 """Experience replay helpers for product-level behavior guardrails."""
 
-from eidolon_agent.infra.replay.experience import (
+from eidolon_agent.app.replay.experience import (
     ExperienceReplayRunner,
     load_replay_scenarios,
     run_replay_files,
 )
-from eidolon_agent.infra.replay.reporting import (
+from eidolon_agent.app.replay.reporting import (
     compare_replay_reports,
     load_report,
     render_comparison_markdown,

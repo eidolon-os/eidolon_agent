@@ -70,16 +70,17 @@ async def test_three_fetches_run_concurrently() -> None:
     # All three branches produced output.
     system = msgs[0].content
     assert "[PERSONA]" in system
-    assert "[MEMORY]" in system
-    # history is between system and trailing user message
-    assert msgs[1].content == "earlier"
+    assert "[RETRIEVED MEMORY]" in system
+    assert "[BACKGROUND CONTEXT]" in system
+    assert "earlier" in system
+    assert [m.role for m in msgs] == [MessageRole.SYSTEM, MessageRole.USER]
     assert msgs[-1].content == "ask"
 
 
 async def test_memory_failure_injects_degraded_notice_into_prompt() -> None:
     """Phase 29.B.1: a memory recall failure no longer degrades *silently*.
 
-    The compiler injects a structured ``[MEMORY]`` block carrying the
+    The compiler injects a structured ``[RETRIEVED MEMORY]`` block carrying the
     degraded-backend notice so the downstream LLM is told NOT to fake
     remembering prior context. This replaces the previous behavior
     (return None, append nothing) which produced an amnesiac-but-
@@ -87,7 +88,7 @@ async def test_memory_failure_injects_degraded_notice_into_prompt() -> None:
 
     Test pins three things:
       1. compile() does not raise — memory is still non-critical
-      2. the system message HAS a [MEMORY] block (the degraded notice)
+      2. the system message HAS a [RETRIEVED MEMORY] block (the degraded notice)
       3. the user input still appears as the trailing user message
     """
 
@@ -102,7 +103,7 @@ async def test_memory_failure_injects_degraded_notice_into_prompt() -> None:
         memory_port=_BoomMemory(),
     )
     msgs = await compiler.compile(make_turn_input("ask"))
-    assert "[MEMORY]" in msgs[0].content  # degraded notice is present
+    assert "[RETRIEVED MEMORY]" in msgs[0].content  # degraded notice is present
     # The notice must include a clear "memory backend unavailable" cue so
     # the LLM behavior is observable from the prompt alone.
     assert "memory backend" in msgs[0].content.lower() or "记忆" in msgs[0].content

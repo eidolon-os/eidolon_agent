@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from eidolon_agent.infra.replay import load_replay_scenarios, run_replay_files
+from eidolon_agent.app.replay import load_replay_scenarios, run_replay_files
 
 pytestmark = pytest.mark.integration
 
@@ -20,6 +20,20 @@ async def test_core_experience_replay_fixture_passes() -> None:
     by_id = {s["scenario_id"]: s for s in report["scenarios"]}
     assert by_id["forget-privacy"]["passed"] is True
     assert by_id["memory-backend-down"]["passed"] is True
+
+
+async def test_topic_switch_context_replay_fixture_passes() -> None:
+    report = await run_replay_files(
+        [Path("tests/replay/fixtures/topic_switch_context.jsonl")]
+    )
+
+    assert report["passed"] is True
+    assert report["summary"]["scenario_count"] == 4
+    by_id = {s["scenario_id"]: s for s in report["scenarios"]}
+    assert by_id["weather_topic_switch_counting"]["passed"] is True
+    assert by_id["weather_failure_correction"]["passed"] is True
+    assert by_id["interrupted_tool_then_new_request"]["passed"] is True
+    assert by_id["multi_turn_reference_without_reexecution"]["passed"] is True
 
 
 async def test_experience_replay_attaches_memory_quality_summary(tmp_path: Path) -> None:

@@ -13,8 +13,9 @@ from eidolon_agent.config.settings import SqliteSettings
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEventKind
+from eidolon_agent.domain.history import HistoryManager
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
-from eidolon_agent.domain.tools.builtin import EmitEventTool
+from eidolon_agent.domain.tools.builtin import EmitEventTool, GetWeatherTool
 from eidolon_agent.infra.llm.providers.fake import FakeLLM
 from eidolon_agent.infra.persistence import (
     create_engine,
@@ -535,6 +536,126 @@ async def test_sensitive_memory_candidate_requires_consent_before_fanout(
     assert received == []
 
 
+async def test_multiturn_weather_then_counting_keeps_weather_as_background(
+    turn_engine_factory,
+) -> None:
+    history = HistoryManager()
+    first = turn_engine_factory(
+        llm=FakeLLM(script=[{"kind": "text", "text": "常州今天有点热。"}], per_token_delay_s=0),
+        history=history,
+    )
+    [ev async for ev in first.run(replace(make_turn_input("查一下常州天气"), turn_id="weather-1"))]
+
+    llm = _AnsweringCaptureLLM("好，一二三。")
+    second = turn_engine_factory(llm=llm, history=history)
+    events = [
+        ev
+        async for ev in second.run(
+            replace(make_turn_input("你帮我数三个数，123"), turn_id="count-2")
+        )
+    ]
+
+    answer = "".join(
+        ev.data.get("text", "") for ev in events if ev.kind is TurnEventKind.DELTA
+    )
+    system = llm.messages_by_call[0][0].content
+    assert "一二三" in answer
+    assert "[CURRENT REQUEST]" in system
+    assert "你帮我数三个数，123" in system
+    assert "[BACKGROUND CONTEXT]" in system
+    assert "常州今天有点热" in system
+    assert "actionability=must_not_execute" in system
+
+
+async def test_weather_failure_then_correction_answers_current_request(
+    turn_engine_factory,
+) -> None:
+    async def _always_fail(_location: str, _lang: str):
+        raise RuntimeError("weather backend unavailable")
+
+    registry = ToolRegistry()
+    registry.register(GetWeatherTool(fetcher=_always_fail))
+    dispatcher = ToolDispatcher(registry)
+    history = HistoryManager()
+    first_llm = FakeLLM(
+        script=[
+            [{"kind": "tool_call", "name": "get_weather", "arguments": {"location": "常州"}}],
+            [{"kind": "tool_call", "name": "get_weather", "arguments": {"location": "常州"}}],
+            [{"kind": "text", "text": "天气接口暂时失败。"}],
+        ],
+        per_token_delay_s=0,
+    )
+    first = turn_engine_factory(
+        llm=first_llm,
+        tool_dispatcher=dispatcher,
+        history=history,
+    )
+    first_events = [
+        ev
+        async for ev in first.run(
+            replace(make_turn_input("帮我查今天常州的天气"), turn_id="weather-fail-1")
+        )
+    ]
+    first_errors = [
+        ev.data.get("error")
+        for ev in first_events
+        if ev.kind is TurnEventKind.TOOL_RESULT
+    ]
+    assert first_errors == ["weather_lookup_failed", "tool_repeat_suppressed"]
+
+    correction_llm = _AnsweringCaptureLLM("抱歉刚才想岔了。好，一二三。")
+    second = turn_engine_factory(llm=correction_llm, history=history)
+    second_events = [
+        ev
+        async for ev in second.run(
+            replace(
+                make_turn_input("没让你查天气，我让你数三个数一二三"),
+                turn_id="correction-2",
+            )
+        )
+    ]
+
+    answer = "".join(
+        ev.data.get("text", "") for ev in second_events if ev.kind is TurnEventKind.DELTA
+    )
+    system = correction_llm.messages_by_call[0][0].content
+    assert "一二三" in answer
+    assert "[CURRENT REQUEST]" in system
+    assert "没让你查天气，我让你数三个数一二三" in system
+    assert "[BACKGROUND CONTEXT]" in system
+    assert "天气接口暂时失败" in system
+    assert "must_not_execute" in system
+
+
+async def test_multiturn_reference_uses_background_without_reexecution(
+    turn_engine_factory,
+) -> None:
+    history = HistoryManager()
+    first = turn_engine_factory(
+        llm=FakeLLM(
+            script=[{"kind": "text", "text": "常州今天白天偏热，傍晚可能有阵雨。"}],
+            per_token_delay_s=0,
+        ),
+        history=history,
+    )
+    [ev async for ev in first.run(replace(make_turn_input("常州天气怎么样？"), turn_id="cz-1"))]
+
+    llm = _AnsweringCaptureLLM("明天常州也要留意降雨。")
+    second = turn_engine_factory(llm=llm, history=history)
+    events = [
+        ev async for ev in second.run(replace(make_turn_input("那明天呢？"), turn_id="cz-2"))
+    ]
+
+    answer = "".join(
+        ev.data.get("text", "") for ev in events if ev.kind is TurnEventKind.DELTA
+    )
+    system = llm.messages_by_call[0][0].content
+    assert "明天常州" in answer
+    assert "常州今天白天偏热" in system
+    assert "那明天呢？" in system
+    assert "actionability=must_not_execute" in system
+
+
 class _ReplayMemory:
     def __init__(self, context: str = "") -> None:
         self.context = context
@@ -611,6 +732,26 @@ class _ScriptedCapturingLLM:
             else LLMFinishReason.STOP
         )
         yield LLMDelta(finish=finish)
+
+    async def count_tokens(self, messages: list[ChatMessage]) -> int:
+        return sum(max(1, len(m.content) // 3) for m in messages)
+
+
+class _AnsweringCaptureLLM:
+    model_id = "fake:answering-capture"
+
+    def __init__(self, answer: str) -> None:
+        self.answer = answer
+        self.messages_by_call: list[list[ChatMessage]] = []
+
+    async def stream(
+        self,
+        messages: list[ChatMessage],
+        **_,
+    ) -> AsyncIterator[LLMDelta]:
+        self.messages_by_call.append(messages)
+        yield LLMDelta(text_delta=self.answer)
+        yield LLMDelta(finish=LLMFinishReason.STOP)
 
     async def count_tokens(self, messages: list[ChatMessage]) -> int:
         return sum(max(1, len(m.content) // 3) for m in messages)

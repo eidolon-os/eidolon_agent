@@ -24,7 +24,7 @@ from eidolon_sdk.memory import conversation_turn_subject
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
-from eidolon_agent.core.types.messages import ChatMessage
+from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEventKind, TurnInput, TurnTrigger
 from eidolon_agent.domain.agent import TaskClassifier, TurnEngine
 from eidolon_agent.domain.context import ContextCompiler
@@ -89,6 +89,13 @@ class TurnReplayResult:
                     ),
                 },
                 "context": {
+                    "structure_version": trace.get("context_structure_version"),
+                    "history_presentation": trace.get("history_presentation"),
+                    "tags": list(trace.get("context_tags") or []),
+                    "interrupted_context_dropped_count": trace.get(
+                        "interrupted_context_dropped_count"
+                    )
+                    or 0,
                     "segments": [
                         s.get("kind")
                         for s in (trace.get("context_ledger") or {}).get("segments", [])
@@ -103,6 +110,18 @@ class TurnReplayResult:
                         (trace.get("context_ledger") or {}).get("degraded_sources")
                         or []
                     ),
+                },
+                "tools": {
+                    "visible_names": list(
+                        ((trace.get("harness") or {}).get("tools") or {}).get(
+                            "visible_names"
+                        )
+                        or []
+                    ),
+                    "repeat_suppressed_count": trace.get(
+                        "tool_repeat_suppressed_count"
+                    )
+                    or 0,
                 },
             },
         }
@@ -192,9 +211,27 @@ class _ReplayHarness:
             conversation_turn_subject("alice"),
             self._on_memory_fanout,
         )
+        now = datetime.now(timezone.utc)
+        for idx, item in enumerate(self.scenario.get("history") or []):
+            role_name = str(item.get("role") or "user").lower()
+            role = MessageRole.ASSISTANT if role_name == "assistant" else MessageRole.USER
+            await self.history.append(
+                conversation_id=str(
+                    item.get("conversation_id")
+                    or self.scenario.get("conversation_id")
+                    or "replay"
+                ),
+                message=ChatMessage(
+                    id=str(item.get("id") or f"seed-{idx + 1}"),
+                    role=role,
+                    content=str(item.get("content") or ""),
+                    created_at=now,
+                    metadata=dict(item.get("metadata") or {}),
+                ),
+            )
 
     async def run_turn(self, spec: dict[str, Any], *, idx: int) -> TurnReplayResult:
-        llm = _CapturingLLM()
+        llm = _CapturingLLM(response_text=str(spec.get("assistant") or "我在。"))
         engine = self._build_engine(llm=llm)
         turn_id = str(spec.get("turn_id") or f"{self.scenario.get('id')}-{idx + 1}")
         ti = _make_turn_input(
@@ -298,14 +335,15 @@ class _ReplayPersonas:
 class _CapturingLLM:
     model_id = "fake:experience-replay"
 
-    def __init__(self) -> None:
+    def __init__(self, *, response_text: str) -> None:
+        self.response_text = response_text
         self.messages: list[ChatMessage] = []
         self.prompt_text = ""
 
     async def stream(self, messages: list[ChatMessage], **_: Any):
         self.messages = list(messages)
         self.prompt_text = "\n\n".join(m.content for m in messages)
-        yield LLMDelta(text_delta="我在。")
+        yield LLMDelta(text_delta=self.response_text)
         yield LLMDelta(finish=LLMFinishReason.STOP)
 
     async def count_tokens(self, messages: list[ChatMessage]) -> int:
@@ -383,6 +421,10 @@ def _check_turn_expectations(
         add(f"required_prompt:{item}", item in result.prompt_text)
     for item in expect.get("forbidden_prompt_substrings") or []:
         add(f"forbidden_prompt:{item}", item not in result.prompt_text)
+    for item in expect.get("required_assistant_substrings") or []:
+        add(f"required_assistant:{item}", item in result.assistant_text)
+    for item in expect.get("forbidden_assistant_substrings") or []:
+        add(f"forbidden_assistant:{item}", item not in result.assistant_text)
     for item in expect.get("required_memory_context_substrings") or []:
         add(f"required_memory_context:{item}", item in harness.memory.context)
     for item in expect.get("forbidden_memory_context_substrings") or []:
@@ -390,6 +432,43 @@ def _check_turn_expectations(
     trace = result.turn_trace or {}
     write = trace.get("memory_write_trace") or {}
     recall = trace.get("memory_trace") or {}
+    tool_call_names = [
+        str((event.get("data") or {}).get("name"))
+        for event in result.events
+        if event.get("kind") == TurnEventKind.TOOL_CALL.value
+    ]
+    for name in expect.get("forbidden_tool_names") or []:
+        add(f"forbidden_tool:{name}", str(name) not in tool_call_names)
+    if "context_structure_version" in expect:
+        add(
+            "context_structure_version",
+            trace.get("context_structure_version") == expect["context_structure_version"],
+            f"got={trace.get('context_structure_version')}",
+        )
+    if "history_presentation" in expect:
+        add(
+            "history_presentation",
+            trace.get("history_presentation") == expect["history_presentation"],
+            f"got={trace.get('history_presentation')}",
+        )
+    for required in expect.get("required_context_tags") or []:
+        required_items = dict(required)
+        tags = trace.get("context_tags") or []
+        add(
+            f"required_context_tag:{required_items}",
+            any(
+                all(tag.get(key) == value for key, value in required_items.items())
+                for tag in tags
+                if isinstance(tag, dict)
+            ),
+        )
+    if "max_tool_repeat_suppressed" in expect:
+        actual = int(trace.get("tool_repeat_suppressed_count") or 0)
+        add(
+            "max_tool_repeat_suppressed",
+            actual <= int(expect["max_tool_repeat_suppressed"]),
+            f"got={actual}",
+        )
     if "memory_write_disposition" in expect:
         add(
             "memory_write_disposition",

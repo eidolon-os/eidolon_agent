@@ -75,6 +75,9 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         if identity is None:
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "no identity")
         active_turns: set[asyncio.Task] = set()
+        active_by_conversation: dict[str, asyncio.Task] = {}
+        generation_by_conversation: dict[str, int] = {}
+        write_lock = asyncio.Lock()
         last_session_id: str | None = None
         signal_fuser = SignalFuser()
 
@@ -112,11 +115,18 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
 
                 start = frame.start
                 last_session_id = start.conversation_id
+                conversation_id = start.conversation_id
+                previous = active_by_conversation.get(conversation_id)
+                if previous is not None and not previous.done():
+                    previous.cancel()
+                generation = generation_by_conversation.get(conversation_id, 0) + 1
+                generation_by_conversation[conversation_id] = generation
                 try:
                     inst = await self._registry.resolve_for_caller(
                         tenant_id=identity.tenant_id,
                         user_id=identity.user_id,
-                        template_id=identity.default_template_id or None,
+                        template_id=getattr(identity, "default_template_id", None)
+                        or None,
                     )
                     agent = inst.agent
                 except NotFoundError as exc:
@@ -132,8 +142,8 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
 
                 ti = TurnInput(
                     turn_id=start.turn_id or uuid.uuid4().hex,
-                    conversation_id=start.conversation_id,
-                    session_id=start.conversation_id,  # one-to-one for now
+                    conversation_id=conversation_id,
+                    session_id=conversation_id,  # one-to-one for now
                     caller=CallerContext(
                         identity=Identity(
                             tenant_id=identity.tenant_id,
@@ -155,10 +165,19 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     metadata=struct_to_dict(start.metadata),
                 )
 
-                async def _emit_turn(_agent=agent, _ti=ti) -> None:
+                async def _emit_turn(_agent=agent, _ti=ti, _generation=generation) -> None:
                     try:
                         async for ev in _agent.run_turn(_ti):
-                            await context.write(turn_event_to_proto(ev))
+                            if (
+                                generation_by_conversation.get(_ti.conversation_id)
+                                != _generation
+                            ):
+                                _ti.metadata["stale_generation_dropped"] = int(
+                                    _ti.metadata.get("stale_generation_dropped") or 0
+                                ) + 1
+                                continue
+                            async with write_lock:
+                                await context.write(turn_event_to_proto(ev))
                     except asyncio.CancelledError:
                         raise
                     except EidolonError as exc:
@@ -166,7 +185,17 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
 
                 task = asyncio.create_task(_emit_turn(), name=f"turn-{ti.turn_id}")
                 active_turns.add(task)
-                task.add_done_callback(active_turns.discard)
+                active_by_conversation[conversation_id] = task
+
+                def _discard_done(done_task, *, conv_id=conversation_id, gen=generation):
+                    active_turns.discard(done_task)
+                    if (
+                        generation_by_conversation.get(conv_id) == gen
+                        and active_by_conversation.get(conv_id) is done_task
+                    ):
+                        active_by_conversation.pop(conv_id, None)
+
+                task.add_done_callback(_discard_done)
         finally:
             watcher.cancel()
             # If the iterator returned because the RPC was cancelled, propagate
@@ -193,7 +222,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         inst = await self._registry.resolve_for_caller(
             tenant_id=identity.tenant_id,
             user_id=identity.user_id,
-            template_id=identity.default_template_id or None,
+            template_id=getattr(identity, "default_template_id", None) or None,
         )
         agent = inst.agent
         ti = TurnInput(
@@ -257,7 +286,8 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 inst = await self._registry.resolve_for_caller(
                     tenant_id=identity.tenant_id,
                     user_id=identity.user_id,
-                    template_id=identity.default_template_id or None,
+                    template_id=getattr(identity, "default_template_id", None)
+                    or None,
                 )
                 from eidolon_agent.domain.personas.types import PersonaSignalInput
 

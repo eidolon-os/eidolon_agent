@@ -1,7 +1,7 @@
 """ContextCompiler — direct prompt assembly.
 
-No more pluggable providers; tests verify the fixed shape:
-  [system: persona + memory + realtime] + [history] + [user_input]
+No more pluggable providers; tests verify the fixed structured shape:
+  [system: instructions + reference/background + current request] + [user_input]
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def test_assembles_system_history_user_in_order() -> None:
+async def test_assembles_structured_system_background_and_current_user() -> None:
     history = HistoryManager()
     await history.append(
         conversation_id="c1",
@@ -108,14 +108,21 @@ async def test_assembles_system_history_user_in_order() -> None:
     )
     msgs = await compiler.compile(make_turn_input("当前问题"))
 
-    assert [m.role for m in msgs] == [
-        MessageRole.SYSTEM,
-        MessageRole.USER,       # earlier-q
-        MessageRole.ASSISTANT,  # earlier-a
-        MessageRole.USER,       # current
-    ]
-    assert "[PERSONA]" in msgs[0].content
+    assert [m.role for m in msgs] == [MessageRole.SYSTEM, MessageRole.USER]
+    system = msgs[0].content
+    assert "[SYSTEM INSTRUCTIONS]" in system
+    assert "[PERSONA]" in system
+    assert "[BACKGROUND CONTEXT]" in system
+    assert "authority=background" in system
+    assert "actionability=must_not_execute" in system
+    assert "earlier-q" in system
+    assert "earlier-a" in system
+    assert "[CURRENT REQUEST]" in system
+    assert "authority=current_request" in system
+    assert "actionability=may_execute" in system
+    assert "当前问题" in system
     assert msgs[-1].content == "当前问题"
+    assert msgs[-1].role is MessageRole.USER
 
 
 async def test_persona_locator_args_match_turn_input() -> None:
@@ -145,7 +152,10 @@ async def test_memory_recall_appended_when_port_present() -> None:
         memory_port=memory,
     )
     msgs = await compiler.compile(make_turn_input("帮我回忆一下"))
-    assert "[MEMORY]\nprior_episode_summary" in msgs[0].content
+    assert "[RETRIEVED MEMORY]" in msgs[0].content
+    assert "authority=retrieved_memory" in msgs[0].content
+    assert "actionability=may_use_as_reference" in msgs[0].content
+    assert "prior_episode_summary" in msgs[0].content
     assert memory.calls and memory.calls[0]["query"] == "帮我回忆一下"
 
 
@@ -242,7 +252,7 @@ async def test_memory_success_does_not_inject_degraded_notice() -> None:
     )
     msgs = await compiler.compile(make_turn_input("聊聊铁锤"))
     system = msgs[0].content
-    assert "[MEMORY]" in system
+    assert "[RETRIEVED MEMORY]" in system
     assert "暂不可达" not in system  # the notice keyword must not appear
     assert "memory backend" not in system  # the notice keyword must not appear
 
@@ -288,6 +298,11 @@ async def test_context_ledger_metadata_is_written_without_prompt_text() -> None:
     assert snapshot["kind"] == "realtime_agent_harness"
     assert "harness_policy" in snapshot["segment_kinds"]
     assert snapshot["memory"]["hit_count"] == 1
+    assert ti.metadata["context_structure_version"] == "context_structure.v2"
+    assert ti.metadata["history_presentation"] == "background_context"
+    assert {
+        tag["authority"] for tag in ti.metadata["context_tags"]
+    } >= {"instruction", "current_request", "retrieved_memory"}
 
 
 async def test_summary_provider_injects_existing_summary_without_moving_current_turn() -> None:
@@ -302,7 +317,8 @@ async def test_summary_provider_injects_existing_summary_without_moving_current_
 
     msgs = await compiler.compile(ti)
 
-    assert "[CONVERSATION SUMMARY]\n之前用户在比较两个方案" in msgs[0].content
+    assert "[BACKGROUND CONTEXT]" in msgs[0].content
+    assert "之前用户在比较两个方案" in msgs[0].content
     assert msgs[-1].role is MessageRole.USER
     assert msgs[-1].content == "那现在你建议选哪个？"
     assert ti.metadata["summary_trace"]["attempted"] is True
@@ -312,6 +328,8 @@ async def test_summary_provider_injects_existing_summary_without_moving_current_
         "current_user_token_estimate": 3,
         "summary_injected": True,
         "raw_history_message_count": 0,
+        "background_history_message_count": 0,
+        "history_presentation": "background_context",
     }
     assert "之前用户在比较" not in str(ti.metadata["summary_trace"])
     assert summary.calls == ["c1"]
@@ -347,7 +365,7 @@ async def test_budget_can_drop_summary_before_current_turn() -> None:
 
     msgs = await compiler.compile(ti)
 
-    assert "[CONVERSATION SUMMARY]" not in msgs[0].content
+    assert "summary " not in msgs[0].content
     assert msgs[-1].content == "当前问题"
     assert ti.metadata["summary_trace"]["context_injected"] is False
     dropped = ti.metadata["context_ledger"]["dropped_segments"]
@@ -462,6 +480,42 @@ async def test_temporary_turn_skips_memory_and_history_context() -> None:
     assert ti.metadata["memory_trace"]["skipped_reason"] == "privacy_policy"
 
 
+async def test_interrupted_history_is_background_only_with_status_tag() -> None:
+    history = HistoryManager()
+    await history.append(
+        conversation_id="c1",
+        message=ChatMessage(
+            id="interrupted-weather",
+            role=MessageRole.ASSISTANT,
+            content="我先查一下天气。",
+            created_at=_now(),
+            metadata={"interrupted": True, "tool_relation": "abandoned_due_to_interrupt"},
+        ),
+    )
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas("[PERSONA]\nhi"),
+        instance_locator=_locator,
+        history_manager=history,
+        memory_port=None,
+    )
+    ti = make_turn_input("当前问题")
+
+    msgs = await compiler.compile(ti)
+
+    assert [m.role for m in msgs] == [MessageRole.SYSTEM, MessageRole.USER]
+    system = msgs[0].content
+    assert "[BACKGROUND CONTEXT]" in system
+    assert "status=interrupted" in system
+    assert "tool_relation=abandoned_due_to_interrupt" in system
+    assert "actionability=must_not_execute" in system
+    assert any(
+        tag["kind"] == "history"
+        and tag["status"] == "interrupted"
+        and tag["tool_relation"] == "abandoned_due_to_interrupt"
+        for tag in ti.metadata["context_tags"]
+    )
+
+
 async def test_budget_keeps_recent_history_before_older_history() -> None:
     history = HistoryManager()
     await history.append(
@@ -486,14 +540,15 @@ async def test_budget_keeps_recent_history_before_older_history() -> None:
         personas_service=_StubPersonas("[P]"),
         instance_locator=_locator,
         history_manager=history,
-        context_budget_tokens=190,
+        context_budget_tokens=260,
     )
 
     ti = make_turn_input("now")
     msgs = await compiler.compile(ti)
 
-    assert "new " in "\n".join(m.content for m in msgs)
-    assert "old " not in "\n".join(m.content for m in msgs)
+    joined = "\n".join(m.content for m in msgs)
+    assert "new new" in joined
+    assert "old old" not in joined
     dropped = ti.metadata["context_ledger"]["dropped_segments"]
     assert dropped == [
         {
@@ -517,7 +572,7 @@ async def test_budget_drops_oversized_memory_and_records_ledger() -> None:
 
     msgs = await compiler.compile(ti)
 
-    assert "[MEMORY]" not in msgs[0].content
+    assert "\n[RETRIEVED MEMORY]\n" not in f"\n{msgs[0].content}\n"
     assert ti.metadata["memory_trace"]["context_injected"] is False
     dropped = ti.metadata["context_ledger"]["dropped_segments"]
     assert any(s["kind"] == "memory" for s in dropped)
@@ -536,7 +591,7 @@ async def test_budget_shadow_records_would_drop_without_changing_prompt() -> Non
 
     msgs = await compiler.compile(ti)
 
-    assert "[MEMORY]" in msgs[0].content
+    assert "[RETRIEVED MEMORY]" in msgs[0].content
     assert ti.metadata["memory_trace"]["context_injected"] is True
     guard = ti.metadata["development_guards"]["context_budget"]
     assert guard["mode"] == "shadow"

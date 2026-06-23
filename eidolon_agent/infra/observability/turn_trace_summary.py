@@ -32,6 +32,14 @@ def build_turn_observability_summary(
         "privacy_mode": privacy.get("mode"),
         "prompt_fingerprint": snapshot.prompt_fingerprint,
         "context": _context_summary(ledger),
+        "context_structure_version": trace.get("context_structure_version"),
+        "history_presentation": trace.get("history_presentation"),
+        "context_tags": list(trace.get("context_tags") or []),
+        "interrupted_context_dropped_count": trace.get(
+            "interrupted_context_dropped_count"
+        )
+        or 0,
+        "stale_generation_dropped": trace.get("stale_generation_dropped") or 0,
         "memory": {
             "attempted": bool(memory.get("attempted")),
             "degraded": bool(memory.get("degraded")),
@@ -54,6 +62,7 @@ def build_turn_observability_summary(
             "error_count": sum(1 for t in tools if not bool(t.get("ok"))),
             "cached_count": sum(1 for t in tools if bool(t.get("cached"))),
             "total_latency_ms": sum(_int_or_zero(t.get("latency_ms")) for t in tools),
+            "repeat_suppressed_count": trace.get("tool_repeat_suppressed_count") or 0,
         },
         "harness": _harness_summary(harness),
         "latency": {

@@ -148,9 +148,14 @@ async def test_tool_preamble_spoken_once_per_turn(turn_engine_factory):
     assert delta_texts.count("我先调用相关工具处理一下。") == 1
     # The real answer still streams.
     assert any("抱歉" in t for t in delta_texts)
-    # The tool was still attempted twice (retry behavior preserved).
+    # The model asked twice, but the second same-tool failure is suppressed
+    # before dispatch so one bad external dependency cannot occupy the turn.
     tool_calls = [e for e in events if e.kind.value == "tool_call"]
     assert len(tool_calls) == 2
+    tool_results = [e for e in events if e.kind.value == "tool_result"]
+    assert len(tool_results) == 2
+    assert tool_results[0].data["error"] == "weather_lookup_failed"
+    assert tool_results[1].data["error"] == "tool_repeat_suppressed"
 
     # ② role-tagging: the preamble is tagged as a status line (not answer);
     # real answer deltas carry no preamble role.
