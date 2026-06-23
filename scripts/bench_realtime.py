@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import subprocess
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,6 +46,7 @@ from eidolon_agent.infra.benchmark import (
     BenchmarkReportSummarizer,
     build_realtime_benchmark_report,
     write_benchmark_artifacts,
+    write_standard_benchmark_run,
 )
 from eidolon_agent.infra.benchmark.reporting import (
     normalize_experience_report,
@@ -54,7 +56,9 @@ from eidolon_agent.infra.benchmark.reporting import (
 from eidolon_agent.app.benchmark import load_replay_scenarios
 from eidolon_agent.app.benchmark.experience import ExperienceReplayRunner
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = Path("~/eidolon/debug/reports/realtime")
+DEFAULT_BENCHMARK_RUNS_DIR = REPO_ROOT / "benchmarks" / "runs"
 DEFAULT_IN_PROCESS_FIXTURE = Path("tests/benchmark/fixtures/core_experience.jsonl")
 DEFAULT_LIVE_SERVICE_FIXTURE = Path("tests/benchmark/fixtures/live_service_smoke.jsonl")
 
@@ -71,6 +75,12 @@ async def main() -> int:
     parser.add_argument("--profile", default="voice")
     parser.add_argument("--fixture", action="append", type=Path, default=[])
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--benchmark-runs-dir", type=Path, default=DEFAULT_BENCHMARK_RUNS_DIR)
+    parser.add_argument(
+        "--no-standard-run",
+        action="store_true",
+        help="Skip writing benchmarks/runs/<suite>/<run_id> artifacts for admin.",
+    )
     parser.add_argument("--baseline", type=Path, default=None)
     parser.add_argument("--no-latest", action="store_true")
     parser.add_argument(
@@ -165,6 +175,15 @@ async def main() -> int:
         output_json=output_json,
         write_latest=not args.no_latest,
     )
+    if not args.no_standard_run:
+        standard_artifacts = write_standard_benchmark_run(
+            report,
+            runs_dir=args.benchmark_runs_dir,
+            suite=_standard_suite_for_mode(args.mode),
+            git_sha=_git_sha(),
+        )
+        artifacts["standard_run_dir"] = standard_artifacts["run_dir"]
+        artifacts["standard_manifest"] = standard_artifacts["manifest"]
     _print_summary(report, artifacts)
     return 0 if report["passed"] else 1
 
@@ -333,6 +352,24 @@ def _default_run_id(mode: str) -> str:
     return f"{mode}-{stamp}-{uuid.uuid4().hex[:6]}"
 
 
+def _standard_suite_for_mode(mode: str) -> str:
+    return f"realtime-{mode}"
+
+
+def _git_sha() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return None
+    return result.stdout.strip() or None
+
+
 def _source_report_summary(report: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": report.get("schema_version"),
@@ -389,6 +426,8 @@ def _print_summary(report: dict[str, Any], artifacts: dict[str, str]) -> None:
     print(f"json={artifacts['json']}")
     print(f"markdown={artifacts['markdown']}")
     print(f"html={artifacts['html']}")
+    if artifacts.get("standard_run_dir"):
+        print(f"admin_run_dir={artifacts['standard_run_dir']}")
     llm_summary = report.get("llm_summary") or {}
     if llm_summary:
         print(f"llm_summary={llm_summary.get('status')}")

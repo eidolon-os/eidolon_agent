@@ -170,7 +170,12 @@ async def ensure_registry_user(
     if not registry_base:
         raise ValueError("--provision-user requires --registry-http")
     base = registry_base.rstrip("/")
-    get_resp = await http.get(f"{base}/users/{user_id}", timeout=10.0)
+    get_resp = await _request_with_retries(
+        http,
+        "GET",
+        f"{base}/users/{user_id}",
+        timeout=10.0,
+    )
     if get_resp.status_code == 200:
         body = get_resp.json()
         return {
@@ -182,7 +187,9 @@ async def ensure_registry_user(
     if get_resp.status_code != 404:
         get_resp.raise_for_status()
 
-    create_resp = await http.post(
+    create_resp = await _request_with_retries(
+        http,
+        "POST",
         f"{base}/users",
         json={
             "user_id": user_id,
@@ -212,7 +219,9 @@ async def _issue_token(
     user_id: str,
     template_id: str,
 ) -> tuple[str, str]:
-    resp = await http.post(
+    resp = await _request_with_retries(
+        http,
+        "POST",
         f"{http_base}/api/admin/pairing/codes",
         json={
             "tenant_id": tenant_id,
@@ -481,7 +490,11 @@ async def _fetch_turn_detail(
     last_error: str | None = None
     while True:
         try:
-            resp = await http.get(f"{http_base}/api/admin/conversations/turns/{turn_id}")
+            resp = await _request_with_retries(
+                http,
+                "GET",
+                f"{http_base}/api/admin/conversations/turns/{turn_id}",
+            )
             if resp.status_code == 200:
                 return resp.json()
             last_error = f"HTTP {resp.status_code}"
@@ -492,8 +505,31 @@ async def _fetch_turn_detail(
                 "status": "admin_detail_unavailable",
                 "observability_summary": None,
                 "error": last_error or "timeout",
-            }
+        }
         await asyncio.sleep(0.1)
+
+
+async def _request_with_retries(
+    http: httpx.AsyncClient,
+    method: str,
+    url: str,
+    *,
+    attempts: int = 5,
+    retry_delay_s: float = 0.25,
+    **kwargs: Any,
+) -> httpx.Response:
+    transient = (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadError, httpx.ReadTimeout)
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return await http.request(method, url, **kwargs)
+        except transient as exc:
+            last_error = exc
+            if attempt == attempts:
+                break
+            await asyncio.sleep(retry_delay_s * attempt)
+    assert last_error is not None
+    raise last_error
 
 
 def _turn_checks(

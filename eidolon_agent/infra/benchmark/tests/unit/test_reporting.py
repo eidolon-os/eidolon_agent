@@ -8,6 +8,7 @@ from eidolon_agent.infra.benchmark.reporting import (
     build_realtime_benchmark_report,
     normalize_flat_turns,
     write_benchmark_artifacts,
+    write_standard_benchmark_run,
 )
 
 
@@ -106,6 +107,64 @@ def test_threshold_and_baseline_regressions_fail_report() -> None:
     assert report["passed"] is False
     assert report["summary"]["threshold_failed_count"] == 2
     assert report["baseline"]["regressed"] is True
+    assert report["diagnosis"]["status"] == "failed"
+    assert any(
+        "首响延迟" in item["summary"] for item in report["diagnosis"]["top_causes"]
+    )
+
+
+def test_diagnosis_groups_failure_causes_and_scenarios(tmp_path) -> None:
+    scenarios, turns = normalize_flat_turns(
+        [
+            {
+                "turn_id": "slow",
+                "first_delta_ms": 3200,
+                "total_ms": 4100,
+                "passed": False,
+                "checks": [{"name": "max_first_delta_ms", "passed": False, "detail": "got=3200"}],
+            },
+            {
+                "turn_id": "tool",
+                "first_delta_ms": 100,
+                "total_ms": 300,
+                "passed": False,
+                "checks": [{"name": "tool_name:emit_event", "passed": False, "detail": "got=[]"}],
+            },
+        ],
+        mode="live-service",
+        scenario_id="live-tool-permission-denied",
+        description="real service tool policy",
+    )
+    report = build_realtime_benchmark_report(
+        run_id="diagnosis",
+        mode="live-service",
+        profile="voice",
+        target={},
+        thresholds={"first_delta_p95_ms": 3000},
+        scenarios=scenarios,
+        turns=turns,
+    )
+
+    diagnosis = report["diagnosis"]
+    assert diagnosis["status"] == "failed"
+    assert diagnosis["counts"]["failed_turns"] == 2
+    assert {item["category"] for item in diagnosis["top_causes"]} >= {
+        "latency_first_delta",
+        "tool_behavior",
+    }
+    assert diagnosis["scenario_breakdown"][0]["scenario_id"] == "live-tool-permission-denied"
+    assert diagnosis["recommendations"]
+    artifacts = write_benchmark_artifacts(
+        report,
+        output_json=tmp_path / "diagnosis.json",
+        write_latest=False,
+    )
+    payload = json.loads((tmp_path / "diagnosis.json").read_text())
+    markdown = (tmp_path / "diagnosis.md").read_text()
+    assert payload["diagnosis"]["headline"]
+    assert "## Diagnosis" in markdown
+    assert "### Top Causes" in markdown
+    assert artifacts["json"].endswith("diagnosis.json")
 
 
 def test_write_benchmark_artifacts_includes_human_reports_and_latest(tmp_path) -> None:
@@ -147,3 +206,42 @@ def test_write_benchmark_artifacts_includes_human_reports_and_latest(tmp_path) -
     assert json.loads((tmp_path / "latest.json").read_text())["run_id"] == "artifact"
     assert json.loads((tmp_path / "latest-hotpath.json").read_text())["run_id"] == "artifact"
     assert artifacts["json"].endswith("benchmark-artifact.json")
+
+
+def test_write_standard_benchmark_run_uses_admin_directory_contract(tmp_path) -> None:
+    scenarios, turns = normalize_flat_turns(
+        [{"turn_id": "t1", "first_delta_ms": 10, "total_ms": 20, "passed": True}],
+        mode="live-service",
+        scenario_id="live-service-smoke",
+        description="real service smoke",
+    )
+    report = build_realtime_benchmark_report(
+        run_id="live-service-20260623T120000Z-a1b2c3",
+        mode="live-service",
+        profile="voice",
+        target={"http_base": "http://127.0.0.1:8081"},
+        thresholds={},
+        scenarios=scenarios,
+        turns=turns,
+    )
+
+    artifacts = write_standard_benchmark_run(
+        report,
+        runs_dir=tmp_path,
+        suite="realtime-live-service",
+        git_sha="abc123",
+    )
+
+    run_dir = tmp_path / "realtime-live-service" / report["run_id"]
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    full_report = json.loads((run_dir / "report.json").read_text())
+    assert artifacts["run_dir"] == str(run_dir)
+    assert manifest["schema_version"] == "eidolon_agent.benchmark_run_manifest.v1"
+    assert manifest["run"]["git_sha"] == "abc123"
+    assert manifest["summary"]["turn_count"] == 1
+    assert manifest["diagnosis"]["status"] == "passed"
+    assert manifest["metrics"]["total_ms"]["p95"] == 20
+    assert manifest["cases"][0]["scenario_id"] == "live-service-smoke"
+    assert full_report["schema_version"] == SCHEMA_VERSION
+    assert (run_dir / "report.md").read_text().startswith("# Realtime Benchmark")
+    assert "<!doctype html>" in (run_dir / "report.html").read_text()
