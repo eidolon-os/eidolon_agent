@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from eidolon_agent.app.replay.benchmarks import live_agent_memory_experience_scenarios
+from eidolon_agent.app.benchmark.suites import live_agent_memory_experience_scenarios
 from scripts import replay_live_service
 
 

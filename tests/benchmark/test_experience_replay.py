@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from eidolon_agent.app.replay import load_replay_scenarios, run_replay_files
-from eidolon_agent.app.replay.benchmarks import agent_memory_experience_scenarios
-from eidolon_agent.app.replay.experience import run_replay_scenarios
+from eidolon_agent.app.benchmark import load_replay_scenarios, run_replay_files
+from eidolon_agent.app.benchmark.suites import agent_memory_experience_scenarios
+from eidolon_agent.app.benchmark.experience import run_replay_scenarios
 
 pytestmark = pytest.mark.integration
 
 
 async def test_core_experience_replay_fixture_passes() -> None:
-    report = await run_replay_files([Path("tests/replay/fixtures/core_experience.jsonl")])
+    report = await run_replay_files([Path("tests/benchmark/fixtures/core_experience.jsonl")])
 
     assert report["passed"] is True
     assert report["summary"]["scenario_count"] == 6
@@ -26,7 +26,7 @@ async def test_core_experience_replay_fixture_passes() -> None:
 
 async def test_topic_switch_context_replay_fixture_passes() -> None:
     report = await run_replay_files(
-        [Path("tests/replay/fixtures/topic_switch_context.jsonl")]
+        [Path("tests/benchmark/fixtures/topic_switch_context.jsonl")]
     )
 
     assert report["passed"] is True
@@ -70,7 +70,7 @@ async def test_experience_replay_attaches_memory_quality_summary(tmp_path: Path)
     )
 
     report = await run_replay_files(
-        [Path("tests/replay/fixtures/core_experience.jsonl")],
+        [Path("tests/benchmark/fixtures/core_experience.jsonl")],
         memory_report_path=memory_report,
     )
 

@@ -5,7 +5,7 @@ SQLite turn trace, and whatever real memory/NATS/LLM configuration the running
 agent has. It intentionally does not inspect prompt text.
 
 Examples:
-    python scripts/replay_live_service.py --fixture tests/replay/fixtures/live_service_smoke.jsonl
+    python scripts/replay_live_service.py --fixture tests/benchmark/fixtures/live_service_smoke.jsonl
     python scripts/replay_live_service.py --output ~/eidolon/debug/reports/replay/live.json --markdown live.md
 """
 
@@ -25,12 +25,12 @@ from typing import Any
 import httpx
 from eidolon_sdk.grpc import authorization_metadata, create_aio_channel
 
-from eidolon_agent.app.replay import (
+from eidolon_agent.app.benchmark import (
     load_replay_scenarios,
     render_replay_html,
     render_replay_markdown,
 )
-from eidolon_agent.app.replay.benchmarks import (
+from eidolon_agent.app.benchmark.suites import (
     LIVE_AGENT_MEMORY_BENCHMARK_NAME,
     live_agent_memory_experience_scenarios,
 )
@@ -85,7 +85,7 @@ async def main() -> int:
     if args.agent_memory_benchmark:
         scenarios = live_agent_memory_experience_scenarios()
     else:
-        fixtures = args.fixture or [Path("tests/replay/fixtures/live_service_smoke.jsonl")]
+        fixtures = args.fixture or [Path("tests/benchmark/fixtures/live_service_smoke.jsonl")]
         scenarios = load_replay_scenarios(fixtures)
     user_id = args.user or f"replay-live-{uuid.uuid4().hex[:8]}"
     try:

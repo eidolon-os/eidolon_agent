@@ -7,7 +7,7 @@ Examples:
     python scripts/bench_realtime.py --mode hotpath --turns 30
     python scripts/bench_realtime.py --mode in-process
     python scripts/bench_realtime.py --mode live-grpc --turns 20 --reuse-stream
-    python scripts/bench_realtime.py --mode live-service --fixture tests/replay/fixtures/live_service_smoke.jsonl
+    python scripts/bench_realtime.py --mode live-service --fixture tests/benchmark/fixtures/live_service_smoke.jsonl
 """
 
 from __future__ import annotations
@@ -51,12 +51,12 @@ from eidolon_agent.infra.benchmark.reporting import (
     normalize_flat_turns,
     normalize_live_service_report,
 )
-from eidolon_agent.app.replay import load_replay_scenarios
-from eidolon_agent.app.replay.experience import ExperienceReplayRunner
+from eidolon_agent.app.benchmark import load_replay_scenarios
+from eidolon_agent.app.benchmark.experience import ExperienceReplayRunner
 
 DEFAULT_OUTPUT_DIR = Path("~/eidolon/debug/reports/realtime")
-DEFAULT_IN_PROCESS_FIXTURE = Path("tests/replay/fixtures/core_experience.jsonl")
-DEFAULT_LIVE_SERVICE_FIXTURE = Path("tests/replay/fixtures/live_service_smoke.jsonl")
+DEFAULT_IN_PROCESS_FIXTURE = Path("tests/benchmark/fixtures/core_experience.jsonl")
+DEFAULT_LIVE_SERVICE_FIXTURE = Path("tests/benchmark/fixtures/live_service_smoke.jsonl")
 
 
 async def main() -> int:

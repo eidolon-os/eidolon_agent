@@ -2,7 +2,7 @@
 
 Examples:
     python scripts/replay_experience.py
-    python scripts/replay_experience.py --fixture tests/replay/fixtures/core.jsonl
+    python scripts/replay_experience.py --fixture tests/benchmark/fixtures/core.jsonl
     python scripts/replay_experience.py --memory-report ../eidolon_memory/reports/latest.json
 """
 
@@ -14,13 +14,13 @@ import json
 import sys
 from pathlib import Path
 
-from eidolon_agent.app.replay import (
+from eidolon_agent.app.benchmark import (
     render_replay_html,
     render_replay_markdown,
     run_replay_files,
     run_replay_scenarios,
 )
-from eidolon_agent.app.replay.benchmarks import (
+from eidolon_agent.app.benchmark.suites import (
     AGENT_MEMORY_BENCHMARK_NAME,
     agent_memory_experience_scenarios,
 )
@@ -65,7 +65,7 @@ async def main() -> int:
             memory_report_path=args.memory_report,
         )
     else:
-        fixtures = args.fixture or [Path("tests/replay/fixtures/core_experience.jsonl")]
+        fixtures = args.fixture or [Path("tests/benchmark/fixtures/core_experience.jsonl")]
         report = await run_replay_files(fixtures, memory_report_path=args.memory_report)
     text = json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2)
     if args.output is not None:

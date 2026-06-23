@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from eidolon_agent.app.replay import (
+from eidolon_agent.app.benchmark import (
     compare_replay_reports,
     render_comparison_markdown,
     render_replay_html,

@@ -14,7 +14,7 @@ Useful commands:
   --markdown ~/eidolon/debug/reports/replay/in-process-latest.md
 
 ./.venv/bin/python scripts/replay_live_service.py \
-  --fixture tests/replay/fixtures/live_service_smoke.jsonl
+  --fixture tests/benchmark/fixtures/live_service_smoke.jsonl
 
 ./.venv/bin/python scripts/compare_replay_reports.py \
   ~/eidolon/debug/reports/replay/baseline.json \

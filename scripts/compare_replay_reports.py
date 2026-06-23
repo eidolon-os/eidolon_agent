@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-from eidolon_agent.app.replay import (
+from eidolon_agent.app.benchmark import (
     compare_replay_reports,
     load_report,
     render_comparison_markdown,

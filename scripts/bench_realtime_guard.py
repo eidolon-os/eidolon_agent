@@ -9,8 +9,8 @@ import statistics
 import sys
 from pathlib import Path
 
-from eidolon_agent.app.replay import load_replay_scenarios
-from eidolon_agent.app.replay.experience import ExperienceReplayRunner
+from eidolon_agent.app.benchmark import load_replay_scenarios
+from eidolon_agent.app.benchmark.experience import ExperienceReplayRunner
 
 
 async def main() -> int:
@@ -27,7 +27,7 @@ async def main() -> int:
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
 
-    fixtures = args.fixture or [Path("tests/replay/fixtures/core_experience.jsonl")]
+    fixtures = args.fixture or [Path("tests/benchmark/fixtures/core_experience.jsonl")]
     scenarios = load_replay_scenarios(fixtures)
     report = await ExperienceReplayRunner().run_many(scenarios)
     turn_rows = [
