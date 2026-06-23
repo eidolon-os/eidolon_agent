@@ -63,10 +63,10 @@ async def _ensure_memory_provisioned(
 ) -> PairingMemoryReadiness | None:
     """Require a live memory route before issuing a device pairing code.
 
-    The full provisioning authority lives in eidolon_admin/eidolon_memory:
-    admin creates users through memory's ``/api/admin/users`` surface. The
-    agent should not create users or fall back to ``default`` here; it only
-    refuses a token that would otherwise start an amnesiac long-term session.
+    The full provisioning authority lives in eidolon_admin's ``/api/users``.
+    The agent should not create users or fall back to ``default`` here; it
+    only refuses a token that would otherwise start an amnesiac long-term
+    session.
     """
     routes = getattr(request.app.state, "memory_routes", None)
     if routes is None:

@@ -137,8 +137,8 @@ async def ensure_registry_user(
     """Create the memory/admin user through eidolon_admin when absent.
 
     This is the real provisioning path: eidolon_admin owns tenant metadata
-    and calls eidolon_memory's admin HTTP. The live replay script only
-    orchestrates that public surface; it never edits users.yaml directly.
+    and the shared registry. The live replay script only orchestrates that
+    public surface; it never edits registry storage directly.
     """
     if not registry_base:
         raise ValueError("--provision-user requires --registry-http")
