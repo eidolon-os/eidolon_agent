@@ -10,6 +10,7 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
+from eidolon_sdk.db import sqlite_url_for_path
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
@@ -24,9 +25,10 @@ if config.config_file_name is not None:
 # Inject our settings-derived URL if the alembic.ini left it blank.
 if not config.get_main_option("sqlalchemy.url"):
     settings = load_settings()
+    url, _ = sqlite_url_for_path(settings.sqlite.path)
     config.set_main_option(
         "sqlalchemy.url",
-        f"sqlite+aiosqlite:///{settings.sqlite.path.expanduser()}",
+        url,
     )
 
 target_metadata = Base.metadata
