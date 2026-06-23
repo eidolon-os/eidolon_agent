@@ -7,16 +7,16 @@ lines per turn; this script's table tells you the wire-observed numbers,
 and you correlate against the brain log for the phase breakdown.
 
 Default flow (the one we care about for P0):
-    1. Issue a pairing code for a *fresh* (tenant, user) — first turn is a
-       true cold start.
-    2. Exchange code → device_token.
-    3. Open Chat bidi, send ``--turns`` turns, time each.
-    4. Print per-turn first_delta_ms / total_ms + summary stats.
+    1. Ensure the isolated benchmark user exists through eidolon_admin.
+    2. Issue a pairing code for that benchmark user.
+    3. Exchange code → device_token.
+    4. Open Chat bidi, send ``--turns`` turns, time each.
+    5. Print per-turn first_delta_ms / total_ms + summary stats.
 
 Usage::
 
     python scripts/bench_chat.py --turns 5
-    python scripts/bench_chat.py --turns 5 --user existing-user  # warm path
+    python scripts/bench_chat.py --turns 5 --user benchmark-voice
     python scripts/bench_chat.py --turns 5 --reuse-stream        # one bidi for all turns
 """
 
@@ -36,6 +36,11 @@ from eidolon_sdk.grpc import authorization_metadata, create_aio_channel
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
+from eidolon_agent.infra.benchmark.users import (
+    DEFAULT_BENCHMARK_TENANT_ID,
+    DEFAULT_BENCHMARK_USER_ID,
+    resolve_benchmark_identity,
+)
 from scripts.replay_live_service import ensure_registry_user
 
 PROMPTS = [
@@ -47,6 +52,10 @@ PROMPTS = [
     "再来一句鼓励的话。",
     "晚安。",
 ]
+
+DEFAULT_REGISTRY_HTTP = (
+    os.getenv("EIDOLON_BENCHMARK_REGISTRY_HTTP") or "http://127.0.0.1:9000/api"
+)
 
 
 async def _issue_token(
@@ -229,22 +238,35 @@ async def main() -> None:
     p.add_argument("--grpc", default="127.0.0.1:45051", help="gRPC target")
     p.add_argument(
         "--registry-http",
-        default=None,
+        default=DEFAULT_REGISTRY_HTTP,
         help=(
             "Central eidolon_admin API base including /api, e.g. "
-            "http://127.0.0.1:18765/api. Used with --provision-user."
+            "http://127.0.0.1:9000/api. Used with --provision-user."
         ),
     )
     p.add_argument(
         "--provision-user",
+        dest="provision_user",
         action="store_true",
+        default=True,
         help="Ensure the benchmark user exists through eidolon_admin /api/users before pairing.",
     )
-    p.add_argument("--tenant", default="demo")
+    p.add_argument(
+        "--no-provision-user",
+        dest="provision_user",
+        action="store_false",
+        help="Skip eidolon_admin user provisioning; pairing must already work for the user.",
+    )
+    p.add_argument("--tenant", default=DEFAULT_BENCHMARK_TENANT_ID)
     p.add_argument(
         "--user",
-        default=None,
-        help="user_id; default = fresh uuid (cold-start scenario)",
+        default=DEFAULT_BENCHMARK_USER_ID,
+        help="user_id; default = benchmark",
+    )
+    p.add_argument(
+        "--allow-non-benchmark-user",
+        action="store_true",
+        help="Allow an explicit user_id that does not start with 'benchmark'.",
     )
     p.add_argument("--template", default="caretaker_jiezhi")
     p.add_argument("--turns", type=int, default=5)
@@ -259,8 +281,18 @@ async def main() -> None:
         help="conversation_id; default = fresh per run",
     )
     args = p.parse_args()
+    try:
+        identity = resolve_benchmark_identity(
+            tenant_id=args.tenant,
+            user_id=args.user,
+            allow_non_benchmark_user=args.allow_non_benchmark_user,
+        )
+    except ValueError as exc:
+        p.error(str(exc))
+    args.tenant = identity.tenant_id
+    args.user = identity.user_id
 
-    user_id = args.user or f"bench-{uuid.uuid4().hex[:8]}"
+    user_id = args.user
     conv_id = args.conv or f"conv-{uuid.uuid4().hex[:8]}"
     print(
         f"tenant={args.tenant} user={user_id} conv={conv_id} turns={args.turns} "

@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import statistics
 import sys
 import time
@@ -35,8 +36,16 @@ from eidolon_agent.app.benchmark.suites import (
     live_agent_memory_experience_scenarios,
 )
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
+from eidolon_agent.infra.benchmark.users import (
+    DEFAULT_BENCHMARK_TENANT_ID,
+    DEFAULT_BENCHMARK_USER_ID,
+    resolve_benchmark_identity,
+)
 
 DEFAULT_REPORT = Path("~/eidolon/debug/reports/replay/live-service-latest.json")
+DEFAULT_REGISTRY_HTTP = (
+    os.getenv("EIDOLON_BENCHMARK_REGISTRY_HTTP") or "http://127.0.0.1:9000/api"
+)
 
 
 async def main() -> int:
@@ -54,19 +63,32 @@ async def main() -> int:
     parser.add_argument("--grpc", default="127.0.0.1:45051")
     parser.add_argument(
         "--registry-http",
-        default=None,
+        default=DEFAULT_REGISTRY_HTTP,
         help=(
             "Central eidolon_admin API base including /api, e.g. "
-            "http://127.0.0.1:18765/api. Used with --provision-user."
+            "http://127.0.0.1:9000/api. Used with --provision-user."
         ),
     )
     parser.add_argument(
         "--provision-user",
+        dest="provision_user",
         action="store_true",
+        default=True,
         help="Ensure the replay user exists through eidolon_admin /api/users before pairing.",
     )
-    parser.add_argument("--tenant", default="demo")
-    parser.add_argument("--user", default=None)
+    parser.add_argument(
+        "--no-provision-user",
+        dest="provision_user",
+        action="store_false",
+        help="Skip eidolon_admin user provisioning; pairing must already work for the user.",
+    )
+    parser.add_argument("--tenant", default=DEFAULT_BENCHMARK_TENANT_ID)
+    parser.add_argument("--user", default=DEFAULT_BENCHMARK_USER_ID)
+    parser.add_argument(
+        "--allow-non-benchmark-user",
+        action="store_true",
+        help="Allow an explicit user_id that does not start with 'benchmark'.",
+    )
     parser.add_argument("--template", default="caretaker_jiezhi")
     parser.add_argument("--conversation", default=None)
     parser.add_argument(
@@ -81,13 +103,23 @@ async def main() -> int:
     parser.add_argument("--admin-timeout-s", type=float, default=5.0)
     parser.add_argument("--http-timeout-s", type=float, default=20.0)
     args = parser.parse_args()
+    try:
+        identity = resolve_benchmark_identity(
+            tenant_id=args.tenant,
+            user_id=args.user,
+            allow_non_benchmark_user=args.allow_non_benchmark_user,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+    args.tenant = identity.tenant_id
+    args.user = identity.user_id
 
     if args.agent_memory_benchmark:
         scenarios = live_agent_memory_experience_scenarios()
     else:
         fixtures = args.fixture or [Path("tests/benchmark/fixtures/live_service_smoke.jsonl")]
         scenarios = load_replay_scenarios(fixtures)
-    user_id = args.user or f"replay-live-{uuid.uuid4().hex[:8]}"
+    user_id = args.user
     try:
         async with httpx.AsyncClient(timeout=args.http_timeout_s, trust_env=False) as http:
             provisioning = None

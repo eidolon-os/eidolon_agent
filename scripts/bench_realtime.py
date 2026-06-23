@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import subprocess
 import uuid
 from datetime import datetime, timezone
@@ -53,6 +54,11 @@ from eidolon_agent.infra.benchmark.reporting import (
     normalize_flat_turns,
     normalize_live_service_report,
 )
+from eidolon_agent.infra.benchmark.users import (
+    DEFAULT_BENCHMARK_TENANT_ID,
+    DEFAULT_BENCHMARK_USER_ID,
+    resolve_benchmark_identity,
+)
 from eidolon_agent.app.benchmark import load_replay_scenarios
 from eidolon_agent.app.benchmark.experience import ExperienceReplayRunner
 
@@ -61,6 +67,9 @@ DEFAULT_OUTPUT_DIR = Path("~/eidolon/debug/reports/realtime")
 DEFAULT_BENCHMARK_RUNS_DIR = REPO_ROOT / "benchmarks" / "runs"
 DEFAULT_IN_PROCESS_FIXTURE = Path("tests/benchmark/fixtures/core_experience.jsonl")
 DEFAULT_LIVE_SERVICE_FIXTURE = Path("tests/benchmark/fixtures/live_service_smoke.jsonl")
+DEFAULT_REGISTRY_HTTP = (
+    os.getenv("EIDOLON_BENCHMARK_REGISTRY_HTTP") or "http://127.0.0.1:9000/api"
+)
 
 
 async def main() -> int:
@@ -108,10 +117,27 @@ async def main() -> int:
 
     parser.add_argument("--http", default="http://127.0.0.1:8081")
     parser.add_argument("--grpc", default="127.0.0.1:45051")
-    parser.add_argument("--registry-http", default=None)
-    parser.add_argument("--provision-user", action="store_true")
-    parser.add_argument("--tenant", default="demo")
-    parser.add_argument("--user", default=None)
+    parser.add_argument("--registry-http", default=DEFAULT_REGISTRY_HTTP)
+    parser.add_argument(
+        "--provision-user",
+        dest="provision_user",
+        action="store_true",
+        default=True,
+        help="Ensure the benchmark user exists through eidolon_admin /api/users before pairing.",
+    )
+    parser.add_argument(
+        "--no-provision-user",
+        dest="provision_user",
+        action="store_false",
+        help="Skip eidolon_admin user provisioning; pairing must already work for the user.",
+    )
+    parser.add_argument("--tenant", default=DEFAULT_BENCHMARK_TENANT_ID)
+    parser.add_argument("--user", default=DEFAULT_BENCHMARK_USER_ID)
+    parser.add_argument(
+        "--allow-non-benchmark-user",
+        action="store_true",
+        help="Allow an explicit user_id that does not start with 'benchmark'.",
+    )
     parser.add_argument("--template", default="caretaker_jiezhi")
     parser.add_argument("--conversation", default=None)
     parser.add_argument("--turns", type=int, default=10)
@@ -120,6 +146,16 @@ async def main() -> int:
     parser.add_argument("--admin-timeout-s", type=float, default=5.0)
     parser.add_argument("--http-timeout-s", type=float, default=20.0)
     args = parser.parse_args()
+    try:
+        identity = resolve_benchmark_identity(
+            tenant_id=args.tenant,
+            user_id=args.user,
+            allow_non_benchmark_user=args.allow_non_benchmark_user,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+    args.tenant = identity.tenant_id
+    args.user = identity.user_id
 
     run_id = args.run_id or _default_run_id(args.mode)
     thresholds = _thresholds_for(args)
@@ -209,7 +245,7 @@ async def _run_in_process(fixtures: list[Path]) -> dict[str, Any]:
 
 
 async def _run_live_grpc(args: argparse.Namespace) -> dict[str, Any]:
-    user_id = args.user or f"bench-{uuid.uuid4().hex[:8]}"
+    user_id = args.user
     conversation_id = args.conversation or f"bench-{uuid.uuid4().hex[:8]}"
     async with httpx.AsyncClient(timeout=args.http_timeout_s, trust_env=False) as http:
         provisioning = None
@@ -275,7 +311,7 @@ async def _run_live_service(
     fixtures: list[Path],
 ) -> dict[str, Any]:
     scenarios = load_replay_scenarios(fixtures)
-    user_id = args.user or f"replay-live-{uuid.uuid4().hex[:8]}"
+    user_id = args.user
     try:
         async with httpx.AsyncClient(timeout=args.http_timeout_s, trust_env=False) as http:
             provisioning = None
