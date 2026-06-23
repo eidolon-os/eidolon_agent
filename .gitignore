@@ -36,6 +36,7 @@ coverage/
 *.sqlite3-wal
 *.sqlite3-shm
 logs/
+**/.trash/
 *.log
 
 # Generated gRPC stubs (regenerated from .proto on build)
