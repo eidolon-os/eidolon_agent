@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import logging
 
-from eidolon_sdk.memory import ConversationTurnPayload, conversation_turn_subject
+from eidolon_sdk.memory import ConversationTurnPayload
 
 from eidolon_agent.core.types.event import Event
+from eidolon_agent.core.types.identity import build_memory_actor_context
 from eidolon_agent.core.types.topics import Topics
 from eidolon_agent.domain.history.ports import MemoryTurnSubjectResolver
 
@@ -38,6 +39,9 @@ class HistoryFanout:
         user_text: str,
         assistant_text: str,
         timestamp_iso: str,
+        device_id: str | None = None,
+        agent_instance_id: str | None = None,
+        persona_id: str | None = None,
         emotion_payload: dict | None = None,
         metadata: dict | None = None,
     ) -> None:
@@ -54,8 +58,15 @@ class HistoryFanout:
             payload_metadata.update(metadata)
         memory_payload = ConversationTurnPayload(
             turn_id=turn_id,
-            user_id=user_id,
-            session_id=session_id,
+            context=build_memory_actor_context(
+                user_id=user_id,
+                session_id=session_id,
+                tenant_id=tenant_id,
+                device_id=device_id,
+                agent_id=agent_instance_id,
+                instance_id=agent_instance_id,
+                persona_id=persona_id,
+            ),
             timestamp=timestamp_iso,
             user_text=user_text,
             assistant_text=assistant_text,
@@ -65,7 +76,7 @@ class HistoryFanout:
             memory_subject = (
                 await self._memory_routes.render_turn_subject(user_id)
                 if self._memory_routes is not None
-                else conversation_turn_subject(user_id)
+                else Topics.memory_conversation_turn(user_id)
             )
             await self._bus.publish(
                 Event(

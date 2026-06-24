@@ -176,6 +176,12 @@ class SqlConversationRepository:
         row.cost_usd_micro = result.cost_usd_micro
         row.model = result.model
         row.error_code = result.error_code
+        # Only stamp device_id / caller_kind when the caller carried one, so a
+        # later partial re-record (idempotent upsert) never nulls a set value.
+        if result.device_id is not None:
+            row.device_id = result.device_id
+        if result.caller_kind is not None:
+            row.caller_kind = result.caller_kind
         if result.metadata is not None:
             row.metadata_ = result.metadata
         if result.started_at:
@@ -668,6 +674,7 @@ def _long_task_to_row(record: LongTaskRecord, *, now: datetime) -> LongTaskRow:
         tenant_id=record.tenant_id,
         user_id=record.user_id,
         agent_instance_id=record.agent_instance_id,
+        device_id=record.device_id,
         conversation_id=record.conversation_id,
         turn_id=record.turn_id,
         session_id=record.session_id,
@@ -726,6 +733,7 @@ def _row_to_long_task(row: LongTaskRow) -> LongTaskRecord:
         tenant_id=row.tenant_id,
         user_id=row.user_id,
         agent_instance_id=row.agent_instance_id,
+        device_id=row.device_id,
         conversation_id=row.conversation_id,
         turn_id=row.turn_id,
         session_id=row.session_id,

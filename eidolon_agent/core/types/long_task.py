@@ -51,6 +51,9 @@ class LongTaskRecord:
     task: str
     user_text: str = ""
     agent_instance_id: str | None = None
+    # Owning device (from caller identity / turns.device_id). Carried so a
+    # proactive report can be routed back to the device (Phase 3 wake).
+    device_id: str | None = None
     tool_call_id: str | None = None
     task_type: str = "other"
     urgency: str = "normal"

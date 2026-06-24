@@ -29,6 +29,27 @@ _TERMINAL_SUCCESS = {"RUN_END", "RUN_FINISHED"}
 _TERMINAL_FAILURE = {"RUN_FAILED", "RUN_CANCELLED", "ERROR"}
 
 
+def _device_id_from_conversation_id(conversation_id: str | None) -> str | None:
+    """Best-effort device_id from a livekit conversation_id.
+
+    Channel builds ``conversation_id = "<prefix>:<participant_identity>:<room>"``
+    (e.g. ``livekit:1c:db:d4:7a:ef:0c:device-1c-db-d4-7a-ef-0c``). The identity
+    (a MAC) contains colons; the prefix and room do not — so the identity is the
+    middle, i.e. everything between the first and last ``:`` segments. This is a
+    transitional fallback used until ``device_id`` is wired end-to-end onto the
+    record (caller identity → turns.device_id / long_tasks.device_id). Returns
+    None when the shape doesn't match (then the proactive wake is simply skipped
+    upstream).
+    """
+    if not conversation_id:
+        return None
+    parts = conversation_id.split(":")
+    if len(parts) < 3:
+        return None
+    device_id = ":".join(parts[1:-1]).strip()
+    return device_id or None
+
+
 @dataclass(frozen=True, slots=True)
 class MementosWorkerConfig:
     base_url: str = "http://127.0.0.1:18765"
@@ -331,10 +352,25 @@ class MementosLongTaskWorker:
         if not claimed:
             _log.debug("proactive report already delivered: task_id=%s", record.id)
             return
+        # device_id makes this event self-routing: hub just send_command(room.join)
+        # to it (plan §3 Phase 3, "publisher owns the mapping; hub only sends").
+        # Prefer the denormalized record field; fall back to parsing the livekit
+        # conversation_id until device_id is wired end-to-end.
+        device_id = record.device_id or _device_id_from_conversation_id(
+            record.conversation_id
+        )
+        if not device_id:
+            _log.info(
+                "proactive report: unresolved device_id task_id=%s conversation_id=%r "
+                "(wake will be skipped by orchestrator)",
+                record.id,
+                record.conversation_id,
+            )
         event = Event(
             subject=subject,
             payload={
                 "instance_id": instance_id,
+                "device_id": device_id,
                 "intent": "long_task_done",
                 "text": report_text,
                 "style_hint": "report",

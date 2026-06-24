@@ -74,6 +74,7 @@ async def _ensure_long_tasks_schema(conn) -> None:
         "external_status": "VARCHAR(64)",
         "last_polled_at": "DATETIME",
         "result_tts_summary": "TEXT",
+        "device_id": "VARCHAR(64)",
     }
     for name, ddl in columns.items():
         if name not in existing:
@@ -84,6 +85,7 @@ async def _ensure_long_tasks_schema(conn) -> None:
         "ix_long_tasks_lease_until": "lease_until",
         "ix_long_tasks_next_retry_at": "next_retry_at",
         "ix_long_tasks_external_status": "external_status",
+        "ix_long_tasks_device_id": "device_id",
     }
     for name, column in indexes.items():
         await conn.execute(

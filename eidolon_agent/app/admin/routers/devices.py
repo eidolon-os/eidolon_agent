@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy import delete, select
 
-from eidolon_agent.infra.persistence.models import (
+from eidolon_agent.infra.persistence import (
     ChatMessageRow,
     ConversationRow,
     DeviceRow,

@@ -73,6 +73,8 @@ class MemoryPort(Protocol):
         object_: str,
         *,
         confidence: float = 0.9,
+        tenant_id: str | None = None,
+        persona_id: str | None = None,
     ) -> None:
         """Publish an explicit KG triple write command."""
         ...

@@ -127,6 +127,8 @@ class MemoryAssertFactTool:
             predicate,
             object_,
             confidence=confidence,
+            tenant_id=ctx.caller.tenant_id,
+            persona_id=ctx.persona_id,
         )
         return ToolResult(
             call_id=call.id,

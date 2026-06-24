@@ -351,6 +351,7 @@ class TurnEngine:
                                 conversation_id=ti.conversation_id,
                                 session_id=ti.session_id,
                                 user_text=ti.text or "",
+                                persona_id=self._persona_template_id,
                             ),
                         )
                     tool_ms_total += int((time.monotonic() - tool_t0) * 1000)
@@ -757,6 +758,9 @@ class TurnEngine:
                 user_text=ti.text or "",
                 assistant_text=assistant_text,
                 timestamp_iso=started_at.isoformat(),
+                device_id=ti.caller.identity.device_id,
+                agent_instance_id=ti.caller.agent_instance_id,
+                persona_id=self._persona_template_id,
                 metadata={
                     "memory_write_disposition": write_trace["disposition"],
                     "memory_write_reason": write_trace["reason"],

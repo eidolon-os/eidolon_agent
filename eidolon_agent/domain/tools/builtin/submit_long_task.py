@@ -89,6 +89,7 @@ class SubmitLongTaskTool:
             tenant_id=ctx.caller.tenant_id,
             user_id=ctx.caller.user_id,
             agent_instance_id=ctx.caller.agent_instance_id,
+            device_id=ctx.caller.identity.device_id,
             conversation_id=ctx.conversation_id,
             turn_id=ctx.turn_id,
             session_id=ctx.session_id,

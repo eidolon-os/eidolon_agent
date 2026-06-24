@@ -66,6 +66,19 @@ class Topics:
     def emotion_turn(user_id: str) -> str:
         return f"agent.emotion.turn.{user_id}"
 
+    # Default agent->memory subjects, used when discovery advertises no routing
+    # template. The {user_id} suffix matches the discovery/static templates.
+    MEMORY_TURN_TEMPLATE = "agent.memory.conversation.turn.{user_id}"
+    MEMORY_CMD_TEMPLATE = "agent.memory.cmd.{user_id}"
+
+    @staticmethod
+    def memory_conversation_turn(user_id: str) -> str:
+        return Topics.MEMORY_TURN_TEMPLATE.format(user_id=user_id)
+
+    @staticmethod
+    def memory_command(user_id: str) -> str:
+        return Topics.MEMORY_CMD_TEMPLATE.format(user_id=user_id)
+
     # --- External inbound -----------------------------------------------------
 
     @staticmethod

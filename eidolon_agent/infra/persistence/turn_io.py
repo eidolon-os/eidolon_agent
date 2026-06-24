@@ -65,6 +65,8 @@ def build_turn_persister(session_factory, *, model_id_provider):
                     model=model_id,
                     error_code=error_code,
                     seq_in_conversation=seq_in_conv,
+                    device_id=ti.caller.identity.device_id,
+                    caller_kind=ti.caller.caller_kind.value,
                     metadata=timings,
                 )
             )

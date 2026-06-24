@@ -19,12 +19,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from eidolon_sdk.memory import conversation_turn_subject
-
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
+from eidolon_agent.core.types.topics import Topics
 from eidolon_agent.core.types.turn import TurnEventKind, TurnInput, TurnTrigger
 from eidolon_agent.domain.agent import TaskClassifier, TurnEngine
 from eidolon_agent.domain.context import ContextCompiler
@@ -215,7 +214,7 @@ class _ReplayHarness:
 
     async def start(self) -> None:
         await self.event_bus.subscribe(
-            conversation_turn_subject("alice"),
+            Topics.memory_conversation_turn("alice"),
             self._on_memory_fanout,
         )
         now = datetime.now(timezone.utc)

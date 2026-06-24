@@ -192,6 +192,8 @@ class _FakeMemoryPort:
         object_,
         *,
         confidence=0.9,
+        tenant_id=None,
+        persona_id=None,
     ) -> None:
         self.asserted.append((user_id, subject, predicate, object_, confidence))
 

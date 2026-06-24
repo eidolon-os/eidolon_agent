@@ -254,7 +254,7 @@ async def test_assert_fact_delegates_to_publisher() -> None:
     await port.assert_fact("alice", "Alice", "lives_in", "Beijing", confidence=0.75)
     pub.publish_kg_add.assert_awaited_once_with(
         user_id="alice", subject="Alice", predicate="lives_in",
-        object_="Beijing", confidence=0.75,
+        object_="Beijing", confidence=0.75, tenant_id=None, persona_id=None,
     )
 
 

@@ -9,11 +9,14 @@ from uuid import uuid4
 from eidolon_sdk.memory import (
     ConversationTurnPayload,
     KgAddTripleCommand,
-    conversation_turn_subject,
-    memory_command_subject,
 )
 
 from eidolon_agent.core.types.event import Event
+from eidolon_agent.core.types.identity import (
+    build_memory_actor_context,
+    build_memory_space_id,
+)
+from eidolon_agent.core.types.topics import Topics
 from eidolon_agent.infra.memory.discovery import MemoryRoutingTable
 
 _log = logging.getLogger(__name__)
@@ -32,12 +35,23 @@ class MemoryNatsPublisher:
         turn_id: str,
         user_text: str,
         assistant_text: str,
+        tenant_id: str | None = None,
+        device_id: str | None = None,
+        agent_instance_id: str | None = None,
+        persona_id: str | None = None,
         metadata: dict | None = None,
     ) -> None:
         payload = ConversationTurnPayload(
             turn_id=turn_id,
-            user_id=user_id,
-            session_id=session_id,
+            context=build_memory_actor_context(
+                user_id=user_id,
+                session_id=session_id,
+                tenant_id=tenant_id,
+                device_id=device_id,
+                agent_id=agent_instance_id,
+                instance_id=agent_instance_id,
+                persona_id=persona_id,
+            ),
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             user_text=user_text,
             assistant_text=assistant_text,
@@ -46,7 +60,7 @@ class MemoryNatsPublisher:
         subject = (
             await self._routes.render_turn_subject(user_id)
             if self._routes is not None
-            else conversation_turn_subject(user_id)
+            else Topics.memory_conversation_turn(user_id)
         )
         await self._bus.publish(
             Event(
@@ -68,12 +82,19 @@ class MemoryNatsPublisher:
         confidence: float = 0.9,
         valid_from: datetime | None = None,
         valid_to: datetime | None = None,
+        tenant_id: str | None = None,
+        persona_id: str | None = None,
     ) -> None:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         request_id = uuid4().hex
+        memory_space_id = build_memory_space_id(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            persona_id=persona_id,
+        )
         payload = KgAddTripleCommand(
             request_id=request_id,
-            user_id=user_id,
+            memory_space_id=memory_space_id,
             issued_at=now,
             issuer="agent",
             subject=subject,
@@ -88,7 +109,7 @@ class MemoryNatsPublisher:
         nats_subject = (
             await self._routes.render_cmd_subject(user_id)
             if self._routes is not None
-            else memory_command_subject(user_id)
+            else Topics.memory_command(user_id)
         )
         await self._bus.publish(
             Event(

@@ -141,6 +141,8 @@ class EidolonMemoryPort:
         object_: str,
         *,
         confidence: float = 0.9,
+        tenant_id: str | None = None,
+        persona_id: str | None = None,
     ) -> None:
         await self._pub.publish_kg_add(
             user_id=user_id,
@@ -148,6 +150,8 @@ class EidolonMemoryPort:
             predicate=predicate,
             object_=object_,
             confidence=confidence,
+            tenant_id=tenant_id,
+            persona_id=persona_id,
         )
 
     async def forget(self, user_id: str, query: str) -> int:

@@ -13,6 +13,18 @@ from eidolon_agent.infra.persistence.engine import (
     ensure_schema,
 )
 from eidolon_agent.infra.persistence.long_task_store import SqlLongTaskStore
+from eidolon_agent.infra.persistence.models import (
+    ChatMessageRow,
+    ConversationRow,
+    DeviceRow,
+    EvolutionHistoryRow,
+    LongTaskRow,
+    PersonaEvolutionProposalRow,
+    PersonaInstanceRow,
+    PersonaObservationRow,
+    PersonaTemplateCustomRow,
+    TurnRow,
+)
 from eidolon_agent.infra.persistence.repositories import (
     SqlChatMessageRepository,
     SqlConversationRepository,
@@ -37,8 +49,17 @@ from eidolon_agent.infra.persistence.turn_io import build_history_hydrator, buil
 from eidolon_agent.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
 __all__ = [
+    "ChatMessageRow",
+    "ConversationRow",
     "CustomTemplateAlreadyExists",
     "CustomTemplateNotFound",
+    "DeviceRow",
+    "EvolutionHistoryRow",
+    "LongTaskRow",
+    "PersonaEvolutionProposalRow",
+    "PersonaInstanceRow",
+    "PersonaObservationRow",
+    "PersonaTemplateCustomRow",
     "SqlAlchemyUnitOfWork",
     "SqlChatMessageRepository",
     "SqlConversationRepository",
@@ -49,6 +70,7 @@ __all__ = [
     "SqlPersonaEvolutionProposalStore",
     "SqlPersonaInstanceStore",
     "SqlPersonaObservationStore",
+    "TurnRow",
     "build_history_hydrator",
     "build_turn_persister",
     "create_engine",

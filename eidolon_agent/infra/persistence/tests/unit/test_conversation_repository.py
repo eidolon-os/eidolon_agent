@@ -141,3 +141,42 @@ async def test_record_turn_persists_metadata_timings(uow_factory) -> None:
     async with uow_factory() as uow:
         row = await uow._session.get(TurnRow, turn_id)  # type: ignore[attr-defined]
     assert row.metadata_ == timings
+
+
+async def test_record_turn_persists_device_id(uow_factory) -> None:
+    conv_id, turn_id = uuid.uuid4().hex, uuid.uuid4().hex
+    async with uow_factory() as uow:
+        await uow.conversations.ensure_started(
+            conversation_id=conv_id, tenant_id="t", user_id="u", agent_instance_id="i"
+        )
+        base = _result(turn_id, conv_id)
+        await uow.conversations.record_turn(
+            dataclasses.replace(base, device_id="1c:db:d4:7a:ef:0c", caller_kind="livekit_voice")
+        )
+        await uow.commit()
+    async with uow_factory() as uow:
+        row = await uow._session.get(TurnRow, turn_id)  # type: ignore[attr-defined]
+    assert row.device_id == "1c:db:d4:7a:ef:0c"
+    assert row.caller_kind == "livekit_voice"
+
+
+async def test_record_turn_reupsert_keeps_device_id(uow_factory) -> None:
+    """A later partial re-record (device_id=None) must not null the stamped value."""
+    conv_id, turn_id = uuid.uuid4().hex, uuid.uuid4().hex
+    async with uow_factory() as uow:
+        await uow.conversations.ensure_started(
+            conversation_id=conv_id, tenant_id="t", user_id="u", agent_instance_id="i"
+        )
+        await uow.conversations.record_turn(
+            dataclasses.replace(_result(turn_id, conv_id), device_id="dev-1")
+        )
+        await uow.commit()
+    async with uow_factory() as uow:
+        # Re-record without a device_id (default None) — must preserve "dev-1".
+        await uow.conversations.record_turn(
+            _result(turn_id, conv_id, status=TurnStatus.ERRORED)
+        )
+        await uow.commit()
+    async with uow_factory() as uow:
+        row = await uow._session.get(TurnRow, turn_id)  # type: ignore[attr-defined]
+    assert row.device_id == "dev-1"

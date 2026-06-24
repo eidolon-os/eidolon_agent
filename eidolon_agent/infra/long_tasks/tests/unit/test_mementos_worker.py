@@ -109,6 +109,10 @@ async def test_worker_publishes_proactive_report_on_success(tmp_path) -> None:
     assert event.subject == "agent.proactive.triggered.inst_abc"
     assert event.payload == {
         "instance_id": "inst_abc",
+        # conversation_id "c1" isn't a livekit triple and no device_id on the
+        # record → unresolved (None). Resolution covered by
+        # test_device_id_resolution.py.
+        "device_id": None,
         "intent": "long_task_done",
         "text": "测试任务已完成，Mementos 已确认收到。",
         "style_hint": "report",

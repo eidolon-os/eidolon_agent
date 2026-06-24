@@ -142,6 +142,10 @@ class LongTaskRow(Base):
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)
     user_id: Mapped[str] = mapped_column(String(128), index=True)
     agent_instance_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    # Owning device (denormalized from turns.device_id / caller identity). Indexed
+    # so the proactive worker + Phase 4 offline buffer + admin can route/query by
+    # device without a turn join (plan §3 Phase 3).
+    device_id: Mapped[str | None] = mapped_column(String(64), index=True)
     conversation_id: Mapped[str | None] = mapped_column(String(64), index=True)
     turn_id: Mapped[str] = mapped_column(String(64), index=True)
     session_id: Mapped[str | None] = mapped_column(String(64))
