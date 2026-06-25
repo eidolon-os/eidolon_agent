@@ -50,8 +50,8 @@ class _StubMemory:
         self._kg_triples = list(kg_triples or [])
         self.calls: list[dict] = []
 
-    async def recall_context(self, *, user_id, query, plan, timeout_s):
-        self.calls.append({"user_id": user_id, "query": query})
+    async def recall_context(self, *, user_id, query, plan, timeout_s, **identity):
+        self.calls.append({"user_id": user_id, "query": query, "identity": identity})
         return MemoryRecallResult(
             context=self._formatted,
             hits=[SimpleNamespace(id="mem-1")],

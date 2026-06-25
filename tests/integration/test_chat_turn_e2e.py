@@ -11,11 +11,14 @@ across module reorgs.
 from __future__ import annotations
 
 import pytest
+from eidolon_sdk.memory import conversation_turn_subject
 
 from eidolon_agent.core.types.turn import TurnEventKind
 from tests.helpers import make_turn_input
 
 pytestmark = pytest.mark.integration
+
+MEMORY_SUBJECT = conversation_turn_subject("t.alice.caretaker_jiezhi")
 
 
 async def test_simple_turn_e2e_streams_deltas_and_persists(
@@ -26,9 +29,7 @@ async def test_simple_turn_e2e_streams_deltas_and_persists(
     async def _on_memory(ev) -> None:
         fanout_received.append(ev)
 
-    await event_bus.subscribe(
-        "agent.memory.conversation.turn.alice", _on_memory
-    )
+    await event_bus.subscribe(MEMORY_SUBJECT, _on_memory)
 
     engine = turn_engine_factory()
     events = [ev async for ev in engine.run(make_turn_input("你好世界"))]

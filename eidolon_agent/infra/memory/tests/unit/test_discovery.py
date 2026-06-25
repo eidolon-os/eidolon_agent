@@ -63,12 +63,15 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
             "nats": {
                 "url": "nats://memory:4222",
                 "stream": "MEMORY_TURNS",
-                "turn_subject_template": "mem.turn.{user_id}",
-                "cmd_subject_template": "mem.cmd.{user_id}",
+                "turn_subject_template": "mem.turn.{memory_space_token}",
+                "cmd_subject_template": "mem.cmd.{memory_space_token}",
             },
             "users": [
                 {
-                    "user_id": "alice",
+                    "memory_space_id": "default.alice.mochi",
+                    "tenant_id": "default",
+                    "owner_user_id": "alice",
+                    "companion_id": "mochi",
                     "enabled": True,
                     "mcp_http_url": "http://127.0.0.1:8031/mcp",
                     "mcp_auth": {
@@ -78,13 +81,13 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
                     "agent_reachable": True,
                 },
                 {
-                    "user_id": "bob",
+                    "memory_space_id": "default.bob.mochi",
                     "enabled": False,
                     "mcp_http_url": "http://127.0.0.1:8032/mcp",
                     "agent_reachable": True,
                 },
                 {
-                    "user_id": "charlie",
+                    "memory_space_id": "default.charlie.mochi",
                     "enabled": True,
                     "mcp_http_url": "http://127.0.0.1:8033/mcp",
                     "agent_reachable": False,
@@ -96,21 +99,25 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
 
     await routes.replace_from_discovery(discovery)
 
-    alice = await routes.route_for("alice")
+    alice = await routes.route_for("default.alice.mochi")
     assert alice is not None
     assert alice.mcp_url == "http://127.0.0.1:8031/mcp"
     assert alice.bearer_token == "secret"
-    assert await routes.route_for("bob") is None
-    assert await routes.route_for("charlie") is None
-    bob_route, bob_reason = await routes.route_status_for("bob")
-    charlie_route, charlie_reason = await routes.route_status_for("charlie")
-    ghost_route, ghost_reason = await routes.route_status_for("ghost")
+    assert await routes.route_for("default.bob.mochi") is None
+    assert await routes.route_for("default.charlie.mochi") is None
+    bob_route, bob_reason = await routes.route_status_for("default.bob.mochi")
+    charlie_route, charlie_reason = await routes.route_status_for("default.charlie.mochi")
+    ghost_route, ghost_reason = await routes.route_status_for("default.ghost.mochi")
     assert bob_route is None and bob_reason == "memory_route_disabled"
     assert charlie_route is None and charlie_reason == "memory_route_unreachable"
     assert ghost_route is None and ghost_reason == "no_memory_route"
     assert await routes.endpoint_count() == 1
-    assert await routes.render_turn_subject("alice") == "mem.turn.alice"
-    assert await routes.render_cmd_subject("alice") == "mem.cmd.alice"
+    assert await routes.render_turn_subject("default.alice.mochi") == (
+        "mem.turn.b64_ZGVmYXVsdC5hbGljZS5tb2NoaQ"
+    )
+    assert await routes.render_cmd_subject("default.alice.mochi") == (
+        "mem.cmd.b64_ZGVmYXVsdC5hbGljZS5tb2NoaQ"
+    )
 
 
 @pytest.mark.asyncio
@@ -118,7 +125,7 @@ async def test_static_routes_remain_fallback():
     routes = MemoryRoutingTable.from_static(
         endpoints=[
             MemoryEndpoint(
-                user_id="default",
+                memory_space_id="default.alice.default",
                 mcp_url="http://127.0.0.1:8030/mcp",
                 bearer_token="local-token",
             )
@@ -126,11 +133,13 @@ async def test_static_routes_remain_fallback():
         nats=NatsSettings(url="nats://static:4222"),
     )
 
-    route = await routes.route_for("default")
+    route = await routes.route_for("default.alice.default")
     assert route is not None
     assert route.bearer_token == "local-token"
     assert await routes.nats_url() == "nats://static:4222"
-    assert await routes.render_turn_subject("default") == "agent.memory.conversation.turn.default"
+    assert await routes.render_turn_subject("default.alice.default") == (
+        "eidolon.memory.turn.b64_ZGVmYXVsdC5hbGljZS5kZWZhdWx0"
+    )
 
 
 @pytest.mark.asyncio
@@ -147,8 +156,8 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
             "nats": {
                 "url": "nats://memory:4222",
                 "stream": "MEMORY_TURNS",
-                "turn_subject_template": "turns.{user_id}",
-                "cmd_subject_template": "cmds.{user_id}",
+                "turn_subject_template": "turns.{memory_space_id}",
+                "cmd_subject_template": "cmds.{memory_space_id}",
             },
             "users": [],
         }
@@ -175,10 +184,10 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
     turn_event, turn_persistent = bus.events[0]
     cmd_event, cmd_persistent = bus.events[1]
     assert turn_persistent is True
-    assert turn_event.subject == "turns.alice"
+    assert turn_event.subject == "turns.b64_ZGVmYXVsdC5hbGljZS5kZWZhdWx0"
     assert turn_event.payload["turn_id"] == "t1"
     assert cmd_persistent is True
-    assert cmd_event.subject == "cmds.alice"
+    assert cmd_event.subject == "cmds.b64_ZGVmYXVsdC5hbGljZS5kZWZhdWx0"
     assert cmd_event.payload["kind"] == "kg_add_triple"
     assert cmd_event.payload["issuer"] == "agent"
     assert cmd_event.payload["request_id"]
@@ -207,6 +216,7 @@ async def test_recall_context_calls_mcp_directly():
     class Session:
         async def call_tool(self, name, arguments):
             assert name == "eidolon_memory_recall_context"
+            assert arguments["context"]["memory_space_id"] == "default.alice.default"
             return {
                 "context": "铁锤是一只狗。",
                 "records": [
@@ -219,8 +229,8 @@ async def test_recall_context_calls_mcp_directly():
             }
 
     class Pool:
-        async def session_for(self, user_id):
-            assert user_id == "alice"
+        async def session_for(self, memory_space_id):
+            assert memory_space_id == "default.alice.default"
             return Session()
 
         async def close_all(self):

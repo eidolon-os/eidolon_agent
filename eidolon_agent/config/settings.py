@@ -96,7 +96,7 @@ class NatsSettings(BaseModel):
 class MemoryEndpoint(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    user_id: str
+    memory_space_id: str
     mcp_url: str  # e.g. http://127.0.0.1:8030/mcp
     bearer_token: str | None = None
 

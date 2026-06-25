@@ -9,6 +9,8 @@ from uuid import uuid4
 from eidolon_sdk.memory import (
     ConversationTurnPayload,
     KgAddTripleCommand,
+    conversation_turn_subject,
+    memory_command_subject,
 )
 
 from eidolon_agent.core.types.event import Event
@@ -16,7 +18,6 @@ from eidolon_agent.core.types.identity import (
     build_memory_actor_context,
     build_memory_space_id,
 )
-from eidolon_agent.core.types.topics import Topics
 from eidolon_agent.infra.memory.discovery import MemoryRoutingTable
 
 _log = logging.getLogger(__name__)
@@ -38,29 +39,32 @@ class MemoryNatsPublisher:
         tenant_id: str | None = None,
         device_id: str | None = None,
         agent_instance_id: str | None = None,
+        companion_id: str | None = None,
         persona_id: str | None = None,
         metadata: dict | None = None,
     ) -> None:
+        context = build_memory_actor_context(
+            user_id=user_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            device_id=device_id,
+            agent_id=agent_instance_id,
+            instance_id=agent_instance_id,
+            companion_id=companion_id,
+            persona_id=persona_id,
+        )
         payload = ConversationTurnPayload(
             turn_id=turn_id,
-            context=build_memory_actor_context(
-                user_id=user_id,
-                session_id=session_id,
-                tenant_id=tenant_id,
-                device_id=device_id,
-                agent_id=agent_instance_id,
-                instance_id=agent_instance_id,
-                persona_id=persona_id,
-            ),
+            context=context,
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             user_text=user_text,
             assistant_text=assistant_text,
             metadata=metadata or {"source": "eidolon-agent"},
         ).model_dump(mode="json")
         subject = (
-            await self._routes.render_turn_subject(user_id)
+            await self._routes.render_turn_subject(context.memory_space_id)
             if self._routes is not None
-            else Topics.memory_conversation_turn(user_id)
+            else conversation_turn_subject(context.memory_space_id)
         )
         await self._bus.publish(
             Event(
@@ -83,6 +87,7 @@ class MemoryNatsPublisher:
         valid_from: datetime | None = None,
         valid_to: datetime | None = None,
         tenant_id: str | None = None,
+        companion_id: str | None = None,
         persona_id: str | None = None,
     ) -> None:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -90,6 +95,7 @@ class MemoryNatsPublisher:
         memory_space_id = build_memory_space_id(
             user_id=user_id,
             tenant_id=tenant_id,
+            companion_id=companion_id,
             persona_id=persona_id,
         )
         payload = KgAddTripleCommand(
@@ -107,9 +113,9 @@ class MemoryNatsPublisher:
             adapter_name="agent",
         ).model_dump(mode="json")
         nats_subject = (
-            await self._routes.render_cmd_subject(user_id)
+            await self._routes.render_cmd_subject(memory_space_id)
             if self._routes is not None
-            else Topics.memory_command(user_id)
+            else memory_command_subject(memory_space_id)
         )
         await self._bus.publish(
             Event(

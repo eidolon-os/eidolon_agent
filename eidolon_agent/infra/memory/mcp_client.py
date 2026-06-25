@@ -1,4 +1,4 @@
-"""MCP Streamable-HTTP client pool — one session per user_id (port).
+"""MCP Streamable-HTTP client pool — one session per memory_space_id (port).
 
 eidolon-memory binds each agent_runner to a port; we hold one long-lived MCP
 session per user. ``recall_context`` is the hot path; ``search`` etc. are
@@ -139,7 +139,7 @@ def _unwrap_fastmcp_result(payload: Any) -> Any:
 
 
 class McpClientPool:
-    """user_id → :class:`McpUserSession`. One session per user, lazy."""
+    """memory_space_id -> :class:`McpUserSession`. One session per space, lazy."""
 
     def __init__(
         self,
@@ -154,11 +154,11 @@ class McpClientPool:
             routes = MemoryRoutingTable.from_static(
                 endpoints=[
                     MemoryEndpoint(
-                        user_id=user_id,
+                        memory_space_id=memory_space_id,
                         mcp_url=mcp_url,
-                        bearer_token=(bearer_tokens or {}).get(user_id),
+                        bearer_token=(bearer_tokens or {}).get(memory_space_id),
                     )
-                    for user_id, mcp_url in (endpoints or {}).items()
+                    for memory_space_id, mcp_url in (endpoints or {}).items()
                 ],
                 nats=NatsSettings(),
             )
@@ -166,16 +166,16 @@ class McpClientPool:
         self._sessions: dict[str, McpUserSession] = {}
         self._lock = asyncio.Lock()
 
-    async def session_for(self, user_id: str) -> McpUserSession:
-        route, unavailable_reason = await self._routes.route_status_for(user_id)
+    async def session_for(self, memory_space_id: str) -> McpUserSession:
+        route, unavailable_reason = await self._routes.route_status_for(memory_space_id)
         if route is None:
-            await self.drop_session(user_id)
+            await self.drop_session(memory_space_id)
             raise MemoryUnavailableError(
-                f"no reachable MCP endpoint for user {user_id}: {unavailable_reason}",
-                details={"user_id": user_id, "reason": unavailable_reason},
+                f"no reachable MCP endpoint for memory space {memory_space_id}: {unavailable_reason}",
+                details={"memory_space_id": memory_space_id, "reason": unavailable_reason},
             )
         async with self._lock:
-            sess = self._sessions.get(user_id)
+            sess = self._sessions.get(memory_space_id)
             if sess is not None and sess.matches(
                 mcp_url=route.mcp_url,
                 bearer_token=route.bearer_token,
@@ -184,12 +184,12 @@ class McpClientPool:
             if sess is not None:
                 await sess.close()
             sess = McpUserSession(route.mcp_url, bearer_token=route.bearer_token)
-            self._sessions[user_id] = sess
+            self._sessions[memory_space_id] = sess
             return sess
 
     async def drop_session(
         self,
-        user_id: str,
+        memory_space_id: str,
         *,
         session: McpUserSession | None = None,
     ) -> bool:
@@ -200,12 +200,12 @@ class McpClientPool:
         without racing and closing a fresh replacement created by another turn.
         """
         async with self._lock:
-            sess = self._sessions.get(user_id)
+            sess = self._sessions.get(memory_space_id)
             if sess is None:
                 return False
             if session is not None and sess is not session:
                 return False
-            self._sessions.pop(user_id, None)
+            self._sessions.pop(memory_space_id, None)
         if sess is not None:
             await sess.close()
         return True

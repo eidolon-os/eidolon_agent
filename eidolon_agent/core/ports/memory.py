@@ -33,6 +33,13 @@ class MemoryPort(Protocol):
         scope: MemoryScope = MemoryScope.ALL,
         voice: bool = True,
         timeout_s: float = 0.2,
+        tenant_id: str | None = None,
+        companion_id: str | None = None,
+        persona_id: str | None = None,
+        agent_id: str | None = None,
+        device_id: str | None = None,
+        instance_id: str | None = None,
+        session_id: str = "default",
     ) -> list[MemoryHit]:
         """Vector + KG fused retrieval. Returns [] on soft-timeout (never raises)."""
         ...
@@ -44,6 +51,13 @@ class MemoryPort(Protocol):
         *,
         plan: MemoryQueryPlan,
         timeout_s: float = 0.2,
+        tenant_id: str | None = None,
+        companion_id: str | None = None,
+        persona_id: str | None = None,
+        agent_id: str | None = None,
+        device_id: str | None = None,
+        instance_id: str | None = None,
+        session_id: str = "default",
     ) -> MemoryRecallResult:
         """Returns prompt-ready recall context plus operator diagnostics.
 
@@ -61,6 +75,12 @@ class MemoryPort(Protocol):
         assistant_text: str,
         *,
         metadata: dict | None = None,
+        tenant_id: str | None = None,
+        companion_id: str | None = None,
+        persona_id: str | None = None,
+        agent_id: str | None = None,
+        device_id: str | None = None,
+        instance_id: str | None = None,
     ) -> None:
         """Publish a ConversationTurnPayload to NATS for steward ingestion."""
         ...
@@ -74,6 +94,7 @@ class MemoryPort(Protocol):
         *,
         confidence: float = 0.9,
         tenant_id: str | None = None,
+        companion_id: str | None = None,
         persona_id: str | None = None,
     ) -> None:
         """Publish an explicit KG triple write command."""
@@ -89,4 +110,4 @@ class MemoryPort(Protocol):
 
 
 MemoryEventHandler = Callable[[dict], Awaitable[None]]
-"""Signature for subscribers to ``agent.memory.event.*`` (promise_due, etc)."""
+"""Signature for subscribers to ``eidolon.memory.event.*`` (promise_due, etc)."""

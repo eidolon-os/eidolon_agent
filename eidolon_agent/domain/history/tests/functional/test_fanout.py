@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from eidolon_sdk.memory import conversation_turn_subject
 
 from eidolon_agent.domain.history import HistoryFanout
 
@@ -17,7 +18,8 @@ class _StubResolver:
     def __init__(self, subject: str) -> None:
         self._subject = subject
 
-    async def render_turn_subject(self, user_id: str) -> str:
+    async def render_turn_subject(self, memory_space_id: str) -> str:
+        assert memory_space_id == "t.alice.default"
         return self._subject
 
 
@@ -27,7 +29,7 @@ async def test_publish_turn_emits_memory_event(event_bus) -> None:
     async def _on(ev) -> None:
         received.append(ev)
 
-    await event_bus.subscribe("agent.memory.conversation.turn.alice", _on)
+    await event_bus.subscribe(conversation_turn_subject("t.alice.default"), _on)
     fanout = HistoryFanout(event_bus=event_bus)
     await fanout.publish_turn(
         tenant_id="t",
@@ -55,7 +57,7 @@ async def test_publish_turn_carries_resolved_actor_context(event_bus) -> None:
     async def _on(ev) -> None:
         received.append(ev)
 
-    await event_bus.subscribe("agent.memory.conversation.turn.alice", _on)
+    await event_bus.subscribe(conversation_turn_subject("acme.alice.mochi"), _on)
     fanout = HistoryFanout(event_bus=event_bus)
     await fanout.publish_turn(
         tenant_id="acme",
@@ -88,7 +90,7 @@ async def test_publish_turn_merges_memory_policy_metadata(event_bus) -> None:
     async def _on(ev) -> None:
         received.append(ev)
 
-    await event_bus.subscribe("agent.memory.conversation.turn.alice", _on)
+    await event_bus.subscribe(conversation_turn_subject("t.alice.default"), _on)
     fanout = HistoryFanout(event_bus=event_bus)
     await fanout.publish_turn(
         tenant_id="t",

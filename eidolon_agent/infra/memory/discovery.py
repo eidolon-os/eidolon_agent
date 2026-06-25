@@ -13,10 +13,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import httpx
+from eidolon_sdk.memory import memory_space_subject_token
 from pydantic import BaseModel, ConfigDict, Field
 
 from eidolon_agent.config.settings import MemoryEndpoint, MemorySettings, NatsSettings
-from eidolon_agent.core.types.topics import Topics
 
 _log = logging.getLogger(__name__)
 
@@ -31,7 +31,11 @@ class DiscoveryMcpAuth(BaseModel):
 class DiscoveryUser(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    user_id: str
+    memory_space_id: str
+    tenant_id: str | None = None
+    owner_user_id: str | None = None
+    companion_id: str | None = None
+    persona_id: str | None = None
     enabled: bool = True
     mcp_http_url: str
     mcp_auth: DiscoveryMcpAuth | None = None
@@ -43,8 +47,8 @@ class DiscoveryNats(BaseModel):
 
     url: str
     stream: str = "MEMORY_TURNS"
-    turn_subject_template: str = "agent.memory.conversation.turn.{user_id}"
-    cmd_subject_template: str = "agent.memory.cmd.{user_id}"
+    turn_subject_template: str = "eidolon.memory.turn.{memory_space_token}"
+    cmd_subject_template: str = "eidolon.memory.cmd.{memory_space_token}"
 
 
 class DiscoveryResponse(BaseModel):
@@ -60,7 +64,7 @@ class DiscoveryResponse(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class MemoryRoute:
-    user_id: str
+    memory_space_id: str
     mcp_url: str
     bearer_token: str | None = None
     enabled: bool = True
@@ -98,8 +102,8 @@ class MemoryRoutingTable:
         nats: NatsSettings,
     ) -> MemoryRoutingTable:
         routes = {
-            e.user_id: MemoryRoute(
-                user_id=e.user_id,
+            e.memory_space_id: MemoryRoute(
+                memory_space_id=e.memory_space_id,
                 mcp_url=e.mcp_url,
                 bearer_token=e.bearer_token,
                 enabled=True,
@@ -111,8 +115,8 @@ class MemoryRoutingTable:
             nats=MemoryNatsRoute(
                 url=nats.url,
                 stream="",
-                turn_subject_template="agent.memory.conversation.turn.{user_id}",
-                cmd_subject_template="agent.memory.cmd.{user_id}",
+                turn_subject_template="eidolon.memory.turn.{memory_space_token}",
+                cmd_subject_template="eidolon.memory.cmd.{memory_space_token}",
             ),
             routes=routes,
             source="static",
@@ -125,8 +129,8 @@ class MemoryRoutingTable:
             auth = user.mcp_auth
             if auth and auth.type.lower() == "bearer" and auth.token_env:
                 token = os.environ.get(auth.token_env, "").strip() or None
-            routes[user.user_id] = MemoryRoute(
-                user_id=user.user_id,
+            routes[user.memory_space_id] = MemoryRoute(
+                memory_space_id=user.memory_space_id,
                 mcp_url=user.mcp_http_url,
                 bearer_token=token,
                 enabled=user.enabled,
@@ -142,13 +146,13 @@ class MemoryRoutingTable:
             self._routes = routes
             self._source = "discovery"
 
-    async def route_for(self, user_id: str) -> MemoryRoute | None:
-        route, _reason = await self.route_status_for(user_id)
+    async def route_for(self, memory_space_id: str) -> MemoryRoute | None:
+        route, _reason = await self.route_status_for(memory_space_id)
         return route
 
-    async def route_status_for(self, user_id: str) -> tuple[MemoryRoute | None, str | None]:
+    async def route_status_for(self, memory_space_id: str) -> tuple[MemoryRoute | None, str | None]:
         async with self._lock:
-            route = self._routes.get(user_id)
+            route = self._routes.get(memory_space_id)
             if route is None:
                 return None, "no_memory_route"
             if not route.enabled:
@@ -169,15 +173,15 @@ class MemoryRoutingTable:
         async with self._lock:
             return self._source
 
-    async def render_turn_subject(self, user_id: str) -> str:
+    async def render_turn_subject(self, memory_space_id: str) -> str:
         async with self._lock:
             template = self._nats.turn_subject_template
-        return _render_subject(template, user_id, Topics.MEMORY_TURN_TEMPLATE)
+        return _render_subject(template, memory_space_id, "eidolon.memory.turn.{memory_space_token}")
 
-    async def render_cmd_subject(self, user_id: str) -> str:
+    async def render_cmd_subject(self, memory_space_id: str) -> str:
         async with self._lock:
             template = self._nats.cmd_subject_template
-        return _render_subject(template, user_id, Topics.MEMORY_CMD_TEMPLATE)
+        return _render_subject(template, memory_space_id, "eidolon.memory.cmd.{memory_space_token}")
 
 
 class MemoryDiscoveryClient:
@@ -308,9 +312,14 @@ async def build_initial_memory_routes(
     return routes, effective_nats_url, refresher
 
 
-def _render_subject(template: str, user_id: str, fallback_template: str) -> str:
+def _render_subject(template: str, memory_space_id: str, fallback_template: str) -> str:
+    token = memory_space_subject_token(memory_space_id)
     try:
-        rendered = template.format(user_id=user_id)
+        rendered = template.format(
+            memory_space_id=token,
+            memory_space_token=token,
+            raw_memory_space_id=memory_space_id,
+        )
     except Exception:
         rendered = ""
     if rendered:
@@ -318,4 +327,4 @@ def _render_subject(template: str, user_id: str, fallback_template: str) -> str:
     _log.warning(
         "invalid memory subject template %r; using fallback %s", template, fallback_template
     )
-    return fallback_template.format(user_id=user_id)
+    return fallback_template.format(memory_space_id=token, memory_space_token=token)

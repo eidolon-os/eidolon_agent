@@ -27,6 +27,13 @@ class PersonaMemoryPort(Protocol):
         *,
         plan: MemoryQueryPlan,
         timeout_s: float = 0.2,
+        tenant_id: str | None = None,
+        companion_id: str | None = None,
+        persona_id: str | None = None,
+        agent_id: str | None = None,
+        device_id: str | None = None,
+        instance_id: str | None = None,
+        session_id: str = "default",
     ) -> MemoryRecallResult:
         ...
 

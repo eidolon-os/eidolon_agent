@@ -9,6 +9,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from eidolon_agent.core.types.identity import build_memory_space_id
+
 router = APIRouter()
 
 
@@ -21,6 +23,7 @@ class IssuePairingCodeRequest(BaseModel):
 class PairingMemoryReadiness(BaseModel):
     ready: bool
     user_id: str
+    memory_space_id: str
     reason: str | None = None
     mcp_http_url: str | None = None
 
@@ -35,7 +38,12 @@ class IssuePairingCodeResponse(BaseModel):
 @router.post("/pairing/codes", response_model=IssuePairingCodeResponse)
 async def issue_code(body: IssuePairingCodeRequest, request: Request):
     pairing = request.app.state.pairing
-    memory = await _ensure_memory_provisioned(body.user_id, request)
+    memory = await _ensure_memory_provisioned(
+        tenant_id=body.tenant_id,
+        user_id=body.user_id,
+        companion_id=body.default_template_id,
+        request=request,
+    )
     rec = await pairing.issue_code(
         tenant_id=body.tenant_id,
         user_id=body.user_id,
@@ -59,7 +67,11 @@ async def code_qr(code: str, request: Request):
 
 
 async def _ensure_memory_provisioned(
-    user_id: str, request: Request
+    *,
+    tenant_id: str,
+    user_id: str,
+    companion_id: str | None,
+    request: Request,
 ) -> PairingMemoryReadiness | None:
     """Require a live memory route before issuing a device pairing code.
 
@@ -72,12 +84,18 @@ async def _ensure_memory_provisioned(
     if routes is None:
         return None
 
-    route, reason = await routes.route_status_for(user_id)
+    memory_space_id = build_memory_space_id(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        companion_id=companion_id,
+    )
+
+    route, reason = await routes.route_status_for(memory_space_id)
     if route is None:
         refresher = getattr(request.app.state, "memory_discovery_refresher", None)
         if refresher is not None:
             await refresher.refresh_once()
-            route, reason = await routes.route_status_for(user_id)
+            route, reason = await routes.route_status_for(memory_space_id)
 
     if route is None:
         raise HTTPException(
@@ -85,6 +103,7 @@ async def _ensure_memory_provisioned(
             detail={
                 "code": "memory_user_not_provisioned",
                 "user_id": user_id,
+                "memory_space_id": memory_space_id,
                 "reason": reason or "memory_route_unavailable",
                 "action": (
                     "Create or repair this user through eidolon_admin /api/users "
@@ -96,6 +115,7 @@ async def _ensure_memory_provisioned(
     return PairingMemoryReadiness(
         ready=True,
         user_id=user_id,
+        memory_space_id=memory_space_id,
         reason=None,
         mcp_http_url=route.mcp_url,
     )

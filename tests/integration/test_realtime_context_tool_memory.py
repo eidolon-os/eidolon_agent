@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 
 import pytest
+from eidolon_sdk.memory import conversation_turn_subject
 from sqlalchemy import select
 
 from eidolon_agent.config.settings import SqliteSettings
@@ -26,6 +27,8 @@ from eidolon_agent.infra.persistence.models import LongTaskRow, TurnRow
 from tests.helpers import make_turn_input
 
 pytestmark = pytest.mark.integration
+
+MEMORY_SUBJECT = conversation_turn_subject("t.alice.caretaker_jiezhi")
 
 
 async def test_tool_call_announces_real_tool_before_dispatch_and_feeds_result_to_llm(
@@ -196,7 +199,7 @@ async def test_temporary_long_task_does_not_fanout_to_memory(
     async def _on_memory(ev):
         memory_fanout.append(ev.payload)
 
-    await event_bus.subscribe("agent.memory.conversation.turn.alice", _on_memory)
+    await event_bus.subscribe(MEMORY_SUBJECT, _on_memory)
     llm = _ScriptedCapturingLLM(
         [
             [{"kind": "tool_call", "name": "delegate_to_coworker", "arguments": {"instruction": "整理资料"}}],
@@ -344,7 +347,7 @@ async def test_private_turn_does_not_fanout_to_memory(turn_engine_factory, event
     async def _on(ev):
         received.append(ev)
 
-    await event_bus.subscribe("agent.memory.conversation.turn.alice", _on)
+    await event_bus.subscribe(MEMORY_SUBJECT, _on)
     ti = make_turn_input("这段别记")
     ti.metadata["temporary"] = True
     engine = turn_engine_factory()
@@ -389,7 +392,7 @@ async def test_memory_replay_remembers_call_name_preference(
         if ev.payload["metadata"]["memory_write_disposition"] == "semantic_upsert":
             memory.context = "称呼偏好: 用户希望被叫作小满"
 
-    await event_bus.subscribe("agent.memory.conversation.turn.alice", _ingest)
+    await event_bus.subscribe(MEMORY_SUBJECT, _ingest)
     engine = turn_engine_factory(memory_port=memory)
     first = replace(make_turn_input("以后叫我小满"), turn_id="pref-1")
 
@@ -423,7 +426,7 @@ async def test_memory_replay_user_correction_replaces_old_fact(
             elif "小满" in text:
                 memory.context = "称呼偏好: 用户希望被叫作小满"
 
-    await event_bus.subscribe("agent.memory.conversation.turn.alice", _ingest)
+    await event_bus.subscribe(MEMORY_SUBJECT, _ingest)
     engine = turn_engine_factory(memory_port=memory)
     first = replace(make_turn_input("以后叫我小满"), turn_id="correction-1")
     second = replace(make_turn_input("更正一下，以后叫我阿满"), turn_id="correction-2")
@@ -455,7 +458,7 @@ async def test_memory_replay_promise_is_labeled_and_forced_into_recall(
         if ev.payload["metadata"]["memory_write_disposition"] == "promise_create":
             memory.context = "强制承诺: 明天提醒用户喝水"
 
-    await event_bus.subscribe("agent.memory.conversation.turn.alice", _ingest)
+    await event_bus.subscribe(MEMORY_SUBJECT, _ingest)
     engine = turn_engine_factory(memory_port=memory)
     promise = replace(make_turn_input("明天提醒我喝水"), turn_id="promise-1")
 
@@ -504,7 +507,7 @@ async def test_temporary_turn_does_not_create_memory_replay(
         received.append(ev.payload)
         memory.context = "should not be written"
 
-    await event_bus.subscribe("agent.memory.conversation.turn.alice", _ingest)
+    await event_bus.subscribe(MEMORY_SUBJECT, _ingest)
     ti = replace(make_turn_input("以后叫我临时名字"), turn_id="temporary-1")
     ti.metadata["temporary"] = True
     engine = turn_engine_factory(memory_port=memory)
@@ -526,7 +529,7 @@ async def test_sensitive_memory_candidate_requires_consent_before_fanout(
     async def _ingest(ev):
         received.append(ev.payload)
 
-    await event_bus.subscribe("agent.memory.conversation.turn.alice", _ingest)
+    await event_bus.subscribe(MEMORY_SUBJECT, _ingest)
     engine = turn_engine_factory()
 
     events = [ev async for ev in engine.run(make_turn_input("我的身份证是123"))]

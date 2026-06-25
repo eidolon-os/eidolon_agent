@@ -1,8 +1,8 @@
 """Adapter for the external eidolon-memory service.
 
-Reads go through MCP Streamable HTTP (per-user agent_runner port).
-Writes go through NATS JetStream on ``agent.memory.conversation.turn.<user_id>``.
-Explicit KG mutations go through ``agent.memory.cmd.<user_id>``.
+Reads go through MCP Streamable HTTP (per-memory-space agent_runner port).
+Writes go through NATS JetStream on ``eidolon.memory.turn.<memory_space_token>``.
+Explicit KG mutations go through ``eidolon.memory.cmd.<memory_space_token>``.
 """
 
 from eidolon_agent.infra.memory.port_adapter import EidolonMemoryPort

@@ -22,13 +22,18 @@ def build_memory_space_id(
     *,
     user_id: str,
     tenant_id: str | None = None,
+    companion_id: str | None = None,
     persona_id: str | None = None,
 ) -> str:
-    """Derive the ``<tenant_id>.<owner_user_id>.<persona_id>`` memory-space id."""
+    """Derive the ``<tenant_id>.<owner_user_id>.<companion_id>`` memory-space id."""
+    resolved_companion_id = _resolve_companion_id(
+        companion_id=companion_id,
+        persona_id=persona_id,
+    )
     return derive_memory_space_id(
         tenant_id or _UNRESOLVED,
         user_id,
-        persona_id or _UNRESOLVED,
+        resolved_companion_id,
     )
 
 
@@ -37,26 +42,42 @@ def build_memory_actor_context(
     user_id: str,
     session_id: str,
     tenant_id: str | None = None,
+    companion_id: str | None = None,
     persona_id: str | None = None,
     agent_id: str | None = None,
     device_id: str | None = None,
     instance_id: str | None = None,
 ) -> MemoryActorContext:
-    """Build the actor context carried on every memory write.
+    """Build the actor context carried on every memory read/write.
 
     Producers pass whatever identity they hold (``tenant_id`` / ``device_id`` /
     ``agent_instance_id`` from the :class:`Identity`); unresolved fields fall
-    back to ``"default"``. ``memory_space_id`` is derived by the SDK.
+    back to ``"default"``. Product code should pass ``companion_id``; the SDK
+    wire field remains ``persona_id``.
     """
+    resolved_companion_id = _resolve_companion_id(
+        companion_id=companion_id,
+        persona_id=persona_id,
+    )
     return MemoryActorContext(
         tenant_id=tenant_id or _UNRESOLVED,
         owner_user_id=user_id,
-        persona_id=persona_id or _UNRESOLVED,
+        persona_id=resolved_companion_id,
         agent_id=agent_id or _UNRESOLVED,
         device_id=device_id or _UNRESOLVED,
         instance_id=instance_id or _UNRESOLVED,
         session_id=session_id,
     )
+
+
+def _resolve_companion_id(
+    *,
+    companion_id: str | None = None,
+    persona_id: str | None = None,
+) -> str:
+    if companion_id and persona_id and companion_id != persona_id:
+        raise ValueError("companion_id and persona_id must match when both are provided")
+    return companion_id or persona_id or _UNRESOLVED
 
 
 class CallerKind(str, Enum):

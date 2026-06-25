@@ -7,6 +7,9 @@ across the codebase. This makes refactoring trivial and lets us enforce the
 
 from __future__ import annotations
 
+from eidolon_sdk.memory import memory_space_subject_token
+
+
 class Topics:
     """Subject builders. All methods return strings; instances are stateless."""
 
@@ -66,24 +69,27 @@ class Topics:
     def emotion_turn(user_id: str) -> str:
         return f"agent.emotion.turn.{user_id}"
 
-    # Default agent->memory subjects, used when discovery advertises no routing
-    # template. The {user_id} suffix matches the discovery/static templates.
-    MEMORY_TURN_TEMPLATE = "agent.memory.conversation.turn.{user_id}"
-    MEMORY_CMD_TEMPLATE = "agent.memory.cmd.{user_id}"
+    # Default agent->memory subjects. The suffix is a NATS-safe single token
+    # derived from memory_space_id; the raw tenant.owner.companion id contains
+    # dots and must not be interpolated directly into NATS subjects.
+    MEMORY_TURN_TEMPLATE = "eidolon.memory.turn.{memory_space_token}"
+    MEMORY_CMD_TEMPLATE = "eidolon.memory.cmd.{memory_space_token}"
 
     @staticmethod
-    def memory_conversation_turn(user_id: str) -> str:
-        return Topics.MEMORY_TURN_TEMPLATE.format(user_id=user_id)
+    def memory_conversation_turn(memory_space_id: str) -> str:
+        token = memory_space_subject_token(memory_space_id)
+        return Topics.MEMORY_TURN_TEMPLATE.format(memory_space_token=token)
 
     @staticmethod
-    def memory_command(user_id: str) -> str:
-        return Topics.MEMORY_CMD_TEMPLATE.format(user_id=user_id)
+    def memory_command(memory_space_id: str) -> str:
+        token = memory_space_subject_token(memory_space_id)
+        return Topics.MEMORY_CMD_TEMPLATE.format(memory_space_token=token)
 
     # --- External inbound -----------------------------------------------------
 
     @staticmethod
     def memory_event_pattern() -> str:
-        return "agent.memory.event.*"
+        return "eidolon.memory.event.*"
 
     @staticmethod
     def emotion_proposed_pattern() -> str:
@@ -91,7 +97,7 @@ class Topics:
 
 # JetStream-persistent subjects (these go through JetStream, others are core NATS).
 PERSISTENT_PREFIXES = (
-    "agent.memory.",
+    "eidolon.memory.",
     "agent.emotion.",
     "agent.evolution.",
 )

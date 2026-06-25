@@ -34,7 +34,7 @@ def _routes(*routes: MemoryRoute) -> MemoryRoutingTable:
             turn_subject_template="t",
             cmd_subject_template="c",
         ),
-        routes={r.user_id: r for r in routes},
+        routes={r.memory_space_id: r for r in routes},
     )
 
 
@@ -61,7 +61,12 @@ def test_issue_code_returns_8_char_alphanumeric(client: TestClient) -> None:
 
 def test_issue_code_reports_memory_readiness_when_route_exists() -> None:
     client = _client_with_routes(
-        _routes(MemoryRoute(user_id="alice", mcp_url="http://127.0.0.1:8031/mcp"))
+        _routes(
+            MemoryRoute(
+                memory_space_id="t.alice.tpl",
+                mcp_url="http://127.0.0.1:8031/mcp",
+            )
+        )
     )
 
     r = client.post(
@@ -74,6 +79,7 @@ def test_issue_code_reports_memory_readiness_when_route_exists() -> None:
     assert body["memory"] == {
         "ready": True,
         "user_id": "alice",
+        "memory_space_id": "t.alice.tpl",
         "reason": None,
         "mcp_http_url": "http://127.0.0.1:8031/mcp",
     }
@@ -104,10 +110,13 @@ def test_issue_code_refreshes_discovery_before_rejecting() -> None:
                     {
                         "nats": {"url": "nats://x"},
                         "users": [
-                            {
-                                "user_id": "alice",
-                                "mcp_http_url": "http://127.0.0.1:8031/mcp",
-                                "enabled": True,
+                        {
+                            "memory_space_id": "t.alice.tpl",
+                            "tenant_id": "t",
+                            "owner_user_id": "alice",
+                            "companion_id": "tpl",
+                            "mcp_http_url": "http://127.0.0.1:8031/mcp",
+                            "enabled": True,
                                 "agent_reachable": True,
                             }
                         ],

@@ -129,8 +129,11 @@ async def test_memory_tools_use_memory_port(caller_ctx) -> None:
     assert search.ok
     assert search.content["records"][0]["content"] == "用户喜欢乌龙茶"
     assert memory.search_calls[0]["scope"] == "semantic"
+    assert memory.search_calls[0]["identity"]["tenant_id"] == "t"
     assert asserted.ok
-    assert memory.asserted == [("u", "user", "prefers_drink", "乌龙茶", 0.8)]
+    assert memory.asserted == [
+        ("u", "user", "prefers_drink", "乌龙茶", 0.8, "t", None, None)
+    ]
     assert forgotten.ok
     assert forgotten.content["removed"] == 3
     assert memory.forgotten == [("u", "乌龙茶")]
@@ -164,6 +167,7 @@ class _FakeMemoryPort:
         scope=None,
         voice=True,
         timeout_s=0.2,
+        **identity,
     ):
         self.search_calls.append(
             {
@@ -173,6 +177,7 @@ class _FakeMemoryPort:
                 "scope": getattr(scope, "value", scope),
                 "voice": voice,
                 "timeout_s": timeout_s,
+                "identity": identity,
             }
         )
         return [
@@ -193,9 +198,12 @@ class _FakeMemoryPort:
         *,
         confidence=0.9,
         tenant_id=None,
+        companion_id=None,
         persona_id=None,
     ) -> None:
-        self.asserted.append((user_id, subject, predicate, object_, confidence))
+        self.asserted.append(
+            (user_id, subject, predicate, object_, confidence, tenant_id, companion_id, persona_id)
+        )
 
     async def forget(self, user_id, query) -> int:
         self.forgotten.append((user_id, query))

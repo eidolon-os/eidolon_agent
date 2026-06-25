@@ -214,7 +214,7 @@ class _ReplayHarness:
 
     async def start(self) -> None:
         await self.event_bus.subscribe(
-            Topics.memory_conversation_turn("alice"),
+            Topics.memory_conversation_turn("default.alice.default"),
             self._on_memory_fanout,
         )
         now = datetime.now(timezone.utc)

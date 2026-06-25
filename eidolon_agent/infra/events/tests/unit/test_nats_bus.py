@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import nats.errors
 import pytest
+from eidolon_sdk.memory import conversation_turn_subject
 
 from eidolon_agent.core.errors import NatsUnavailableError
 from eidolon_agent.core.types.event import Event
@@ -72,7 +73,9 @@ async def test_publish_transient_subject_uses_core_nats(monkeypatch: pytest.Monk
 
 async def test_publish_persistent_subject_uses_jetstream(monkeypatch: pytest.MonkeyPatch) -> None:
     bus, fake_nc, fake_js = _make_bus(monkeypatch)
-    await bus.publish(Event(subject="agent.memory.conversation.turn.alice", payload={}, source="t"))
+    await bus.publish(
+        Event(subject=conversation_turn_subject("default.alice.default"), payload={}, source="t")
+    )
     fake_js.publish.assert_awaited_once()
     fake_nc.publish.assert_not_called()
 
@@ -91,7 +94,7 @@ async def test_publish_with_msg_id_sets_dedup_header(monkeypatch: pytest.MonkeyP
     bus, _fake_nc, fake_js = _make_bus(monkeypatch)
     await bus.publish(
         Event(
-            subject="agent.memory.conversation.turn.alice",
+            subject=conversation_turn_subject("default.alice.default"),
             payload={},
             source="t",
             metadata={"msg_id": "turn-42"},

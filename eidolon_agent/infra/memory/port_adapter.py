@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timezone
 
 from eidolon_agent.core.errors import MemoryUnavailableError
+from eidolon_agent.core.types.identity import build_memory_actor_context
 from eidolon_agent.core.types.memory import (
     MemoryHit,
     MemoryKind,
@@ -39,26 +40,48 @@ class EidolonMemoryPort:
         scope: MemoryScope = MemoryScope.ALL,
         voice: bool = True,
         timeout_s: float = 0.2,
+        tenant_id: str | None = None,
+        companion_id: str | None = None,
+        persona_id: str | None = None,
+        agent_id: str | None = None,
+        device_id: str | None = None,
+        instance_id: str | None = None,
+        session_id: str = "default",
     ) -> list[MemoryHit]:
-        session = await self._pool.session_for(user_id)
+        ctx = build_memory_actor_context(
+            user_id=user_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            companion_id=companion_id,
+            persona_id=persona_id,
+            agent_id=agent_id,
+            device_id=device_id,
+            instance_id=instance_id,
+        )
+        memory_space_id = ctx.memory_space_id
+        session = await self._pool.session_for(memory_space_id)
         try:
             raw = await asyncio.wait_for(
                 session.call_tool(
                     "eidolon_memory_search",
-                    {"query": query, "top_k": top_k},
+                    {
+                        "query": query,
+                        "context": ctx.model_dump(mode="json"),
+                        "top_k": top_k,
+                    },
                 ),
                 timeout=timeout_s,
             )
         except TimeoutError:
-            _log.warning("memory search timed out for user=%s", user_id)
-            await self._pool.drop_session(user_id, session=session)
+            _log.warning("memory search timed out for memory_space=%s", memory_space_id)
+            await self._pool.drop_session(memory_space_id, session=session)
             return []
         except MemoryUnavailableError:
-            _log.warning("memory search unavailable for user=%s", user_id)
-            await self._pool.drop_session(user_id, session=session)
+            _log.warning("memory search unavailable for memory_space=%s", memory_space_id)
+            await self._pool.drop_session(memory_space_id, session=session)
             return []
         except Exception:
-            _log.exception("memory search failed for user=%s", user_id)
+            _log.exception("memory search failed for memory_space=%s", memory_space_id)
             return []
         return _records_to_hits(raw.get("records") or [])
 
@@ -69,12 +92,34 @@ class EidolonMemoryPort:
         *,
         plan: MemoryQueryPlan,
         timeout_s: float = 0.2,
+        tenant_id: str | None = None,
+        companion_id: str | None = None,
+        persona_id: str | None = None,
+        agent_id: str | None = None,
+        device_id: str | None = None,
+        instance_id: str | None = None,
+        session_id: str = "default",
     ) -> MemoryRecallResult:
+        ctx = build_memory_actor_context(
+            user_id=user_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            companion_id=companion_id,
+            persona_id=persona_id,
+            agent_id=agent_id,
+            device_id=device_id,
+            instance_id=instance_id,
+        )
+        memory_space_id = ctx.memory_space_id
         try:
-            session = await self._pool.session_for(user_id)
+            session = await self._pool.session_for(memory_space_id)
         except MemoryUnavailableError as exc:
             reason = _memory_unavailable_reason(exc)
-            _log.warning("memory recall unavailable for user=%s reason=%s", user_id, reason)
+            _log.warning(
+                "memory recall unavailable for memory_space=%s reason=%s",
+                memory_space_id,
+                reason,
+            )
             return MemoryRecallResult(degraded=True, degraded_reason=reason)
         try:
             raw = await asyncio.wait_for(
@@ -82,6 +127,7 @@ class EidolonMemoryPort:
                     "eidolon_memory_recall_context",
                     {
                         "query": query,
+                        "context": ctx.model_dump(mode="json"),
                         "top_k": plan.semantic_k,
                         "voice": plan.voice,
                         "include_kg": True,
@@ -91,16 +137,20 @@ class EidolonMemoryPort:
                 timeout=timeout_s,
             )
         except TimeoutError:
-            _log.warning("memory recall timed out for user=%s", user_id)
-            await self._pool.drop_session(user_id, session=session)
+            _log.warning("memory recall timed out for memory_space=%s", memory_space_id)
+            await self._pool.drop_session(memory_space_id, session=session)
             return MemoryRecallResult(degraded=True, degraded_reason="timeout")
         except MemoryUnavailableError as exc:
             reason = _memory_unavailable_reason(exc)
-            _log.warning("memory recall unavailable for user=%s reason=%s", user_id, reason)
-            await self._pool.drop_session(user_id, session=session)
+            _log.warning(
+                "memory recall unavailable for memory_space=%s reason=%s",
+                memory_space_id,
+                reason,
+            )
+            await self._pool.drop_session(memory_space_id, session=session)
             return MemoryRecallResult(degraded=True, degraded_reason=reason)
         except Exception:
-            _log.exception("memory recall failed for user=%s", user_id)
+            _log.exception("memory recall failed for memory_space=%s", memory_space_id)
             return MemoryRecallResult(degraded=True, degraded_reason="error")
         context = raw.get("context", "") or ""
         hits = _records_to_hits(raw.get("records") or [])
@@ -123,6 +173,12 @@ class EidolonMemoryPort:
         assistant_text: str,
         *,
         metadata: dict | None = None,
+        tenant_id: str | None = None,
+        companion_id: str | None = None,
+        persona_id: str | None = None,
+        agent_id: str | None = None,
+        device_id: str | None = None,
+        instance_id: str | None = None,
     ) -> None:
         await self._pub.publish_turn(
             user_id=user_id,
@@ -131,6 +187,11 @@ class EidolonMemoryPort:
             user_text=user_text,
             assistant_text=assistant_text,
             metadata=metadata,
+            tenant_id=tenant_id,
+            companion_id=companion_id,
+            persona_id=persona_id,
+            agent_instance_id=instance_id or agent_id,
+            device_id=device_id,
         )
 
     async def assert_fact(
@@ -142,6 +203,7 @@ class EidolonMemoryPort:
         *,
         confidence: float = 0.9,
         tenant_id: str | None = None,
+        companion_id: str | None = None,
         persona_id: str | None = None,
     ) -> None:
         await self._pub.publish_kg_add(
@@ -151,18 +213,23 @@ class EidolonMemoryPort:
             object_=object_,
             confidence=confidence,
             tenant_id=tenant_id,
+            companion_id=companion_id,
             persona_id=persona_id,
         )
 
     async def forget(self, user_id: str, query: str) -> int:
         # The memory service exposes ``eidolon_memory_forget`` via MCP in newer versions;
         # if absent, we no-op safely. Production should branch on capability negotiation.
-        session = await self._pool.session_for(user_id)
+        ctx = build_memory_actor_context(user_id=user_id, session_id="default")
+        session = await self._pool.session_for(ctx.memory_space_id)
         try:
             result = await session.call_tool("eidolon_memory_forget", {"query": query})
             return int(result.get("removed", 0))
         except Exception:
-            _log.warning("memory forget unsupported or failed for user=%s", user_id)
+            _log.warning(
+                "memory forget unsupported or failed for memory_space=%s",
+                ctx.memory_space_id,
+            )
             return 0
 
     async def health(self) -> bool:

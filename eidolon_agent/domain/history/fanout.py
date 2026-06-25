@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from eidolon_sdk.memory import ConversationTurnPayload
+from eidolon_sdk.memory import ConversationTurnPayload, conversation_turn_subject
 
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.identity import build_memory_actor_context
@@ -56,17 +56,18 @@ class HistoryFanout:
         }
         if metadata:
             payload_metadata.update(metadata)
+        context = build_memory_actor_context(
+            user_id=user_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            device_id=device_id,
+            agent_id=agent_instance_id,
+            instance_id=agent_instance_id,
+            persona_id=persona_id,
+        )
         memory_payload = ConversationTurnPayload(
             turn_id=turn_id,
-            context=build_memory_actor_context(
-                user_id=user_id,
-                session_id=session_id,
-                tenant_id=tenant_id,
-                device_id=device_id,
-                agent_id=agent_instance_id,
-                instance_id=agent_instance_id,
-                persona_id=persona_id,
-            ),
+            context=context,
             timestamp=timestamp_iso,
             user_text=user_text,
             assistant_text=assistant_text,
@@ -74,9 +75,9 @@ class HistoryFanout:
         ).model_dump(mode="json")
         try:
             memory_subject = (
-                await self._memory_routes.render_turn_subject(user_id)
+                await self._memory_routes.render_turn_subject(context.memory_space_id)
                 if self._memory_routes is not None
-                else Topics.memory_conversation_turn(user_id)
+                else conversation_turn_subject(context.memory_space_id)
             )
             await self._bus.publish(
                 Event(

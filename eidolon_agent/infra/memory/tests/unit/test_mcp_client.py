@@ -80,12 +80,14 @@ def test_decode_error_block_raises_memory_unavailable() -> None:
 def _routes(*routes: MemoryRoute) -> MemoryRoutingTable:
     return MemoryRoutingTable(
         nats=MemoryNatsRoute(url="nats://x", stream="", turn_subject_template="t", cmd_subject_template="c"),
-        routes={r.user_id: r for r in routes},
+        routes={r.memory_space_id: r for r in routes},
     )
 
 
 async def test_pool_health_true_when_routes_present() -> None:
-    pool = McpClientPool(routes=_routes(MemoryRoute(user_id="alice", mcp_url="http://a/mcp")))
+    pool = McpClientPool(
+        routes=_routes(MemoryRoute(memory_space_id="default.alice.default", mcp_url="http://a/mcp"))
+    )
     assert await pool.health() is True
 
 
@@ -105,11 +107,11 @@ async def test_session_for_unknown_user_raises_unavailable() -> None:
     ("route", "reason"),
     [
         (
-            MemoryRoute(user_id="alice", mcp_url="http://a/mcp", enabled=False),
+            MemoryRoute(memory_space_id="default.alice.default", mcp_url="http://a/mcp", enabled=False),
             "memory_route_disabled",
         ),
         (
-            MemoryRoute(user_id="alice", mcp_url="http://a/mcp", reachable=False),
+            MemoryRoute(memory_space_id="default.alice.default", mcp_url="http://a/mcp", reachable=False),
             "memory_route_unreachable",
         ),
     ],
@@ -119,27 +121,33 @@ async def test_session_for_unavailable_route_carries_reason(
 ) -> None:
     pool = McpClientPool(routes=_routes(route))
     with pytest.raises(MemoryUnavailableError, match=reason) as exc_info:
-        await pool.session_for("alice")
-    assert exc_info.value.details == {"user_id": "alice", "reason": reason}
+        await pool.session_for("default.alice.default")
+    assert exc_info.value.details == {
+        "memory_space_id": "default.alice.default",
+        "reason": reason,
+    }
 
 
 async def test_session_reused_for_same_route() -> None:
     pool = McpClientPool(
-        routes=_routes(MemoryRoute(user_id="alice", mcp_url="http://a/mcp", bearer_token="t1"))
+        routes=_routes(MemoryRoute(memory_space_id="default.alice.default", mcp_url="http://a/mcp", bearer_token="t1"))
     )
-    s1 = await pool.session_for("alice")
-    s2 = await pool.session_for("alice")
+    s1 = await pool.session_for("default.alice.default")
+    s2 = await pool.session_for("default.alice.default")
     assert s1 is s2
 
 
 async def test_session_rotated_when_url_changes() -> None:
-    routes = _routes(MemoryRoute(user_id="alice", mcp_url="http://old/mcp"))
+    routes = _routes(MemoryRoute(memory_space_id="default.alice.default", mcp_url="http://old/mcp"))
     pool = McpClientPool(routes=routes)
-    s1 = await pool.session_for("alice")
+    s1 = await pool.session_for("default.alice.default")
     # Swap the route under the table (simulating discovery refresh).
     s1.close = AsyncMock(return_value=None)
-    routes._routes["alice"] = MemoryRoute(user_id="alice", mcp_url="http://new/mcp")
-    s2 = await pool.session_for("alice")
+    routes._routes["default.alice.default"] = MemoryRoute(
+        memory_space_id="default.alice.default",
+        mcp_url="http://new/mcp",
+    )
+    s2 = await pool.session_for("default.alice.default")
     assert s2 is not s1
     s1.close.assert_awaited()  # old session was closed
 
@@ -147,12 +155,12 @@ async def test_session_rotated_when_url_changes() -> None:
 async def test_pool_close_all_closes_each_session() -> None:
     pool = McpClientPool(
         routes=_routes(
-            MemoryRoute(user_id="alice", mcp_url="http://a/mcp"),
-            MemoryRoute(user_id="bob", mcp_url="http://b/mcp"),
+            MemoryRoute(memory_space_id="default.alice.default", mcp_url="http://a/mcp"),
+            MemoryRoute(memory_space_id="default.bob.default", mcp_url="http://b/mcp"),
         )
     )
-    s1 = await pool.session_for("alice")
-    s2 = await pool.session_for("bob")
+    s1 = await pool.session_for("default.alice.default")
+    s2 = await pool.session_for("default.bob.default")
     s1.close = AsyncMock()
     s2.close = AsyncMock()
     await pool.close_all()
@@ -161,31 +169,35 @@ async def test_pool_close_all_closes_each_session() -> None:
 
 
 async def test_pool_drop_session_closes_cached_session() -> None:
-    pool = McpClientPool(routes=_routes(MemoryRoute(user_id="alice", mcp_url="http://a/mcp")))
-    sess = await pool.session_for("alice")
+    pool = McpClientPool(
+        routes=_routes(MemoryRoute(memory_space_id="default.alice.default", mcp_url="http://a/mcp"))
+    )
+    sess = await pool.session_for("default.alice.default")
     sess.close = AsyncMock()
 
-    dropped = await pool.drop_session("alice", session=sess)
+    dropped = await pool.drop_session("default.alice.default", session=sess)
 
     assert dropped is True
     sess.close.assert_awaited_once()
-    assert await pool.session_for("alice") is not sess
+    assert await pool.session_for("default.alice.default") is not sess
 
 
 async def test_pool_drop_session_identity_guard_keeps_replacement() -> None:
-    pool = McpClientPool(routes=_routes(MemoryRoute(user_id="alice", mcp_url="http://a/mcp")))
-    stale = await pool.session_for("alice")
+    pool = McpClientPool(
+        routes=_routes(MemoryRoute(memory_space_id="default.alice.default", mcp_url="http://a/mcp"))
+    )
+    stale = await pool.session_for("default.alice.default")
     replacement = McpUserSession("http://a/mcp")
     stale.close = AsyncMock()
     replacement.close = AsyncMock()
-    pool._sessions["alice"] = replacement
+    pool._sessions["default.alice.default"] = replacement
 
-    dropped = await pool.drop_session("alice", session=stale)
+    dropped = await pool.drop_session("default.alice.default", session=stale)
 
     assert dropped is False
     stale.close.assert_not_awaited()
     replacement.close.assert_not_awaited()
-    assert await pool.session_for("alice") is replacement
+    assert await pool.session_for("default.alice.default") is replacement
 
 
 # ---- McpUserSession ------------------------------------------------------

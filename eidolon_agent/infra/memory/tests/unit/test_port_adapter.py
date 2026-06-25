@@ -81,11 +81,13 @@ async def test_search_invokes_mcp_search_with_args() -> None:
     ]})
     port, _, pool, _ = _port(session_call=call)
     hits = await port.search("alice", "find x", top_k=3)
-    pool.session_for.assert_awaited_once_with("alice")
+    pool.session_for.assert_awaited_once_with("default.alice.default")
     call.assert_awaited_once()
     name, args = call.await_args.args
     assert name == "eidolon_memory_search"
-    assert args == {"query": "find x", "top_k": 3}
+    assert args["query"] == "find x"
+    assert args["top_k"] == 3
+    assert args["context"]["memory_space_id"] == "default.alice.default"
     assert len(hits) == 1
     assert hits[0].content == "hello"
 
@@ -98,14 +100,14 @@ async def test_search_returns_empty_on_timeout() -> None:
 
     port, session, pool, _ = _port(session_call=_slow)
     assert await port.search("alice", "x", timeout_s=0.01) == []
-    pool.drop_session.assert_awaited_once_with("alice", session=session)
+    pool.drop_session.assert_awaited_once_with("default.alice.default", session=session)
 
 
 async def test_search_drops_session_on_memory_unavailable() -> None:
     call = AsyncMock(side_effect=MemoryUnavailableError("stream closed"))
     port, session, pool, _ = _port(session_call=call)
     assert await port.search("alice", "x") == []
-    pool.drop_session.assert_awaited_once_with("alice", session=session)
+    pool.drop_session.assert_awaited_once_with("default.alice.default", session=session)
 
 
 async def test_search_returns_empty_on_exception() -> None:
@@ -167,6 +169,7 @@ async def test_recall_context_returns_context_hits_and_degraded_false() -> None:
     assert name == "eidolon_memory_recall_context"
     assert args["top_k"] == 5
     assert args["voice"] is True
+    assert args["context"]["memory_space_id"] == "default.alice.default"
 
 
 async def test_recall_context_returns_degraded_on_exception() -> None:
@@ -195,7 +198,7 @@ async def test_recall_context_drops_session_on_timeout() -> None:
     assert hits == []
     assert degraded is True
     assert result.degraded_reason == "timeout"
-    pool.drop_session.assert_awaited_once_with("alice", session=session)
+    pool.drop_session.assert_awaited_once_with("default.alice.default", session=session)
 
 
 async def test_recall_context_drops_session_on_memory_unavailable_call() -> None:
@@ -213,7 +216,7 @@ async def test_recall_context_drops_session_on_memory_unavailable_call() -> None
     assert hits == []
     assert degraded is True
     assert result.degraded_reason == "memory_stream_closed"
-    pool.drop_session.assert_awaited_once_with("alice", session=session)
+    pool.drop_session.assert_awaited_once_with("default.alice.default", session=session)
 
 
 async def test_recall_context_returns_route_reason_on_unavailable_session() -> None:
@@ -221,7 +224,7 @@ async def test_recall_context_returns_route_reason_on_unavailable_session() -> N
     pool.session_for = AsyncMock(
         side_effect=MemoryUnavailableError(
             "no route",
-            details={"user_id": "alice", "reason": "no_memory_route"},
+            details={"memory_space_id": "default.alice.default", "reason": "no_memory_route"},
         )
     )
 
@@ -246,6 +249,8 @@ async def test_write_turn_delegates_to_publisher() -> None:
     pub.publish_turn.assert_awaited_once_with(
         user_id="alice", session_id="sess-1", turn_id="turn-1",
         user_text="hi", assistant_text="hello", metadata={"k": "v"},
+        tenant_id=None, companion_id=None, persona_id=None,
+        agent_instance_id=None, device_id=None,
     )
 
 
@@ -254,7 +259,8 @@ async def test_assert_fact_delegates_to_publisher() -> None:
     await port.assert_fact("alice", "Alice", "lives_in", "Beijing", confidence=0.75)
     pub.publish_kg_add.assert_awaited_once_with(
         user_id="alice", subject="Alice", predicate="lives_in",
-        object_="Beijing", confidence=0.75, tenant_id=None, persona_id=None,
+        object_="Beijing", confidence=0.75, tenant_id=None,
+        companion_id=None, persona_id=None,
     )
 
 
