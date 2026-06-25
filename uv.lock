@@ -699,7 +699,7 @@ requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20.0" },
     { name = "alembic", specifier = ">=1.13.0" },
     { name = "anyio", specifier = ">=4.3.0" },
-    { name = "eidolon-sdk", directory = "../eidolon_sdk" },
+    { name = "eidolon-sdk", editable = "../eidolon_sdk" },
     { name = "fastapi", specifier = ">=0.110.0" },
     { name = "grpcio", specifier = ">=1.62.0" },
     { name = "grpcio-status", specifier = ">=1.62.0" },
@@ -737,7 +737,7 @@ provides-extras = ["dev"]
 [[package]]
 name = "eidolon-sdk"
 version = "0.1.0"
-source = { directory = "../eidolon_sdk" }
+source = { editable = "../eidolon_sdk" }
 dependencies = [
     { name = "aiosqlite" },
     { name = "cryptography" },
