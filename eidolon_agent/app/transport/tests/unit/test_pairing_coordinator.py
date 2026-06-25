@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from eidolon_sdk.runtime import PairingTokenVerifier, RuntimeUnauthenticatedError
+from eidolon_sdk.biz.runtime import PairingTokenVerifier, RuntimeUnauthenticatedError
 
 from eidolon_agent.app.transport.pairing import PairingCoordinator
 from eidolon_agent.core.errors import NotFoundError, UnauthenticatedError

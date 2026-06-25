@@ -10,7 +10,7 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
-from eidolon_sdk.db import sqlite_url_for_path
+from eidolon_sdk.core.db import sqlite_url_for_path
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config

@@ -1,15 +1,15 @@
 """Async SQLAlchemy engine + session factory for agent-owned persistence.
 
-The generic SQLite URL/session/PRAGMA setup lives in ``eidolon_sdk.db``; this
+The generic SQLite URL/session/PRAGMA setup lives in ``eidolon_sdk.core.db``; this
 module keeps only agent-specific schema bootstrap and compatibility repairs.
 """
 
 from __future__ import annotations
 
-from eidolon_sdk.db import (
+from eidolon_sdk.core.db import (
     SqliteSettings as SdkSqliteSettings,
 )
-from eidolon_sdk.db import (
+from eidolon_sdk.core.db import (
     create_sqlite_engine,
     create_sqlite_session_factory,
 )

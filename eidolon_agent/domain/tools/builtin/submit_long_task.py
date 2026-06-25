@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from eidolon_sdk.long_tasks import progress_subject_for
+from eidolon_sdk.biz.long_tasks import progress_subject_for
 
 from eidolon_agent.core.ports.long_tasks import LongTaskQueueFullError, LongTaskSubmitter
 from eidolon_agent.core.ports.tool import ToolInvocationContext

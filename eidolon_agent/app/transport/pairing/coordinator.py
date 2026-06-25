@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from eidolon_sdk.runtime import VerifiedDevice, sign_device_token
+from eidolon_sdk.biz.runtime import VerifiedDevice, sign_device_token
 
 from eidolon_agent.core.errors import NotFoundError, UnauthenticatedError
 

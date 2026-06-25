@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from eidolon_sdk.core.protobuf import protobuf_struct_to_dict
 from google.protobuf import struct_pb2
-from eidolon_sdk.protobuf import protobuf_struct_to_dict
 
 from eidolon_agent.app.transport.grpc.proto import pb
 from eidolon_agent.core.types.turn import TurnEvent, TurnEventKind

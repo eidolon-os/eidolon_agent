@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from eidolon_sdk.runtime import PairingTokenVerifier
+from eidolon_sdk.biz.runtime import PairingTokenVerifier
 from fastapi import FastAPI
 
 from eidolon_agent.app.admin.routers import devices as devices_router

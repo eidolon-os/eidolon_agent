@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from eidolon_sdk.grpc import authorization_metadata, create_aio_channel
+from eidolon_sdk.core.grpc import authorization_metadata, create_aio_channel
 
 from eidolon_agent.app.benchmark import (
     load_replay_scenarios,

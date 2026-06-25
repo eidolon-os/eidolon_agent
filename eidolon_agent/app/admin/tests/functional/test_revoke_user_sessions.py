@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 import httpx
 import pytest
-from eidolon_sdk.runtime import (
+from eidolon_sdk.biz.runtime import (
     PairingTokenVerifier,
     RuntimeTokenRevokedError,
     device_revocation_keys,

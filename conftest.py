@@ -6,7 +6,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from eidolon_sdk.runtime import BackgroundTaskRunner
+from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
 from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.context.compiler import ContextCompiler

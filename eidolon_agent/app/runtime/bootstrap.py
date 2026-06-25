@@ -20,7 +20,8 @@ import logging
 import secrets
 from pathlib import Path
 
-from eidolon_sdk.runtime import BackgroundTaskRunner, PairingTokenVerifier
+from eidolon_sdk.biz.runtime import PairingTokenVerifier
+from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
 from eidolon_agent.app.admin import build_admin_app
 from eidolon_agent.app.runtime.container import Container

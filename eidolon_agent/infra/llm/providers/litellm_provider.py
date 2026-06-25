@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 import httpx
 import litellm
-from eidolon_sdk.llm import render_openai_tool_calls, validate_openai_tool_transcript
+from eidolon_sdk.integrations.llm import render_openai_tool_calls, validate_openai_tool_transcript
 
 from eidolon_agent.core.errors import LLMUnavailableError
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason, LLMUsage

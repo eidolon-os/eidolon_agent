@@ -28,7 +28,7 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
-from eidolon_sdk.runtime import BackgroundTaskRunner
+from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
 from eidolon_agent.core.errors import GuardrailBlockedError, TurnCancelledError
 from eidolon_agent.core.ports.llm import LLMPort

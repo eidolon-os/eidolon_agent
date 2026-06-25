@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from eidolon_sdk.long_tasks import (
+from eidolon_sdk.biz.long_tasks import (
     parse_session_key,
     safe_user_key,
     session_key_for,

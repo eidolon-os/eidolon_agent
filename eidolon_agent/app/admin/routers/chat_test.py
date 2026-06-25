@@ -6,7 +6,7 @@ import logging
 import uuid
 
 import grpc
-from eidolon_sdk.streaming import encode_sse_event
+from eidolon_sdk.core.streaming import encode_sse_event
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel

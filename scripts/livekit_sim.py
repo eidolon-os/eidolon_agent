@@ -21,7 +21,7 @@ import sys
 import uuid
 
 import httpx
-from eidolon_sdk.grpc import authorization_metadata, create_aio_channel
+from eidolon_sdk.core.grpc import authorization_metadata, create_aio_channel
 
 # Make the in-repo proto package importable without installing the wheel.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
