@@ -20,6 +20,7 @@ class Container:
 
     sqlite_engine: object | None = None
     session_factory: object | None = None
+    data_store: object | None = None
 
     persona_instance_store: object | None = None
     persona_observation_store: object | None = None

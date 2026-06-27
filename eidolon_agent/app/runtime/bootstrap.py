@@ -20,6 +20,8 @@ import logging
 import secrets
 from pathlib import Path
 
+from eidolon_data import DataStore
+from eidolon_data import load_settings as load_data_settings
 from eidolon_sdk.biz.runtime import PairingTokenVerifier
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
@@ -68,17 +70,17 @@ from eidolon_agent.infra.memory.discovery import build_initial_memory_routes
 from eidolon_agent.infra.memory.mcp_client import McpClientPool
 from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
 from eidolon_agent.infra.observability import configure_logging
-from eidolon_agent.infra.persistence import (
-    SqlEvolutionHistoryStore,
-    SqlLongTaskStore,
-    SqlPersonaEvolutionProposalStore,
-    SqlPersonaInstanceStore,
-    SqlPersonaObservationStore,
-    build_history_hydrator,
-    build_turn_persister,
-    create_engine,
-    create_session_factory,
-    ensure_schema,
+from eidolon_agent.infra.persistence.eidolon_data_persona import (
+    EidolonDataCustomTemplateStore,
+    EidolonDataEvolutionHistoryStore,
+    EidolonDataPersonaEvolutionProposalStore,
+    EidolonDataPersonaInstanceStore,
+    EidolonDataPersonaObservationStore,
+)
+from eidolon_agent.infra.persistence.eidolon_data_runtime import (
+    EidolonDataLongTaskStore,
+    build_eidolon_data_history_hydrator,
+    build_eidolon_data_turn_persister,
 )
 
 _log = logging.getLogger(__name__)
@@ -98,12 +100,10 @@ async def build_application(
     # 2. container -------------------------------------------------------------
     # (already created above)
 
-    # 3. SQLite + memory discovery + NATS -------------------------------------
-    engine = create_engine(settings.sqlite)
-    await ensure_schema(engine)
-    session_factory = create_session_factory(engine)
-    container.sqlite_engine = engine
-    container.session_factory = session_factory
+    # 3. Eidolon Data + memory discovery + NATS -------------------------------
+    data_store = DataStore.open(load_data_settings())
+    await data_store.init_schema()
+    container.data_store = data_store
 
     memory_routes, effective_nats_url, memory_refresher = await build_initial_memory_routes(
         memory=settings.memory,
@@ -135,15 +135,9 @@ async def build_application(
 
     # 5 + 6. Personas templates + per-user instance copies ---------------------
     # Templates have two backing stores: builtin yaml files (read-only,
-    # ship with the agent) and an operator-mutable SQL table for custom
-    # templates (Phase 29.D). The registry merges them at lookup time;
-    # the SQL store is None for tests/diagnostic modes that don't want
-    # to hit the database.
-    from eidolon_agent.infra.persistence.sql_custom_template_store import (
-        SqlCustomTemplateStore,
-    )
-
-    custom_template_store = SqlCustomTemplateStore(session_factory)
+    # ship with the agent) and operator-mutable presets in eidolon_data.
+    # The registry merges them at lookup time.
+    custom_template_store = EidolonDataCustomTemplateStore(data_store)
     tpl_reg = PersonaTemplateRegistry(
         Path(settings.persona.templates_dir),
         custom_source=custom_template_store,
@@ -151,20 +145,19 @@ async def build_application(
     await tpl_reg.load_all()
     container.custom_template_store = custom_template_store
     container.persona_template_registry = tpl_reg
-    # Production wiring: SQLite-backed instance store. The legacy
-    # YamlPersonaInstanceStore is now only used by the YAML→SQLite migration
-    # script. ``persona.storage`` in config lets ops fall back to YAML for
-    # diagnostic / forensic scenarios.
+    # Production wiring: eidolon_data-backed persona genomes. The legacy
+    # YamlPersonaInstanceStore remains available for diagnostic / forensic
+    # scenarios.
     if settings.persona.storage == "yaml":
         instance_store: object = YamlPersonaInstanceStore(Path(settings.persona.instances_dir))
     else:
-        instance_store = SqlPersonaInstanceStore(session_factory)
+        instance_store = EidolonDataPersonaInstanceStore(data_store)
     # One adapter satisfies both PersonaAuditPort (write) and
     # PersonaEvolutionRepository (read) so worker writes audit rows AND admin
     # can paginate them. NullPersonaAuditPort is no longer used in production.
-    evolution_history = SqlEvolutionHistoryStore(session_factory)
-    persona_observations = SqlPersonaObservationStore(session_factory)
-    persona_proposals = SqlPersonaEvolutionProposalStore(session_factory)
+    evolution_history = EidolonDataEvolutionHistoryStore(data_store)
+    persona_observations = EidolonDataPersonaObservationStore(data_store)
+    persona_proposals = EidolonDataPersonaEvolutionProposalStore(data_store)
     personas_service = PersonasService(
         registry=tpl_reg,
         instances=instance_store,
@@ -184,7 +177,7 @@ async def build_application(
     container.personas_service = personas_service
 
     # 7. Cross-cutting services -----------------------------------------------
-    history = HistoryManager(hydrate_messages=build_history_hydrator(session_factory))
+    history = HistoryManager(hydrate_messages=build_eidolon_data_history_hydrator(data_store))
     fanout = HistoryFanout(event_bus=container.event_bus, memory_routes=memory_routes)
     background_tasks = BackgroundTaskRunner(component="agent")
     sig_bus = SignalBus()
@@ -210,7 +203,7 @@ async def build_application(
     long_task_worker = None
     if settings.long_task.transport == "mementos_http":
         long_task_worker = MementosLongTaskWorker(
-            store=SqlLongTaskStore(session_factory),
+            store=EidolonDataLongTaskStore(data_store),
             client=MementosHttpClient(
                 base_url=settings.long_task.mementos_base_url,
                 timeout_s=settings.long_task.worker_http_timeout_s,
@@ -327,13 +320,9 @@ async def build_application(
         # Phase 33.B1: admin /users/{id}/revoke-sessions writes here;
         # same instance the verifier reads. Same bucket, two consumers.
         revocation_kv=revocation_kv,
-        # Phase 34.A: conversations browse router reads turns + messages
-        # via SqlConversationRepository / SqlChatMessageRepository. Same
-        # session factory the writer side uses, just opened in read-only
-        # short transactions.
-        session_factory=session_factory,
         memory_routes=memory_routes,
         memory_discovery_refresher=memory_refresher,
+        data_store=data_store,
     )
     container.http_app = http_app
     container.admin_app = admin_app
@@ -433,8 +422,8 @@ def _build_turn_engine(
         tool_schema_strict=container.settings.turn.tool_schema_strict,
         require_idempotency_for_side_effect_tools=container.settings.turn.require_idempotency_for_side_effect_tools,
         taboos_provider=lambda: tuple(),
-        turn_persister=build_turn_persister(
-            container.session_factory,
+        turn_persister=build_eidolon_data_turn_persister(
+            container.data_store,
             model_id_provider=lambda: getattr(container.llm_router, "model_id", None),
         ),
         harness=harness,

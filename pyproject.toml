@@ -32,6 +32,7 @@ dependencies = [
     "uvicorn[standard]>=0.27.0",
     "PyJWT[crypto]>=2.8.0",
     "eidolon-sdk",
+    "eidolon-data",
 
     # Infra: NATS (event bus + KV + JetStream), SQLite, config
     "nats-py>=2.7.0",
@@ -79,6 +80,7 @@ eidolon-agent = "eidolon_agent.app.runtime.cli:main"
 
 [tool.uv.sources]
 eidolon-sdk = { path = "../eidolon_sdk", editable = true }
+eidolon-data = { path = "../eidolon_data", editable = true }
 
 [tool.setuptools.packages.find]
 where = ["."]

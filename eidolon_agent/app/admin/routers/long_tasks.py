@@ -1,5 +1,7 @@
 """Admin: read-only browse over long-running mementos tasks."""
 
+# ruff: noqa: B008
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -9,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from eidolon_agent.core.types.long_task import LongTaskRecord
-from eidolon_agent.infra.persistence import SqlLongTaskRepository
+from eidolon_agent.infra.persistence import EidolonDataLongTaskStore
 
 router = APIRouter()
 
@@ -78,11 +80,11 @@ class LongTaskDetail(LongTaskSummary):
     next_retry_at: datetime | None
 
 
-def _session_factory(request: Request):
-    factory = getattr(request.app.state, "session_factory", None)
-    if factory is None:
-        raise HTTPException(503, "session_factory not configured on admin app")
-    return factory
+def _data_store(request: Request) -> EidolonDataLongTaskStore:
+    data_store = getattr(request.app.state, "data_store", None)
+    if data_store is None:
+        raise HTTPException(503, "data_store not configured on admin app")
+    return EidolonDataLongTaskStore(data_store)
 
 
 @router.get("/long-tasks", response_model=ListLongTasksResponse)
@@ -99,18 +101,16 @@ async def list_long_tasks(
         description="ISO timestamp; only return tasks created strictly before this",
     ),
 ) -> ListLongTasksResponse:
-    factory = _session_factory(request)
-    async with factory() as session:
-        repo = SqlLongTaskRepository(session)
-        rows = await repo.list_for_admin(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            status=status,
-            provider=provider,
-            task_type=task_type,
-            limit=limit,
-            before=before,
-        )
+    store = _data_store(request)
+    rows = await store.list_for_admin(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        status=status,
+        provider=provider,
+        task_type=task_type,
+        limit=limit,
+        before=before,
+    )
     tasks = [_summary(r) for r in rows]
     next_before = tasks[-1].created_at if len(tasks) == limit else None
     return ListLongTasksResponse(tasks=tasks, next_before=next_before)
@@ -118,10 +118,8 @@ async def list_long_tasks(
 
 @router.get("/long-tasks/{task_id}", response_model=LongTaskDetail)
 async def get_long_task(request: Request, task_id: str) -> LongTaskDetail:
-    factory = _session_factory(request)
-    async with factory() as session:
-        repo = SqlLongTaskRepository(session)
-        record = await repo.get(task_id)
+    store = _data_store(request)
+    record = await store.get(task_id)
     if record is None:
         raise HTTPException(404, "long task not found")
     return _detail(record)

@@ -7,10 +7,10 @@ Two sources at the same logical address:
     the agent. Cached in memory because the set is small and static
     until the process restarts.
 
-  - **custom** (Phase 29.D): operator-authored templates persisted in
-    the ``persona_templates_custom`` SQL table via
-    :class:`SqlCustomTemplateStore`. The registry holds an in-memory
-    cache of the custom set, refreshed whenever admin CRUD mutates it.
+  - **custom**: operator-authored templates persisted as Eidolon Data
+    event-backed custom template store. The registry
+    holds an in-memory cache of the custom set, refreshed whenever admin CRUD
+    mutates it.
 
 Read API stays **synchronous** — registry consumers (turn compilation,
 prompt rendering, evolution) need a fast lookup with no SQL roundtrip

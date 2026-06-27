@@ -13,45 +13,43 @@ import json
 import sys
 from pathlib import Path
 
+from eidolon_data import DataStore
+from eidolon_data import load_settings as load_data_settings
+from eidolon_data.schema.models import MessageRow, TurnRow
 from sqlalchemy import select
 
-from eidolon_agent.config import load_settings
 from eidolon_agent.infra.observability.replay_diff import (
     ReplayDiffThresholds,
     compare_replay_snapshots,
     snapshots_from_artifact,
 )
-from eidolon_agent.infra.persistence import create_engine, create_session_factory
-from eidolon_agent.infra.persistence.models import ChatMessageRow, TurnRow
 
 
 async def _print_conversation(conv_id: str) -> None:
-    settings = load_settings()
-    engine = create_engine(settings.sqlite)
-    sf = create_session_factory(engine)
-    async with sf() as s:
+    settings = load_data_settings()
+    store = DataStore.open(settings)
+    async with store.session_factory() as s:
         rows = (
             await s.execute(
-                select(ChatMessageRow, TurnRow)
-                .join(TurnRow, ChatMessageRow.turn_id == TurnRow.id)
+                select(MessageRow, TurnRow)
+                .join(TurnRow, MessageRow.turn_id == TurnRow.turn_id)
                 .where(TurnRow.conversation_id == conv_id)
-                .order_by(ChatMessageRow.created_at)
+                .order_by(TurnRow.seq, MessageRow.created_at)
             )
         ).all()
     if not rows:
-        print(f"no messages for {conv_id} in {settings.sqlite.path}")
+        print(f"no messages for {conv_id} in {settings.sqlite_path}")
+        await store.close()
         return
     for msg, _turn in rows:
         ts = msg.created_at.isoformat(timespec="seconds")
         print(f"[{ts}] {msg.role:>9}: {msg.content}")
-    await engine.dispose()
+    await store.close()
 
 
 async def _export_traces(conv_id: str, path: Path) -> None:
-    settings = load_settings()
-    engine = create_engine(settings.sqlite)
-    sf = create_session_factory(engine)
-    async with sf() as s:
+    store = DataStore.open(load_data_settings())
+    async with store.session_factory() as s:
         turns = (
             (
                 await s.execute(
@@ -68,11 +66,11 @@ async def _export_traces(conv_id: str, path: Path) -> None:
         "conversation_id": conv_id,
         "turns": [
             {
-                "turn_id": row.id,
-                "metadata": row.metadata_ or {},
+                "turn_id": row.turn_id,
+                "metadata": {**(row.metadata_json or {}), "turn_trace": row.trace_json},
             }
             for row in turns
-            if (row.metadata_ or {}).get("turn_trace")
+            if row.trace_json
         ],
     }
     path.write_text(
@@ -80,7 +78,7 @@ async def _export_traces(conv_id: str, path: Path) -> None:
         encoding="utf-8",
     )
     print(f"exported {len(artifact['turns'])} traced turns to {path}")
-    await engine.dispose()
+    await store.close()
 
 
 def _run_diff(args: argparse.Namespace) -> int:

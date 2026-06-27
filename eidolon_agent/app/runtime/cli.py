@@ -91,6 +91,8 @@ async def _run(args) -> int:  # type: ignore[no-untyped-def]
         await container.memory_port.close()
     if container.llm_router is not None and hasattr(container.llm_router, "close"):
         await container.llm_router.close()
+    if container.data_store is not None and hasattr(container.data_store, "close"):
+        await container.data_store.close()
     return 0
 
 

@@ -1,39 +1,32 @@
 """End-to-end tests for the custom-template CRUD surface (Phase 29.D).
 
-These spin up a real SQLite DB with migrations applied, a real registry
-(builtin yaml templates from ``settings.persona.templates_dir`` + the
-SQL custom store), and the FastAPI app — so we cover:
+These spin up a real Eidolon Data SQLite DB, a real registry (builtin yaml
+templates from ``settings.persona.templates_dir`` + the custom preset store),
+and the FastAPI app — so we cover:
 
-  - SQL migration shape is correct
+  - Eidolon Data schema shape is correct
   - HTTP request/response wiring
-  - Refcount-check on DELETE (uses a real ``persona_instances`` row)
+  - Refcount-check on DELETE (uses a real ``persona_genomes`` row)
   - Cache refresh: writes propagate to the registry so subsequent
     ``GET /personas/templates`` shows the change
 """
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Iterator
 
 import pytest
-import yaml
+from eidolon_data import DataSettings, DataStore
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from eidolon_agent.app.admin.routers import templates as templates_router
 from eidolon_agent.app.admin.routers import personas as personas_router
+from eidolon_agent.app.admin.routers import templates as templates_router
 from eidolon_agent.domain.personas.registry import PersonaTemplateRegistry
-from eidolon_agent.domain.personas.types import PersonaTemplate
-from eidolon_agent.config.settings import SqliteSettings
-from eidolon_agent.infra.persistence import (
-    create_engine,
-    create_session_factory,
-    ensure_schema,
-)
-from eidolon_agent.infra.persistence.models import PersonaInstanceRow
-from eidolon_agent.infra.persistence.sql_custom_template_store import (
-    SqlCustomTemplateStore,
+from eidolon_agent.infra.persistence.eidolon_data_persona import (
+    EidolonDataCustomTemplateStore,
+    EidolonDataPersonaInstanceStore,
 )
 
 pytestmark = pytest.mark.functional
@@ -63,18 +56,13 @@ memory_adapter:
 
 
 @pytest.fixture
-async def env(tmp_path: Path) -> Iterator[dict]:
-    """Real SQLite (file-backed, tmp) + real registry pointed at a
-    tmp_path templates_dir with one minimal builtin yaml.
-    """
-    # 1) DB + session factory + migrated schema
-    db_path = tmp_path / "agent.sqlite"
-    engine = create_engine(SqliteSettings(path=str(db_path)))
-    await ensure_schema(engine)
-    sf = create_session_factory(engine)
-    store = SqlCustomTemplateStore(sf)
+async def env(tmp_path: Path) -> AsyncIterator[dict]:
+    """Real Eidolon Data SQLite + registry pointed at a tmp templates_dir."""
+    data_store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
+    await data_store.init_schema()
+    store = EidolonDataCustomTemplateStore(data_store)
 
-    # 2) Builtin templates dir with one minimal template so we can test
+    # Builtin templates dir with one minimal template so we can test
     # "cannot create custom with builtin id" + "fork builtin → custom".
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
@@ -84,7 +72,7 @@ async def env(tmp_path: Path) -> Iterator[dict]:
     reg = PersonaTemplateRegistry(templates_dir, custom_source=store)
     await reg.load_all()
 
-    # 3) Tiny app — just the two persona-related routers
+    # Tiny app — just the two persona-related routers
     app = FastAPI()
     app.state.custom_template_store = store
     app.state.persona_template_registry = reg
@@ -97,12 +85,11 @@ async def env(tmp_path: Path) -> Iterator[dict]:
 
     yield {
         "client": TestClient(app),
-        "engine": engine,
-        "session_factory": sf,
+        "data_store": data_store,
         "store": store,
         "registry": reg,
     }
-    await engine.dispose()
+    await data_store.close()
 
 
 # ---- create ----------------------------------------------------------------
@@ -252,14 +239,9 @@ def test_delete_missing_returns_404(env) -> None:
     assert r.status_code == 404
 
 
-async def test_delete_refuses_when_persona_instances_reference_it(env) -> None:
-    """The cascade-safety check — if any persona_instance row still
-    references this template_id, DELETE returns 409 instead of orphaning
-    those instances."""
-    from datetime import datetime, timezone
-
+async def test_delete_refuses_when_persona_genomes_reference_it(env) -> None:
+    """A preset referenced by a genome cannot be deleted in-place."""
     client = env["client"]
-    sf = env["session_factory"]
 
     # 1. Create the custom template
     client.post(
@@ -271,25 +253,14 @@ async def test_delete_refuses_when_persona_instances_reference_it(env) -> None:
         },
     )
 
-    # 2. Insert a persona_instance row referencing it (simulates a
-    # previously-rendered agent)
-    now = datetime.now(timezone.utc)
-    async with sf() as session:
-        session.add(
-            PersonaInstanceRow(
-                id="inst_x",
-                tenant_id="default",
-                user_id="alice",
-                template_id="in_use",
-                template_version=1,
-                overlay_version=1,
-                overlay_json={},
-                created_at=now,
-                updated_at=now,
-                last_active_at=now,
-            )
-        )
-        await session.commit()
+    # 2. Save a persona genome whose source_json records the generating template.
+    instance_store = EidolonDataPersonaInstanceStore(env["data_store"])
+    await instance_store.create_from_template(
+        template=env["registry"].get("in_use"),
+        tenant_id="default",
+        user_id="alice",
+        instance_id="inst_x",
+    )
 
     # 3. DELETE the template — should refuse with 409
     r = client.delete("/api/admin/personas/templates/in_use")

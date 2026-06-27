@@ -11,10 +11,36 @@ Two layers under test:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import httpx
 import pytest
+from eidolon_data import DataSettings, DataStore
+from eidolon_data.schema.models import (
+    CompanionRow as DataCompanionRow,
+)
+from eidolon_data.schema.models import (
+    ConversationRow as DataConversationRow,
+)
+from eidolon_data.schema.models import (
+    DeviceRow as DataDeviceRow,
+)
+from eidolon_data.schema.models import (
+    EventRow as DataEventRow,
+)
+from eidolon_data.schema.models import (
+    JobRow as DataJobRow,
+)
+from eidolon_data.schema.models import (
+    MemoryRealmRow as DataMemoryRealmRow,
+)
+from eidolon_data.schema.models import (
+    MessageRow as DataMessageRow,
+)
+from eidolon_data.schema.models import (
+    PersonaGenomeRow as DataPersonaGenomeRow,
+)
+from eidolon_data.schema.models import (
+    TurnRow as DataTurnRow,
+)
 from eidolon_sdk.biz.runtime import (
     PairingTokenVerifier,
     RuntimeTokenRevokedError,
@@ -26,22 +52,6 @@ from fastapi import FastAPI
 from sqlalchemy import func, select
 
 from eidolon_agent.app.admin.routers import devices as devices_router
-from eidolon_agent.config.settings import SqliteSettings
-from eidolon_agent.infra.persistence import (
-    create_engine,
-    create_session_factory,
-    ensure_schema,
-)
-from eidolon_agent.infra.persistence.models import (
-    ChatMessageRow,
-    ConversationRow,
-    DeviceRow,
-    EvolutionHistoryRow,
-    PersonaEvolutionProposalRow,
-    PersonaInstanceRow,
-    PersonaObservationRow,
-    TurnRow,
-)
 
 pytestmark = pytest.mark.functional
 
@@ -103,130 +113,119 @@ async def test_revoke_user_sessions_writes_revocation_key() -> None:
     assert b"T" in val and b":" in val  # ISO format roughly
 
 
-async def test_delete_user_data_removes_persistent_rows_and_revocations(tmp_path) -> None:
-    engine = create_engine(SqliteSettings(path=tmp_path / "agent.sqlite3"))
-    await ensure_schema(engine)
-    factory = create_session_factory(engine)
+async def test_delete_user_data_503_when_data_store_missing() -> None:
     kv = _FakeKV()
-    await kv.put(user_revocation_keys("alice")[0], b"revoked")
-    await kv.put("revoked.user.alice", b"revoked")
-
-    now = datetime.now(timezone.utc)
-    async with factory() as session, session.begin():
-        session.add(
-            ConversationRow(
-                id="conv-a",
-                tenant_id="default",
-                user_id="alice",
-                agent_instance_id="ag-a",
-                started_at=now,
-            )
-        )
-        session.add(
-            TurnRow(
-                id="turn-a",
-                conversation_id="conv-a",
-                seq=1,
-                trigger="user_utterance",
-                started_at=now,
-                status="ok",
-            )
-        )
-        session.add(
-            ChatMessageRow(
-                id="msg-a",
-                turn_id="turn-a",
-                role="user",
-                content="hello",
-                created_at=now,
-            )
-        )
-        session.add(
-            DeviceRow(
-                id="dev-a",
-                tenant_id="default",
-                user_id="alice",
-                token_hash="hash",
-            )
-        )
-        session.add(
-            PersonaInstanceRow(
-                id="ag-a",
-                tenant_id="default",
-                user_id="alice",
-                template_id="tpl",
-                overlay_json={},
-                created_at=now,
-                updated_at=now,
-            )
-        )
-        session.add(
-            EvolutionHistoryRow(
-                id="evo-a",
-                instance_id="ag-a",
-                from_overlay_version=1,
-                to_overlay_version=2,
-                proposed_by="test",
-                rationale="test",
-                created_at=now,
-            )
-        )
-        session.add(
-            PersonaObservationRow(
-                id="obs-a",
-                tenant_id="default",
-                user_id="alice",
-                instance_id="ag-a",
-                kind="test",
-                summary="test",
-                created_at=now,
-            )
-        )
-        session.add(
-            PersonaEvolutionProposalRow(
-                id="prop-a",
-                tenant_id="default",
-                user_id="alice",
-                instance_id="ag-a",
-                rationale="test",
-                created_at=now,
-                updated_at=now,
-            )
-        )
-
     app = _build_test_app(kv)
-    app.state.session_factory = factory
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         r = await client.delete("/api/admin/users/alice/data")
 
-    assert r.status_code == 200
-    body = r.json()
-    assert body["deleted"] is True
-    assert body["counts"]["conversations"] == 1
-    assert body["counts"]["turns"] == 1
-    assert body["counts"]["chat_messages"] == 1
-    assert body["counts"]["persona_instances"] == 1
-    assert body["counts"]["evolution_history"] == 1
-    assert body["revocation_keys_cleared"] == 2
-    assert await kv.get(user_revocation_keys("alice")[0]) is None
-    assert await kv.get("revoked.user.alice") is None
+    assert r.status_code == 503
+    assert "data_store" in r.json()["detail"]
 
-    async with factory() as session:
-        for model in (
-            ConversationRow,
-            TurnRow,
-            ChatMessageRow,
-            DeviceRow,
-            PersonaInstanceRow,
-            EvolutionHistoryRow,
-            PersonaObservationRow,
-            PersonaEvolutionProposalRow,
-        ):
-            count = await session.scalar(select(func.count()).select_from(model))
-            assert count == 0
-    await engine.dispose()
+
+async def test_delete_user_data_prefers_eidolon_data_store(tmp_path) -> None:
+    store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
+    await store.init_schema()
+    kv = _FakeKV()
+    await kv.put(user_revocation_keys("alice")[0], b"revoked")
+    await kv.put("revoked.user.alice", b"revoked")
+
+    try:
+        await store.owners.create(owner_id="alice", display_name="Alice")
+        await store.companions.create(companion_id="companion-a", owner_id="alice")
+        await store.persona_repo.create_genome(
+            genome_id="genome-a",
+            companion_id="companion-a",
+            version=1,
+            genome_json={"persona_instance": {"instance_id": "companion-a"}},
+        )
+        await store.companions.set_current_genome("companion-a", "genome-a")
+        await store.devices.create_device(
+            device_id="dev-a",
+            owner_id="alice",
+            bound_companion_id="companion-a",
+            auth_type="token",
+            secret_ref="secret-ref",
+            access_policy_json={"capability": "chat"},
+        )
+        await store.conversations.create_conversation(
+            conversation_id="conv-a",
+            owner_id="alice",
+            companion_id="companion-a",
+            device_id="dev-a",
+        )
+        await store.conversations.append_turn(
+            turn_id="turn-a",
+            conversation_id="conv-a",
+            seq=1,
+        )
+        await store.conversations.append_message(
+            message_id="msg-a",
+            turn_id="turn-a",
+            role="user",
+            content="hello",
+        )
+        await store.jobs.create(
+            job_id="job-a",
+            owner_id="alice",
+            provider="mementos",
+            kind="writing",
+            turn_id="turn-a",
+        )
+        await store.memory_repo.create_realm(
+            realm_id="realm-a",
+            owner_id="alice",
+            companion_id="companion-a",
+        )
+        await store.events.append(
+            event_id="evt-a",
+            owner_id="alice",
+            subject_type="persona",
+            subject_id="companion-a",
+            event_type="persona.evolution.applied",
+        )
+
+        app = _build_test_app(kv)
+        app.state.data_store = store
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.delete("/api/admin/users/alice/data")
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["deleted"] is True
+        assert body["counts"]["conversations"] == 1
+        assert body["counts"]["turns"] == 1
+        assert body["counts"]["messages"] == 1
+        assert body["counts"]["persona_genomes"] == 1
+        assert body["counts"]["memory_realms"] == 1
+        assert body["counts"]["jobs"] == 1
+        assert body["counts"]["devices"] == 1
+        assert body["counts"]["events"] == 1
+        assert body["revocation_keys_cleared"] == 2
+
+        async with store.session_factory() as session:
+            for model in (
+                DataConversationRow,
+                DataTurnRow,
+                DataMessageRow,
+                DataPersonaGenomeRow,
+                DataMemoryRealmRow,
+                DataJobRow,
+                DataDeviceRow,
+                DataEventRow,
+            ):
+                count = await session.scalar(select(func.count()).select_from(model))
+                assert count == 0
+            companion = await session.get(DataCompanionRow, "companion-a")
+            assert companion is not None
+            assert companion.status == "deleted"
+            assert companion.current_genome_id is None
+    finally:
+        await store.close()
 
 
 async def test_revoke_user_sessions_503_when_kv_missing() -> None:

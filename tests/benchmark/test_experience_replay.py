@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 
 from eidolon_agent.app.benchmark import load_replay_scenarios, run_replay_files
-from eidolon_agent.app.benchmark.suites import agent_memory_experience_scenarios
 from eidolon_agent.app.benchmark.experience import run_replay_scenarios
+from eidolon_agent.app.benchmark.suites import agent_memory_experience_scenarios
 
 pytestmark = pytest.mark.integration
 

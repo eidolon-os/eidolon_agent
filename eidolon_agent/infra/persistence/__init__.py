@@ -1,79 +1,43 @@
-"""SQLite persistence via SQLAlchemy 2.0 async.
+"""Eidolon Agent persistence adapters.
 
-The single source of truth for *durable, queryable* state. Volatile / short-TTL
-state lives in NATS KV (see :mod:`eidolon_agent.infra.events`); semantic memory
-lives in eidolon-memory (see :mod:`eidolon_agent.infra.memory`).
-
-Schema migrations are managed by Alembic (``persistence/migrations``).
+Durable business data is owned by ``eidolon_data``. This package exposes only
+the agent-side adapters that map agent domain types onto that unified schema.
 """
 
-from eidolon_agent.infra.persistence.engine import (
-    create_engine,
-    create_session_factory,
-    ensure_schema,
-)
-from eidolon_agent.infra.persistence.long_task_store import SqlLongTaskStore
-from eidolon_agent.infra.persistence.models import (
-    ChatMessageRow,
-    ConversationRow,
-    DeviceRow,
-    EvolutionHistoryRow,
-    LongTaskRow,
-    PersonaEvolutionProposalRow,
-    PersonaInstanceRow,
-    PersonaObservationRow,
-    PersonaTemplateCustomRow,
-    TurnRow,
-)
-from eidolon_agent.infra.persistence.repositories import (
-    SqlChatMessageRepository,
-    SqlConversationRepository,
-    SqlLongTaskRepository,
-)
-from eidolon_agent.infra.persistence.sql_custom_template_store import (
+from eidolon_agent.infra.persistence.custom_template_types import (
     CustomTemplateAlreadyExists,
+    CustomTemplateError,
+    CustomTemplateInUse,
     CustomTemplateNotFound,
-    SqlCustomTemplateStore,
+    CustomTemplateView,
 )
-from eidolon_agent.infra.persistence.sql_evolution_history_store import (
-    SqlEvolutionHistoryStore,
+from eidolon_agent.infra.persistence.eidolon_data_persona import (
+    EidolonDataCustomTemplateStore,
+    EidolonDataEvolutionHistoryStore,
+    EidolonDataPersonaEvolutionProposalStore,
+    EidolonDataPersonaInstanceStore,
+    EidolonDataPersonaObservationStore,
 )
-from eidolon_agent.infra.persistence.sql_persona_evolution_store import (
-    SqlPersonaEvolutionProposalStore,
-    SqlPersonaObservationStore,
+from eidolon_agent.infra.persistence.eidolon_data_runtime import (
+    EidolonDataConversationReader,
+    EidolonDataLongTaskStore,
+    build_eidolon_data_history_hydrator,
+    build_eidolon_data_turn_persister,
 )
-from eidolon_agent.infra.persistence.sql_persona_instance_store import (
-    SqlPersonaInstanceStore,
-)
-from eidolon_agent.infra.persistence.turn_io import build_history_hydrator, build_turn_persister
-from eidolon_agent.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
 __all__ = [
-    "ChatMessageRow",
-    "ConversationRow",
     "CustomTemplateAlreadyExists",
+    "CustomTemplateError",
+    "CustomTemplateInUse",
     "CustomTemplateNotFound",
-    "DeviceRow",
-    "EvolutionHistoryRow",
-    "LongTaskRow",
-    "PersonaEvolutionProposalRow",
-    "PersonaInstanceRow",
-    "PersonaObservationRow",
-    "PersonaTemplateCustomRow",
-    "SqlAlchemyUnitOfWork",
-    "SqlChatMessageRepository",
-    "SqlConversationRepository",
-    "SqlCustomTemplateStore",
-    "SqlEvolutionHistoryStore",
-    "SqlLongTaskRepository",
-    "SqlLongTaskStore",
-    "SqlPersonaEvolutionProposalStore",
-    "SqlPersonaInstanceStore",
-    "SqlPersonaObservationStore",
-    "TurnRow",
-    "build_history_hydrator",
-    "build_turn_persister",
-    "create_engine",
-    "create_session_factory",
-    "ensure_schema",
+    "CustomTemplateView",
+    "EidolonDataConversationReader",
+    "EidolonDataCustomTemplateStore",
+    "EidolonDataEvolutionHistoryStore",
+    "EidolonDataLongTaskStore",
+    "EidolonDataPersonaEvolutionProposalStore",
+    "EidolonDataPersonaInstanceStore",
+    "EidolonDataPersonaObservationStore",
+    "build_eidolon_data_history_hydrator",
+    "build_eidolon_data_turn_persister",
 ]

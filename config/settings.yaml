@@ -19,9 +19,6 @@ memory:
   - memory_space_id: default.default.default
     mcp_url: http://127.0.0.1:8030/mcp
   recall_timeout_s: 0.3
-sqlite:
-  path: ~/eidolon/history/eidolon_agent.sqlite3
-  enable_wal: true
 llm:
   api_key: EIDOLON_AGENT_LLM_API_KEY
   models:

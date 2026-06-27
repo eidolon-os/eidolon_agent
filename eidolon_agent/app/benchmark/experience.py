@@ -19,11 +19,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from eidolon_sdk.memory import conversation_turn_subject
+
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
-from eidolon_agent.core.types.topics import Topics
 from eidolon_agent.core.types.turn import TurnEventKind, TurnInput, TurnTrigger
 from eidolon_agent.domain.agent import TaskClassifier, TurnEngine
 from eidolon_agent.domain.context import ContextCompiler
@@ -33,6 +34,10 @@ from eidolon_agent.domain.tools import EmitEventTool, ToolDispatcher, ToolRegist
 from eidolon_agent.infra.events import InMemoryEventBus
 
 SCHEMA_VERSION = "eidolon_agent.experience_replay_report.v1"
+_REPLAY_TENANT_ID = "replay"
+_REPLAY_USER_ID = "alice"
+_REPLAY_AGENT_INSTANCE_ID = "inst-test"
+_REPLAY_PERSONA_ID = "caretaker_jiezhi"
 
 
 @dataclass(slots=True)
@@ -214,7 +219,9 @@ class _ReplayHarness:
 
     async def start(self) -> None:
         await self.event_bus.subscribe(
-            Topics.memory_conversation_turn("default.alice.default"),
+            conversation_turn_subject(
+                f"{_REPLAY_TENANT_ID}.{_REPLAY_USER_ID}.{_REPLAY_PERSONA_ID}"
+            ),
             self._on_memory_fanout,
         )
         now = datetime.now(timezone.utc)
@@ -322,7 +329,7 @@ class _ReplayHarness:
             crisis=CrisisHandler(event_bus=self.event_bus),
             event_bus=self.event_bus,
             personas_service=_ReplayPersonas(),
-            persona_template_id="caretaker_jiezhi",
+            persona_template_id=_REPLAY_PERSONA_ID,
             memory_port=self.memory,
             turn_persister=self._capture_turn,
         )
@@ -688,9 +695,9 @@ def _make_turn_input(
         session_id="replay-session",
         caller=CallerContext(
             identity=Identity(
-                tenant_id="replay",
-                user_id="alice",
-                agent_instance_id="inst-test",
+                tenant_id=_REPLAY_TENANT_ID,
+                user_id=_REPLAY_USER_ID,
+                agent_instance_id=_REPLAY_AGENT_INSTANCE_ID,
             ),
             caller_kind=CallerKind.WEB_CHAT,
             trace_id=f"replay-{turn_id}",

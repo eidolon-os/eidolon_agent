@@ -5,37 +5,29 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from eidolon_data import DataSettings, DataStore
 
-from eidolon_agent.config.settings import SqliteSettings
+from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.long_task import (
+    CallbackStatus,
     LongTaskRecord,
     LongTaskStatus,
     session_key_for,
     task_key_for,
 )
-from eidolon_agent.core.types.event import Event
-from eidolon_agent.core.types.long_task import CallbackStatus
 from eidolon_agent.infra.events.adapters.inmem import InMemoryEventBus
 from eidolon_agent.infra.long_tasks.mementos import (
     MementosLongTaskWorker,
     MementosWorkerConfig,
 )
-from eidolon_agent.infra.persistence import (
-    SqlAlchemyUnitOfWork,
-    SqlLongTaskStore,
-    create_engine,
-    create_session_factory,
-    ensure_schema,
-)
+from eidolon_agent.infra.persistence import EidolonDataLongTaskStore
 
 pytestmark = pytest.mark.asyncio
 
 
 async def test_worker_keeps_tool_path_to_accepted_then_completes(tmp_path) -> None:
-    engine = create_engine(SqliteSettings(path=tmp_path / "agent.sqlite3"))
-    await ensure_schema(engine)
-    session_factory = create_session_factory(engine)
-    store = SqlLongTaskStore(session_factory)
+    data_store = await _data_store(tmp_path)
+    store = EidolonDataLongTaskStore(data_store)
     client = _FakeMementosClient()
     worker = MementosLongTaskWorker(
         store=store,
@@ -48,8 +40,7 @@ async def test_worker_keeps_tool_path_to_accepted_then_completes(tmp_path) -> No
 
     await worker.submit(record)
 
-    async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        accepted = await uow.long_tasks.get("task-1")
+    accepted = await store.get("task-1")
 
     assert accepted is not None
     assert accepted.status is LongTaskStatus.ACCEPTED
@@ -57,10 +48,9 @@ async def test_worker_keeps_tool_path_to_accepted_then_completes(tmp_path) -> No
 
     drained = await worker.drain_once()
 
-    async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        completed = await uow.long_tasks.get("task-1")
+    completed = await store.get("task-1")
     await client.close()
-    await engine.dispose()
+    await data_store.close()
 
     assert drained is True
     assert completed is not None
@@ -77,10 +67,8 @@ async def test_worker_keeps_tool_path_to_accepted_then_completes(tmp_path) -> No
 
 
 async def test_worker_publishes_proactive_report_on_success(tmp_path) -> None:
-    engine = create_engine(SqliteSettings(path=tmp_path / "agent.sqlite3"))
-    await ensure_schema(engine)
-    session_factory = create_session_factory(engine)
-    store = SqlLongTaskStore(session_factory)
+    data_store = await _data_store(tmp_path)
+    store = EidolonDataLongTaskStore(data_store)
     client = _FakeMementosClient()
     bus = InMemoryEventBus()
     received: list[Event] = []
@@ -118,10 +106,9 @@ async def test_worker_publishes_proactive_report_on_success(tmp_path) -> None:
         "style_hint": "report",
     }
 
-    async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        completed = await uow.long_tasks.get("task-1")
+    completed = await store.get("task-1")
     await client.close()
-    await engine.dispose()
+    await data_store.close()
 
     assert completed is not None
     assert completed.callback_status is CallbackStatus.DELIVERED
@@ -131,10 +118,8 @@ async def test_worker_publishes_proactive_report_on_success(tmp_path) -> None:
 
 
 async def test_worker_skips_proactive_report_without_instance_id(tmp_path) -> None:
-    engine = create_engine(SqliteSettings(path=tmp_path / "agent.sqlite3"))
-    await ensure_schema(engine)
-    session_factory = create_session_factory(engine)
-    store = SqlLongTaskStore(session_factory)
+    data_store = await _data_store(tmp_path)
+    store = EidolonDataLongTaskStore(data_store)
     client = _FakeMementosClient()
     bus = InMemoryEventBus()
     received: list[Event] = []
@@ -157,15 +142,20 @@ async def test_worker_skips_proactive_report_without_instance_id(tmp_path) -> No
     await worker.drain_once()
     await asyncio.sleep(0)
 
-    async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        completed = await uow.long_tasks.get("task-1")
+    completed = await store.get("task-1")
     await client.close()
-    await engine.dispose()
+    await data_store.close()
 
     assert received == []
     assert completed is not None
     # No announcement claimed → callback stays pending.
     assert completed.callback_status is CallbackStatus.PENDING
+
+
+async def _data_store(tmp_path) -> DataStore:
+    store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
+    await store.init_schema()
+    return store
 
 
 def _record(task_id: str, *, agent_instance_id: str | None = None) -> LongTaskRecord:

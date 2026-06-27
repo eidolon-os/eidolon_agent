@@ -331,9 +331,9 @@ class PersonasService:
             dry_run=dry_run,
         )
         if result.applied:
-            # Bump version every time we persist a new overlay. Single-TX
-            # writes are the responsibility of the store implementation
-            # (SqlPersonaInstanceStore wraps save+history in one session).
+            # Bump version every time we persist a new overlay. The concrete
+            # store owns how the versioned snapshot and audit record are made
+            # durable.
             evolved = evolved.model_copy(update={"overlay_version": instance.overlay_version + 1})
             await self._instances.save(evolved, reason="evolve")
             await self._audit.record_evolution(result)
@@ -807,8 +807,8 @@ async def build_default_personas_service(
 ) -> PersonasService:
     """Build a service with the legacy YAML store.
 
-    Production callers should instead build a ``SqlPersonaInstanceStore`` and
-    pass it to ``PersonasService`` directly — see ``app/runtime/bootstrap.py``.
+    Production callers should instead build the eidolon_data-backed stores and
+    pass them to ``PersonasService`` directly — see ``app/runtime/bootstrap.py``.
     This helper is preserved for tests and migration scripts that work off
     raw YAML files.
     """

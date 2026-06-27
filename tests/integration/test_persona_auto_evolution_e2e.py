@@ -3,41 +3,38 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from eidolon_data import DataSettings, DataStore
 from fastapi.testclient import TestClient
 
 from eidolon_agent.app.admin import build_admin_app
-from eidolon_agent.config.settings import Settings, SqliteSettings
+from eidolon_agent.config.settings import Settings
 from eidolon_agent.domain.personas import PersonasService, PersonaTemplateRegistry
 from eidolon_agent.domain.personas.types import PersonaInteractionEvent, PersonaObservation
-from eidolon_agent.infra.persistence import (
-    SqlEvolutionHistoryStore,
-    SqlPersonaEvolutionProposalStore,
-    SqlPersonaInstanceStore,
-    SqlPersonaObservationStore,
-    create_engine,
-    create_session_factory,
-    ensure_schema,
+from eidolon_agent.infra.persistence.eidolon_data_persona import (
+    EidolonDataEvolutionHistoryStore,
+    EidolonDataPersonaEvolutionProposalStore,
+    EidolonDataPersonaInstanceStore,
+    EidolonDataPersonaObservationStore,
 )
 
 pytestmark = pytest.mark.integration
 
 
-async def _build_sql_personas_service(tmp_path: Path) -> tuple[PersonasService, object]:
-    engine = create_engine(SqliteSettings(path=tmp_path / "agent.sqlite3"))
-    await ensure_schema(engine)
-    session_factory = create_session_factory(engine)
+async def _build_personas_service(tmp_path: Path) -> tuple[PersonasService, DataStore]:
+    data_store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
+    await data_store.init_schema()
     registry = PersonaTemplateRegistry(Path("eidolon_agent/domain/personas/templates"))
     await registry.load_all()
-    evolution_history = SqlEvolutionHistoryStore(session_factory)
+    evolution_history = EidolonDataEvolutionHistoryStore(data_store)
     service = PersonasService(
         registry=registry,
-        instances=SqlPersonaInstanceStore(session_factory),
+        instances=EidolonDataPersonaInstanceStore(data_store),
         audit_port=evolution_history,
         evolution_repo=evolution_history,
-        observation_repo=SqlPersonaObservationStore(session_factory),
-        proposal_repo=SqlPersonaEvolutionProposalStore(session_factory),
+        observation_repo=EidolonDataPersonaObservationStore(data_store),
+        proposal_repo=EidolonDataPersonaEvolutionProposalStore(data_store),
     )
-    return service, engine
+    return service, data_store
 
 
 def _client(service: PersonasService) -> TestClient:
@@ -52,7 +49,7 @@ def _client(service: PersonasService) -> TestClient:
 
 @pytest.mark.asyncio
 async def test_auto_evolution_applies_low_risk_feedback_end_to_end(tmp_path):
-    service, engine = await _build_sql_personas_service(tmp_path)
+    service, data_store = await _build_personas_service(tmp_path)
     try:
         await service.start()
         await service.create_instance(
@@ -107,12 +104,12 @@ async def test_auto_evolution_applies_low_risk_feedback_end_to_end(tmp_path):
         assert history.json()[0]["applied"] is True
     finally:
         await service.stop()
-        await engine.dispose()
+        await data_store.close()
 
 
 @pytest.mark.asyncio
 async def test_auto_evolution_keeps_higher_risk_stress_proposal_pending_e2e(tmp_path):
-    service, engine = await _build_sql_personas_service(tmp_path)
+    service, data_store = await _build_personas_service(tmp_path)
     try:
         await service.create_instance(
             tenant_id="t",
@@ -169,4 +166,4 @@ async def test_auto_evolution_keeps_higher_risk_stress_proposal_pending_e2e(tmp_
         assert pending.json()[0]["id"] == proposal_rows[0]["id"]
     finally:
         await service.stop()
-        await engine.dispose()
+        await data_store.close()

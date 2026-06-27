@@ -7,10 +7,11 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 
 import pytest
+from eidolon_data import DataSettings, DataStore
+from eidolon_data.schema.models import JobRow, TurnRow
 from eidolon_sdk.memory import conversation_turn_subject
 from sqlalchemy import select
 
-from eidolon_agent.config.settings import SqliteSettings
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEventKind
@@ -18,12 +19,6 @@ from eidolon_agent.domain.history import HistoryManager
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import EmitEventTool, GetWeatherTool
 from eidolon_agent.infra.llm.providers.fake import FakeLLM
-from eidolon_agent.infra.persistence import (
-    create_engine,
-    create_session_factory,
-    ensure_schema,
-)
-from eidolon_agent.infra.persistence.models import LongTaskRow, TurnRow
 from tests.helpers import make_turn_input
 
 pytestmark = pytest.mark.integration
@@ -126,9 +121,7 @@ async def test_llm_selected_long_task_persists_minimal_receipt_record(
     turn_engine_factory,
     tmp_path,
 ) -> None:
-    sql_engine = create_engine(SqliteSettings(path=tmp_path / "agent.sqlite3"))
-    await ensure_schema(sql_engine)
-    session_factory = create_session_factory(sql_engine)
+    data_store = await _data_store(tmp_path)
     llm = _ScriptedCapturingLLM(
         [
             [
@@ -147,7 +140,7 @@ async def test_llm_selected_long_task_persists_minimal_receipt_record(
             [{"kind": "text", "text": "已经开始处理，我会继续跟进。"}],
         ]
     )
-    engine = turn_engine_factory(llm=llm, session_factory=session_factory)
+    engine = turn_engine_factory(llm=llm, data_store=data_store)
 
     events = [
         ev async for ev in engine.run(make_turn_input("整理我最近的项目资料"))
@@ -156,38 +149,39 @@ async def test_llm_selected_long_task_persists_minimal_receipt_record(
 
     tool_result = next(ev for ev in events if ev.kind is TurnEventKind.TOOL_RESULT)
     content = tool_result.data["content"]
-    async with session_factory() as session:
+    async with data_store.session_factory() as session:
         row = (
             await session.execute(
-                select(LongTaskRow).where(LongTaskRow.id == content["task_id"])
+                select(JobRow).where(JobRow.job_id == content["task_id"])
             )
         ).scalar_one_or_none()
-    await sql_engine.dispose()
+    await data_store.close()
 
     assert row is not None
     assert row.status == "accepted"
-    assert row.tenant_id == "t"
-    assert row.user_id == "alice"
+    payload = row.input_json["eidolon_agent_long_task"]
+    assert payload["tenant_id"] == "t"
+    assert row.owner_id == "alice"
     assert row.conversation_id == "c1"
     assert row.turn_id == "t1"
-    assert row.trace_id == "tr"
-    assert row.session_key == content["session_key"]
-    assert row.task_key == content["task_key"]
-    assert row.task_date == content["task_date"]
-    assert row.session_key.startswith("e.alice.")
-    assert len(row.session_key.removeprefix("e.alice.")) == 8
-    assert row.mementos_session_id is None
-    assert row.task_type == "document_work"
-    assert row.expected_output == "一份结构化行动清单"
-    assert row.context_summary == "用户在测试 coworker 委托任务。"
-    assert row.request_payload["session_key"] == row.session_key
-    assert row.request_payload["task_key"] == row.task_key
-    assert row.request_payload["mementos_session_id"] == row.session_key
-    assert row.request_payload["title"] == "整理项目资料"
-    assert row.request_payload["instruction"] == "整理我最近的项目资料并给出行动清单"
-    assert row.request_payload["expected_result"] == "一份结构化行动清单"
-    assert row.request_payload["context"] == "用户在测试 coworker 委托任务。"
-    assert row.callback_subject == content["progress_subject"]
+    assert payload["trace_id"] == "tr"
+    assert payload["session_key"] == content["session_key"]
+    assert payload["task_key"] == content["task_key"]
+    assert payload["task_date"] == content["task_date"]
+    assert payload["session_key"].startswith("e.alice.")
+    assert len(payload["session_key"].removeprefix("e.alice.")) == 8
+    assert row.provider_ref_json["mementos_session_id"] is None
+    assert row.kind == "document_work"
+    assert payload["expected_output"] == "一份结构化行动清单"
+    assert payload["context_summary"] == "用户在测试 coworker 委托任务。"
+    assert payload["request_payload"]["session_key"] == payload["session_key"]
+    assert payload["request_payload"]["task_key"] == payload["task_key"]
+    assert payload["request_payload"]["mementos_session_id"] == payload["session_key"]
+    assert payload["request_payload"]["title"] == "整理项目资料"
+    assert payload["request_payload"]["instruction"] == "整理我最近的项目资料并给出行动清单"
+    assert payload["request_payload"]["expected_result"] == "一份结构化行动清单"
+    assert payload["request_payload"]["context"] == "用户在测试 coworker 委托任务。"
+    assert row.result_json["callback_subject"] == content["progress_subject"]
 
 
 async def test_temporary_long_task_does_not_fanout_to_memory(
@@ -249,9 +243,7 @@ async def test_turn_trace_contains_harness_snapshot_for_coworker_handoff(
     turn_engine_factory,
     tmp_path,
 ) -> None:
-    sql_engine = create_engine(SqliteSettings(path=tmp_path / "agent.sqlite3"))
-    await ensure_schema(sql_engine)
-    session_factory = create_session_factory(sql_engine)
+    data_store = await _data_store(tmp_path)
     llm = _ScriptedCapturingLLM(
         [
             [
@@ -264,7 +256,7 @@ async def test_turn_trace_contains_harness_snapshot_for_coworker_handoff(
             [{"kind": "text", "text": "已交给后台。"}],
         ]
     )
-    engine = turn_engine_factory(llm=llm, session_factory=session_factory)
+    engine = turn_engine_factory(llm=llm, data_store=data_store)
 
     events = [ev async for ev in engine.run(make_turn_input("帮我整理资料"))]
     await _drain_background_tasks()
@@ -272,17 +264,15 @@ async def test_turn_trace_contains_harness_snapshot_for_coworker_handoff(
     assert any(ev.kind is TurnEventKind.HANDOFF for ev in events)
     row = None
     for _ in range(50):
-        async with session_factory() as session:
-            row = (
-                await session.execute(select(TurnRow).where(TurnRow.id == "t1"))
-            ).scalar_one_or_none()
+        async with data_store.session_factory() as session:
+            row = await session.get(TurnRow, "t1")
         if row is not None:
             break
         await asyncio.sleep(0.01)
-    await sql_engine.dispose()
+    await data_store.close()
 
     assert row is not None
-    trace = (row.metadata_ or {})["turn_trace"]
+    trace = row.trace_json
     harness = trace["harness"]
     assert harness["kind"] == "realtime_agent_harness"
     assert "harness_policy" in harness["segment_kinds"]
@@ -678,6 +668,12 @@ async def _drain_background_tasks() -> None:
     await asyncio.sleep(0)
     await asyncio.sleep(0)
     await asyncio.sleep(0)
+
+
+async def _data_store(tmp_path) -> DataStore:
+    store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
+    await store.init_schema()
+    return store
 
 
 class _CapturingLLM:

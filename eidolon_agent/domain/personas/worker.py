@@ -101,9 +101,8 @@ class PersonaEvolutionWorker:
                 dry_run=False,
             )
             if result.applied:
-                # Bump version + persist together. SqlPersonaInstanceStore.save
-                # wraps the row update + evolution_history append in one TX so
-                # the worker cannot leave a half-applied state on crash.
+                # Bump version; the concrete store owns how the versioned
+                # snapshot is made durable.
                 evolved = evolved.model_copy(
                     update={"overlay_version": instance.overlay_version + 1}
                 )
@@ -146,4 +145,3 @@ def _interaction_to_evolution_events(
     for item in event.payload.get("evolution_events", ()):
         out.append(PersonaEvolutionEvent(kind=str(item), source=event.kind, created_at=now))
     return out
-

@@ -26,6 +26,8 @@ Two practical notes:
     returns raw message text.
 """
 
+# ruff: noqa: B008
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -35,10 +37,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from eidolon_agent.infra.observability import build_turn_observability_summary
-from eidolon_agent.infra.persistence import (
-    SqlChatMessageRepository,
-    SqlConversationRepository,
-)
+from eidolon_agent.infra.persistence import EidolonDataConversationReader
 
 router = APIRouter()
 
@@ -145,17 +144,11 @@ class TurnDetail(BaseModel):
 # ── endpoints ──────────────────────────────────────────────────────────────
 
 
-def _session_factory(request: Request):
-    """Pull the SQLAlchemy session factory off app.state.
-
-    Wired in :func:`eidolon_agent.app.admin.build_admin_app`. We resolve
-    it per-request rather than via Depends because every other admin
-    router uses the ``app.state`` convention; switching here would
-    diverge for no benefit."""
-    factory = getattr(request.app.state, "session_factory", None)
-    if factory is None:
-        raise HTTPException(503, "session_factory not configured on admin app")
-    return factory
+def _data_reader(request: Request) -> EidolonDataConversationReader:
+    data_store = getattr(request.app.state, "data_store", None)
+    if data_store is None:
+        raise HTTPException(503, "data_store not configured on admin app")
+    return EidolonDataConversationReader(data_store)
 
 
 @router.get("/conversations/turns", response_model=ListTurnsResponse)
@@ -170,15 +163,13 @@ async def list_turns(
     ),
 ) -> ListTurnsResponse:
     """Page of turns, newest-first. Pure read; no side-effects."""
-    factory = _session_factory(request)
-    async with factory() as session:
-        repo = SqlConversationRepository(session)
-        rows = await repo.list_turns_by_user(
-            user_id=user_id,
-            tenant_id=tenant_id,
-            limit=limit,
-            before=before,
-        )
+    reader = _data_reader(request)
+    rows = await reader.list_turns_by_user(
+        user_id=user_id,
+        tenant_id=tenant_id,
+        limit=limit,
+        before=before,
+    )
     turns = [
         TurnSummary(
             turn_id=r["id"],
@@ -223,15 +214,13 @@ async def list_memory_audit(
     before: datetime | None = Query(default=None),
 ) -> MemoryAuditResponse:
     """Prompt-safe memory write candidates from local turn traces."""
-    factory = _session_factory(request)
-    async with factory() as session:
-        repo = SqlConversationRepository(session)
-        rows = await repo.list_turns_by_user(
-            user_id=user_id,
-            tenant_id=tenant_id,
-            limit=limit,
-            before=before,
-        )
+    reader = _data_reader(request)
+    rows = await reader.list_turns_by_user(
+        user_id=user_id,
+        tenant_id=tenant_id,
+        limit=limit,
+        before=before,
+    )
     out: list[MemoryAuditRow] = []
     for row in rows:
         trace = ((row.get("metadata_") or {}).get("turn_trace") or {})
@@ -261,14 +250,11 @@ async def list_memory_audit(
 @router.get("/conversations/turns/{turn_id}", response_model=TurnDetail)
 async def get_turn(turn_id: str, request: Request) -> TurnDetail:
     """One turn + its chat messages."""
-    factory = _session_factory(request)
-    async with factory() as session:
-        convo_repo = SqlConversationRepository(session)
-        msg_repo = SqlChatMessageRepository(session)
-        row = await convo_repo.get_turn(turn_id)
-        if row is None:
-            raise HTTPException(404, f"turn {turn_id!r} not found")
-        messages = await msg_repo.list_for_turn(turn_id)
+    reader = _data_reader(request)
+    row = await reader.get_turn(turn_id)
+    if row is None:
+        raise HTTPException(404, f"turn {turn_id!r} not found")
+    messages = await reader.list_for_turn(turn_id)
 
     metadata = row["metadata_"]
     return TurnDetail(

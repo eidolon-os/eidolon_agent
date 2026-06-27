@@ -23,9 +23,9 @@ from eidolon_agent.infra.events import InMemoryEventBus, InMemoryKVStore
 from eidolon_agent.infra.llm import LLMRouter
 from eidolon_agent.infra.llm.providers.fake import FakeLLM
 from eidolon_agent.infra.persistence import (
-    SqlLongTaskStore,
-    build_history_hydrator,
-    build_turn_persister,
+    EidolonDataLongTaskStore,
+    build_eidolon_data_history_hydrator,
+    build_eidolon_data_turn_persister,
 )
 
 
@@ -71,13 +71,20 @@ async def personas_service(canonical_template_registry, persona_instance_store):
 async def turn_engine_factory(personas_service, event_bus):
     """Builds a minimal TurnEngine for tests."""
 
-    def _factory(*, llm=None, memory_port=None, tool_dispatcher=None, history=None, session_factory=None):
+    def _factory(
+        *,
+        llm=None,
+        memory_port=None,
+        tool_dispatcher=None,
+        history=None,
+        data_store=None,
+    ):
         from eidolon_agent.domain.agent.turn import TurnEngine
 
         history = history or HistoryManager(
             hydrate_messages=(
-                build_history_hydrator(session_factory)
-                if session_factory is not None
+                build_eidolon_data_history_hydrator(data_store)
+                if data_store is not None
                 else None
             )
         )
@@ -85,8 +92,13 @@ async def turn_engine_factory(personas_service, event_bus):
         if tool_dispatcher is None:
             tools = ToolRegistry()
             tools.register(EmitEventTool(event_bus=event_bus))
+            task_store = (
+                EidolonDataLongTaskStore(data_store)
+                if data_store is not None
+                else None
+            )
             long_task_submitter = _ImmediateLongTaskSubmitter(
-                SqlLongTaskStore(session_factory) if session_factory is not None else None
+                task_store
             )
             tools.register(SubmitLongTaskTool(long_task_submitter=long_task_submitter))
             tool_dispatcher = ToolDispatcher(tools)
@@ -118,11 +130,11 @@ async def turn_engine_factory(personas_service, event_bus):
             persona_template_id="caretaker_jiezhi",
             memory_port=memory_port,
             turn_persister=(
-                build_turn_persister(
-                    session_factory,
+                build_eidolon_data_turn_persister(
+                    data_store,
                     model_id_provider=lambda: getattr(llm_router, "model_id", None),
                 )
-                if session_factory is not None
+                if data_store is not None
                 else None
             ),
             background_tasks=background_tasks,
@@ -135,7 +147,7 @@ async def turn_engine_factory(personas_service, event_bus):
 
 
 class _ImmediateLongTaskSubmitter:
-    def __init__(self, store: SqlLongTaskStore | None = None) -> None:
+    def __init__(self, store: object | None = None) -> None:
         self.store = store
         self.records = []
 

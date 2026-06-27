@@ -16,7 +16,7 @@ refused with 409. Forking is the supported path to "derive from a
 builtin".
 
 State coupling:
-    Writes go through ``SqlCustomTemplateStore``, then trigger
+    Writes go through the wired custom template store, then trigger
     ``registry.refresh_custom()`` so the in-memory cache (consulted by
     rendering / turn compile) stays consistent. Skipping the refresh
     would mean an operator's edit is persisted but the running agent
@@ -30,7 +30,6 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from eidolon_agent.core.errors import ValidationError as DomainValidationError
 from eidolon_agent.domain.personas.types import PersonaTemplate
 
 router = APIRouter()
@@ -72,7 +71,7 @@ def _store(request: Request):
             status_code=503,
             detail=(
                 "custom template store unavailable — agent bootstrap did "
-                "not wire it (check session_factory + persistence init)"
+                "not wire it (check eidolon_data initialization)"
             ),
         )
     return store
@@ -95,15 +94,15 @@ def _validate_yaml_renders(yaml_body: str) -> None:
     try:
         raw = yaml.safe_load(yaml_body)
     except yaml.YAMLError as exc:
-        raise HTTPException(status_code=422, detail=f"YAML parse error: {exc}")
+        raise HTTPException(status_code=422, detail=f"YAML parse error: {exc}") from exc
     if not isinstance(raw, dict):
         raise HTTPException(
             status_code=422, detail="template root must be a mapping"
         )
     try:
         PersonaTemplate(**raw)
-    except Exception as exc:  # noqa: BLE001 - pydantic surfaces clear messages
-        raise HTTPException(status_code=422, detail=f"template schema: {exc}")
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"template schema: {exc}") from exc
 
 
 # ---- endpoints -------------------------------------------------------------
@@ -142,7 +141,7 @@ async def create_custom_template(
             yaml_body=body.yaml_body,
         )
     except CustomTemplateAlreadyExists as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     await reg.refresh_custom()
     return view.to_dict()
@@ -178,7 +177,7 @@ async def update_custom_template(
             yaml_body=body.yaml_body,
         )
     except CustomTemplateNotFound as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     await reg.refresh_custom()
     return view.to_dict()
@@ -222,7 +221,7 @@ async def delete_custom_template(template_id: str, request: Request) -> None:
     try:
         await store.delete(template_id)
     except CustomTemplateNotFound as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     await reg.refresh_custom()
     # 204 — no body
@@ -247,7 +246,9 @@ async def fork_template(
     try:
         source_yaml = reg.raw_yaml(template_id)
     except Exception as exc:
-        raise HTTPException(status_code=404, detail=f"source template not found: {exc}")
+        raise HTTPException(
+            status_code=404, detail=f"source template not found: {exc}"
+        ) from exc
     # The fork's target id must not collide with a builtin.
     if body.new_template_id in reg.builtin_ids():
         raise HTTPException(
@@ -279,7 +280,7 @@ async def fork_template(
             yaml_body=source_yaml,
         )
     except CustomTemplateAlreadyExists as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     await reg.refresh_custom()
     return view.to_dict()

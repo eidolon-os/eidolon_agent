@@ -17,7 +17,6 @@ from eidolon_agent.core.ports.long_tasks import LongTaskQueueFullError
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.long_task import LongTaskRecord, LongTaskStatus
 from eidolon_agent.core.types.topics import Topics
-from eidolon_agent.infra.persistence.long_task_store import SqlLongTaskStore
 
 # Longest fallback report spoken aloud when no TTS summary was produced — the
 # raw result text is truncated so the companion never reads a wall of text.
@@ -138,6 +137,74 @@ class LongTaskResultSummarizerPort(Protocol):
         ...
 
 
+class LongTaskStorePort(Protocol):
+    async def accept(self, record: LongTaskRecord) -> None:
+        ...
+
+    async def mark_failed(
+        self,
+        task_id: str,
+        *,
+        error_code: str,
+        error_message: str,
+        error_payload: dict | None = None,
+        status: LongTaskStatus = LongTaskStatus.FAILED,
+    ) -> LongTaskRecord | None:
+        ...
+
+    async def mark_queued(
+        self,
+        task_id: str,
+        *,
+        worker_id: str,
+        lease_until: datetime | None = None,
+    ) -> LongTaskRecord | None:
+        ...
+
+    async def find_mementos_session_id(self, session_key: str) -> str | None:
+        ...
+
+    async def attach_mementos_run(
+        self,
+        task_id: str,
+        *,
+        mementos_session_id: str | None = None,
+        mementos_conversation_id: str | None = None,
+        mementos_run_id: str | None = None,
+        latest_seq: int | None = None,
+        workspace_dir: str | None = None,
+        external_status: str | None = None,
+    ) -> LongTaskRecord | None:
+        ...
+
+    async def touch_poll(
+        self,
+        task_id: str,
+        *,
+        latest_seq: int | None = None,
+        external_status: str | None = None,
+    ) -> LongTaskRecord | None:
+        ...
+
+    async def complete(
+        self,
+        task_id: str,
+        *,
+        result_text: str | None = None,
+        result_payload: dict | None = None,
+        artifact_paths: list[str] | None = None,
+    ) -> LongTaskRecord | None:
+        ...
+
+    async def set_result_tts_summary(
+        self, task_id: str, summary: str
+    ) -> LongTaskRecord | None:
+        ...
+
+    async def claim_callback_delivery(self, task_id: str, *, subject: str) -> bool:
+        ...
+
+
 class MementosLongTaskWorker:
     """Fast submitter plus background Mementos executor.
 
@@ -149,7 +216,7 @@ class MementosLongTaskWorker:
     def __init__(
         self,
         *,
-        store: SqlLongTaskStore,
+        store: LongTaskStorePort,
         client: MementosHttpClient,
         config: MementosWorkerConfig | None = None,
         result_summarizer: LongTaskResultSummarizerPort | None = None,

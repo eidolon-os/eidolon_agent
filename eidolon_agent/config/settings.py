@@ -115,15 +115,6 @@ class MemorySettings(BaseModel):
     recall_timeout_s: float = 0.2  # eidolon-memory has a 300ms hard budget
 
 
-class SqliteSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    path: Path = Path("eidolon_agent.sqlite3")
-    enable_wal: bool = True
-    busy_timeout_ms: int = 5000
-    journal_synchronous: Literal["NORMAL", "FULL"] = "NORMAL"
-
-
 class LLMModelConfig(BaseModel):
     """One model entry. ``name`` uses LiteLLM convention: ``gpt-4o-mini``,
     ``claude-3-5-sonnet-latest``, ``ollama/llama3``, etc.
@@ -331,7 +322,6 @@ class Settings(BaseSettings):
     http: HttpSettings = Field(default_factory=HttpSettings)
     nats: NatsSettings = Field(default_factory=NatsSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
-    sqlite: SqliteSettings = Field(default_factory=SqliteSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
     long_task: LongTaskSettings = Field(default_factory=LongTaskSettings)
     persona: PersonaSettings = Field(default_factory=PersonaSettings)

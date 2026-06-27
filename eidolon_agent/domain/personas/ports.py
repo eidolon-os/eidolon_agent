@@ -63,12 +63,11 @@ class PersonaAuditPort(Protocol):
 class PersonaInstanceStore(Protocol):
     """Persistence boundary for per-user persona instance copies.
 
-    Two implementations exist:
+    Implementations include:
       * ``YamlPersonaInstanceStore`` (legacy / migration source) reads one
         YAML file per instance from ``settings.persona.instances_dir``.
-      * ``SqlPersonaInstanceStore`` (production) wraps a SQLAlchemy
-        ``async_sessionmaker`` and stores instances as JSON blobs in the
-        ``persona_instances`` table; supports single-TX evolution writes.
+      * ``EidolonDataPersonaInstanceStore`` (production) stores versioned
+        instances as persona genomes owned by ``eidolon_data``.
 
     Both implementations are async so the service layer can call them without
     knowing the backing store.

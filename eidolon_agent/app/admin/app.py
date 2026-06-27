@@ -35,7 +35,7 @@ def build_admin_app(
     custom_template_store=None,
     persona_template_registry=None,
     revocation_kv=None,
-    session_factory=None,
+    data_store=None,
     memory_routes=None,
     memory_discovery_refresher=None,
 ) -> FastAPI:
@@ -68,11 +68,7 @@ def build_admin_app(
     # in-memory cache stays consistent).
     app.state.custom_template_store = custom_template_store
     app.state.persona_template_registry = persona_template_registry
-    # Phase 34.A: conversations router queries SQLite for the read-only
-    # admin "what did this user talk about" view. None on early boot
-    # paths where SQLite isn't wired (tests); router-side guard returns
-    # 503 in that case rather than crashing.
-    app.state.session_factory = session_factory
+    app.state.data_store = data_store
     # Pairing guard: issuing a device token for an unprovisioned memory
     # user creates a chat session that can answer but will never recall or
     # persist long-term memory. Keep this state optional so router unit

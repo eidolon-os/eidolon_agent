@@ -1,13 +1,12 @@
 """YAML-backed PersonaInstanceStore implementation.
 
-Kept as the legacy / migration-source storage layer. Production uses
-``SqlPersonaInstanceStore`` (see ``infra/persistence/sql_persona_instance_store``)
-which provides atomic single-TX evolution writes; this YAML store remains so
-the migration script and self-contained tests can read existing files.
+Kept for local debugging and self-contained tests. Production uses the
+Eidolon Data persona adapter, which stores companion persona state as
+``persona_genomes``.
 
 The class is async on every method (returning fast since file I/O is small)
-so it satisfies the ``PersonaInstanceStore`` Protocol shared with the SQL
-implementation.
+so it satisfies the ``PersonaInstanceStore`` protocol shared by persistence
+adapters.
 """
 
 from __future__ import annotations

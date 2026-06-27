@@ -499,7 +499,7 @@ config/
 └── .env                   ← 本地密钥（git-ignored）
 scripts/
 ├── livekit_sim.py         ← 端到端模拟脚本
-├── replay_conversation.py ← 回放 SQLite 中的会话
+├── replay_conversation.py ← 回放 Eidolon Data 中的会话
 └── benchmark/             ← 性能基准（预留）
 tests/
 ├── conftest.py            ← 顶层 fixtures（event_bus / personas_service / turn_engine_factory）

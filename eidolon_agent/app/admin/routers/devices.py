@@ -11,19 +11,6 @@ from eidolon_sdk.biz.runtime import (
 )
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
-from sqlalchemy import delete, select
-
-from eidolon_agent.infra.persistence import (
-    ChatMessageRow,
-    ConversationRow,
-    DeviceRow,
-    EvolutionHistoryRow,
-    LongTaskRow,
-    PersonaEvolutionProposalRow,
-    PersonaInstanceRow,
-    PersonaObservationRow,
-    TurnRow,
-)
 
 router = APIRouter()
 
@@ -112,107 +99,30 @@ async def revoke_user_sessions(user_id: str, request: Request) -> RevokeUserSess
     status_code=status.HTTP_200_OK,
 )
 async def delete_user_data(user_id: str, request: Request) -> DeleteUserDataResponse:
-    """Hard-delete agent-owned persistent data for one user.
+    """Hard-delete Eidolon Data business rows for one owner/user.
 
-    Admin calls this from its user-delete cascade after it has removed
-    registered persona agents. This second pass removes data that is keyed
-    directly by ``user_id`` or may outlive an individual persona instance:
-    conversation history, long tasks, runtime device tokens, persona
-    observations/proposals, evolution history, and any orphan persona
-    instances not present in admin's agent registry.
+    Admin calls this from its user-delete cascade. Ownership and deletion order
+    live in ``eidolon_data`` so agent does not carry unified-schema SQL.
     """
-    session_factory = getattr(request.app.state, "session_factory", None)
-    if session_factory is None:
+    data_store = getattr(request.app.state, "data_store", None)
+    if data_store is None:
         raise HTTPException(
             status_code=503,
-            detail="session_factory not configured; cannot delete user data",
+            detail="data_store not configured; cannot delete user data",
         )
 
-    async with session_factory() as session, session.begin():
-        instance_ids = list(
-            (
-                await session.execute(
-                    select(PersonaInstanceRow.id).where(
-                        PersonaInstanceRow.user_id == user_id
-                    )
-                )
-            ).scalars()
-        )
-        conversation_ids = list(
-            (
-                await session.execute(
-                    select(ConversationRow.id).where(ConversationRow.user_id == user_id)
-                )
-            ).scalars()
-        )
-        turn_ids: list[str] = []
-        if conversation_ids:
-            turn_ids = list(
-                (
-                    await session.execute(
-                        select(TurnRow.id).where(
-                            TurnRow.conversation_id.in_(conversation_ids)
-                        )
-                    )
-                ).scalars()
-            )
+    counts = await data_store.user_data.delete_owner_data(user_id)
+    cleared_revocations = await _clear_user_revocations(request, user_id)
 
-        counts: dict[str, int] = {}
-        if turn_ids:
-            counts["chat_messages"] = _rowcount(
-                await session.execute(
-                    delete(ChatMessageRow).where(ChatMessageRow.turn_id.in_(turn_ids))
-                )
-            )
-        else:
-            counts["chat_messages"] = 0
-        if conversation_ids:
-            counts["turns"] = _rowcount(
-                await session.execute(
-                    delete(TurnRow).where(TurnRow.conversation_id.in_(conversation_ids))
-                )
-            )
-        else:
-            counts["turns"] = 0
-        counts["conversations"] = _rowcount(
-            await session.execute(
-                delete(ConversationRow).where(ConversationRow.user_id == user_id)
-            )
-        )
-        counts["long_tasks"] = _rowcount(
-            await session.execute(delete(LongTaskRow).where(LongTaskRow.user_id == user_id))
-        )
-        counts["runtime_devices"] = _rowcount(
-            await session.execute(delete(DeviceRow).where(DeviceRow.user_id == user_id))
-        )
-        counts["persona_observations"] = _rowcount(
-            await session.execute(
-                delete(PersonaObservationRow).where(PersonaObservationRow.user_id == user_id)
-            )
-        )
-        counts["persona_evolution_proposals"] = _rowcount(
-            await session.execute(
-                delete(PersonaEvolutionProposalRow).where(
-                    PersonaEvolutionProposalRow.user_id == user_id
-                )
-            )
-        )
-        if instance_ids:
-            counts["evolution_history"] = _rowcount(
-                await session.execute(
-                    delete(EvolutionHistoryRow).where(
-                        EvolutionHistoryRow.instance_id.in_(instance_ids)
-                    )
-                )
-            )
-        else:
-            counts["evolution_history"] = 0
-        counts["persona_instances"] = _rowcount(
-            await session.execute(
-                delete(PersonaInstanceRow).where(PersonaInstanceRow.user_id == user_id)
-            )
-        )
+    return DeleteUserDataResponse(
+        user_id=user_id,
+        deleted=True,
+        counts=counts,
+        revocation_keys_cleared=cleared_revocations,
+    )
 
+
+async def _clear_user_revocations(request: Request, user_id: str) -> int:
     cleared_revocations = 0
     kv = getattr(request.app.state, "revocation_kv", None)
     if kv is not None:
@@ -221,13 +131,7 @@ async def delete_user_data(user_id: str, request: Request) -> DeleteUserDataResp
             if delete_key is not None and await kv.get(key) is not None:
                 await delete_key(key)
                 cleared_revocations += 1
-
-    return DeleteUserDataResponse(
-        user_id=user_id,
-        deleted=True,
-        counts=counts,
-        revocation_keys_cleared=cleared_revocations,
-    )
+    return cleared_revocations
 
 
 @router.post("/devices/{device_id}/rotate", response_model=RotateDeviceTokenResponse)
@@ -262,7 +166,3 @@ def _bearer_token(request: Request) -> str:
     if scheme.lower() != "bearer" or not token.strip():
         raise HTTPException(status_code=401, detail="missing bearer token")
     return token.strip()
-
-
-def _rowcount(result) -> int:
-    return int(result.rowcount or 0)
