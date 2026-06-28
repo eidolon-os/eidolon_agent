@@ -28,9 +28,15 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from eidolon_agent.core.errors import NotFoundError
 from eidolon_agent.domain.personas.types import (
+    BehavioralKnob,
+    EvolutionState,
+    IdentityCore,
+    PersonaAssets,
     PersonaEvolutionProposal,
     PersonaEvolutionResult,
     PersonaInstance,
+    PersonaMetadata,
+    StyleCompiler,
     PersonaObservation,
     PersonaTemplate,
 )
@@ -236,7 +242,7 @@ class EidolonDataPersonaInstanceStore:
             row = await _get_current_genome(session, companion_id=instance_id)
             if row is None:
                 return None
-            instance = _genome_row_to_instance(row)
+            instance = _genome_row_to_instance(row, owner_id=user_id)
             if instance.tenant_id != tenant_id or instance.user_id != user_id:
                 return None
             return instance
@@ -713,8 +719,95 @@ def _instance_source_json(instance: PersonaInstance) -> dict[str, Any]:
     }
 
 
-def _genome_row_to_instance(row: PersonaGenomeRow) -> PersonaInstance:
-    return PersonaInstance.model_validate(row.genome_json[_INSTANCE_KEY])
+def _genome_row_to_instance(
+    row: PersonaGenomeRow,
+    *,
+    owner_id: str | None = None,
+) -> PersonaInstance:
+    genome_json = row.genome_json or {}
+    if _INSTANCE_KEY in genome_json:
+        return PersonaInstance.model_validate(genome_json[_INSTANCE_KEY])
+
+    identity = genome_json.get("identity") if isinstance(genome_json.get("identity"), dict) else {}
+    style = genome_json.get("style") if isinstance(genome_json.get("style"), dict) else {}
+    boundaries = genome_json.get("boundaries") if isinstance(genome_json.get("boundaries"), dict) else {}
+
+    name = str(identity.get("name") or row.companion_id)
+    archetype = str(identity.get("archetype") or "companion")
+    prompt = (row.prompt_markdown or "").strip()
+    style_lines: list[str] = []
+    if prompt:
+        style_lines.append(prompt)
+    tone = style.get("tone")
+    if tone:
+        style_lines.append(f"Tone: {tone}")
+    initiative = style.get("initiative")
+    if initiative:
+        style_lines.append(f"Initiative: {initiative}")
+
+    values = _string_tuple(identity.get("values"))
+    rules = _string_tuple(boundaries.get("rules") or boundaries.get("unbreakable_rules"))
+    taboos = _string_tuple(boundaries.get("taboos"))
+    now = datetime.now(timezone.utc)
+    return PersonaInstance(
+        instance_id=row.companion_id,
+        tenant_id=owner_id or _owner_id_from_companion(row.companion_id),
+        user_id=owner_id or _owner_id_from_companion(row.companion_id),
+        origin_template_id=row.genome_id,
+        origin_template_revision=row.version,
+        overlay_version=row.version,
+        created_at=row.created_at or now,
+        updated_at=row.updated_at or now,
+        metadata=PersonaMetadata(
+            template_id=row.genome_id,
+            template_revision=row.version,
+            archetype=archetype,
+            name=name,
+            description=str(identity.get("description") or ""),
+        ),
+        identity_core=IdentityCore(
+            base_pronouns=str(identity.get("pronouns") or "她"),
+            values=values,
+            unbreakable_rules=rules,
+            taboos=taboos,
+        ),
+        behavioral_knobs={
+            "warmth": BehavioralKnob(
+                current=_knob_value(style.get("warmth"), default=0.65)
+            ),
+            "initiative": BehavioralKnob(
+                current=_knob_value(style.get("initiative_level"), default=0.5)
+            ),
+        },
+        style_compiler=StyleCompiler(base_instructions=tuple(style_lines)),
+        evolution_state=EvolutionState(),
+        assets=PersonaAssets(),
+    )
+
+
+def _string_tuple(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,) if value else ()
+    if isinstance(value, list | tuple):
+        return tuple(str(item) for item in value if str(item))
+    return (str(value),)
+
+
+def _knob_value(value: Any, *, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return min(1.0, max(0.0, parsed))
+
+
+def _owner_id_from_companion(companion_id: str) -> str:
+    parts = companion_id.split(":")
+    if len(parts) >= 3 and parts[0] == "c":
+        return parts[1]
+    return companion_id
 
 
 def _event_row(

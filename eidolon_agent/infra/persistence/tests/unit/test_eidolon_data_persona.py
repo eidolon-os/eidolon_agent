@@ -68,6 +68,38 @@ async def test_persona_instance_store_uses_persona_genomes(
 
 
 @pytest.mark.asyncio
+async def test_persona_instance_store_loads_owner_workspace_genome(
+    data_store: DataStore,
+) -> None:
+    await data_store.owner_service.create_owner(
+        owner_id="benchmark",
+        display_name="Benchmark",
+    )
+    await data_store.companion_workspace.initialize_workspace(
+        owner_id="benchmark",
+        companion_id="test",
+        companion_display_name="Test Companion",
+        genome_id="g:benchmark:default:v1",
+        genome_json={
+            "identity": {"name": "Test", "archetype": "companion"},
+            "style": {"tone": "warm", "initiative": "balanced"},
+        },
+        prompt_markdown="# Test\n\nReply warmly.",
+        realm_id="r:benchmark:default",
+    )
+
+    store = EidolonDataPersonaInstanceStore(data_store)
+    loaded = await store.load("benchmark", "benchmark", "test")
+
+    assert loaded.instance_id == "test"
+    assert loaded.tenant_id == "benchmark"
+    assert loaded.user_id == "benchmark"
+    assert loaded.origin_template_id == "g:benchmark:default:v1"
+    assert loaded.metadata.name == "Test"
+    assert any("# Test" in item for item in loaded.style_compiler.base_instructions)
+
+
+@pytest.mark.asyncio
 async def test_persona_instance_create_is_idempotent_under_concurrent_first_writes(
     data_store: DataStore,
     canonical_template_registry,

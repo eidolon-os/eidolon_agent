@@ -81,7 +81,6 @@ class AgentRegistry:
             inst = self._instances.get(key)
             if inst is not None:
                 return inst
-            self.get_template(resolved_genome_id)
             inst = AgentInstance(
                 owner_id=owner_id,
                 companion_id=companion_id,

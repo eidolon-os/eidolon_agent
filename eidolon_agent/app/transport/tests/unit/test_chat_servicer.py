@@ -30,10 +30,11 @@ pytestmark = pytest.mark.unit
 
 @dataclass
 class _StubIdentity:
-    tenant_id: str = "t"
-    user_id: str = "alice"
+    owner_id: str = "owner-1"
+    companion_id: str = "companion-1"
+    memory_realm_id: str = "realm-1"
+    genome_id: str = "genome-1"
     device_id: str | None = "dev-1"
-    default_template_id: str | None = None
 
 
 def _make_context() -> MagicMock:
@@ -56,6 +57,14 @@ def _scripted_agent(events):
     return agent
 
 
+def _stub_instance(agent):
+    return SimpleNamespace(
+        companion_id="companion-1",
+        genome_id="genome-1",
+        agent=agent,
+    )
+
+
 # ---- ExchangePairingCode --------------------------------------------------
 
 
@@ -65,9 +74,10 @@ async def test_exchange_pairing_code_happy_path() -> None:
         return_value=SimpleNamespace(
             device_id="dev-x",
             token="JWT",
-            tenant_id="t",
-            user_id="alice",
-            default_template_id="tpl",
+            owner_id="owner-1",
+            companion_id="companion-1",
+            memory_realm_id="realm-1",
+            genome_id="genome-1",
             expires_at=datetime(2030, 1, 1, tzinfo=timezone.utc),
         )
     )
@@ -83,7 +93,10 @@ async def test_exchange_pairing_code_happy_path() -> None:
     )
     assert resp.device_id == "dev-x"
     assert resp.device_token == "JWT"
-    assert resp.default_template_id == "tpl"
+    assert resp.owner_id == "owner-1"
+    assert resp.companion_id == "companion-1"
+    assert resp.memory_realm_id == "realm-1"
+    assert resp.genome_id == "genome-1"
 
 
 async def test_exchange_pairing_code_unknown_aborts_unauth() -> None:
@@ -123,9 +136,7 @@ async def test_chat_once_returns_assembled_assistant_text() -> None:
     ]
     registry = MagicMock()
     registry.resolve_for_caller = AsyncMock(
-        return_value=SimpleNamespace(
-            instance_id="inst-1", agent=_scripted_agent(events)
-        )
+        return_value=_stub_instance(_scripted_agent(events))
     )
     svc = EidolonAgentServicer(
         agent_registry=registry, pairing=MagicMock(),
@@ -205,7 +216,7 @@ async def test_chat_cancels_active_turn_when_context_is_cancelled() -> None:
 
     registry = MagicMock()
     registry.resolve_for_caller = AsyncMock(
-        return_value=SimpleNamespace(instance_id="inst-1", agent=agent)
+        return_value=_stub_instance(agent)
     )
     svc = EidolonAgentServicer(
         agent_registry=registry, pairing=MagicMock(),
@@ -277,7 +288,7 @@ async def test_chat_does_not_cancel_active_turn_when_context_is_done_but_not_can
 
     registry = MagicMock()
     registry.resolve_for_caller = AsyncMock(
-        return_value=SimpleNamespace(instance_id="inst-1", agent=agent)
+        return_value=_stub_instance(agent)
     )
     svc = EidolonAgentServicer(
         agent_registry=registry, pairing=MagicMock(),
@@ -319,7 +330,7 @@ async def test_chat_start_inline_realtime_reaches_turn_input() -> None:
     agent.run_turn = _turn
     registry = MagicMock()
     registry.resolve_for_caller = AsyncMock(
-        return_value=SimpleNamespace(instance_id="inst-1", agent=agent)
+        return_value=_stub_instance(agent)
     )
     signals = MagicMock()
     signals.recent = AsyncMock(return_value=[])
@@ -372,7 +383,7 @@ async def test_chat_fuses_recent_signals_when_start_has_no_realtime() -> None:
     agent.run_turn = _turn
     registry = MagicMock()
     registry.resolve_for_caller = AsyncMock(
-        return_value=SimpleNamespace(instance_id="inst-1", agent=agent)
+        return_value=_stub_instance(agent)
     )
     now = datetime.now(timezone.utc)
     signals = MagicMock()
