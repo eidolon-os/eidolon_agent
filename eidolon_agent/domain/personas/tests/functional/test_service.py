@@ -48,15 +48,15 @@ async def test_all_builtin_templates_compile_with_medium_length_style(personas_s
     for summary in summaries:
         instance_id = f"i-{summary.template_id}"
         await personas_service.create_instance(
-            tenant_id="t",
-            user_id="u",
+            tenant_id="owner",
+            user_id="owner",
             instance_id=instance_id,
             template_id=summary.template_id,
         )
         compiled = await personas_service.compile_prompt(
-            tenant_id="t",
-            user_id="u",
-            instance_id=instance_id,
+            owner_id="owner",
+            companion_id=instance_id,
+            genome_id=summary.template_id,
             user_text="今天有点累",
         )
         assert "默认回复保持中等长度" in compiled.system_prompt
@@ -98,15 +98,15 @@ async def test_instance_is_full_copy(canonical_template_registry, tmp_path):
 @pytest.mark.asyncio
 async def test_compile_prompt_uses_style_mapping(personas_service):
     await personas_service.create_instance(
-        tenant_id="t",
-        user_id="u",
+        tenant_id="owner",
+        user_id="owner",
         instance_id="i",
         template_id="caretaker_jiezhi",
     )
     compiled = await personas_service.compile_prompt(
-        tenant_id="t",
-        user_id="u",
-        instance_id="i",
+        owner_id="owner",
+        companion_id="i",
+        genome_id="caretaker_jiezhi",
         user_text="你好",
     )
     assert "你是「解之」" in compiled.system_prompt
@@ -119,8 +119,8 @@ async def test_compile_prompt_uses_style_mapping(personas_service):
 @pytest.mark.asyncio
 async def test_get_snapshot_and_compile_prompt_include_runtime_state(personas_service):
     await personas_service.create_instance(
-        tenant_id="t",
-        user_id="u",
+        tenant_id="owner",
+        user_id="owner",
         instance_id="i-snapshot",
         template_id="caretaker_jiezhi",
     )
@@ -130,15 +130,15 @@ async def test_get_snapshot_and_compile_prompt_include_runtime_state(personas_se
         emotion_delta=0.7,
     )
     snapshot = await personas_service.get_snapshot(
-        tenant_id="t",
-        user_id="u",
+        tenant_id="owner",
+        user_id="owner",
         instance_id="i-snapshot",
     )
     assert "心情不错" in snapshot.prompt_hint
     compiled = await personas_service.compile_prompt(
-        tenant_id="t",
-        user_id="u",
-        instance_id="i-snapshot",
+        owner_id="owner",
+        companion_id="i-snapshot",
+        genome_id="caretaker_jiezhi",
         user_text="你好",
     )
     assert "当前人格状态：心情不错" in compiled.system_prompt
@@ -147,8 +147,8 @@ async def test_get_snapshot_and_compile_prompt_include_runtime_state(personas_se
 @pytest.mark.asyncio
 async def test_memory_adapter_relation_policy(personas_service):
     await personas_service.create_instance(
-        tenant_id="t",
-        user_id="u",
+        tenant_id="owner",
+        user_id="owner",
         instance_id="i-memory",
         template_id="caretaker_jiezhi",
     )
@@ -157,8 +157,8 @@ async def test_memory_adapter_relation_policy(personas_service):
         metadata={"relation_type": "user_stressors", "emotion": "frustrated"},
     )
     result = await personas_service.mock_memory_trigger(
-        tenant_id="t",
-        user_id="u",
+        tenant_id="owner",
+        user_id="owner",
         instance_id="i-memory",
         user_text="又被老板骂了",
         memory_hits=[hit],
@@ -456,29 +456,28 @@ async def test_submit_interaction_auto_evolves_without_legacy_double_apply(
         proposal_repo=proposals,
     )
     await service.create_instance(
-        tenant_id="t",
-        user_id="u",
+        tenant_id="owner",
+        user_id="owner",
         instance_id="i-auto-interaction",
         template_id="caretaker_jiezhi",
     )
     before = await service.get_instance(
-        tenant_id="t",
-        user_id="u",
+        tenant_id="owner",
+        user_id="owner",
         instance_id="i-auto-interaction",
     )
     await service.submit_interaction(
         PersonaInteractionEvent(
-            tenant_id="t",
-            user_id="u",
-            instance_id="i-auto-interaction",
-            template_id="caretaker_jiezhi",
+            owner_id="owner",
+            companion_id="i-auto-interaction",
+            genome_id="caretaker_jiezhi",
             kind="positive_feedback_received",
             payload={"confidence": 0.9, "strength": 0.8},
         )
     )
     immediate = await service.get_instance(
-        tenant_id="t",
-        user_id="u",
+        tenant_id="owner",
+        user_id="owner",
         instance_id="i-auto-interaction",
     )
     assert (
@@ -489,8 +488,8 @@ async def test_submit_interaction_auto_evolves_without_legacy_double_apply(
     await service._worker.drain_once()
     await service.drain_evolution_queue()
     after = await service.get_instance(
-        tenant_id="t",
-        user_id="u",
+        tenant_id="owner",
+        user_id="owner",
         instance_id="i-auto-interaction",
     )
     assert after.behavioral_knobs["intimacy"].current == pytest.approx(

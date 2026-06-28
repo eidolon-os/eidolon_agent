@@ -16,22 +16,22 @@ async def test_registry_resolves_dynamic_data_genome() -> None:
 
     registry = AgentRegistry(
         instance_factory=_factory,
-        default_genome_id="g:default",
+        default_genome_id="g_default",
     )
-    registry.register_template(AgentTemplate(genome_id="g:default", name="Default"))
+    registry.register_template(AgentTemplate(genome_id="g_default", name="Default"))
 
     first = await registry.resolve_for_caller(
         owner_id="benchmark",
         companion_id="test",
-        genome_id="g:benchmark:default:v1",
+        genome_id="g_benchmark_default_v1",
     )
     second = await registry.resolve_for_caller(
         owner_id="benchmark",
         companion_id="test",
-        genome_id="g:benchmark:default:v1",
+        genome_id="g_benchmark_default_v1",
     )
 
     assert first is second
     assert first.companion_id == "test"
-    assert first.genome_id == "g:benchmark:default:v1"
+    assert first.genome_id == "g_benchmark_default_v1"
     assert len(created) == 1

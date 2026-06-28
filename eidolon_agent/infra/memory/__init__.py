@@ -6,6 +6,5 @@ Explicit KG mutations go through ``eidolon.memory.cmd.<memory_space_token>``.
 """
 
 from eidolon_agent.infra.memory.port_adapter import EidolonMemoryPort
-from eidolon_agent.infra.memory.strategy import MemoryStrategy
 
-__all__ = ["EidolonMemoryPort", "MemoryStrategy"]
+__all__ = ["EidolonMemoryPort"]

@@ -285,7 +285,6 @@ JetStream 持久化前缀：`agent.memory.*` / `agent.emotion.*` / `agent.evolut
 | `EIDOLON_CONFIG` | 动态配置 |
 | `EIDOLON_FLAGS` | 功能开关 |
 | `EIDOLON_EXP` | A/B 实验 |
-| `PAIRING_CODES` | 配对码（预留，目前 PairingCoordinator 在内存） |
 | `DEVICE_REVOCATIONS` | 设备吊销名单（RuntimeTokenVerifier 查询） |
 | `EIDOLON_TOOL_IDEMP` | 工具幂等性 cache（ToolDispatcher 用） |
 
@@ -296,7 +295,7 @@ JetStream 持久化前缀：`agent.memory.*` / `agent.emotion.*` / `agent.evolut
 详见 [`eidolon_agent/domain/personas/README.md`](eidolon_agent/domain/personas/README.md)。要点：
 
 - **模板** 是只读 YAML（`domain/personas/templates/*.yaml`），定义 identity_core + 行为旋钮 (knobs)。
-- **实例** 是按 (tenant, user) 的拷贝，保存在 `~/eidolon/personas/instances/<t>/<u>/<inst_id>.yaml`。
+- **实例** 是 companion 的运行时 persona/genome 快照；生产环境写入 `eidolon_data.persona_genomes`。
 - **演化** 异步：TurnEngine yield DONE 后 `submit_interaction` 入队，`PersonaEvolutionWorker` 后台消费、按规则微调 knob、持久化到 SQLite + YAML。
 - **运行时状态**（mood/energy/attention）不写 YAML，长在内存里 + 周期 snapshot。
 - **演化护栏**：identity_core 不可演化；knob 有 min/max + step_limit + cooldown。
@@ -314,32 +313,17 @@ JetStream 持久化前缀：`agent.memory.*` / `agent.emotion.*` / `agent.evolut
 ```proto
 service EidolonAgent {
   rpc Chat(stream ChatRequest) returns (stream TurnEvent);
-  rpc ChatOnce(ChatOnceRequest) returns (ChatOnceResponse);
   rpc PushSignal(SignalRequest) returns (Ack);
   rpc SubscribeProactive(SubscribeRequest) returns (stream ProactiveEvent);
-  rpc ExchangePairingCode(ExchangeRequest) returns (ExchangeResponse);   // 唯一公开 RPC
 }
 ```
 
-`AuthInterceptor` 在每个 RPC 上校验 `Bearer <device_token>`（JWT，HS256），`ExchangePairingCode` 例外。
+`AuthInterceptor` 在每个 RPC 上校验 `Bearer <runtime_token>`（JWT，HS256）。Token 必须携带
+`RuntimeIdentity(owner_id, companion_id, device_id, memory_realm_id, genome_id)`。
 
-**外部客户端（如 eidolon_channel）必须先拿到 device_token**，不能把占位字符串当 token 用。最快流程：
-
-```bash
-# 1. 确保 agent 已起（admin :8081 + gRPC :45051）
-curl -s http://127.0.0.1:8081/api/docs >/dev/null
-
-# 2. 在 eidolon_channel 仓库签发 JWT（30 天有效）
-cd ../eidolon_channel
-.venv/bin/python scripts/provision_eidolon_token.py \
-  --tenant-id demo --user-id alice
-
-# 3. 将 stdout 的 JWT 写入 eidolon_channel/config/.env：
-#    REMOTE_AGENT_RPC_DEVICE_TOKEN=<粘贴>
-# 4. 重启 LiveKit worker
-```
-
-`provision_eidolon_token.py` 会调用 admin `POST /api/admin/pairing/codes`，再用公开 RPC `ExchangePairingCode` 换 token。`PAIRING_JWT_SECRET` 为空时 agent 会把密钥持久化在 `~/eidolon/run/jwt-secret`；重启 agent 后旧 token 仍有效，除非你删了该文件。
+Agent 是 companion runtime，不负责 owner 注册、device pairing、或 companion 选择。外部调用方
+必须在进入 Agent 前完成 device -> companion 绑定，并重新签发包含具体 companion/genome/realm 的
+runtime token。对话热路径不会再按 owner 查询 active companion。
 
 ### HTTP（`:8180`）—— 健康探针
 
@@ -347,12 +331,12 @@ cd ../eidolon_channel
 
 ### Admin HTTP（`:8081`）—— 控制面
 
-- `POST /api/admin/pairing/codes` —— 签发配对码
-- `GET  /api/admin/pairing/codes/{code}.png` —— 配对码 QR
 - `GET  /api/admin/devices` —— 设备列表
 - `DELETE /api/admin/devices/{id}` —— 吊销设备
+- `POST /api/admin/owners/{owner_id}/revoke-sessions` —— 吊销 owner 下 runtime token
 - `GET  /api/admin/personas/templates` —— 模板列表
-- `POST /api/admin/chat/test` —— 完整 gRPC 链路冒烟 SSE 端点
+- `POST /api/admin/chat/test` —— owner/companion runtime chat dogfood 端点
+- `GET  /api/admin/conversations/turns` —— 对话/消息/turn 检查入口
 
 ---
 

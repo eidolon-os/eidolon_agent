@@ -804,6 +804,8 @@ def _knob_value(value: Any, *, default: float) -> float:
 
 
 def _owner_id_from_companion(companion_id: str) -> str:
+    if companion_id.startswith("c_") and "_" in companion_id.removeprefix("c_"):
+        return companion_id.removeprefix("c_").rsplit("_", 1)[0]
     parts = companion_id.split(":")
     if len(parts) >= 3 and parts[0] == "c":
         return parts[1]
@@ -819,7 +821,7 @@ def _event_row(
     payload_json: dict[str, Any],
 ) -> EventRow:
     return EventRow(
-        event_id=f"evt-{uuid.uuid4().hex}",
+        event_id=f"evt_{uuid.uuid4().hex}",
         owner_id=owner_id,
         subject_type=subject_type,
         subject_id=subject_id,

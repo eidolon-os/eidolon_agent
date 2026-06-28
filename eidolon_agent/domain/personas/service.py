@@ -14,7 +14,7 @@ from eidolon_agent.core.errors import (
     NotFoundError,
     ValidationError,
 )
-from eidolon_agent.core.types.memory import MemoryHit, MemoryQueryPlan
+from eidolon_agent.core.types.memory import MemoryHit
 from eidolon_agent.domain.personas.auto_evolution import PersonaAutoEvolutionPolicy
 from eidolon_agent.domain.personas.compiler import PersonaCompiler
 from eidolon_agent.domain.personas.evolution import PersonaEvolutionEngine
@@ -29,7 +29,6 @@ from eidolon_agent.domain.personas.ports import (
     PersonaEvolutionRepository,
     PersonaInstanceStore,
     PersonaLLMPort,
-    PersonaMemoryPort,
     PersonaObservationRepository,
 )
 from eidolon_agent.domain.personas.reflection import PersonaReflectionEngine
@@ -68,7 +67,7 @@ class PersonasService:
         runtime_state: PersonaRuntimeStateStore | None = None,
         signal_adapter: PersonaSignalAdapter | None = None,
         worker: PersonaEvolutionWorker | None = None,
-        memory_port: PersonaMemoryPort | None = None,
+        memory_port: object | None = None,
         llm_port: PersonaLLMPort | None = None,
         event_port: PersonaEventPort | None = None,
         audit_port: PersonaAuditPort | None = None,
@@ -86,7 +85,13 @@ class PersonasService:
         self._evolution = evolution or PersonaEvolutionEngine()
         self._runtime = runtime_state or PersonaRuntimeStateStore()
         self._signal_adapter = signal_adapter or PersonaSignalAdapter()
-        self._memory = memory_port
+        # Persona compilation is intentionally memory-passive in the
+        # owner/companion runtime model. ContextCompiler owns recall with the
+        # full RuntimeIdentity, especially memory_realm_id and device_id.
+        # ``memory_port`` remains accepted for older tests/wiring, but the
+        # service only consumes explicit ``dry_run_memory`` for persona
+        # evolution previews.
+        del memory_port
         self._llm = llm_port
         self._events = event_port or NullPersonaEventPort()
         self._audit = audit_port or NullPersonaAuditPort()
@@ -95,7 +100,7 @@ class PersonasService:
         self._proposal_repo = proposal_repo
         self._reflection = reflection or PersonaReflectionEngine()
         self._auto_evolution = auto_evolution or PersonaAutoEvolutionPolicy()
-        self._memory_timeout_s = memory_timeout_s
+        del memory_timeout_s
         self._reflection_queue: asyncio.Queue[tuple[str, str, str]] = asyncio.Queue()
         self._reflection_pending: set[tuple[str, str, str]] = set()
         self._reflection_task: asyncio.Task | None = None
@@ -216,22 +221,6 @@ class PersonasService:
         if dry_run_memory is not None:
             hits = dry_run_memory
             formatted_context = "\n".join(hit.content for hit in hits)
-        elif self._memory is not None and user_text:
-            formatted_context, hits, degraded = await self._memory.recall_context(
-                owner_id=owner_id,
-                query=user_text,
-                companion_id=companion_id,
-                memory_realm_id=companion_id,
-                device_id=None,
-                plan=MemoryQueryPlan(
-                    episodic_query=user_text,
-                    semantic_query=user_text,
-                    episodic_k=3,
-                    semantic_k=5,
-                    voice=True,
-                ),
-                timeout_s=self._memory_timeout_s,
-            )
 
         adapted = self._memory_adapter.adapt(
             instance=instance,
@@ -380,10 +369,9 @@ class PersonasService:
         template_id: str | None = None,
     ) -> PersonaMockResult:
         compiled = await self.compile_prompt(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            instance_id=instance_id,
-            template_id=template_id,
+            owner_id=user_id,
+            companion_id=instance_id,
+            genome_id=template_id,
             user_text=user_text,
             dry_run_memory=memory_hits,
         )
@@ -801,7 +789,7 @@ async def build_default_personas_service(
     *,
     templates_dir: Path,
     instances_dir: Path,
-    memory_port: PersonaMemoryPort | None = None,
+    memory_port: object | None = None,
     llm_port: PersonaLLMPort | None = None,
     event_port: PersonaEventPort | None = None,
     audit_port: PersonaAuditPort | None = None,

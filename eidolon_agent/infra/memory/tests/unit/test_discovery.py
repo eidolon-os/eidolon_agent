@@ -68,8 +68,8 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
             },
             "memory_realms": [
                 {
-                    "memory_space_id": "r:benchmark:default",
-                    "memory_realm_id": "r:benchmark:default",
+                    "memory_space_id": "r_benchmark_default",
+                    "memory_realm_id": "r_benchmark_default",
                     "owner_id": "benchmark",
                     "companion_id": "mochi",
                     "enabled": True,
@@ -81,8 +81,8 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
                     "agent_reachable": True,
                 },
                 {
-                    "memory_space_id": "r:benchmark:disabled",
-                    "memory_realm_id": "r:benchmark:disabled",
+                    "memory_space_id": "r_benchmark_disabled",
+                    "memory_realm_id": "r_benchmark_disabled",
                     "owner_id": "benchmark",
                     "companion_id": "disabled",
                     "enabled": False,
@@ -90,8 +90,8 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
                     "agent_reachable": True,
                 },
                 {
-                    "memory_space_id": "r:benchmark:unreachable",
-                    "memory_realm_id": "r:benchmark:unreachable",
+                    "memory_space_id": "r_benchmark_unreachable",
+                    "memory_realm_id": "r_benchmark_unreachable",
                     "owner_id": "benchmark",
                     "companion_id": "unreachable",
                     "enabled": True,
@@ -105,24 +105,24 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
 
     await routes.replace_from_discovery(discovery)
 
-    alice = await routes.route_for("r:benchmark:default")
+    alice = await routes.route_for("r_benchmark_default")
     assert alice is not None
     assert alice.mcp_url == "http://127.0.0.1:8031/mcp"
     assert alice.bearer_token == "secret"
-    assert await routes.route_for("r:benchmark:disabled") is None
-    assert await routes.route_for("r:benchmark:unreachable") is None
-    bob_route, bob_reason = await routes.route_status_for("r:benchmark:disabled")
-    charlie_route, charlie_reason = await routes.route_status_for("r:benchmark:unreachable")
-    ghost_route, ghost_reason = await routes.route_status_for("r:benchmark:ghost")
+    assert await routes.route_for("r_benchmark_disabled") is None
+    assert await routes.route_for("r_benchmark_unreachable") is None
+    bob_route, bob_reason = await routes.route_status_for("r_benchmark_disabled")
+    charlie_route, charlie_reason = await routes.route_status_for("r_benchmark_unreachable")
+    ghost_route, ghost_reason = await routes.route_status_for("r_benchmark_ghost")
     assert bob_route is None and bob_reason == "memory_route_disabled"
     assert charlie_route is None and charlie_reason == "memory_route_unreachable"
     assert ghost_route is None and ghost_reason == "no_memory_route"
     assert await routes.endpoint_count() == 1
-    assert await routes.render_turn_subject("r:benchmark:default") == (
-        "mem.turn.b64_cjpiZW5jaG1hcms6ZGVmYXVsdA"
+    assert await routes.render_turn_subject("r_benchmark_default") == (
+        "mem.turn.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
     )
-    assert await routes.render_cmd_subject("r:benchmark:default") == (
-        "mem.cmd.b64_cjpiZW5jaG1hcms6ZGVmYXVsdA"
+    assert await routes.render_cmd_subject("r_benchmark_default") == (
+        "mem.cmd.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
     )
 
 
@@ -176,7 +176,7 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
     await pub.publish_turn(
         owner_id="benchmark",
         companion_id="test",
-        memory_realm_id="r:benchmark:default",
+        memory_realm_id="r_benchmark_default",
         device_id="admin-console",
         session_id="s1",
         turn_id="t1",
@@ -186,7 +186,7 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
     await pub.publish_kg_add(
         owner_id="benchmark",
         companion_id="test",
-        memory_realm_id="r:benchmark:default",
+        memory_realm_id="r_benchmark_default",
         subject="self",
         predicate="likes",
         object_="oolong",
@@ -194,7 +194,7 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
     await pub.publish_confirmed_fact(
         owner_id="benchmark",
         companion_id="test",
-        memory_realm_id="r:benchmark:default",
+        memory_realm_id="r_benchmark_default",
         device_id="admin-console",
         session_id="s1",
         text="用户 最终验证时间 2026-06-28 20:00",
@@ -206,20 +206,20 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
     cmd_event, cmd_persistent = bus.events[1]
     confirmed_event, confirmed_persistent = bus.events[2]
     assert turn_persistent is True
-    assert turn_event.subject == "turns.b64_cjpiZW5jaG1hcms6ZGVmYXVsdA"
+    assert turn_event.subject == "turns.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
     assert turn_event.payload["turn_id"] == "t1"
     assert turn_event.payload["context"]["owner_id"] == "benchmark"
     assert turn_event.payload["context"]["companion_id"] == "test"
-    assert turn_event.payload["context"]["memory_realm_id"] == "r:benchmark:default"
+    assert turn_event.payload["context"]["memory_realm_id"] == "r_benchmark_default"
     assert turn_event.payload["context"]["device_id"] == "admin-console"
     assert cmd_persistent is True
-    assert cmd_event.subject == "cmds.b64_cjpiZW5jaG1hcms6ZGVmYXVsdA"
+    assert cmd_event.subject == "cmds.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
     assert cmd_event.payload["kind"] == "kg_add_triple"
     assert cmd_event.payload["issuer"] == "agent"
     assert cmd_event.payload["request_id"]
     assert "command" not in cmd_event.payload
     assert confirmed_persistent is True
-    assert confirmed_event.subject == "cmds.b64_cjpiZW5jaG1hcms6ZGVmYXVsdA"
+    assert confirmed_event.subject == "cmds.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
     assert confirmed_event.payload["kind"] == "user_confirm_fact"
     assert confirmed_event.payload["issuer"] == "agent"
     assert confirmed_event.payload["text"] == "用户 最终验证时间 2026-06-28 20:00"
@@ -253,9 +253,9 @@ async def test_recall_context_calls_mcp_directly():
             assert name == "eidolon_memory_recall_context"
             assert arguments["context"]["owner_id"] == "benchmark"
             assert arguments["context"]["companion_id"] == "test"
-            assert arguments["context"]["memory_realm_id"] == "r:benchmark:default"
+            assert arguments["context"]["memory_realm_id"] == "r_benchmark_default"
             assert arguments["context"]["device_id"] == "admin-console"
-            assert arguments["context"]["memory_space_id"] == "r:benchmark:default"
+            assert arguments["context"]["memory_space_id"] == "r_benchmark_default"
             return {
                 "context": "铁锤是一只狗。",
                 "records": [
@@ -269,7 +269,7 @@ async def test_recall_context_calls_mcp_directly():
 
     class Pool:
         async def session_for(self, memory_space_id):
-            assert memory_space_id == "r:benchmark:default"
+            assert memory_space_id == "r_benchmark_default"
             return Session()
 
         async def close_all(self):
@@ -291,7 +291,7 @@ async def test_recall_context_calls_mcp_directly():
         plan=MemoryQueryPlan(semantic_k=3),
         timeout_s=1.0,
         companion_id="test",
-        memory_realm_id="r:benchmark:default",
+        memory_realm_id="r_benchmark_default",
         device_id="admin-console",
     )
 

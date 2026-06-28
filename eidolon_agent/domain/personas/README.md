@@ -1,8 +1,8 @@
 # Personas
 
-`eidolon_agent.domain.personas` is the persona subsystem: templates, per-user
-instance copies, runtime state, prompt compilation, memory consumption,
-signal interpretation, and asynchronous evolution.
+`eidolon_agent.domain.personas` is the persona subsystem: templates,
+per-companion instance copies, runtime state, prompt compilation, memory
+adaptation, signal interpretation, and asynchronous evolution.
 
 ## Boundary
 
@@ -10,10 +10,10 @@ Use `PersonasService` as the public facade. Application code should not reach
 into the registry, instance store, compiler, runtime state, memory adapter, or
 evolution worker directly.
 
-Templates are immutable base genomes. When a user binds a template, personas
-creates a full `PersonaInstance` copy. Future evolution changes only that
-instance copy. Short-lived mood, energy, and attention live in runtime state
-(in memory + periodic snapshot) and are not written into instance YAML.
+Templates are immutable base genomes. When a companion binds a template,
+personas creates a full `PersonaInstance` copy. Future evolution changes only
+that instance copy. Short-lived mood, energy, and attention live in runtime
+state and are not written into instance YAML.
 
 ## Runtime Data
 
@@ -28,7 +28,7 @@ eidolon_agent/domain/personas/
 User instance data defaults to:
 
 ```text
-~/eidolon/personas/instances/<tenant>/<user>/<instance_id>.yaml
+~/eidolon/personas/instances/<owner>/<owner>/<companion_id>.yaml
 ```
 
 The runtime path is configurable via `settings.persona.instances_dir`.
@@ -55,20 +55,17 @@ HTTP routers and tests:
 engine itself is gone — proactive triggers will come back via a NATS-driven
 worker when product needs them.)
 
-`compile_prompt` reads memory through `PersonaMemoryPort`, adapts recalled
-facts and graph relations through `PersonaMemoryAdapter`, then compiles the
-current knobs and runtime state into LLM-facing instructions. Note: when
-called from the `ContextCompiler` on the hot path, callers pass
-`dry_run_memory=[]` to skip the inner memory recall — memory is owned by the
-compiler, not by personas, to avoid double-fetch.
+`compile_prompt` is memory-passive. It adapts explicitly supplied
+`dry_run_memory` hits through `PersonaMemoryAdapter`, then compiles the current
+knobs and runtime state into LLM-facing instructions. Runtime recall is owned
+by `ContextCompiler`, because only that layer has the full
+`RuntimeIdentity(owner_id, companion_id, device_id, memory_realm_id, genome_id)`.
 
 ## Ports
 
 Personas depends on external infrastructure only through ports declared in
 `personas/ports.py`:
 
-- `PersonaMemoryPort` — memory recall (typically the same `EidolonMemoryPort`
-  instance from `infra/memory/`)
 - `PersonaLLMPort` — optional, for evolution-time summarisation
 - `PersonaEventPort` — publish `persona.overlay.updated` / `evolution.applied`
   events

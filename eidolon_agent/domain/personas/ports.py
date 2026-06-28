@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from eidolon_agent.core.types.memory import MemoryQueryPlan, MemoryRecallResult
 from eidolon_agent.domain.personas.types import (
     PersonaEvolutionProposal,
     PersonaEvolutionResult,
@@ -16,26 +15,6 @@ from eidolon_agent.domain.personas.types import (
     PersonaObservation,
     PersonaTemplate,
 )
-
-
-@runtime_checkable
-class PersonaMemoryPort(Protocol):
-    async def recall_context(
-        self,
-        user_id: str,
-        query: str,
-        *,
-        plan: MemoryQueryPlan,
-        timeout_s: float = 0.2,
-        tenant_id: str | None = None,
-        companion_id: str | None = None,
-        persona_id: str | None = None,
-        agent_id: str | None = None,
-        device_id: str | None = None,
-        instance_id: str | None = None,
-        session_id: str = "default",
-    ) -> MemoryRecallResult:
-        ...
 
 
 @runtime_checkable

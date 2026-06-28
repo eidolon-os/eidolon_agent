@@ -173,7 +173,7 @@ async def test_delete_owner_data_prefers_eidolon_data_store(tmp_path) -> None:
             companion_id="companion-a",
         )
         await store.events.append(
-            event_id="evt-a",
+            event_id="evt_a",
             owner_id="alice",
             subject_type="persona",
             subject_id="companion-a",

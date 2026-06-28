@@ -79,13 +79,13 @@ async def test_persona_instance_store_loads_owner_workspace_genome(
         owner_id="benchmark",
         companion_id="test",
         companion_display_name="Test Companion",
-        genome_id="g:benchmark:default:v1",
+        genome_id="g_benchmark_default_v1",
         genome_json={
             "identity": {"name": "Test", "archetype": "companion"},
             "style": {"tone": "warm", "initiative": "balanced"},
         },
         prompt_markdown="# Test\n\nReply warmly.",
-        realm_id="r:benchmark:default",
+        realm_id="r_benchmark_default",
     )
 
     store = EidolonDataPersonaInstanceStore(data_store)
@@ -94,7 +94,7 @@ async def test_persona_instance_store_loads_owner_workspace_genome(
     assert loaded.instance_id == "test"
     assert loaded.tenant_id == "benchmark"
     assert loaded.user_id == "benchmark"
-    assert loaded.origin_template_id == "g:benchmark:default:v1"
+    assert loaded.origin_template_id == "g_benchmark_default_v1"
     assert loaded.metadata.name == "Test"
     assert any("# Test" in item for item in loaded.style_compiler.base_instructions)
 

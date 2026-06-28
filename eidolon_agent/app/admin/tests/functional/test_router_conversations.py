@@ -51,8 +51,8 @@ async def _seed_turn(
     """Write the same shape the real chat path emits."""
     del seq
     companion_id = companion_id or f"{owner_id}-test"
-    genome_id = f"g:{owner_id}:default:v1"
-    realm_id = f"r:{owner_id}:default"
+    genome_id = f"g_{owner_id}_default_v1"
+    realm_id = f"r_{owner_id}_default"
     device_id = f"device-{owner_id}"
     if await store.companions.get(companion_id) is None:
         await store.owner_service.create_owner(owner_id=owner_id, display_name=owner_id)
@@ -279,7 +279,7 @@ async def test_get_turn_returns_messages_in_order(tmp_path) -> None:
     assert body["turn_id"] == "t-1"
     assert body["owner_id"] == "manson"
     assert body["companion_id"] == "manson-test"
-    assert body["memory_realm_id"] == "r:manson:default"
+    assert body["memory_realm_id"] == "r_manson_default"
     assert body["latency_first_delta_ms"] == 120
     assert body["turn_trace"]["schema_version"] == "turn_trace.v1"
     assert body["turn_trace"]["boundary"] == "eidolon_agent.brain"
