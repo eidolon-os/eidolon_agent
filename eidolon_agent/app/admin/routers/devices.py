@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from eidolon_sdk.biz.runtime import (
+    owner_revocation_keys,
     RuntimeTokenRevokedError,
     RuntimeUnauthenticatedError,
-    user_revocation_keys,
 )
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
@@ -17,8 +17,8 @@ router = APIRouter()
 
 class DeviceInfo(BaseModel):
     id: str
-    tenant_id: str
-    user_id: str
+    owner_id: str
+    companion_id: str | None = None
     name: str | None
     revoked: bool
 
@@ -41,41 +41,25 @@ async def revoke_device(device_id: str, request: Request):
     return None
 
 
-class RevokeUserSessionsResponse(BaseModel):
-    user_id: str
+class RevokeOwnerSessionsResponse(BaseModel):
+    owner_id: str
     revoked: bool
 
 
-class DeleteUserDataResponse(BaseModel):
-    user_id: str
+class DeleteOwnerDataResponse(BaseModel):
+    owner_id: str
     deleted: bool
     counts: dict[str, int]
     revocation_keys_cleared: int = 0
 
 
 @router.post(
-    "/users/{user_id}/revoke-sessions",
-    response_model=RevokeUserSessionsResponse,
+    "/owners/{owner_id}/revoke-sessions",
+    response_model=RevokeOwnerSessionsResponse,
     status_code=status.HTTP_200_OK,
 )
-async def revoke_user_sessions(user_id: str, request: Request) -> RevokeUserSessionsResponse:
-    """Phase 33.B1: invalidate ALL active runtime tokens for a user.
-
-    Writes ``revoked.user.<user_id>`` to the ``DEVICE_REVOCATIONS`` KV
-    bucket. ``PairingTokenVerifier.verify`` checks this key on every
-    gRPC call — so the next chat() turn for any session of this user
-    fails with ``RuntimeTokenRevokedError`` → LK session aborts → web client
-    sees ``transport.sidecar_unavailable`` and must re-connect (which
-    will fail at hub /api/config 404 if admin also disabled the user).
-
-    Use cases:
-      - Operator disables a user account in admin UI; want active calls
-        cut off immediately, not at next token expiry (24h).
-      - Suspected token leak; revoke before rotating the secret.
-
-    The bucket entry has no TTL — operator must explicitly delete it
-    to un-revoke the user. (TODO: add a DELETE endpoint for that.)
-    """
+async def revoke_owner_sessions(owner_id: str, request: Request) -> RevokeOwnerSessionsResponse:
+    """Invalidate all active runtime tokens for an owner boundary."""
     kv = getattr(request.app.state, "revocation_kv", None)
     if kv is None:
         raise HTTPException(
@@ -88,20 +72,20 @@ async def revoke_user_sessions(user_id: str, request: Request) -> RevokeUserSess
     # Value can be anything truthy — verifier just checks key existence.
     # Store the timestamp for ops-side audit ("when was this revoked").
     timestamp = datetime.now(timezone.utc).isoformat()
-    for key in user_revocation_keys(user_id):
+    for key in owner_revocation_keys(owner_id):
         await kv.put(key, timestamp.encode("utf-8"))
-    return RevokeUserSessionsResponse(user_id=user_id, revoked=True)
+    return RevokeOwnerSessionsResponse(owner_id=owner_id, revoked=True)
 
 
 @router.delete(
-    "/users/{user_id}/data",
-    response_model=DeleteUserDataResponse,
+    "/owners/{owner_id}/data",
+    response_model=DeleteOwnerDataResponse,
     status_code=status.HTTP_200_OK,
 )
-async def delete_user_data(user_id: str, request: Request) -> DeleteUserDataResponse:
-    """Hard-delete Eidolon Data business rows for one owner/user.
+async def delete_owner_data(owner_id: str, request: Request) -> DeleteOwnerDataResponse:
+    """Hard-delete Eidolon Data business rows for one owner.
 
-    Admin calls this from its user-delete cascade. Ownership and deletion order
+    Admin calls this from its owner-delete cascade. Ownership and deletion order
     live in ``eidolon_data`` so agent does not carry unified-schema SQL.
     """
     data_store = getattr(request.app.state, "data_store", None)
@@ -111,22 +95,22 @@ async def delete_user_data(user_id: str, request: Request) -> DeleteUserDataResp
             detail="data_store not configured; cannot delete user data",
         )
 
-    counts = await data_store.user_data.delete_owner_data(user_id)
-    cleared_revocations = await _clear_user_revocations(request, user_id)
+    counts = await data_store.owner_data.delete_owner_data(owner_id)
+    cleared_revocations = await _clear_owner_revocations(request, owner_id)
 
-    return DeleteUserDataResponse(
-        user_id=user_id,
+    return DeleteOwnerDataResponse(
+        owner_id=owner_id,
         deleted=True,
         counts=counts,
         revocation_keys_cleared=cleared_revocations,
     )
 
 
-async def _clear_user_revocations(request: Request, user_id: str) -> int:
+async def _clear_owner_revocations(request: Request, owner_id: str) -> int:
     cleared_revocations = 0
     kv = getattr(request.app.state, "revocation_kv", None)
     if kv is not None:
-        for key in user_revocation_keys(user_id):
+        for key in owner_revocation_keys(owner_id):
             delete_key = getattr(kv, "delete", None)
             if delete_key is not None and await kv.get(key) is not None:
                 await delete_key(key)

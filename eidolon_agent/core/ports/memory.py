@@ -1,11 +1,4 @@
-"""MemoryPort — external eidolon-memory adapter.
-
-Reads go through MCP (synchronous, 150–300ms budget). Writes go through NATS
-JetStream (asynchronous, fire-and-forget with at-least-once delivery).
-
-The Port hides this dual-channel from callers. ``write_turn`` returns when the
-publish ack lands (not when the memory service finishes ingestion).
-"""
+"""MemoryPort: external eidolon-memory adapter."""
 
 from __future__ import annotations
 
@@ -26,100 +19,82 @@ class MemoryPort(Protocol):
 
     async def search(
         self,
-        user_id: str,
+        owner_id: str,
         query: str,
         *,
+        companion_id: str,
+        memory_realm_id: str,
+        device_id: str,
         top_k: int = 5,
         scope: MemoryScope = MemoryScope.ALL,
         voice: bool = True,
         timeout_s: float = 0.2,
-        tenant_id: str | None = None,
-        companion_id: str | None = None,
-        persona_id: str | None = None,
-        agent_id: str | None = None,
-        device_id: str | None = None,
-        instance_id: str | None = None,
         session_id: str = "default",
     ) -> list[MemoryHit]:
-        """Vector + KG fused retrieval. Returns [] on soft-timeout (never raises)."""
+        """Vector + KG fused retrieval. Returns [] on soft-timeout."""
         ...
 
     async def recall_context(
         self,
-        user_id: str,
+        owner_id: str,
         query: str,
         *,
+        companion_id: str,
+        memory_realm_id: str,
+        device_id: str,
         plan: MemoryQueryPlan,
         timeout_s: float = 0.2,
-        tenant_id: str | None = None,
-        companion_id: str | None = None,
-        persona_id: str | None = None,
-        agent_id: str | None = None,
-        device_id: str | None = None,
-        instance_id: str | None = None,
         session_id: str = "default",
     ) -> MemoryRecallResult:
-        """Returns prompt-ready recall context plus operator diagnostics.
-
-        ``degraded=True`` indicates the result is best-effort (timeout / error).
-        Callers must inject a sentinel into the prompt rather than raise.
-        """
+        """Returns prompt-ready recall context plus diagnostics."""
         ...
 
     async def write_turn(
         self,
-        user_id: str,
+        owner_id: str,
+        companion_id: str,
+        memory_realm_id: str,
+        device_id: str,
         session_id: str,
         turn_id: str,
-        user_text: str,
+        owner_text: str,
         assistant_text: str,
         *,
         metadata: dict | None = None,
-        tenant_id: str | None = None,
-        companion_id: str | None = None,
-        persona_id: str | None = None,
-        agent_id: str | None = None,
-        device_id: str | None = None,
-        instance_id: str | None = None,
     ) -> None:
         """Publish a ConversationTurnPayload to NATS for steward ingestion."""
         ...
 
     async def assert_fact(
         self,
-        user_id: str,
+        owner_id: str,
+        companion_id: str,
+        memory_realm_id: str,
         subject: str,
         predicate: str,
         object_: str,
         *,
         confidence: float = 0.9,
-        tenant_id: str | None = None,
-        companion_id: str | None = None,
-        persona_id: str | None = None,
     ) -> None:
         """Publish an explicit KG triple write command."""
         ...
 
     async def forget(
         self,
-        user_id: str,
+        owner_id: str,
+        companion_id: str,
+        memory_realm_id: str,
+        device_id: str,
         query: str,
         *,
-        tenant_id: str | None = None,
-        companion_id: str | None = None,
-        persona_id: str | None = None,
-        agent_id: str | None = None,
-        device_id: str | None = None,
-        instance_id: str | None = None,
         session_id: str = "default",
     ) -> int:
         """Delete memories matching ``query``. Returns count removed."""
         ...
 
     async def health(self) -> bool:
-        """Lightweight reachability check — used by /readyz."""
+        """Lightweight reachability check used by /readyz."""
         ...
 
 
 MemoryEventHandler = Callable[[dict], Awaitable[None]]
-"""Signature for subscribers to ``eidolon.memory.event.*`` (promise_due, etc)."""

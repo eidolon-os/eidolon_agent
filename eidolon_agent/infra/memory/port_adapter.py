@@ -33,30 +33,24 @@ class EidolonMemoryPort:
 
     async def search(
         self,
-        user_id: str,
+        owner_id: str,
         query: str,
         *,
         top_k: int = 5,
         scope: MemoryScope = MemoryScope.ALL,
         voice: bool = True,
         timeout_s: float = 0.2,
-        tenant_id: str | None = None,
-        companion_id: str | None = None,
-        persona_id: str | None = None,
-        agent_id: str | None = None,
-        device_id: str | None = None,
-        instance_id: str | None = None,
+        companion_id: str,
+        memory_realm_id: str,
+        device_id: str,
         session_id: str = "default",
     ) -> list[MemoryHit]:
         ctx = build_memory_actor_context(
-            user_id=user_id,
-            session_id=session_id,
-            tenant_id=tenant_id,
+            owner_id=owner_id,
             companion_id=companion_id,
-            persona_id=persona_id,
-            agent_id=agent_id,
+            memory_realm_id=memory_realm_id,
             device_id=device_id,
-            instance_id=instance_id,
+            session_id=session_id,
         )
         memory_space_id = ctx.memory_space_id
         session = await self._pool.session_for(memory_space_id)
@@ -87,28 +81,22 @@ class EidolonMemoryPort:
 
     async def recall_context(
         self,
-        user_id: str,
+        owner_id: str,
         query: str,
         *,
         plan: MemoryQueryPlan,
         timeout_s: float = 0.2,
-        tenant_id: str | None = None,
-        companion_id: str | None = None,
-        persona_id: str | None = None,
-        agent_id: str | None = None,
-        device_id: str | None = None,
-        instance_id: str | None = None,
+        companion_id: str,
+        memory_realm_id: str,
+        device_id: str,
         session_id: str = "default",
     ) -> MemoryRecallResult:
         ctx = build_memory_actor_context(
-            user_id=user_id,
-            session_id=session_id,
-            tenant_id=tenant_id,
+            owner_id=owner_id,
             companion_id=companion_id,
-            persona_id=persona_id,
-            agent_id=agent_id,
+            memory_realm_id=memory_realm_id,
             device_id=device_id,
-            instance_id=instance_id,
+            session_id=session_id,
         )
         memory_space_id = ctx.memory_space_id
         try:
@@ -166,81 +154,68 @@ class EidolonMemoryPort:
 
     async def write_turn(
         self,
-        user_id: str,
+        owner_id: str,
+        companion_id: str,
+        memory_realm_id: str,
+        device_id: str,
         session_id: str,
         turn_id: str,
-        user_text: str,
+        owner_text: str,
         assistant_text: str,
         *,
         metadata: dict | None = None,
-        tenant_id: str | None = None,
-        companion_id: str | None = None,
-        persona_id: str | None = None,
-        agent_id: str | None = None,
-        device_id: str | None = None,
-        instance_id: str | None = None,
     ) -> None:
         await self._pub.publish_turn(
-            user_id=user_id,
+            owner_id=owner_id,
+            companion_id=companion_id,
+            memory_realm_id=memory_realm_id,
+            device_id=device_id,
             session_id=session_id,
             turn_id=turn_id,
-            user_text=user_text,
+            owner_text=owner_text,
             assistant_text=assistant_text,
             metadata=metadata,
-            tenant_id=tenant_id,
-            companion_id=companion_id,
-            persona_id=persona_id,
-            agent_instance_id=instance_id or agent_id,
-            device_id=device_id,
         )
 
     async def assert_fact(
         self,
-        user_id: str,
+        owner_id: str,
+        companion_id: str,
+        memory_realm_id: str,
         subject: str,
         predicate: str,
         object_: str,
         *,
         confidence: float = 0.9,
-        tenant_id: str | None = None,
-        companion_id: str | None = None,
-        persona_id: str | None = None,
     ) -> None:
         await self._pub.publish_kg_add(
-            user_id=user_id,
+            owner_id=owner_id,
+            companion_id=companion_id,
+            memory_realm_id=memory_realm_id,
             subject=subject,
             predicate=predicate,
             object_=object_,
             confidence=confidence,
-            tenant_id=tenant_id,
-            companion_id=companion_id,
-            persona_id=persona_id,
         )
 
     async def forget(
         self,
-        user_id: str,
+        owner_id: str,
+        companion_id: str,
+        memory_realm_id: str,
+        device_id: str,
         query: str,
         *,
-        tenant_id: str | None = None,
-        companion_id: str | None = None,
-        persona_id: str | None = None,
-        agent_id: str | None = None,
-        device_id: str | None = None,
-        instance_id: str | None = None,
         session_id: str = "default",
     ) -> int:
         # The memory service exposes ``eidolon_memory_forget`` via MCP in newer versions;
         # if absent, we no-op safely. Production should branch on capability negotiation.
         ctx = build_memory_actor_context(
-            user_id=user_id,
-            session_id=session_id,
-            tenant_id=tenant_id,
+            owner_id=owner_id,
             companion_id=companion_id,
-            persona_id=persona_id,
-            agent_id=agent_id,
+            memory_realm_id=memory_realm_id,
             device_id=device_id,
-            instance_id=instance_id,
+            session_id=session_id,
         )
         session = await self._pool.session_for(ctx.memory_space_id)
         try:

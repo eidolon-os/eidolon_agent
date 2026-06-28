@@ -57,9 +57,10 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         resp = pb.ExchangeResponse(
             device_id=issued.device_id,
             device_token=issued.token,
-            tenant_id=issued.tenant_id,
-            user_id=issued.user_id,
-            default_template_id=issued.default_template_id or "",
+            owner_id=issued.owner_id,
+            companion_id=issued.companion_id,
+            memory_realm_id=issued.memory_realm_id,
+            genome_id=issued.genome_id,
         )
         resp.expires_at.FromDatetime(issued.expires_at)
         return resp
@@ -129,10 +130,9 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 generation_by_conversation[conversation_id] = generation
                 try:
                     inst = await self._registry.resolve_for_caller(
-                        tenant_id=identity.tenant_id,
-                        user_id=identity.user_id,
-                        template_id=getattr(identity, "default_template_id", None)
-                        or None,
+                        owner_id=identity.owner_id,
+                        companion_id=identity.companion_id,
+                        genome_id=identity.genome_id,
                     )
                     agent = inst.agent
                 except NotFoundError as exc:
@@ -152,10 +152,11 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     session_id=conversation_id,  # one-to-one for now
                     caller=CallerContext(
                         identity=Identity(
-                            tenant_id=identity.tenant_id,
-                            user_id=identity.user_id,
-                            agent_instance_id=inst.instance_id,
+                            owner_id=identity.owner_id,
+                            companion_id=inst.companion_id,
                             device_id=identity.device_id,
+                            memory_realm_id=identity.memory_realm_id,
+                            genome_id=inst.genome_id,
                         ),
                         caller_kind=CallerKind.LIVEKIT_VOICE,
                         trace_id=dict(context.invocation_metadata()).get(
@@ -230,9 +231,9 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         if identity is None:
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "no identity")
         inst = await self._registry.resolve_for_caller(
-            tenant_id=identity.tenant_id,
-            user_id=identity.user_id,
-            template_id=getattr(identity, "default_template_id", None) or None,
+            owner_id=identity.owner_id,
+            companion_id=identity.companion_id,
+            genome_id=identity.genome_id,
         )
         agent = inst.agent
         ti = TurnInput(
@@ -241,9 +242,11 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
             session_id=request.conversation_id,
             caller=CallerContext(
                 identity=Identity(
-                    tenant_id=identity.tenant_id,
-                    user_id=identity.user_id,
-                    agent_instance_id=inst.instance_id,
+                    owner_id=identity.owner_id,
+                    companion_id=inst.companion_id,
+                    device_id=identity.device_id,
+                    memory_realm_id=identity.memory_realm_id,
+                    genome_id=inst.genome_id,
                 ),
                 caller_kind=CallerKind.WEB_CHAT,
                 trace_id=uuid.uuid4().hex,
@@ -294,18 +297,16 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         if self._personas is not None and identity is not None:
             try:
                 inst = await self._registry.resolve_for_caller(
-                    tenant_id=identity.tenant_id,
-                    user_id=identity.user_id,
-                    template_id=getattr(identity, "default_template_id", None)
-                    or None,
+                    owner_id=identity.owner_id,
+                    companion_id=identity.companion_id,
+                    genome_id=identity.genome_id,
                 )
                 from eidolon_agent.domain.personas.types import PersonaSignalInput
 
                 await self._personas.submit_signal(
                     PersonaSignalInput(
-                        tenant_id=identity.tenant_id,
-                        user_id=identity.user_id,
-                        instance_id=inst.instance_id,
+                        owner_id=identity.owner_id,
+                        companion_id=inst.companion_id,
                         dominant_emotion=request.signal.label,
                         emotion_confidence=float(request.signal.confidence),
                         presence=_presence_from_signal(request.signal.modality, request.signal.label),

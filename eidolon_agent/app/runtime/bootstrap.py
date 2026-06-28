@@ -22,10 +22,6 @@ from pathlib import Path
 
 from eidolon_data import DataStore
 from eidolon_data import load_settings as load_data_settings
-from eidolon_data.adapters.admin_registry import (
-    EidolonDataAgentMetadataRepository,
-    EidolonDataUserRepository,
-)
 from eidolon_sdk.biz.runtime import PairingTokenVerifier
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
@@ -271,26 +267,21 @@ async def build_application(
     async def _build_companion(inst):  # type: ignore[no-untyped-def]
         engine = _build_turn_engine(
             container=container,
-            instance_id=inst.instance_id,
-            template_id=inst.template_id,
+            companion_id=inst.companion_id,
+            genome_id=inst.genome_id,
         )
-        return CompanionAgent(instance_id=inst.instance_id, turn_engine=engine)
+        return CompanionAgent(companion_id=inst.companion_id, turn_engine=engine)
 
     templates = list(tpl_reg.list_all())
-    default_template_id = templates[0].metadata.template_id if templates else ""
+    default_genome_id = templates[0].metadata.template_id if templates else ""
     agent_registry = AgentRegistry(
         instance_factory=_build_companion,
-        default_template_id=default_template_id,
-        active_instance_resolver=(
-            _build_active_instance_resolver(data_store)
-            if settings.runtime.recover_active_instances
-            else None
-        ),
+        default_genome_id=default_genome_id,
     )
     for tpl in templates:
         agent_registry.register_template(
             AgentTemplate(
-                template_id=tpl.metadata.template_id,
+                genome_id=tpl.metadata.template_id,
                 name=tpl.metadata.name,
                 description=tpl.metadata.description,
             )
@@ -382,13 +373,13 @@ def _build_llm_router(settings: Settings) -> LLMRouter:
 def _build_turn_engine(
     *,
     container: Container,
-    instance_id: str,
-    template_id: str,
+    companion_id: str,
+    genome_id: str,
 ) -> TurnEngine:
-    """Construct a per-instance TurnEngine with collaborator closures."""
+    """Construct a per-companion TurnEngine with collaborator closures."""
 
-    def locator(_tenant_id: str, _user_id: str, _conv_id: str):
-        return (instance_id, template_id)
+    def locator(_owner_id: str, _companion_id: str, _conv_id: str):
+        return (companion_id, genome_id)
 
     harness = RealtimeAgentHarness(
         budget=HarnessBudget(
@@ -424,7 +415,7 @@ def _build_turn_engine(
         crisis=container.crisis_handler,
         event_bus=container.event_bus,
         personas_service=container.personas_service,
-        persona_template_id=template_id,
+        persona_template_id=genome_id,
         memory_port=container.memory_port,
         max_tool_iters=container.settings.turn.max_tool_iters,
         memory_write_mode=container.settings.turn.memory_write_mode,
@@ -438,36 +429,6 @@ def _build_turn_engine(
         harness=harness,
         background_tasks=container.background_tasks,
     )
-
-
-def _build_active_instance_resolver(data_store: DataStore):
-    users = EidolonDataUserRepository(data_store)
-    agents = EidolonDataAgentMetadataRepository(data_store)
-
-    async def _resolve(
-        *,
-        tenant_id: str,
-        user_id: str,
-        requested_template_id: str | None = None,
-    ) -> tuple[str, str] | None:
-        del requested_template_id
-        try:
-            user = await users.get(user_id)
-            if user is None or not user.enabled or user.tenant_id != tenant_id:
-                return None
-            if not user.active_agent_id:
-                return None
-            agent = await agents.get(user.active_agent_id)
-            if agent is None:
-                return None
-            if agent.user_id != user_id or agent.tenant_id != tenant_id:
-                return None
-            return agent.agent_id, agent.template_id
-        except Exception:
-            _log.warning("active agent recovery failed for %s/%s", tenant_id, user_id, exc_info=True)
-            return None
-
-    return _resolve
 
 
 def _generate_persisted_secret(path: Path) -> str:

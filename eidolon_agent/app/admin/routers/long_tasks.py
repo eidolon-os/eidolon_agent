@@ -20,9 +20,10 @@ class LongTaskSummary(BaseModel):
     task_id: str
     provider: str
     status: str
-    tenant_id: str
-    user_id: str
-    agent_instance_id: str | None
+    owner_id: str
+    companion_id: str
+    memory_realm_id: str | None
+    genome_id: str | None
     conversation_id: str | None
     turn_id: str
     trace_id: str | None
@@ -90,8 +91,8 @@ def _data_store(request: Request) -> EidolonDataLongTaskStore:
 @router.get("/long-tasks", response_model=ListLongTasksResponse)
 async def list_long_tasks(
     request: Request,
-    tenant_id: str | None = Query(default=None),
-    user_id: str | None = Query(default=None, description="Filter by admin user_id"),
+    owner_id: str | None = Query(default=None),
+    companion_id: str | None = Query(default=None),
     status: str | None = Query(default=None),
     provider: str | None = Query(default=None),
     task_type: str | None = Query(default=None),
@@ -103,8 +104,8 @@ async def list_long_tasks(
 ) -> ListLongTasksResponse:
     store = _data_store(request)
     rows = await store.list_for_admin(
-        tenant_id=tenant_id,
-        user_id=user_id,
+        owner_id=owner_id,
+        companion_id=companion_id,
         status=status,
         provider=provider,
         task_type=task_type,
@@ -130,9 +131,10 @@ def _summary(record: LongTaskRecord) -> LongTaskSummary:
         task_id=record.id,
         provider=record.provider,
         status=record.status.value,
-        tenant_id=record.tenant_id,
-        user_id=record.user_id,
-        agent_instance_id=record.agent_instance_id,
+        owner_id=record.owner_id,
+        companion_id=record.companion_id,
+        memory_realm_id=record.memory_realm_id,
+        genome_id=record.genome_id,
         conversation_id=record.conversation_id,
         turn_id=record.turn_id,
         trace_id=record.trace_id,

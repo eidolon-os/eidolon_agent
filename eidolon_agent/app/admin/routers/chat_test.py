@@ -20,9 +20,8 @@ router = APIRouter()
 
 
 class ChatTestRequest(BaseModel):
-    tenant_id: str = "demo"
-    user_id: str = "alice"
-    template_id: str = "caretaker_jiezhi"
+    owner_id: str = "demo"
+    companion_id: str = "companion-demo"
     text: str = ""
 
 
@@ -34,14 +33,23 @@ async def chat_test(body: ChatTestRequest, request: Request):
     """
     settings = request.app.state.settings
     pairing = request.app.state.pairing
+    data_store = getattr(request.app.state, "data_store", None)
+    if data_store is None:
+        raise RuntimeError("data_store not configured")
+    companion = await data_store.companions.get(body.companion_id)
+    if companion is None or companion.owner_id != body.owner_id:
+        raise RuntimeError("companion not found for owner")
+    if not companion.default_memory_realm_id or not companion.current_genome_id:
+        raise RuntimeError("companion has no default memory realm or current genome")
 
     # The registry creates the agent lazily on the first Chat RPC; nothing
     # to do here besides issuing the pairing code.
 
     rec = await pairing.issue_code(
-        tenant_id=body.tenant_id,
-        user_id=body.user_id,
-        default_template_id=body.template_id,
+        owner_id=body.owner_id,
+        companion_id=body.companion_id,
+        memory_realm_id=companion.default_memory_realm_id,
+        genome_id=companion.current_genome_id,
         issued_by_actor="admin-chat-test",
     )
     target = f"{settings.grpc.tcp_host}:{settings.grpc.tcp_port}"
@@ -57,7 +65,7 @@ async def chat_test(body: ChatTestRequest, request: Request):
                     device_name="Admin Chat Test",
                 )
             )
-            yield _sse("status", {"message": "paired", "user_id": exch.user_id})
+            yield _sse("status", {"message": "paired", "owner_id": exch.owner_id})
 
             async def _requests():
                 yield pb.ChatRequest(

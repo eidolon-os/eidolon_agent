@@ -51,12 +51,8 @@ async def test_turn_submits_persona_interaction(turn_engine_factory, personas_se
     # _post_turn runs as a fire-and-forget task after DONE is yielded.
     await engine._background.drain(timeout_s=1)
     await personas_service._worker.drain_once()
-    snapshot = await personas_service.get_snapshot(
-        tenant_id="t",
-        user_id="alice",
-        instance_id="inst-test",
-    )
-    assert "注意力在用户身上" in snapshot.prompt_hint
+    runtime_state = await personas_service._runtime.snapshot(instance_id="companion-test")
+    assert "注意力在用户身上" in runtime_state.to_prompt_hint()
 
 
 def test_persona_state_is_not_exposed_as_tool(turn_engine_factory):

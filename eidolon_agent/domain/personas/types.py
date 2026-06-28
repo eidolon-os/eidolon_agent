@@ -372,10 +372,9 @@ class PersonaEvolutionProposal(BaseModel):
 class PersonaInteractionEvent(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    tenant_id: str
-    user_id: str
-    instance_id: str
-    template_id: str | None = None
+    owner_id: str
+    companion_id: str
+    genome_id: str | None = None
     kind: str
     user_text: str = ""
     assistant_text: str = ""
@@ -386,9 +385,8 @@ class PersonaInteractionEvent(BaseModel):
 class PersonaSignalInput(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    tenant_id: str
-    user_id: str
-    instance_id: str
+    owner_id: str
+    companion_id: str
     dominant_emotion: str | None = None
     emotion_confidence: float = Field(0.0, ge=0.0, le=1.0)
     speech_rate: Literal["slow", "normal", "fast"] | None = None
@@ -401,8 +399,8 @@ class PersonaSignalInput(BaseModel):
 class PersonaProactiveDecision(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    instance_id: str
-    user_id: str
+    companion_id: str
+    owner_id: str
     intent: str
     text: str
     style_hint: str = ""

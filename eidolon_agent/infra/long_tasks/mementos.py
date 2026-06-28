@@ -387,25 +387,25 @@ class MementosLongTaskWorker:
     ) -> None:
         """Announce a finished task so the companion can speak it unprompted.
 
-        Publishes ``agent.proactive.triggered.<instance_id>`` carrying the
+        Publishes ``agent.proactive.triggered.<companion_id>`` carrying the
         spoken text. The publish is gated on an atomic callback claim so a
         completion seen more than once is announced exactly once. Anything that
-        prevents a clean announcement (no bus, no instance, empty text, store or
+        prevents a clean announcement (no bus, no companion, empty text, store or
         bus error) is logged and skipped — it must never fail the task.
         """
         if self._event_bus is None:
             return
-        instance_id = record.agent_instance_id
-        if not instance_id:
+        companion_id = record.companion_id
+        if not companion_id:
             _log.info(
-                "proactive report skipped: no agent_instance_id task_id=%s",
+                "proactive report skipped: no companion_id task_id=%s",
                 record.id,
             )
             return
         report_text = (summary or result_text[:_FALLBACK_REPORT_MAX_CHARS]).strip()
         if not report_text:
             return
-        subject = Topics.proactive_triggered(instance_id)
+        subject = Topics.proactive_triggered(companion_id)
         try:
             claimed = await self._store.claim_callback_delivery(
                 record.id,

@@ -166,8 +166,8 @@ class TurnEngine:
             ts_guard_ms = int((time.monotonic() - t0) * 1000)
             if verdict.action is SafetyAction.ESCALATE:
                 crisis = await self._crisis.handle(
-                    instance_id=ti.caller.agent_instance_id or "",
-                    user_id=ti.caller.user_id,
+                    companion_id=ti.caller.companion_id,
+                    owner_id=ti.caller.owner_id,
                     locale=ti.caller.locale,
                 )
                 ti.metadata["is_private"] = True
@@ -201,13 +201,11 @@ class TurnEngine:
                 if self._memory is not None:
                     try:
                         removed = await self._memory.forget(
-                            ti.caller.user_id,
+                            ti.caller.owner_id,
+                            ti.caller.companion_id,
+                            ti.caller.memory_realm_id,
+                            ti.caller.device_id,
                             ti.text or "",
-                            tenant_id=ti.caller.tenant_id,
-                            companion_id=ti.caller.agent_instance_id,
-                            agent_id=ti.caller.agent_instance_id,
-                            device_id=ti.caller.identity.device_id,
-                            instance_id=ti.caller.agent_instance_id,
                             session_id=ti.session_id or "default",
                         )
                     except Exception:
@@ -357,7 +355,8 @@ class TurnEngine:
                                 conversation_id=ti.conversation_id,
                                 session_id=ti.session_id,
                                 user_text=ti.text or "",
-                                persona_id=self._persona_template_id,
+                                companion_id=ti.caller.companion_id,
+                                memory_realm_id=ti.caller.memory_realm_id,
                             ),
                         )
                     tool_ms_total += int((time.monotonic() - tool_t0) * 1000)
@@ -552,8 +551,8 @@ class TurnEngine:
                     memory_write_trace=memory_write_trace,
                     tool_trace=tool_trace,
                     persona=PersonaTrace(
-                        instance_id=ti.caller.agent_instance_id,
-                        template_id=self._persona_template_id,
+                        companion_id=ti.caller.companion_id,
+                        genome_id=self._persona_template_id,
                     ),
                     privacy=runtime_policy.privacy,
                     proactive_reason=ti.metadata.get("proactive_reason"),
@@ -757,16 +756,15 @@ class TurnEngine:
             return
         try:
             await self._fanout.publish_turn(
-                tenant_id=ti.caller.tenant_id,
-                user_id=ti.caller.user_id,
+                owner_id=ti.caller.owner_id,
+                companion_id=ti.caller.companion_id,
+                memory_realm_id=ti.caller.memory_realm_id,
+                device_id=ti.caller.device_id,
                 session_id=ti.session_id,
                 turn_id=ti.turn_id,
                 user_text=ti.text or "",
                 assistant_text=assistant_text,
                 timestamp_iso=started_at.isoformat(),
-                device_id=ti.caller.identity.device_id,
-                companion_id=ti.caller.agent_instance_id,
-                agent_instance_id=ti.caller.agent_instance_id,
                 metadata={
                     "memory_write_disposition": write_trace["disposition"],
                     "memory_write_reason": write_trace["reason"],
@@ -834,10 +832,9 @@ class TurnEngine:
         try:
             await self._personas.submit_interaction(
                 PersonaInteractionEvent(
-                    tenant_id=ti.caller.tenant_id,
-                    user_id=ti.caller.user_id,
-                    instance_id=ti.caller.agent_instance_id or "",
-                    template_id=self._persona_template_id,
+                    owner_id=ti.caller.owner_id,
+                    companion_id=ti.caller.companion_id,
+                    genome_id=self._persona_template_id,
                     kind=kind,
                     user_text=user_text,
                     assistant_text=assistant_text,

@@ -31,33 +31,28 @@ class MemoryNatsPublisher:
     async def publish_turn(
         self,
         *,
-        user_id: str,
+        owner_id: str,
+        companion_id: str,
+        memory_realm_id: str,
+        device_id: str,
         session_id: str,
         turn_id: str,
-        user_text: str,
+        owner_text: str,
         assistant_text: str,
-        tenant_id: str | None = None,
-        device_id: str | None = None,
-        agent_instance_id: str | None = None,
-        companion_id: str | None = None,
-        persona_id: str | None = None,
         metadata: dict | None = None,
     ) -> None:
         context = build_memory_actor_context(
-            user_id=user_id,
-            session_id=session_id,
-            tenant_id=tenant_id,
-            device_id=device_id,
-            agent_id=agent_instance_id,
-            instance_id=agent_instance_id,
+            owner_id=owner_id,
             companion_id=companion_id,
-            persona_id=persona_id,
+            memory_realm_id=memory_realm_id,
+            device_id=device_id,
+            session_id=session_id,
         )
         payload = ConversationTurnPayload(
             turn_id=turn_id,
             context=context,
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            user_text=user_text,
+            user_text=owner_text,
             assistant_text=assistant_text,
             metadata=metadata or {"source": "eidolon-agent"},
         ).model_dump(mode="json")
@@ -79,25 +74,19 @@ class MemoryNatsPublisher:
     async def publish_kg_add(
         self,
         *,
-        user_id: str,
+        owner_id: str,
+        companion_id: str,
+        memory_realm_id: str,
         subject: str,
         predicate: str,
         object_: str,
         confidence: float = 0.9,
         valid_from: datetime | None = None,
         valid_to: datetime | None = None,
-        tenant_id: str | None = None,
-        companion_id: str | None = None,
-        persona_id: str | None = None,
     ) -> None:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         request_id = uuid4().hex
-        memory_space_id = build_memory_space_id(
-            user_id=user_id,
-            tenant_id=tenant_id,
-            companion_id=companion_id,
-            persona_id=persona_id,
-        )
+        memory_space_id = build_memory_space_id(memory_realm_id=memory_realm_id)
         payload = KgAddTripleCommand(
             request_id=request_id,
             memory_space_id=memory_space_id,

@@ -32,17 +32,15 @@ class HistoryFanout:
     async def publish_turn(
         self,
         *,
-        tenant_id: str,
-        user_id: str,
+        owner_id: str,
+        companion_id: str,
+        memory_realm_id: str,
+        device_id: str,
         session_id: str,
         turn_id: str,
         user_text: str,
         assistant_text: str,
         timestamp_iso: str,
-        device_id: str | None = None,
-        companion_id: str | None = None,
-        agent_instance_id: str | None = None,
-        persona_id: str | None = None,
         emotion_payload: dict | None = None,
         metadata: dict | None = None,
     ) -> None:
@@ -53,19 +51,18 @@ class HistoryFanout:
             "source_project": "eidolon_agent",
             "source_component": "history.fanout",
             "source_turn_id": turn_id,
-            "tenant_id": tenant_id,
+            "owner_id": owner_id,
+            "companion_id": companion_id,
+            "memory_realm_id": memory_realm_id,
         }
         if metadata:
             payload_metadata.update(metadata)
         context = build_memory_actor_context(
-            user_id=user_id,
-            session_id=session_id,
-            tenant_id=tenant_id,
+            owner_id=owner_id,
             companion_id=companion_id,
+            memory_realm_id=memory_realm_id,
             device_id=device_id,
-            agent_id=agent_instance_id,
-            instance_id=agent_instance_id,
-            persona_id=persona_id,
+            session_id=session_id,
         )
         memory_payload = ConversationTurnPayload(
             turn_id=turn_id,
@@ -96,7 +93,7 @@ class HistoryFanout:
             try:
                 await self._bus.publish(
                     Event(
-                        subject=Topics.emotion_turn(user_id),
+                        subject=Topics.emotion_turn(owner_id),
                         payload={**memory_payload, "emotion": emotion_payload},
                         source="history.fanout",
                         metadata={"msg_id": turn_id},

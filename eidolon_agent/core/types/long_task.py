@@ -8,11 +8,11 @@ from enum import Enum
 from typing import Any
 
 from eidolon_sdk.biz.long_tasks import (
+    owner_id_from_safe_key,
     parse_session_key,
-    safe_user_key,
+    safe_owner_key,
     session_key_for,
     task_key_for,
-    user_id_from_safe_key,
 )
 
 
@@ -39,8 +39,8 @@ class LongTaskRecord:
     id: str
     provider: str
     status: LongTaskStatus
-    tenant_id: str
-    user_id: str
+    owner_id: str
+    companion_id: str
     conversation_id: str | None
     turn_id: str
     session_id: str | None
@@ -50,7 +50,8 @@ class LongTaskRecord:
     task_key: str
     task: str
     user_text: str = ""
-    agent_instance_id: str | None = None
+    memory_realm_id: str | None = None
+    genome_id: str | None = None
     # Owning device (from caller identity / turns.device_id). Carried so a
     # proactive report can be routed back to the device (Phase 3 wake).
     device_id: str | None = None
@@ -98,9 +99,9 @@ __all__ = [
     "CallbackStatus",
     "LongTaskRecord",
     "LongTaskStatus",
+    "owner_id_from_safe_key",
     "parse_session_key",
-    "safe_user_key",
+    "safe_owner_key",
     "session_key_for",
     "task_key_for",
-    "user_id_from_safe_key",
 ]

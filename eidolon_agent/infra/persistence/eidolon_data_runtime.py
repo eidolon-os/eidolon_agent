@@ -18,7 +18,6 @@ from eidolon_data.schema.models import (
     DeviceRow,
     JobRow,
     MessageRow,
-    OwnerRow,
     TurnRow,
 )
 from eidolon_data.services.datastore import DataStore
@@ -79,26 +78,27 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
         is_private: bool = False,
     ) -> None:
         model_id = model_id_provider()
-        companion_id = _companion_id_for_turn(ti)
+        companion_id = ti.caller.companion_id
         async with data_store.session_factory() as session:
-            await _ensure_owner_companion_device(
+            await _validate_owner_companion_device(
                 session,
-                owner_id=ti.caller.user_id,
-                tenant_id=ti.caller.tenant_id,
+                owner_id=ti.caller.owner_id,
                 companion_id=companion_id,
-                device_id=ti.caller.identity.device_id,
+                device_id=ti.caller.device_id,
             )
             await _insert_ignore(
                 session,
                 ConversationRow,
                 {
                     "conversation_id": ti.conversation_id,
-                    "owner_id": ti.caller.user_id,
+                    "owner_id": ti.caller.owner_id,
                     "companion_id": companion_id,
-                    "device_id": ti.caller.identity.device_id,
+                    "device_id": ti.caller.device_id,
                     "metadata_json": {
-                        "tenant_id": ti.caller.tenant_id,
-                        "agent_instance_id": ti.caller.agent_instance_id or "",
+                        "owner_id": ti.caller.owner_id,
+                        "companion_id": companion_id,
+                        "memory_realm_id": ti.caller.memory_realm_id,
+                        "genome_id": ti.caller.genome_id,
                         "session_id": ti.session_id,
                     },
                 },
@@ -116,7 +116,7 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                     turn_id=ti.turn_id,
                     conversation_id=ti.conversation_id,
                     seq=seq,
-                    device_id=ti.caller.identity.device_id,
+                    device_id=ti.caller.device_id,
                     trigger=ti.trigger.value,
                     status=status.value,
                     started_at=started_at,
@@ -139,7 +139,7 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                             model=model_id,
                             error_code=error_code,
                             seq_in_conversation=seq,
-                            device_id=ti.caller.identity.device_id,
+                            device_id=ti.caller.device_id,
                             caller_kind=ti.caller.caller_kind.value,
                             metadata=timings,
                         )
@@ -152,7 +152,7 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                 existing_turn.status = status.value
                 existing_turn.started_at = started_at
                 existing_turn.finished_at = finished_at
-                existing_turn.device_id = ti.caller.identity.device_id
+                existing_turn.device_id = ti.caller.device_id
                 existing_turn.trace_json = _trace_json(timings)
                 existing_turn.metrics_json = {
                     **(existing_turn.metrics_json or {}),
@@ -223,11 +223,10 @@ class EidolonDataLongTaskStore:
         now = datetime.now(timezone.utc)
         record = replace(record, created_at=record.created_at or now, updated_at=record.updated_at or now)
         async with self._data_store.session_factory() as session:
-            await _ensure_owner_companion_device(
+            await _validate_owner_companion_device(
                 session,
-                owner_id=record.user_id,
-                tenant_id=record.tenant_id,
-                companion_id=record.agent_instance_id,
+                owner_id=record.owner_id,
+                companion_id=record.companion_id,
                 device_id=record.device_id,
             )
             row = await session.get(JobRow, record.id)
@@ -248,8 +247,8 @@ class EidolonDataLongTaskStore:
     async def list_for_admin(
         self,
         *,
-        tenant_id: str | None = None,
-        user_id: str | None = None,
+        owner_id: str | None = None,
+        companion_id: str | None = None,
         status: str | None = None,
         provider: str | None = None,
         task_type: str | None = None,
@@ -258,8 +257,10 @@ class EidolonDataLongTaskStore:
     ) -> list[LongTaskRecord]:
         async with self._data_store.session_factory() as session:
             stmt = select(JobRow).order_by(JobRow.created_at.desc()).limit(limit)
-            if user_id:
-                stmt = stmt.where(JobRow.owner_id == user_id)
+            if owner_id:
+                stmt = stmt.where(JobRow.owner_id == owner_id)
+            if companion_id:
+                stmt = stmt.where(JobRow.companion_id == companion_id)
             if status:
                 stmt = stmt.where(JobRow.status == status)
             if provider:
@@ -269,10 +270,7 @@ class EidolonDataLongTaskStore:
             if before is not None:
                 stmt = stmt.where(JobRow.created_at < before)
             rows = (await session.execute(stmt)).scalars().all()
-            records = [_job_row_to_record(row) for row in rows]
-            if tenant_id:
-                records = [record for record in records if record.tenant_id == tenant_id]
-            return records
+            return [_job_row_to_record(row) for row in rows]
 
     async def mark_queued(
         self,
@@ -494,11 +492,11 @@ class EidolonDataConversationReader:
     def __init__(self, data_store: DataStore) -> None:
         self._data_store = data_store
 
-    async def list_turns_by_user(
+    async def list_turns_by_owner(
         self,
         *,
-        user_id: str | None = None,
-        tenant_id: str | None = None,
+        owner_id: str | None = None,
+        companion_id: str | None = None,
         limit: int = 50,
         before: datetime | None = None,
     ) -> list[dict]:
@@ -509,15 +507,14 @@ class EidolonDataConversationReader:
                 .order_by(TurnRow.started_at.desc())
                 .limit(limit)
             )
-            if user_id is not None:
-                stmt = stmt.where(ConversationRow.owner_id == user_id)
+            if owner_id is not None:
+                stmt = stmt.where(ConversationRow.owner_id == owner_id)
+            if companion_id is not None:
+                stmt = stmt.where(ConversationRow.companion_id == companion_id)
             if before is not None:
                 stmt = stmt.where(TurnRow.started_at < before)
             rows = (await session.execute(stmt)).all()
-            out = [_turn_row_to_admin_dict(turn, conversation) for turn, conversation in rows]
-            if tenant_id is not None:
-                out = [row for row in out if row["tenant_id"] == tenant_id]
-            return out
+            return [_turn_row_to_admin_dict(turn, conversation) for turn, conversation in rows]
 
     async def get_turn(self, turn_id: str) -> dict | None:
         async with self._data_store.session_factory() as session:
@@ -536,63 +533,46 @@ class EidolonDataConversationReader:
     async def list_for_turn(self, turn_id: str) -> list[ChatMessage]:
         async with self._data_store.session_factory() as session:
             rows = (
-        (
-            await session.execute(
-                select(MessageRow)
-                .where(MessageRow.turn_id == turn_id)
-                .order_by(MessageRow.seq)
-            )
-        )
+                (
+                    await session.execute(
+                        select(MessageRow)
+                        .where(MessageRow.turn_id == turn_id)
+                        .order_by(MessageRow.seq)
+                    )
+                )
                 .scalars()
                 .all()
             )
             return [_row_to_message(row) for row in rows]
 
 
-async def _ensure_owner_companion_device(
+async def _validate_owner_companion_device(
     session,
     *,
     owner_id: str,
-    tenant_id: str,
-    companion_id: str | None,
+    companion_id: str,
     device_id: str | None,
 ) -> None:
-    await _insert_ignore(
-        session,
-        OwnerRow,
-        {
-            "owner_id": owner_id,
-            "display_name": owner_id,
-            "kind": "person",
-            "profile_json": {"tenant_id": tenant_id},
-        },
-        index_elements=["owner_id"],
-    )
-    if companion_id:
-        await _insert_ignore(
-            session,
-            CompanionRow,
-            {
-                "companion_id": companion_id,
-                "owner_id": owner_id,
-                "display_name": companion_id,
-                "kind": "companion",
-                "metadata_json": {"tenant_id": tenant_id, "source": "eidolon_agent"},
-            },
-            index_elements=["companion_id"],
+    companion = await session.get(CompanionRow, companion_id)
+    if companion is None:
+        raise RuntimeError(f"companion not provisioned: {companion_id}")
+    if companion.owner_id != owner_id:
+        raise RuntimeError(
+            f"companion {companion_id!r} belongs to owner {companion.owner_id!r}, not {owner_id!r}"
         )
-    if device_id:
-        await _insert_ignore(
-            session,
-            DeviceRow,
-            {
-                "device_id": device_id,
-                "owner_id": owner_id,
-                "name": device_id,
-                "kind": "agent_caller",
-                "metadata_json": {"tenant_id": tenant_id, "source": "eidolon_agent"},
-            },
-            index_elements=["device_id"],
+    if not device_id:
+        await session.flush()
+        return
+    device = await session.get(DeviceRow, device_id)
+    if device is None:
+        raise RuntimeError(f"device not provisioned: {device_id}")
+    if device.owner_id != owner_id:
+        raise RuntimeError(
+            f"device {device_id!r} belongs to owner {device.owner_id!r}, not {owner_id!r}"
+        )
+    if device.bound_companion_id != companion_id:
+        raise RuntimeError(
+            f"device {device_id!r} is bound to companion {device.bound_companion_id!r}, not {companion_id!r}"
         )
     await session.flush()
 
@@ -628,19 +608,16 @@ async def _next_turn_seq(session, conversation_id: str) -> int:
     return int(result.scalar_one())
 
 
-def _companion_id_for_turn(ti: TurnInput) -> str:
-    return ti.caller.agent_instance_id or "default-companion"
-
-
 def _turn_metadata_json(ti: TurnInput, triage_kind: TriageKind, timings: dict) -> dict[str, Any]:
     return {
         **(timings or {}),
-        "tenant_id": ti.caller.tenant_id,
-        "user_id": ti.caller.user_id,
-        "agent_instance_id": ti.caller.agent_instance_id or "",
+        "owner_id": ti.caller.owner_id,
+        "companion_id": ti.caller.companion_id,
+        "memory_realm_id": ti.caller.memory_realm_id,
+        "genome_id": ti.caller.genome_id,
         "session_id": ti.session_id,
         "caller_kind": ti.caller.caller_kind.value,
-        "device_id": ti.caller.identity.device_id,
+        "device_id": ti.caller.device_id,
         "triage_kind": triage_kind.value,
         "trace_id": ti.caller.trace_id,
         "request_id": ti.caller.request_id,
@@ -788,11 +765,10 @@ def _turn_row_to_admin_dict(turn: TurnRow, conversation: ConversationRow) -> dic
         "trace_id": metadata.get("trace_id"),
         "error_code": metrics.get("error_code"),
         "metadata_": metadata,
-        "tenant_id": conversation_meta.get("tenant_id") or metadata.get("tenant_id") or "",
-        "user_id": conversation.owner_id,
-        "agent_instance_id": conversation_meta.get("agent_instance_id")
-        or metadata.get("agent_instance_id")
-        or conversation.companion_id,
+        "owner_id": conversation.owner_id,
+        "companion_id": conversation.companion_id,
+        "memory_realm_id": conversation_meta.get("memory_realm_id") or metadata.get("memory_realm_id"),
+        "genome_id": conversation_meta.get("genome_id") or metadata.get("genome_id"),
         "conversation_title": conversation.title,
     }
 
@@ -800,8 +776,8 @@ def _turn_row_to_admin_dict(turn: TurnRow, conversation: ConversationRow) -> dic
 def _record_to_job_row(record: LongTaskRecord) -> JobRow:
     return JobRow(
         job_id=record.id,
-        owner_id=record.user_id,
-        companion_id=record.agent_instance_id,
+        owner_id=record.owner_id,
+        companion_id=record.companion_id,
         conversation_id=record.conversation_id,
         turn_id=record.turn_id,
         provider=record.provider,
@@ -819,8 +795,8 @@ def _record_to_job_row(record: LongTaskRecord) -> JobRow:
 
 
 def _apply_record_to_job_row(row: JobRow, record: LongTaskRecord) -> None:
-    row.owner_id = record.user_id
-    row.companion_id = record.agent_instance_id
+    row.owner_id = record.owner_id
+    row.companion_id = record.companion_id
     row.conversation_id = record.conversation_id
     row.turn_id = record.turn_id
     row.provider = record.provider
@@ -840,8 +816,8 @@ def _job_row_to_record(row: JobRow) -> LongTaskRecord:
     payload["id"] = row.job_id
     payload["provider"] = row.provider
     payload["status"] = row.status
-    payload["user_id"] = row.owner_id
-    payload["agent_instance_id"] = row.companion_id
+    payload["owner_id"] = row.owner_id
+    payload["companion_id"] = row.companion_id
     payload["conversation_id"] = row.conversation_id
     payload["turn_id"] = row.turn_id
     payload["task_type"] = row.kind
@@ -883,7 +859,6 @@ def _record_from_json(data: dict[str, Any]) -> LongTaskRecord:
         "next_retry_at",
     ):
         values[key] = _dt_from_json(values.get(key))
-    values.setdefault("tenant_id", "")
     values.setdefault("session_key", "")
     values.setdefault("task_date", "")
     values.setdefault("task_key", "")

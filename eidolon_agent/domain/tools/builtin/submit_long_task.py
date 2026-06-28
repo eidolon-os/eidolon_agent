@@ -54,13 +54,14 @@ class SubmitLongTaskTool:
         progress_subject = progress_subject_for(task_id)
         now = _localized_now(ctx.caller.locale)
         task_date = now.date().isoformat()
-        session_key = session_key_for(ctx.caller.user_id, now.date())
+        session_key = session_key_for(ctx.caller.owner_id, now.date())
         task_key = task_key_for(session_key, task_id)
         payload = {
             "task_id": task_id,
-            "tenant_id": ctx.caller.tenant_id,
-            "user_id": ctx.caller.user_id,
-            "agent_instance_id": ctx.caller.agent_instance_id,
+            "owner_id": ctx.caller.owner_id,
+            "companion_id": ctx.caller.companion_id,
+            "memory_realm_id": ctx.caller.memory_realm_id,
+            "genome_id": ctx.caller.genome_id,
             "conversation_id": ctx.conversation_id,
             "session_id": ctx.session_id,
             "turn_id": ctx.turn_id,
@@ -86,10 +87,11 @@ class SubmitLongTaskTool:
             id=task_id,
             provider="mementos",
             status=LongTaskStatus.ACCEPTED,
-            tenant_id=ctx.caller.tenant_id,
-            user_id=ctx.caller.user_id,
-            agent_instance_id=ctx.caller.agent_instance_id,
-            device_id=ctx.caller.identity.device_id,
+            owner_id=ctx.caller.owner_id,
+            companion_id=ctx.caller.companion_id,
+            memory_realm_id=ctx.caller.memory_realm_id,
+            genome_id=ctx.caller.genome_id,
+            device_id=ctx.caller.device_id,
             conversation_id=ctx.conversation_id,
             turn_id=ctx.turn_id,
             session_id=ctx.session_id,

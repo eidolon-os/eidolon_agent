@@ -19,11 +19,11 @@ from eidolon_agent.core.types.long_task import (
     CallbackStatus,
     LongTaskRecord,
     LongTaskStatus,
+    owner_id_from_safe_key,
     parse_session_key,
-    safe_user_key,
+    safe_owner_key,
     session_key_for,
     task_key_for,
-    user_id_from_safe_key,
 )
 from eidolon_agent.core.types.memory import (
     MemoryHit,
@@ -76,11 +76,11 @@ __all__ = [  # noqa: RUF022 - grouped by domain rather than alphabetical for rea
     "CallbackStatus",
     "LongTaskRecord",
     "LongTaskStatus",
+    "owner_id_from_safe_key",
     "parse_session_key",
-    "safe_user_key",
+    "safe_owner_key",
     "session_key_for",
     "task_key_for",
-    "user_id_from_safe_key",
     # memory
     "MemoryHit",
     "MemoryItem",

@@ -196,19 +196,18 @@ class PersonasService:
     async def compile_prompt(
         self,
         *,
-        tenant_id: str,
-        user_id: str,
-        instance_id: str,
+        owner_id: str,
+        companion_id: str,
+        genome_id: str | None = None,
         user_text: str,
-        template_id: str | None = None,
         realtime: dict | None = None,
         dry_run_memory: list[MemoryHit] | None = None,
     ) -> CompiledPersona:
         snapshot = await self.get_snapshot(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            instance_id=instance_id,
-            template_id=template_id,
+            tenant_id=owner_id,
+            user_id=owner_id,
+            instance_id=companion_id,
+            template_id=genome_id,
         )
         instance = snapshot.instance
         formatted_context = ""
@@ -219,8 +218,11 @@ class PersonasService:
             formatted_context = "\n".join(hit.content for hit in hits)
         elif self._memory is not None and user_text:
             formatted_context, hits, degraded = await self._memory.recall_context(
-                user_id=user_id,
+                owner_id=owner_id,
                 query=user_text,
+                companion_id=companion_id,
+                memory_realm_id=companion_id,
+                device_id=None,
                 plan=MemoryQueryPlan(
                     episodic_query=user_text,
                     semantic_query=user_text,
@@ -229,10 +231,6 @@ class PersonasService:
                     voice=True,
                 ),
                 timeout_s=self._memory_timeout_s,
-                tenant_id=tenant_id,
-                companion_id=instance_id,
-                agent_id=instance_id,
-                instance_id=instance_id,
             )
 
         adapted = self._memory_adapter.adapt(
@@ -248,16 +246,16 @@ class PersonasService:
         ):
             try:
                 await self._record_triggered_observations(
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    instance_id=instance_id,
+                    tenant_id=owner_id,
+                    user_id=owner_id,
+                    instance_id=companion_id,
                     kinds=adapted.triggered_events,
                     source="memory_adapter",
                     summary="memory policy triggered persona observation",
                     evidence={"query": user_text[:500], "degraded": degraded},
                     memory_ids=tuple(hit.id for hit in hits),
                 )
-                self._schedule_reflection(tenant_id, user_id, instance_id)
+                self._schedule_reflection(owner_id, owner_id, companion_id)
             except Exception:
                 _log.exception("record persona memory observation failed")
         return self._compiler.compile(
@@ -295,9 +293,9 @@ class PersonasService:
         observation = _interaction_to_observation(normalized)
         if observation is not None and self._observation_repo is not None:
             await self._observation_repo.add(observation)
-            self._schedule_reflection(event.tenant_id, event.user_id, event.instance_id)
+            self._schedule_reflection(event.owner_id, event.owner_id, event.companion_id)
         if observation is not None and self._auto_reflection_ready():
-            self._worker.submit(normalized.model_copy(update={"template_id": None}))
+            self._worker.submit(normalized.model_copy(update={"genome_id": None}))
         else:
             self._worker.submit(normalized)
 
@@ -305,7 +303,7 @@ class PersonasService:
         update = self._signal_adapter.to_runtime_update(signal)
         if not update:
             return
-        await self._runtime.update(instance_id=signal.instance_id, **update)
+        await self._runtime.update(instance_id=signal.companion_id, **update)
 
     async def evolve(
         self,
@@ -855,9 +853,9 @@ def _interaction_to_observation(
         evidence["assistant_text"] = event.assistant_text[:500]
     return PersonaObservation(
         id=f"obs-{uuid.uuid4().hex}",
-        tenant_id=event.tenant_id,
-        user_id=event.user_id,
-        instance_id=event.instance_id,
+        tenant_id=event.owner_id,
+        user_id=event.owner_id,
+        instance_id=event.companion_id,
         kind=kind,
         source=event.kind,
         strength=_clamp01(float(event.payload.get("strength", 0.6))),

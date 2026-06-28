@@ -84,17 +84,15 @@ class PersonaEvolutionWorker:
                 self._queue.task_done()
 
     async def _handle(self, event: PersonaInteractionEvent) -> None:
-        lock = self._locks.setdefault(event.instance_id, asyncio.Lock())
+        lock = self._locks.setdefault(event.companion_id, asyncio.Lock())
         async with lock:
             await self._apply_runtime_state(event)
-            if not event.template_id:
+            evo_events = _interaction_to_evolution_events(event)
+            if not event.genome_id or not evo_events:
                 return
             instance = await self._instances.load(
-                event.tenant_id, event.user_id, event.instance_id
+                event.owner_id, event.owner_id, event.companion_id
             )
-            evo_events = _interaction_to_evolution_events(event)
-            if not evo_events:
-                return
             evolved, result = self._evolution.evolve(
                 instance=instance,
                 events=evo_events,
@@ -111,25 +109,25 @@ class PersonaEvolutionWorker:
                 )
                 await self._audit.record_evolution(result)
                 await self._events.publish_evolution_applied(
-                    event.instance_id,
+                    event.companion_id,
                     result.model_dump(mode="json"),
                 )
                 await self._events.publish_persona_updated(
-                    event.instance_id,
+                    event.companion_id,
                     {"reason": "async_evolution", "changes": result.model_dump(mode="json")["changes"]},
                 )
 
     async def _apply_runtime_state(self, event: PersonaInteractionEvent) -> None:
         if event.kind == "turn_completed":
             await self._runtime.update(
-                instance_id=event.instance_id,
+                instance_id=event.companion_id,
                 attention_target=AttentionTarget.USER,
                 focus_score=0.65,
             )
         emotion = event.payload.get("emotion")
         if emotion:
             await self._runtime.update(
-                instance_id=event.instance_id,
+                instance_id=event.companion_id,
                 emotion=str(emotion),
                 emotion_delta=float(event.payload.get("emotion_delta", 0.15)),
             )

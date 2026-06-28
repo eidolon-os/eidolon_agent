@@ -6,7 +6,7 @@ mutation endpoints in this router (the chat path is the only writer).
 
 Endpoints:
   GET  /api/admin/conversations/turns
-       List turns newest-first. Filterable by user_id / tenant_id;
+       List turns newest-first. Filterable by owner_id / companion_id;
        cursor-paginated via ``before`` (an ISO timestamp; we hand
        back ``next_before`` so the UI doesn't need to know the cursor
        column).
@@ -17,9 +17,8 @@ Endpoints:
        exist.
 
 Two practical notes:
-  - ``user_id`` here is admin's canonical user_id (the same key in
-    memory / hub / channel JWT) — so the operator can filter using
-    the same dropdown they use elsewhere in the UI.
+  - ``owner_id`` is the data ownership boundary and ``companion_id`` is the
+    runtime agent boundary.
   - We deliberately don't expose message bodies on the list endpoint;
     that would balloon a page-of-50 to many MB once realistic
     conversations exist. The detail endpoint is the only place that
@@ -51,9 +50,10 @@ class TurnSummary(BaseModel):
     turn_id: str
     conversation_id: str
     seq: int
-    tenant_id: str
-    user_id: str
-    agent_instance_id: str
+    owner_id: str
+    companion_id: str
+    memory_realm_id: str | None
+    genome_id: str | None
     trigger: str
     caller_kind: str | None
     device_id: str | None
@@ -81,8 +81,8 @@ class MemoryAuditRow(BaseModel):
     turn_id: str
     conversation_id: str
     seq: int
-    tenant_id: str
-    user_id: str
+    owner_id: str
+    companion_id: str
     started_at: datetime
     disposition: str | None
     reason: str | None
@@ -117,9 +117,10 @@ class TurnDetail(BaseModel):
     conversation_id: str
     conversation_title: str | None
     seq: int
-    tenant_id: str
-    user_id: str
-    agent_instance_id: str
+    owner_id: str
+    companion_id: str
+    memory_realm_id: str | None
+    genome_id: str | None
     trigger: str
     caller_kind: str | None
     device_id: str | None
@@ -154,8 +155,8 @@ def _data_reader(request: Request) -> EidolonDataConversationReader:
 @router.get("/conversations/turns", response_model=ListTurnsResponse)
 async def list_turns(
     request: Request,
-    user_id: str | None = Query(default=None, description="Filter by admin user_id"),
-    tenant_id: str | None = Query(default=None),
+    owner_id: str | None = Query(default=None),
+    companion_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     before: datetime | None = Query(
         default=None,
@@ -164,9 +165,9 @@ async def list_turns(
 ) -> ListTurnsResponse:
     """Page of turns, newest-first. Pure read; no side-effects."""
     reader = _data_reader(request)
-    rows = await reader.list_turns_by_user(
-        user_id=user_id,
-        tenant_id=tenant_id,
+    rows = await reader.list_turns_by_owner(
+        owner_id=owner_id,
+        companion_id=companion_id,
         limit=limit,
         before=before,
     )
@@ -175,9 +176,10 @@ async def list_turns(
             turn_id=r["id"],
             conversation_id=r["conversation_id"],
             seq=r["seq"],
-            tenant_id=r["tenant_id"],
-            user_id=r["user_id"],
-            agent_instance_id=r["agent_instance_id"],
+            owner_id=r["owner_id"],
+            companion_id=r["companion_id"],
+            memory_realm_id=r["memory_realm_id"],
+            genome_id=r["genome_id"],
             trigger=r["trigger"],
             caller_kind=r["caller_kind"],
             device_id=r["device_id"],
@@ -208,16 +210,16 @@ async def list_turns(
 @router.get("/conversations/memory-audit", response_model=MemoryAuditResponse)
 async def list_memory_audit(
     request: Request,
-    user_id: str | None = Query(default=None, description="Filter by admin user_id"),
-    tenant_id: str | None = Query(default=None),
+    owner_id: str | None = Query(default=None),
+    companion_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     before: datetime | None = Query(default=None),
 ) -> MemoryAuditResponse:
     """Prompt-safe memory write candidates from local turn traces."""
     reader = _data_reader(request)
-    rows = await reader.list_turns_by_user(
-        user_id=user_id,
-        tenant_id=tenant_id,
+    rows = await reader.list_turns_by_owner(
+        owner_id=owner_id,
+        companion_id=companion_id,
         limit=limit,
         before=before,
     )
@@ -232,8 +234,8 @@ async def list_memory_audit(
                 turn_id=row["id"],
                 conversation_id=row["conversation_id"],
                 seq=row["seq"],
-                tenant_id=row["tenant_id"],
-                user_id=row["user_id"],
+                owner_id=row["owner_id"],
+                companion_id=row["companion_id"],
                 started_at=row["started_at"],
                 disposition=write.get("disposition"),
                 reason=write.get("reason"),
@@ -262,9 +264,10 @@ async def get_turn(turn_id: str, request: Request) -> TurnDetail:
         conversation_id=row["conversation_id"],
         conversation_title=row["conversation_title"],
         seq=row["seq"],
-        tenant_id=row["tenant_id"],
-        user_id=row["user_id"],
-        agent_instance_id=row["agent_instance_id"],
+        owner_id=row["owner_id"],
+        companion_id=row["companion_id"],
+        memory_realm_id=row["memory_realm_id"],
+        genome_id=row["genome_id"],
         trigger=row["trigger"],
         caller_kind=row["caller_kind"],
         device_id=row["device_id"],

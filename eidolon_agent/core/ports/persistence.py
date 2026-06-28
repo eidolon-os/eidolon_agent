@@ -27,8 +27,8 @@ class ChatMessageRepository(Protocol):
         before: datetime | None = None,
     ) -> list[ChatMessage]: ...
 
-    async def delete_for_user(self, user_id: str) -> int:
-        """Used by ``/admin/users/{id}/forget``. Returns rows affected."""
+    async def delete_for_owner(self, owner_id: str) -> int:
+        """Used by owner-level privacy deletion. Returns rows affected."""
         ...
 
 
@@ -38,9 +38,9 @@ class ConversationRepository(Protocol):
         self,
         *,
         conversation_id: str,
-        tenant_id: str,
-        user_id: str,
-        agent_instance_id: str,
+        owner_id: str,
+        companion_id: str,
+        device_id: str,
     ) -> None: ...
 
     async def finish(self, conversation_id: str, *, title: str | None = None) -> None: ...
@@ -54,8 +54,8 @@ class DeviceRepository(Protocol):
         self,
         *,
         device_id: str,
-        tenant_id: str,
-        user_id: str,
+        owner_id: str,
+        companion_id: str,
         token_hash: str,
         scopes: list[str],
     ) -> None: ...

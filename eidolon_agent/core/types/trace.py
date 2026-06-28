@@ -76,14 +76,14 @@ class PrivacyTrace:
 
 @dataclass(frozen=True, slots=True)
 class PersonaTrace:
-    instance_id: str | None = None
-    template_id: str | None = None
+    companion_id: str | None = None
+    genome_id: str | None = None
     snapshot_version: int | None = None
 
     def to_metadata(self) -> dict[str, Any]:
         return {
-            "instance_id": self.instance_id,
-            "template_id": self.template_id,
+            "companion_id": self.companion_id,
+            "genome_id": self.genome_id,
             "snapshot_version": self.snapshot_version,
         }
 

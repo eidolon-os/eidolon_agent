@@ -1,9 +1,9 @@
-"""Phase 33.B1: user-level token revocation propagates to verifier.
+"""Owner-level token revocation propagates to verifier.
 
 Two layers under test:
 
-1. Endpoint: ``POST /api/admin/users/{user_id}/revoke-sessions`` writes
-   ``revoked.user.<user_id>`` to the DEVICE_REVOCATIONS KV.
+1. Endpoint: ``POST /api/admin/owners/{owner_id}/revoke-sessions`` writes
+   owner revocation keys to the DEVICE_REVOCATIONS KV.
 2. Verifier: ``PairingTokenVerifier.verify`` checks this key on every
    call and raises ``RuntimeTokenRevokedError`` when present — regardless of
    how recently the token was minted.
@@ -45,8 +45,8 @@ from eidolon_sdk.biz.runtime import (
     PairingTokenVerifier,
     RuntimeTokenRevokedError,
     device_revocation_keys,
+    owner_revocation_keys,
     sign_device_token,
-    user_revocation_keys,
 )
 from fastapi import FastAPI
 from sqlalchemy import func, select
@@ -90,46 +90,41 @@ def _build_test_app(kv: _FakeKV) -> FastAPI:
 # ---- endpoint ------------------------------------------------------------
 
 
-async def test_revoke_user_sessions_writes_revocation_key() -> None:
-    """``POST /api/admin/users/manson/revoke-sessions`` writes a key
-    that the verifier (later) will treat as 'all manson sessions are
-    revoked'."""
+async def test_revoke_owner_sessions_writes_revocation_key() -> None:
     kv = _FakeKV()
     app = _build_test_app(kv)
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        r = await client.post("/api/admin/users/manson/revoke-sessions")
+        r = await client.post("/api/admin/owners/manson/revoke-sessions")
 
     assert r.status_code == 200
     body = r.json()
-    assert body == {"user_id": "manson", "revoked": True}
-    # Key written with a non-empty value (ISO timestamp). The endpoint writes
-    # both the encoded key and legacy simple-id key for compatibility.
-    assert await kv.get(user_revocation_keys("manson")[0]) is not None
+    assert body == {"owner_id": "manson", "revoked": True}
+    assert await kv.get(owner_revocation_keys("manson")[0]) is not None
     val = await kv.get("revoked.user.manson")
     assert val is not None
     assert b"T" in val and b":" in val  # ISO format roughly
 
 
-async def test_delete_user_data_503_when_data_store_missing() -> None:
+async def test_delete_owner_data_503_when_data_store_missing() -> None:
     kv = _FakeKV()
     app = _build_test_app(kv)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        r = await client.delete("/api/admin/users/alice/data")
+        r = await client.delete("/api/admin/owners/alice/data")
 
     assert r.status_code == 503
     assert "data_store" in r.json()["detail"]
 
 
-async def test_delete_user_data_prefers_eidolon_data_store(tmp_path) -> None:
+async def test_delete_owner_data_prefers_eidolon_data_store(tmp_path) -> None:
     store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
     await store.init_schema()
     kv = _FakeKV()
-    await kv.put(user_revocation_keys("alice")[0], b"revoked")
+    await kv.put(owner_revocation_keys("alice")[0], b"revoked")
     await kv.put("revoked.user.alice", b"revoked")
 
     try:
@@ -192,7 +187,7 @@ async def test_delete_user_data_prefers_eidolon_data_store(tmp_path) -> None:
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
-            r = await client.delete("/api/admin/users/alice/data")
+            r = await client.delete("/api/admin/owners/alice/data")
 
         assert r.status_code == 200
         body = r.json()
@@ -228,7 +223,7 @@ async def test_delete_user_data_prefers_eidolon_data_store(tmp_path) -> None:
         await store.close()
 
 
-async def test_revoke_user_sessions_503_when_kv_missing() -> None:
+async def test_revoke_owner_sessions_503_when_kv_missing() -> None:
     """If the bucket wasn't initialized at startup (NATS down at boot,
     say), the endpoint must report 503 — not silently succeed."""
     app = FastAPI()
@@ -238,7 +233,7 @@ async def test_revoke_user_sessions_503_when_kv_missing() -> None:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        r = await client.post("/api/admin/users/manson/revoke-sessions")
+        r = await client.post("/api/admin/owners/manson/revoke-sessions")
 
     assert r.status_code == 503
     assert "revocation_kv" in r.json()["detail"]
@@ -247,35 +242,29 @@ async def test_revoke_user_sessions_503_when_kv_missing() -> None:
 # ---- verifier integration ------------------------------------------------
 
 
-async def test_verifier_rejects_token_after_user_revoke() -> None:
-    """The whole point of this phase: a freshly-minted, not-expired
-    token whose ``user_id`` is in ``revoked.user.<id>`` must fail
-    verification with ``RuntimeTokenRevokedError``.
-
-    Mirrors the runtime flow: channel signed a JWT for manson; admin
-    operator then revoked manson; next chat() turn that calls
-    verifier.verify() should be rejected immediately."""
+async def test_verifier_rejects_token_after_owner_revoke() -> None:
     kv = _FakeKV()
     verifier = PairingTokenVerifier(secret=SECRET, revocation_kv=kv)
 
     token, _ = sign_device_token(
         secret=SECRET,
         device_id="web-abc12345",
-        tenant_id="default",
-        user_id="manson",
-        default_template_id="caretaker_jiezhi",
+        owner_id="manson",
+        companion_id="companion-a",
+        memory_realm_id="realm-a",
+        genome_id="genome-a",
         scopes=["device"],
     )
     # Sanity: works pre-revoke.
     verified = await verifier.verify(token)
-    assert verified.user_id == "manson"
+    assert verified.owner_id == "manson"
 
     # Operator revokes manson via the endpoint.
     app = _build_test_app(kv)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        r = await client.post("/api/admin/users/manson/revoke-sessions")
+        r = await client.post("/api/admin/owners/manson/revoke-sessions")
     assert r.status_code == 200
 
     # Same token now rejected.
@@ -284,19 +273,19 @@ async def test_verifier_rejects_token_after_user_revoke() -> None:
     assert "manson" in str(exc_info.value)
 
 
-async def test_verifier_user_revoke_does_not_affect_other_users() -> None:
-    """Revoking manson must not impact default. Sanity that the key
-    scoping (revoked.user.<id>) is correctly per-user."""
+async def test_verifier_owner_revoke_does_not_affect_other_owners() -> None:
     kv = _FakeKV()
     verifier = PairingTokenVerifier(secret=SECRET, revocation_kv=kv)
 
     manson_token, _ = sign_device_token(
-        secret=SECRET, device_id="web-1", tenant_id="t", user_id="manson",
-        default_template_id=None, scopes=["device"],
+        secret=SECRET, device_id="web-1", owner_id="manson",
+        companion_id="companion-a", memory_realm_id="realm-a", genome_id="genome-a",
+        scopes=["device"],
     )
     default_token, _ = sign_device_token(
-        secret=SECRET, device_id="web-2", tenant_id="t", user_id="default",
-        default_template_id=None, scopes=["device"],
+        secret=SECRET, device_id="web-2", owner_id="default",
+        companion_id="companion-b", memory_realm_id="realm-b", genome_id="genome-b",
+        scopes=["device"],
     )
 
     # Revoke just manson via the endpoint.
@@ -304,13 +293,13 @@ async def test_verifier_user_revoke_does_not_affect_other_users() -> None:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        await client.post("/api/admin/users/manson/revoke-sessions")
+        await client.post("/api/admin/owners/manson/revoke-sessions")
 
     with pytest.raises(RuntimeTokenRevokedError):
         await verifier.verify(manson_token)
     # default still works.
     verified = await verifier.verify(default_token)
-    assert verified.user_id == "default"
+    assert verified.owner_id == "default"
 
 
 async def test_verifier_device_level_revoke_still_works() -> None:
@@ -320,8 +309,9 @@ async def test_verifier_device_level_revoke_still_works() -> None:
     verifier = PairingTokenVerifier(secret=SECRET, revocation_kv=kv)
 
     token, _ = sign_device_token(
-        secret=SECRET, device_id="dev-x", tenant_id="t", user_id="alice",
-        default_template_id=None, scopes=["device"],
+        secret=SECRET, device_id="dev-x", owner_id="alice",
+        companion_id="companion-a", memory_realm_id="realm-a", genome_id="genome-a",
+        scopes=["device"],
     )
 
     # Manually write a device-level revocation (no admin endpoint for
@@ -341,9 +331,10 @@ async def test_verifier_accepts_mac_device_id_without_invalid_kv_key() -> None:
     token, _ = sign_device_token(
         secret=SECRET,
         device_id="1c:db:d4:7a:ef:0c",
-        tenant_id="t",
-        user_id="alice",
-        default_template_id=None,
+        owner_id="alice",
+        companion_id="companion-a",
+        memory_realm_id="realm-a",
+        genome_id="genome-a",
         scopes=["device"],
     )
 
@@ -359,9 +350,10 @@ async def test_verifier_rejects_mac_device_id_with_encoded_revocation_key() -> N
     token, _ = sign_device_token(
         secret=SECRET,
         device_id=device_id,
-        tenant_id="t",
-        user_id="alice",
-        default_template_id=None,
+        owner_id="alice",
+        companion_id="companion-a",
+        memory_realm_id="realm-a",
+        genome_id="genome-a",
         scopes=["device"],
     )
     await kv.put(device_revocation_keys(device_id)[0], b"manual-test")

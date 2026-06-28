@@ -1,41 +1,29 @@
-"""AgentRegistry — session-keyed map of CompanionAgents.
-
-After the Phase 4 simplification: one agent per (tenant, user) pair, built
-lazily on first ``resolve_for_caller``. No admin RPCs to manually
-start/stop instances; the bootstrap chooses the default template, and any
-unrecognised caller spins up an agent on demand.
-"""
+"""AgentRegistry keyed by companion runtime identity."""
 
 from __future__ import annotations
 
 import asyncio
-import inspect
-import uuid
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from eidolon_agent.core.errors import NotFoundError
 from eidolon_agent.domain.agent.companion import CompanionAgent
 
-ActiveInstanceResolver = Callable[..., Awaitable[tuple[str, str] | None] | tuple[str, str] | None]
-
 
 @dataclass(frozen=True, slots=True)
 class AgentTemplate:
-    """Static catalog entry. One per available persona archetype."""
+    """Static catalog entry. One per available persona archetype/genome family."""
 
-    template_id: str  # matches PersonaTemplate.template_id
+    genome_id: str
     name: str
     description: str = ""
 
 
 @dataclass(slots=True)
 class AgentInstance:
-    instance_id: str
-    template_id: str
-    tenant_id: str
-    user_id: str
+    owner_id: str
+    companion_id: str
+    genome_id: str
     nickname_alias: str | None = None
     status: str = "active"
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -44,41 +32,35 @@ class AgentInstance:
 
 
 class AgentRegistry:
-    """Per-(tenant, user) CompanionAgent registry.
+    """Companion runtime registry.
 
-    ``resolve_for_caller`` is the single public entry point; missing
-    instances are created on demand via ``instance_factory``.
+    The token already carries owner, companion, and genome ids. The registry
+    therefore never chooses an active companion for an owner.
     """
 
     def __init__(
         self,
         *,
-        instance_factory,  # Callable[[AgentInstance], Awaitable[CompanionAgent]]
-        default_template_id: str,
-        active_instance_resolver: ActiveInstanceResolver | None = None,
+        instance_factory,
+        default_genome_id: str = "",
     ) -> None:
         self._templates: dict[str, AgentTemplate] = {}
-        self._instances: dict[str, AgentInstance] = {}  # key: tenant_id/user_id
+        self._instances: dict[str, AgentInstance] = {}
         self._lock = asyncio.Lock()
         self._factory = instance_factory
-        self._default_template_id = default_template_id
-        self._active_instance_resolver = active_instance_resolver
-
-    # ---- templates -----------------------------------------------------------
+        self._default_genome_id = default_genome_id
 
     def register_template(self, tpl: AgentTemplate) -> None:
-        self._templates[tpl.template_id] = tpl
+        self._templates[tpl.genome_id] = tpl
 
     def list_templates(self) -> list[AgentTemplate]:
         return list(self._templates.values())
 
-    def get_template(self, template_id: str) -> AgentTemplate:
+    def get_template(self, genome_id: str) -> AgentTemplate:
         try:
-            return self._templates[template_id]
+            return self._templates[genome_id]
         except KeyError as exc:
-            raise NotFoundError(f"agent template: {template_id}") from exc
-
-    # ---- instances -----------------------------------------------------------
+            raise NotFoundError(f"agent genome: {genome_id}") from exc
 
     def list_instances(self) -> list[AgentInstance]:
         return list(self._instances.values())
@@ -86,16 +68,12 @@ class AgentRegistry:
     async def resolve_for_caller(
         self,
         *,
-        tenant_id: str,
-        user_id: str,
-        template_id: str | None = None,
+        owner_id: str,
+        companion_id: str,
+        genome_id: str | None = None,
     ) -> AgentInstance:
-        """Look up or lazily create the agent for a (tenant, user) pair.
-
-        ``template_id`` is honoured only on first creation; existing instances
-        keep whatever template they were built with.
-        """
-        key = f"{tenant_id}/{user_id}"
+        resolved_genome_id = genome_id or self._default_genome_id
+        key = f"{companion_id}:{resolved_genome_id}"
         inst = self._instances.get(key)
         if inst is not None:
             return inst
@@ -103,46 +81,12 @@ class AgentRegistry:
             inst = self._instances.get(key)
             if inst is not None:
                 return inst
-            tpl_id = template_id or self._default_template_id
-            instance_id: str | None = None
-            resolved = await self._resolve_active_instance(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                requested_template_id=template_id,
-            )
-            if resolved is not None:
-                instance_id, resolved_template_id = resolved
-                tpl_id = resolved_template_id or tpl_id
-            self.get_template(tpl_id)  # raises NotFoundError if not registered
+            self.get_template(resolved_genome_id)
             inst = AgentInstance(
-                instance_id=instance_id or f"inst_{uuid.uuid4().hex[:12]}",
-                template_id=tpl_id,
-                tenant_id=tenant_id,
-                user_id=user_id,
+                owner_id=owner_id,
+                companion_id=companion_id,
+                genome_id=resolved_genome_id,
             )
             inst.agent = await self._factory(inst)
             self._instances[key] = inst
             return inst
-
-    async def _resolve_active_instance(
-        self,
-        *,
-        tenant_id: str,
-        user_id: str,
-        requested_template_id: str | None,
-    ) -> tuple[str, str] | None:
-        if self._active_instance_resolver is None:
-            return None
-        resolved = self._active_instance_resolver(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            requested_template_id=requested_template_id,
-        )
-        if inspect.isawaitable(resolved):
-            resolved = await resolved
-        if resolved is None:
-            return None
-        instance_id, template_id = resolved
-        if not instance_id:
-            return None
-        return instance_id, template_id

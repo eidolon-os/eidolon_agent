@@ -36,12 +36,18 @@ class CrisisHandler:
     def __init__(self, *, event_bus=None) -> None:
         self._bus = event_bus
 
-    async def handle(self, *, instance_id: str, user_id: str, locale: str = "zh-CN") -> CrisisResponse:
+    async def handle(
+        self,
+        *,
+        companion_id: str,
+        owner_id: str,
+        locale: str = "zh-CN",
+    ) -> CrisisResponse:
         if self._bus is not None:
             await self._bus.publish(
                 Event(
-                    subject=f"agent.guardrail.crisis.{instance_id}",
-                    payload={"user_id": user_id, "locale": locale},
+                    subject=f"agent.guardrail.crisis.{companion_id}",
+                    payload={"owner_id": owner_id, "locale": locale},
                     source="guardrails.crisis",
                 )
             )

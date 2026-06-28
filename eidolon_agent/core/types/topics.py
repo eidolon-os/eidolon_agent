@@ -2,7 +2,7 @@
 
 All subjects MUST be constructed via this module — no string literals scattered
 across the codebase. This makes refactoring trivial and lets us enforce the
-``agent.<scope>.<tenant>.<user>.<...>`` namespacing convention.
+``agent.<scope>.<owner>.<companion>.<...>`` namespacing convention.
 """
 
 from __future__ import annotations
@@ -66,12 +66,12 @@ class Topics:
     # --- External outbound ----------------------------------------------------
 
     @staticmethod
-    def emotion_turn(user_id: str) -> str:
-        return f"agent.emotion.turn.{user_id}"
+    def emotion_turn(owner_id: str) -> str:
+        return f"agent.emotion.turn.{owner_id}"
 
     # Default agent->memory subjects. The suffix is a NATS-safe single token
-    # derived from memory_space_id; the raw tenant.owner.companion id contains
-    # dots and must not be interpolated directly into NATS subjects.
+    # derived from memory_space_id; realm ids may contain separators and must
+    # not be interpolated directly into NATS subjects.
     MEMORY_TURN_TEMPLATE = "eidolon.memory.turn.{memory_space_token}"
     MEMORY_CMD_TEMPLATE = "eidolon.memory.cmd.{memory_space_token}"
 

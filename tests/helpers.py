@@ -18,7 +18,11 @@ def make_turn_input(text: str = "你好") -> TurnInput:
         session_id="s1",
         caller=CallerContext(
             identity=Identity(
-                tenant_id="t", user_id="alice", agent_instance_id="inst-test"
+                owner_id="alice",
+                companion_id="companion-test",
+                device_id="device-test",
+                memory_realm_id="realm-test",
+                genome_id="genome-test",
             ),
             caller_kind=CallerKind.WEB_CHAT,
             trace_id="tr",

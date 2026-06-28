@@ -166,8 +166,9 @@ message ExchangeRequest {
 message ExchangeResponse {
   string device_id = 1;
   string device_token = 2;
-  string tenant_id = 3;
-  string user_id = 4;
-  string default_template_id = 5;
-  google.protobuf.Timestamp expires_at = 6;
+  string owner_id = 3;
+  string companion_id = 4;
+  string memory_realm_id = 5;
+  string genome_id = 6;
+  google.protobuf.Timestamp expires_at = 7;
 }

@@ -14,8 +14,8 @@ from eidolon_agent.domain.agent.turn import TurnEngine
 
 
 class CompanionAgent:
-    def __init__(self, *, instance_id: str, turn_engine: TurnEngine) -> None:
-        self.instance_id = instance_id
+    def __init__(self, *, companion_id: str, turn_engine: TurnEngine) -> None:
+        self.companion_id = companion_id
         self._engine = turn_engine
 
     def run_turn(self, ti: TurnInput) -> AsyncIterator[TurnEvent]:

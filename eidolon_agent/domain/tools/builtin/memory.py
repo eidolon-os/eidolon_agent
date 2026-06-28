@@ -59,17 +59,15 @@ class MemorySearchTool:
         top_k = _bounded_int(call.arguments.get("top_k"), default=5, minimum=1, maximum=20)
         scope = _scope(call.arguments.get("scope"))
         hits = await self._memory.search(
-            ctx.caller.user_id,
+            ctx.caller.owner_id,
             query,
+            companion_id=ctx.caller.companion_id,
+            memory_realm_id=ctx.caller.memory_realm_id,
+            device_id=ctx.caller.device_id,
             top_k=top_k,
             scope=scope,
             voice=ctx.caller.caller_kind.value == "livekit_voice",
             timeout_s=self.schema.timeout_s,
-            tenant_id=ctx.caller.tenant_id,
-            companion_id=ctx.caller.agent_instance_id,
-            agent_id=ctx.caller.agent_instance_id,
-            device_id=ctx.caller.identity.device_id,
-            instance_id=ctx.caller.agent_instance_id,
             session_id=ctx.session_id or "default",
         )
         return ToolResult(
@@ -106,7 +104,7 @@ class MemoryAssertFactTool:
             permissions=frozenset({Permission.MEMORY_WRITE, Permission.USER_DATA}),
             side_effect=True,
             timeout_s=timeout_s,
-            idempotency_key_template="${user_id}:memory_assert_fact:${subject}:${predicate}:${object}",
+            idempotency_key_template="${owner_id}:${companion_id}:memory_assert_fact:${subject}:${predicate}:${object}",
         )
         self._memory = memory_port
 
@@ -128,13 +126,13 @@ class MemoryAssertFactTool:
             call.arguments.get("confidence"), default=0.9, minimum=0.0, maximum=1.0
         )
         await self._memory.assert_fact(
-            ctx.caller.user_id,
+            ctx.caller.owner_id,
+            ctx.caller.companion_id,
+            ctx.caller.memory_realm_id,
             subject,
             predicate,
             object_,
             confidence=confidence,
-            tenant_id=ctx.caller.tenant_id,
-            companion_id=ctx.caller.agent_instance_id,
         )
         return ToolResult(
             call_id=call.id,
@@ -172,7 +170,7 @@ class MemoryForgetTool:
             permissions=frozenset({Permission.MEMORY_WRITE, Permission.USER_DATA}),
             side_effect=True,
             timeout_s=timeout_s,
-            idempotency_key_template="${user_id}:memory_forget:${query}",
+            idempotency_key_template="${owner_id}:${companion_id}:memory_forget:${query}",
         )
         self._memory = memory_port
 
@@ -189,13 +187,11 @@ class MemoryForgetTool:
                 error_message="query is required",
             )
         removed = await self._memory.forget(
-            ctx.caller.user_id,
+            ctx.caller.owner_id,
+            ctx.caller.companion_id,
+            ctx.caller.memory_realm_id,
+            ctx.caller.device_id,
             query,
-            tenant_id=ctx.caller.tenant_id,
-            companion_id=ctx.caller.agent_instance_id,
-            agent_id=ctx.caller.agent_instance_id,
-            device_id=ctx.caller.identity.device_id,
-            instance_id=ctx.caller.agent_instance_id,
             session_id=ctx.session_id or "default",
         )
         return ToolResult(

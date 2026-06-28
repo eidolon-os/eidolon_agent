@@ -1,4 +1,4 @@
-"""Generate pairing codes, exchange them for device_tokens."""
+"""Generate pairing codes and exchange them for device tokens."""
 
 from __future__ import annotations
 
@@ -9,19 +9,20 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from eidolon_sdk.biz.runtime import VerifiedDevice, sign_device_token
+from eidolon_sdk.biz.runtime import RuntimeIdentity, sign_device_token
 
 from eidolon_agent.core.errors import NotFoundError, UnauthenticatedError
 
-_ALPHABET = string.ascii_uppercase + string.digits  # no lowercase to avoid confusion
+_ALPHABET = string.ascii_uppercase + string.digits
 
 
 @dataclass(frozen=True, slots=True)
 class PairingCode:
     code: str
-    tenant_id: str
-    user_id: str
-    default_template_id: str | None
+    owner_id: str
+    companion_id: str
+    memory_realm_id: str
+    genome_id: str
     issued_at: datetime
     expires_at: datetime
     issued_by_actor: str
@@ -32,9 +33,10 @@ class IssuedToken:
     device_id: str
     token: str
     expires_at: datetime
-    tenant_id: str
-    user_id: str
-    default_template_id: str | None
+    owner_id: str
+    companion_id: str
+    memory_realm_id: str
+    genome_id: str
 
 
 class PairingCoordinator:
@@ -52,25 +54,26 @@ class PairingCoordinator:
         self._code_ttl_s = code_ttl_s
         self._code_length = code_length
         self._token_ttl_days = token_ttl_days
-        # In-memory store; production should also persist via SQLite for audit.
         self._codes: dict[str, PairingCode] = {}
         self._lock = asyncio.Lock()
 
     async def issue_code(
         self,
         *,
-        tenant_id: str,
-        user_id: str,
-        default_template_id: str | None,
+        owner_id: str,
+        companion_id: str,
+        memory_realm_id: str,
+        genome_id: str,
         issued_by_actor: str,
     ) -> PairingCode:
         code = "".join(secrets.choice(_ALPHABET) for _ in range(self._code_length))
         now = datetime.now(timezone.utc)
         record = PairingCode(
             code=code,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            default_template_id=default_template_id,
+            owner_id=owner_id,
+            companion_id=companion_id,
+            memory_realm_id=memory_realm_id,
+            genome_id=genome_id,
             issued_at=now,
             expires_at=now + timedelta(seconds=self._code_ttl_s),
             issued_by_actor=issued_by_actor,
@@ -91,37 +94,41 @@ class PairingCoordinator:
             secret=self._secret,
             algorithm=self._alg,
             device_id=device_id,
-            tenant_id=rec.tenant_id,
-            user_id=rec.user_id,
-            default_template_id=rec.default_template_id,
+            owner_id=rec.owner_id,
+            companion_id=rec.companion_id,
+            memory_realm_id=rec.memory_realm_id,
+            genome_id=rec.genome_id,
             scopes=["device"],
-            ttl_days=self._token_ttl_days,
+            ttl_seconds=self._token_ttl_days * 24 * 3600,
         )
         return IssuedToken(
             device_id=device_id,
             token=token,
             expires_at=exp,
-            tenant_id=rec.tenant_id,
-            user_id=rec.user_id,
-            default_template_id=rec.default_template_id,
+            owner_id=rec.owner_id,
+            companion_id=rec.companion_id,
+            memory_realm_id=rec.memory_realm_id,
+            genome_id=rec.genome_id,
         )
 
-    async def rotate(self, device: VerifiedDevice) -> IssuedToken:
+    async def rotate(self, identity: RuntimeIdentity) -> IssuedToken:
         token, exp = sign_device_token(
             secret=self._secret,
             algorithm=self._alg,
-            device_id=device.device_id,
-            tenant_id=device.tenant_id,
-            user_id=device.user_id,
-            default_template_id=device.default_template_id,
-            scopes=list(device.scopes) or ["device"],
-            ttl_days=self._token_ttl_days,
+            device_id=identity.device_id,
+            owner_id=identity.owner_id,
+            companion_id=identity.companion_id,
+            memory_realm_id=identity.memory_realm_id,
+            genome_id=identity.genome_id,
+            scopes=list(identity.scopes) or ["device"],
+            ttl_seconds=self._token_ttl_days * 24 * 3600,
         )
         return IssuedToken(
-            device_id=device.device_id,
+            device_id=identity.device_id,
             token=token,
             expires_at=exp,
-            tenant_id=device.tenant_id,
-            user_id=device.user_id,
-            default_template_id=device.default_template_id,
+            owner_id=identity.owner_id,
+            companion_id=identity.companion_id,
+            memory_realm_id=identity.memory_realm_id,
+            genome_id=identity.genome_id,
         )

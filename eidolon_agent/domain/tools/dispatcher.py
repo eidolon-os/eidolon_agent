@@ -241,8 +241,9 @@ class ToolDispatcher:
             return None
         try:
             return Template(tmpl).safe_substitute(
-                user_id=ctx.caller.user_id,
-                tenant_id=ctx.caller.tenant_id,
+                owner_id=ctx.caller.owner_id,
+                companion_id=ctx.caller.companion_id,
+                memory_realm_id=ctx.caller.memory_realm_id,
                 turn_id=ctx.turn_id,
                 **call.arguments,
             )

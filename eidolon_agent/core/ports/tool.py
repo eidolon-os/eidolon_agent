@@ -18,9 +18,8 @@ class ToolInvocationContext:
     conversation_id: str | None = None
     session_id: str | None = None
     user_text: str | None = None
-    # The persona (template id) currently responding. Used as the memory
-    # persona partition key for side-effecting memory writes.
-    persona_id: str | None = None
+    companion_id: str | None = None
+    memory_realm_id: str | None = None
     dry_run: bool = False
 
 

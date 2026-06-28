@@ -50,8 +50,8 @@ class ConversationSummaryProvider(Protocol):
 class ContextCompiler:
     """Assemble the LLM message list for a Turn.
 
-    Locator returns ``(instance_id, template_id)`` for a tenant/user/conv
-    triple. Memory port is optional — when omitted, memory recall is skipped.
+    Locator returns ``(companion_id, genome_id)`` for an owner/companion/conv
+    triple. Memory port is optional; when omitted, memory recall is skipped.
     """
 
     def __init__(
@@ -86,8 +86,8 @@ class ContextCompiler:
         self._harness = harness or RealtimeAgentHarness()
 
     async def compile(self, ti: TurnInput) -> list[ChatMessage]:
-        instance_id, template_id = self._locator(
-            ti.caller.tenant_id, ti.caller.user_id, ti.conversation_id
+        companion_id, genome_id = self._locator(
+            ti.caller.owner_id, ti.caller.companion_id, ti.conversation_id
         )
         policy = TurnRuntimePolicy.from_metadata(ti.metadata)
 
@@ -101,10 +101,9 @@ class ContextCompiler:
         persona_task = _timed(
             "persona",
             self._personas.compile_prompt(
-                tenant_id=ti.caller.tenant_id,
-                user_id=ti.caller.user_id,
-                instance_id=instance_id,
-                template_id=template_id,
+                owner_id=ti.caller.owner_id,
+                companion_id=companion_id,
+                genome_id=genome_id,
                 user_text=ti.text or "",
                 realtime=_realtime_dict(ti.realtime),
                 dry_run_memory=[],
@@ -581,15 +580,13 @@ class ContextCompiler:
                 "preview": recall_query[:160],
             }
             recall = await self._memory.recall_context(
-                user_id=ti.caller.user_id,
+                owner_id=ti.caller.owner_id,
                 query=recall_query,
                 plan=plan,
                 timeout_s=self._memory_timeout_s,
-                tenant_id=ti.caller.tenant_id,
-                companion_id=ti.caller.agent_instance_id,
-                device_id=ti.caller.identity.device_id,
-                agent_id=ti.caller.agent_instance_id,
-                instance_id=ti.caller.agent_instance_id,
+                companion_id=ti.caller.companion_id,
+                memory_realm_id=ti.caller.memory_realm_id,
+                device_id=ti.caller.device_id,
                 session_id=ti.session_id,
             )
             formatted, hits, _degraded = recall
@@ -603,9 +600,9 @@ class ContextCompiler:
             )
         except Exception as exc:
             _log.exception(
-                "memory recall failed for user=%s; injecting degraded notice "
+                "memory recall failed for owner=%s; injecting degraded notice "
                 "into system prompt",
-                ti.caller.user_id,
+                ti.caller.owner_id,
             )
             return (
                 self._MEMORY_DEGRADED_NOTICE,

@@ -9,26 +9,22 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from eidolon_data.adapters.admin_registry import (
-    EidolonDataAgentMetadataRepository,
-    EidolonDataUserRepository,
-)
-
 from eidolon_agent.core.types.identity import build_memory_space_id
 
 router = APIRouter()
 
 
 class IssuePairingCodeRequest(BaseModel):
-    tenant_id: str
-    user_id: str
-    default_template_id: str | None = None
+    owner_id: str
+    companion_id: str
 
 
 class PairingMemoryReadiness(BaseModel):
     ready: bool
-    user_id: str
+    owner_id: str
+    companion_id: str
     memory_space_id: str
+    memory_realm_id: str
     reason: str | None = None
     mcp_http_url: str | None = None
 
@@ -43,16 +39,17 @@ class IssuePairingCodeResponse(BaseModel):
 @router.post("/pairing/codes", response_model=IssuePairingCodeResponse)
 async def issue_code(body: IssuePairingCodeRequest, request: Request):
     pairing = request.app.state.pairing
-    memory = await _ensure_memory_provisioned(
-        tenant_id=body.tenant_id,
-        user_id=body.user_id,
-        default_template_id=body.default_template_id,
+    identity = await _resolve_pairing_identity(
+        owner_id=body.owner_id,
+        companion_id=body.companion_id,
         request=request,
     )
+    memory = await _ensure_memory_provisioned(identity=identity, request=request)
     rec = await pairing.issue_code(
-        tenant_id=body.tenant_id,
-        user_id=body.user_id,
-        default_template_id=body.default_template_id,
+        owner_id=identity.owner_id,
+        companion_id=identity.companion_id,
+        memory_realm_id=identity.memory_realm_id,
+        genome_id=identity.genome_id,
         issued_by_actor="admin",
     )
     return IssuePairingCodeResponse(
@@ -73,33 +70,18 @@ async def code_qr(code: str, request: Request):
 
 async def _ensure_memory_provisioned(
     *,
-    tenant_id: str,
-    user_id: str,
-    default_template_id: str | None,
+    identity: "_PairingIdentity",
     request: Request,
 ) -> PairingMemoryReadiness | None:
     """Require a live memory route before issuing a device pairing code.
 
-    The full provisioning authority lives in eidolon_admin's ``/api/users``.
-    The agent should not create users or fall back to ``default`` here; it
-    only refuses a token that would otherwise start an amnesiac long-term
-    session.
+    The agent refuses a token that would start an amnesiac long-term session.
     """
     routes = getattr(request.app.state, "memory_routes", None)
     if routes is None:
         return None
 
-    companion_id = await _resolve_pairing_companion_id(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        default_template_id=default_template_id,
-        request=request,
-    )
-    memory_space_id = build_memory_space_id(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        companion_id=companion_id,
-    )
+    memory_space_id = build_memory_space_id(memory_realm_id=identity.memory_realm_id)
 
     route, reason = await routes.route_status_for(memory_space_id)
     if route is None:
@@ -113,11 +95,12 @@ async def _ensure_memory_provisioned(
             status_code=409,
             detail={
                 "code": "memory_user_not_provisioned",
-                "user_id": user_id,
+                "owner_id": identity.owner_id,
+                "companion_id": identity.companion_id,
                 "memory_space_id": memory_space_id,
                 "reason": reason or "memory_route_unavailable",
                 "action": (
-                    "Create or repair this user through eidolon_admin /api/users "
+                    "Create or repair this owner companion through eidolon_admin "
                     "before issuing a device pairing code."
                 ),
             },
@@ -125,38 +108,45 @@ async def _ensure_memory_provisioned(
 
     return PairingMemoryReadiness(
         ready=True,
-        user_id=user_id,
+        owner_id=identity.owner_id,
+        companion_id=identity.companion_id,
         memory_space_id=memory_space_id,
+        memory_realm_id=identity.memory_realm_id,
         reason=None,
         mcp_http_url=route.mcp_url,
     )
 
 
-async def _resolve_pairing_companion_id(
+class _PairingIdentity(BaseModel):
+    owner_id: str
+    companion_id: str
+    memory_realm_id: str
+    genome_id: str
+
+
+async def _resolve_pairing_identity(
     *,
-    tenant_id: str,
-    user_id: str,
-    default_template_id: str | None,
+    owner_id: str,
+    companion_id: str,
     request: Request,
-) -> str | None:
-    """Resolve the durable companion/agent instance used by runtime memory.
-
-    ``default_template_id`` is a token preference for template selection; the
-    memory partition is keyed by the active companion instance when eidolon_data
-    is available. Falling back keeps isolated router mounts working.
-    """
-
+) -> _PairingIdentity:
     data_store = getattr(request.app.state, "data_store", None)
     if data_store is None:
-        return default_template_id
-    users = EidolonDataUserRepository(data_store)
-    agents = EidolonDataAgentMetadataRepository(data_store)
-    user = await users.get(user_id)
-    if user is None or not user.enabled or user.tenant_id != tenant_id:
-        return default_template_id
-    if not user.active_agent_id:
-        return default_template_id
-    agent = await agents.get(user.active_agent_id)
-    if agent is None or agent.tenant_id != tenant_id or agent.user_id != user_id:
-        return default_template_id
-    return agent.agent_id
+        raise HTTPException(status_code=503, detail="data_store not configured")
+
+    owner = await data_store.owners.get(owner_id)
+    if owner is None or owner.status != "active":
+        raise HTTPException(status_code=404, detail="owner not found or inactive")
+    companion = await data_store.companions.get(companion_id)
+    if companion is None or companion.owner_id != owner_id or companion.status != "active":
+        raise HTTPException(status_code=404, detail="companion not found or inactive")
+    if not companion.default_memory_realm_id:
+        raise HTTPException(status_code=409, detail="companion has no default memory realm")
+    if not companion.current_genome_id:
+        raise HTTPException(status_code=409, detail="companion has no current genome")
+    return _PairingIdentity(
+        owner_id=owner_id,
+        companion_id=companion_id,
+        memory_realm_id=companion.default_memory_realm_id,
+        genome_id=companion.current_genome_id,
+    )
