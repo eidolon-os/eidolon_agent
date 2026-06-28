@@ -1,11 +1,4 @@
-"""Server-side gRPC interceptors: auth + tracing.
-
-Authentication: extract a Bearer token from ``authorization`` metadata, verify
-via :class:`PairingTokenVerifier`, attach the resulting Identity to the
-``servicer_context`` (callers retrieve it from invocation context).
-
-Pairing's :rpc:`ExchangePairingCode` bypasses auth — it's the only public RPC.
-"""
+"""Server-side gRPC interceptors: auth + tracing."""
 
 from __future__ import annotations
 
@@ -16,11 +9,7 @@ from grpc.aio import ServerInterceptor
 
 _log = logging.getLogger(__name__)
 
-_PUBLIC_METHODS = frozenset(
-    {
-        "/eidolon.agent.v1.EidolonAgent/ExchangePairingCode",
-    }
-)
+_PUBLIC_METHODS = frozenset()
 
 
 class AuthInterceptor(ServerInterceptor):

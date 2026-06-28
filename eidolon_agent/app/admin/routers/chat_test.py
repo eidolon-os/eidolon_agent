@@ -1,4 +1,4 @@
-"""Admin: gRPC chat test — full pairing + Chat bidi stream via real gRPC."""
+"""Admin: gRPC chat test over the real Chat bidi runtime path."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import logging
 import uuid
 
 import grpc
+from eidolon_sdk.biz.runtime import resolve_shared_secret, sign_device_token
 from eidolon_sdk.core.streaming import encode_sse_event
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
@@ -27,12 +28,8 @@ class ChatTestRequest(BaseModel):
 
 @router.post("/chat/test")
 async def chat_test(body: ChatTestRequest, request: Request):
-    """Stream a turn over the real gRPC Chat bidi path, exposed as SSE.
-
-    Same code path as a LiveKit caller: pairing → ExchangePairingCode → Chat.
-    """
+    """Stream a turn over the real authenticated gRPC Chat bidi path."""
     settings = request.app.state.settings
-    pairing = request.app.state.pairing
     data_store = getattr(request.app.state, "data_store", None)
     if data_store is None:
         raise RuntimeError("data_store not configured")
@@ -42,15 +39,20 @@ async def chat_test(body: ChatTestRequest, request: Request):
     if not companion.default_memory_realm_id or not companion.current_genome_id:
         raise RuntimeError("companion has no default memory realm or current genome")
 
-    # The registry creates the agent lazily on the first Chat RPC; nothing
-    # to do here besides issuing the pairing code.
-
-    rec = await pairing.issue_code(
+    jwt_secret = resolve_shared_secret(settings.runtime_token.jwt_secret)
+    if not jwt_secret:
+        raise RuntimeError("runtime token secret not configured")
+    test_device_id = f"admin-test-{uuid.uuid4().hex[:8]}"
+    device_token, _ = sign_device_token(
+        secret=jwt_secret,
+        algorithm=settings.runtime_token.jwt_algorithm,
+        device_id=test_device_id,
         owner_id=body.owner_id,
         companion_id=body.companion_id,
         memory_realm_id=companion.default_memory_realm_id,
         genome_id=companion.current_genome_id,
-        issued_by_actor="admin-chat-test",
+        scopes=["admin-chat-test"],
+        ttl_seconds=600,
     )
     target = f"{settings.grpc.tcp_host}:{settings.grpc.tcp_port}"
 
@@ -58,14 +60,7 @@ async def chat_test(body: ChatTestRequest, request: Request):
         channel = grpc.aio.insecure_channel(target)
         try:
             stub = pbg.EidolonAgentStub(channel)
-            exch = await stub.ExchangePairingCode(
-                pb.ExchangeRequest(
-                    pairing_code=rec.code,
-                    device_id=f"admin-test-{uuid.uuid4().hex[:8]}",
-                    device_name="Admin Chat Test",
-                )
-            )
-            yield _sse("status", {"message": "paired", "owner_id": exch.owner_id})
+            yield _sse("status", {"message": "token_issued", "owner_id": body.owner_id})
 
             async def _requests():
                 yield pb.ChatRequest(
@@ -78,7 +73,7 @@ async def chat_test(body: ChatTestRequest, request: Request):
 
             stream = stub.Chat(
                 _requests(),
-                metadata=(("authorization", f"Bearer {exch.device_token}"),),
+                metadata=(("authorization", f"Bearer {device_token}"),),
             )
             async for ev in stream:
                 kind = pb.TurnEvent.Kind.Name(ev.kind)

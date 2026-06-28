@@ -4,7 +4,7 @@ Two layers under test:
 
 1. Endpoint: ``POST /api/admin/owners/{owner_id}/revoke-sessions`` writes
    owner revocation keys to the DEVICE_REVOCATIONS KV.
-2. Verifier: ``PairingTokenVerifier.verify`` checks this key on every
+2. Verifier: ``RuntimeTokenVerifier.verify`` checks this key on every
    call and raises ``RuntimeTokenRevokedError`` when present — regardless of
    how recently the token was minted.
 """
@@ -42,8 +42,8 @@ from eidolon_data.schema.models import (
     TurnRow as DataTurnRow,
 )
 from eidolon_sdk.biz.runtime import (
-    PairingTokenVerifier,
     RuntimeTokenRevokedError,
+    RuntimeTokenVerifier,
     device_revocation_keys,
     owner_revocation_keys,
     sign_device_token,
@@ -102,8 +102,7 @@ async def test_revoke_owner_sessions_writes_revocation_key() -> None:
     assert r.status_code == 200
     body = r.json()
     assert body == {"owner_id": "manson", "revoked": True}
-    assert await kv.get(owner_revocation_keys("manson")[0]) is not None
-    val = await kv.get("revoked.user.manson")
+    val = await kv.get(owner_revocation_keys("manson")[0])
     assert val is not None
     assert b"T" in val and b":" in val  # ISO format roughly
 
@@ -125,7 +124,6 @@ async def test_delete_owner_data_prefers_eidolon_data_store(tmp_path) -> None:
     await store.init_schema()
     kv = _FakeKV()
     await kv.put(owner_revocation_keys("alice")[0], b"revoked")
-    await kv.put("revoked.user.alice", b"revoked")
 
     try:
         await store.owners.create(owner_id="alice", display_name="Alice")
@@ -200,7 +198,7 @@ async def test_delete_owner_data_prefers_eidolon_data_store(tmp_path) -> None:
         assert body["counts"]["jobs"] == 1
         assert body["counts"]["devices"] == 1
         assert body["counts"]["events"] == 1
-        assert body["revocation_keys_cleared"] == 2
+        assert body["revocation_keys_cleared"] == 1
 
         async with store.session_factory() as session:
             for model in (
@@ -244,7 +242,7 @@ async def test_revoke_owner_sessions_503_when_kv_missing() -> None:
 
 async def test_verifier_rejects_token_after_owner_revoke() -> None:
     kv = _FakeKV()
-    verifier = PairingTokenVerifier(secret=SECRET, revocation_kv=kv)
+    verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
 
     token, _ = sign_device_token(
         secret=SECRET,
@@ -275,7 +273,7 @@ async def test_verifier_rejects_token_after_owner_revoke() -> None:
 
 async def test_verifier_owner_revoke_does_not_affect_other_owners() -> None:
     kv = _FakeKV()
-    verifier = PairingTokenVerifier(secret=SECRET, revocation_kv=kv)
+    verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
 
     manson_token, _ = sign_device_token(
         secret=SECRET, device_id="web-1", owner_id="manson",
@@ -306,7 +304,7 @@ async def test_verifier_device_level_revoke_still_works() -> None:
     """Phase 33.B1 added user-level revoke but must NOT regress the
     pre-existing device-level revoke path."""
     kv = _FakeKV()
-    verifier = PairingTokenVerifier(secret=SECRET, revocation_kv=kv)
+    verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
 
     token, _ = sign_device_token(
         secret=SECRET, device_id="dev-x", owner_id="alice",
@@ -315,7 +313,7 @@ async def test_verifier_device_level_revoke_still_works() -> None:
     )
 
     # Manually write a device-level revocation (no admin endpoint for
-    # this scope yet — comes from pairing flow today).
+    # this scope yet.
     await kv.put("revoked.dev-x", b"manual-test")
 
     with pytest.raises(RuntimeTokenRevokedError) as exc_info:
@@ -326,7 +324,7 @@ async def test_verifier_device_level_revoke_still_works() -> None:
 async def test_verifier_accepts_mac_device_id_without_invalid_kv_key() -> None:
     """MAC-style ESP32 ids contain ``:`` and must not be used raw as KV keys."""
     kv = _FakeKV()
-    verifier = PairingTokenVerifier(secret=SECRET, revocation_kv=kv)
+    verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
 
     token, _ = sign_device_token(
         secret=SECRET,
@@ -344,7 +342,7 @@ async def test_verifier_accepts_mac_device_id_without_invalid_kv_key() -> None:
 
 async def test_verifier_rejects_mac_device_id_with_encoded_revocation_key() -> None:
     kv = _FakeKV()
-    verifier = PairingTokenVerifier(secret=SECRET, revocation_kv=kv)
+    verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
     device_id = "1c:db:d4:7a:ef:0c"
 
     token, _ = sign_device_token(

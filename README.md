@@ -286,7 +286,7 @@ JetStream 持久化前缀：`agent.memory.*` / `agent.emotion.*` / `agent.evolut
 | `EIDOLON_FLAGS` | 功能开关 |
 | `EIDOLON_EXP` | A/B 实验 |
 | `PAIRING_CODES` | 配对码（预留，目前 PairingCoordinator 在内存） |
-| `DEVICE_REVOCATIONS` | 设备吊销名单（PairingTokenVerifier 查询） |
+| `DEVICE_REVOCATIONS` | 设备吊销名单（RuntimeTokenVerifier 查询） |
 | `EIDOLON_TOOL_IDEMP` | 工具幂等性 cache（ToolDispatcher 用） |
 
 ---

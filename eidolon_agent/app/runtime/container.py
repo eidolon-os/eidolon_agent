@@ -50,8 +50,7 @@ class Container:
     memory_port: object | None = None
 
     agent_registry: object | None = None
-    pairing_coordinator: object | None = None
-    pairing_verifier: object | None = None
+    runtime_token_verifier: object | None = None
 
     grpc_server: object | None = None
     http_app: object | None = None

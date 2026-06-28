@@ -3,7 +3,7 @@
 #   cp config/settings.example.yaml config/settings.yaml
 #   cp config/.env.example config/.env
 #
-# Secrets (LLM API key, pairing JWT) go in config/.env only.
+# Secrets (LLM API key, runtime JWT) go in config/.env only.
 
 env: dev
 
@@ -72,7 +72,7 @@ observability:
   log_json: true
   log_dir: ~/eidolon/logs
 
-pairing:
+runtime_token:
   jwt_secret: PAIRING_JWT_SECRET
   jwt_algorithm: HS256
 

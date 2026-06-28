@@ -17,7 +17,13 @@ pytestmark = pytest.mark.functional
 
 
 async def test_new_start_supersedes_old_turn_and_drops_late_events(monkeypatch) -> None:
-    identity = Identity(tenant_id="t", user_id="u", agent_instance_id="inst")
+    identity = Identity(
+        owner_id="owner-1",
+        companion_id="companion-1",
+        device_id="dev-1",
+        memory_realm_id="realm-1",
+        genome_id="genome-1",
+    )
     monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
     first_agent = _LateAfterCancelAgent("old-late")
     second_agent = _ImmediateAgent("new-answer")
@@ -25,7 +31,6 @@ async def test_new_start_supersedes_old_turn_and_drops_late_events(monkeypatch) 
     context = _Context()
     servicer = EidolonAgentServicer(
         agent_registry=registry,
-        pairing=None,
         signals_bus=_Signals(),
         proactive_bus=None,
     )
@@ -62,14 +67,19 @@ async def test_new_start_supersedes_old_turn_and_drops_late_events(monkeypatch) 
 
 
 async def test_explicit_cancel_drops_late_events(monkeypatch) -> None:
-    identity = Identity(tenant_id="t", user_id="u", agent_instance_id="inst")
+    identity = Identity(
+        owner_id="owner-1",
+        companion_id="companion-1",
+        device_id="dev-1",
+        memory_realm_id="realm-1",
+        genome_id="genome-1",
+    )
     monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
     cancelled_agent = _LateAfterCancelAgent("cancelled-late")
     registry = _Registry([cancelled_agent])
     context = _Context()
     servicer = EidolonAgentServicer(
         agent_registry=registry,
-        pairing=None,
         signals_bus=_Signals(),
         proactive_bus=None,
     )
@@ -94,7 +104,13 @@ async def test_explicit_cancel_drops_late_events(monkeypatch) -> None:
 
 
 async def test_parallel_conversations_do_not_supersede_each_other(monkeypatch) -> None:
-    identity = Identity(tenant_id="t", user_id="u", agent_instance_id="inst")
+    identity = Identity(
+        owner_id="owner-1",
+        companion_id="companion-1",
+        device_id="dev-1",
+        memory_realm_id="realm-1",
+        genome_id="genome-1",
+    )
     monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
     first_agent = _DelayedAgent("conv-a-answer", delay_s=0.01)
     second_agent = _ImmediateAgent("conv-b-answer")
@@ -102,7 +118,6 @@ async def test_parallel_conversations_do_not_supersede_each_other(monkeypatch) -
     context = _Context()
     servicer = EidolonAgentServicer(
         agent_registry=registry,
-        pairing=None,
         signals_bus=_Signals(),
         proactive_bus=None,
     )
@@ -146,7 +161,12 @@ class _Registry:
     async def resolve_for_caller(self, **_):
         agent = self._agents[min(self._idx, len(self._agents) - 1)]
         self._idx += 1
-        return SimpleNamespace(instance_id="inst", agent=agent)
+        return SimpleNamespace(
+            instance_id="inst",
+            companion_id="companion-1",
+            genome_id="genome-1",
+            agent=agent,
+        )
 
 
 class _LateAfterCancelAgent:

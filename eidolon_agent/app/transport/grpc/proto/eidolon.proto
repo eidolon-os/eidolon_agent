@@ -5,20 +5,15 @@ package eidolon.agent.v1;
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
-// The EidolonAgent service is the brain that LiveKit voice agents (and other
-// callers — web, IoT, desktop) invoke instead of a raw LLM. It bundles
-// streaming chat, signal ingest, proactive subscription, and the pairing
-// handshake into one connection.
+// The EidolonAgent service is the companion runtime that LiveKit voice agents
+// and other authenticated callers invoke instead of a raw LLM. Identity,
+// device binding, and token issuance live outside this service.
 service EidolonAgent {
   // Primary: bidirectional streaming chat. The client sends ChatRequest
   // frames (initial + optional cancels + optional signals); the server emits
   // a stream of TurnEvent frames. Both directions stay open for the duration
   // of a session (multiple turns share the connection).
   rpc Chat(stream ChatRequest) returns (stream TurnEvent);
-
-  // One-shot non-streaming call. Useful for simple text-only callers that
-  // don't need barge-in. Equivalent to a single ChatRequest + collected reply.
-  rpc ChatOnce(ChatOnceRequest) returns (ChatOnceResponse);
 
   // Push realtime signals (emotion, prosody, vision tags) for the current
   // session without driving a turn. The server fuses these and uses them in
@@ -28,10 +23,6 @@ service EidolonAgent {
   // Server-stream of proactive utterances the agent decides to initiate.
   // Caller subscribes once and decides on its side whether to barge-in.
   rpc SubscribeProactive(SubscribeRequest) returns (stream ProactiveEvent);
-
-  // Trade a pairing_code for a long-lived device_token. THIS IS THE ONLY
-  // RPC that does NOT require Authorization metadata.
-  rpc ExchangePairingCode(ExchangeRequest) returns (ExchangeResponse);
 }
 
 // ---------------------------------------------------------------------------
@@ -108,25 +99,6 @@ message TurnEvent {
 }
 
 // ---------------------------------------------------------------------------
-// One-shot
-// ---------------------------------------------------------------------------
-
-message ChatOnceRequest {
-  string turn_id = 1;
-  string conversation_id = 2;
-  string text = 3;
-  google.protobuf.Struct metadata = 4;
-}
-
-message ChatOnceResponse {
-  string turn_id = 1;
-  string assistant_text = 2;
-  string triage = 3;
-  uint64 latency_first_delta_ms = 4;
-  google.protobuf.Struct metadata = 5;
-}
-
-// ---------------------------------------------------------------------------
 // Signals
 // ---------------------------------------------------------------------------
 
@@ -151,24 +123,4 @@ message ProactiveEvent {
   string text = 3;
   string style_hint = 4;
   google.protobuf.Timestamp ts = 5;
-}
-
-// ---------------------------------------------------------------------------
-// Pairing
-// ---------------------------------------------------------------------------
-
-message ExchangeRequest {
-  string pairing_code = 1;
-  string device_name = 2;
-  string device_id = 3; // optional; server generates if empty
-}
-
-message ExchangeResponse {
-  string device_id = 1;
-  string device_token = 2;
-  string owner_id = 3;
-  string companion_id = 4;
-  string memory_realm_id = 5;
-  string genome_id = 6;
-  google.protobuf.Timestamp expires_at = 7;
 }

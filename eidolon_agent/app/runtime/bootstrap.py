@@ -9,7 +9,7 @@ This is the only place that knows the concrete dependency graph. Steps:
 5.  Personas registry + per-user instance store
 6.  Cross-cutting services (history, signals, guardrails, triage)
 7.  Tools + LLM router + dispatch
-8.  Pairing coordinator + token verifier
+8.  Runtime token verifier
 9.  AgentRegistry with instance factory closure
 10. gRPC + HTTP + Admin transport servers
 """
@@ -22,7 +22,7 @@ from pathlib import Path
 
 from eidolon_data import DataStore
 from eidolon_data import load_settings as load_data_settings
-from eidolon_sdk.biz.runtime import PairingTokenVerifier
+from eidolon_sdk.biz.runtime import RuntimeTokenVerifier
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
 from eidolon_agent.app.admin import build_admin_app
@@ -30,7 +30,6 @@ from eidolon_agent.app.runtime.container import Container
 from eidolon_agent.app.transport.grpc import GrpcServer
 from eidolon_agent.app.transport.grpc.chat_servicer import EidolonAgentServicer
 from eidolon_agent.app.transport.http import build_http_app
-from eidolon_agent.app.transport.pairing import PairingCoordinator
 from eidolon_agent.config.settings import Settings, load_settings
 from eidolon_agent.core.types.tool import Permission
 from eidolon_agent.domain.agent.companion import CompanionAgent
@@ -244,24 +243,16 @@ async def build_application(
     container.tool_registry = tool_registry
     container.tool_dispatcher = tool_dispatcher
 
-    # 8. Pairing ---------------------------------------------------------------
-    jwt_secret = settings.pairing.jwt_secret
+    # 8. Runtime token verification ------------------------------------------
+    jwt_secret = settings.runtime_token.jwt_secret
     if not jwt_secret:
         jwt_secret = _generate_persisted_secret(Path(settings.runtime.run_dir) / "jwt-secret")
-    pairing = PairingCoordinator(
-        jwt_secret=jwt_secret,
-        jwt_algorithm=settings.pairing.jwt_algorithm,
-        code_ttl_s=settings.pairing.pairing_code_ttl_s,
-        code_length=settings.pairing.pairing_code_length,
-        token_ttl_days=settings.pairing.device_token_ttl_days,
-    )
-    verifier = PairingTokenVerifier(
+    verifier = RuntimeTokenVerifier(
         secret=jwt_secret,
-        algorithm=settings.pairing.jwt_algorithm,
+        algorithm=settings.runtime_token.jwt_algorithm,
         revocation_kv=revocation_kv,
     )
-    container.pairing_coordinator = pairing
-    container.pairing_verifier = verifier
+    container.runtime_token_verifier = verifier
 
     # 14. AgentRegistry with instance factory closure ------------------------
     async def _build_companion(inst):  # type: ignore[no-untyped-def]
@@ -291,7 +282,6 @@ async def build_application(
     # 15. Transport servers ---------------------------------------------------
     servicer = EidolonAgentServicer(
         agent_registry=agent_registry,
-        pairing=pairing,
         signals_bus=sig_bus,
         proactive_bus=container.event_bus,
         personas_service=personas_service,
@@ -312,8 +302,6 @@ async def build_application(
     admin_app = build_admin_app(
         settings=settings,
         agent_registry=agent_registry,
-        pairing=pairing,
-        pairing_verifier=verifier,
         personas_service=personas_service,
         custom_template_store=custom_template_store,
         persona_template_registry=tpl_reg,

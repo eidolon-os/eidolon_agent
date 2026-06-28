@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from eidolon_sdk.biz.runtime import (
-    owner_revocation_keys,
-    RuntimeTokenRevokedError,
-    RuntimeUnauthenticatedError,
-)
+from eidolon_sdk.biz.runtime import owner_revocation_keys
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
@@ -21,12 +17,6 @@ class DeviceInfo(BaseModel):
     companion_id: str | None = None
     name: str | None
     revoked: bool
-
-
-class RotateDeviceTokenResponse(BaseModel):
-    device_id: str
-    device_token: str
-    expires_at: datetime
 
 
 @router.get("/devices", response_model=list[DeviceInfo])
@@ -117,36 +107,3 @@ async def _clear_owner_revocations(request: Request, owner_id: str) -> int:
                 cleared_revocations += 1
     return cleared_revocations
 
-
-@router.post("/devices/{device_id}/rotate", response_model=RotateDeviceTokenResponse)
-async def rotate_device_token(device_id: str, request: Request) -> RotateDeviceTokenResponse:
-    verifier = getattr(request.app.state, "pairing_verifier", None)
-    pairing = getattr(request.app.state, "pairing", None)
-    if verifier is None or pairing is None:
-        raise HTTPException(status_code=503, detail="pairing is not configured")
-
-    token = _bearer_token(request)
-    try:
-        verified = await verifier.verify(token)
-    except RuntimeTokenRevokedError as exc:
-        raise HTTPException(status_code=401, detail=exc.message) from exc
-    except RuntimeUnauthenticatedError as exc:
-        raise HTTPException(status_code=401, detail=exc.message) from exc
-
-    if verified.device_id != device_id:
-        raise HTTPException(status_code=403, detail="token device_id does not match URL")
-
-    issued = await pairing.rotate(verified)
-    return RotateDeviceTokenResponse(
-        device_id=issued.device_id,
-        device_token=issued.token,
-        expires_at=issued.expires_at,
-    )
-
-
-def _bearer_token(request: Request) -> str:
-    header = request.headers.get("authorization", "")
-    scheme, _, token = header.partition(" ")
-    if scheme.lower() != "bearer" or not token.strip():
-        raise HTTPException(status_code=401, detail="missing bearer token")
-    return token.strip()

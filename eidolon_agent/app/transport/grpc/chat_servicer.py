@@ -1,4 +1,4 @@
-"""gRPC servicer — Chat / ChatOnce / PushSignal / SubscribeProactive / ExchangePairingCode.
+"""gRPC servicer — Chat / PushSignal / SubscribeProactive.
 
 The servicer is intentionally thin: it translates proto frames ↔ core types,
 resolves the AgentInstance from the caller's identity, and delegates each Turn
@@ -16,8 +16,7 @@ import grpc
 from eidolon_agent.app.transport.grpc.codec import struct_to_dict, turn_event_to_proto
 from eidolon_agent.app.transport.grpc.interceptors import current_identity
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
-from eidolon_agent.app.transport.pairing.coordinator import PairingCoordinator
-from eidolon_agent.core.errors import EidolonError, NotFoundError, UnauthenticatedError
+from eidolon_agent.core.errors import EidolonError, NotFoundError
 from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
 from eidolon_agent.core.types.signal import SignalDigest
 from eidolon_agent.core.types.turn import TurnInput, TurnTrigger
@@ -31,39 +30,14 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         self,
         *,
         agent_registry,
-        pairing: PairingCoordinator,
         signals_bus,
         proactive_bus,  # EventBus
         personas_service=None,
     ) -> None:
         self._registry = agent_registry
-        self._pairing = pairing
         self._signals = signals_bus
         self._bus = proactive_bus
         self._personas = personas_service
-
-    # ---- Pairing (public RPC, no auth) --------------------------------------
-
-    async def ExchangePairingCode(
-        self, request: pb.ExchangeRequest, context: grpc.aio.ServicerContext
-    ) -> pb.ExchangeResponse:
-        try:
-            issued = await self._pairing.exchange(
-                code=request.pairing_code,
-                device_id=request.device_id or None,
-            )
-        except (NotFoundError, UnauthenticatedError) as exc:
-            await context.abort(grpc.StatusCode.UNAUTHENTICATED, exc.message)
-        resp = pb.ExchangeResponse(
-            device_id=issued.device_id,
-            device_token=issued.token,
-            owner_id=issued.owner_id,
-            companion_id=issued.companion_id,
-            memory_realm_id=issued.memory_realm_id,
-            genome_id=issued.genome_id,
-        )
-        resp.expires_at.FromDatetime(issued.expires_at)
-        return resp
 
     # ---- Chat bidi stream ---------------------------------------------------
 
@@ -221,55 +195,6 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     await task
                 except asyncio.CancelledError:
                     pass
-
-    # ---- One-shot ----------------------------------------------------------
-
-    async def ChatOnce(
-        self, request: pb.ChatOnceRequest, context: grpc.aio.ServicerContext
-    ) -> pb.ChatOnceResponse:
-        identity = current_identity()
-        if identity is None:
-            await context.abort(grpc.StatusCode.UNAUTHENTICATED, "no identity")
-        inst = await self._registry.resolve_for_caller(
-            owner_id=identity.owner_id,
-            companion_id=identity.companion_id,
-            genome_id=identity.genome_id,
-        )
-        agent = inst.agent
-        ti = TurnInput(
-            turn_id=request.turn_id or uuid.uuid4().hex,
-            conversation_id=request.conversation_id,
-            session_id=request.conversation_id,
-            caller=CallerContext(
-                identity=Identity(
-                    owner_id=identity.owner_id,
-                    companion_id=inst.companion_id,
-                    device_id=identity.device_id,
-                    memory_realm_id=identity.memory_realm_id,
-                    genome_id=inst.genome_id,
-                ),
-                caller_kind=CallerKind.WEB_CHAT,
-                trace_id=uuid.uuid4().hex,
-                request_id=uuid.uuid4().hex,
-            ),
-            trigger=TurnTrigger.USER_UTTERANCE,
-            text=request.text,
-        )
-        assistant_text_parts: list[str] = []
-        first_delta_ms = 0
-        triage = "simple"
-        async for ev in agent.run_turn(ti):
-            if ev.kind.value == "delta":
-                assistant_text_parts.append(ev.data.get("text", ""))
-            elif ev.kind.value == "done":
-                first_delta_ms = int(ev.data.get("first_delta_ms") or 0)
-                triage = ev.data.get("triage", "simple")
-        return pb.ChatOnceResponse(
-            turn_id=ti.turn_id,
-            assistant_text="".join(assistant_text_parts),
-            triage=triage,
-            latency_first_delta_ms=first_delta_ms,
-        )
 
     # ---- PushSignal --------------------------------------------------------
 

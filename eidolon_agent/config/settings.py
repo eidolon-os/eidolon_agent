@@ -211,7 +211,7 @@ class ObservabilitySettings(BaseModel):
     debug_snapshot_sample_rate: float = 0.01  # 1% turn snapshots dumped to debug/
 
 
-class PairingSettings(BaseModel):
+class RuntimeTokenSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     jwt_secret: str = ""  # yaml placeholder: PAIRING_JWT_SECRET
@@ -224,14 +224,12 @@ class PairingSettings(BaseModel):
             val = (data.get("jwt_secret") or "").strip()
             if val and val != "PAIRING_JWT_SECRET":
                 raise ValueError(
-                    "pairing.jwt_secret must be empty or the placeholder "
+                    "runtime_token.jwt_secret must be empty or the placeholder "
                     "PAIRING_JWT_SECRET; set the secret in config/.env"
                 )
             if val == "PAIRING_JWT_SECRET":
                 data["jwt_secret"] = ""
         return data
-    pairing_code_ttl_s: int = 600
-    pairing_code_length: int = 8
     device_token_ttl_days: int = 30
     trusted_mtls_cn_whitelist: list[str] = Field(default_factory=list)
 
@@ -326,7 +324,7 @@ class Settings(BaseSettings):
     long_task: LongTaskSettings = Field(default_factory=LongTaskSettings)
     persona: PersonaSettings = Field(default_factory=PersonaSettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
-    pairing: PairingSettings = Field(default_factory=PairingSettings)
+    runtime_token: RuntimeTokenSettings = Field(default_factory=RuntimeTokenSettings)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
     turn: TurnSettings = Field(default_factory=TurnSettings)
 
@@ -336,12 +334,12 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _pairing_secret_from_env(self) -> Settings:
+    def _runtime_token_secret_from_env(self) -> Settings:
         env_secret = os.environ.get("PAIRING_JWT_SECRET", "").strip()
-        if env_secret and not self.pairing.jwt_secret:
+        if env_secret and not self.runtime_token.jwt_secret:
             return self.model_copy(
                 update={
-                    "pairing": self.pairing.model_copy(update={"jwt_secret": env_secret})
+                    "runtime_token": self.runtime_token.model_copy(update={"jwt_secret": env_secret})
                 }
             )
         return self

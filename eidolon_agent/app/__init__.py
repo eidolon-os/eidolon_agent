@@ -2,7 +2,7 @@
 
 This is the only layer allowed to import from every other layer. It owns:
     - ``runtime/``   — bootstrap, container, CLI, lifecycle
-    - ``transport/`` — gRPC, HTTP (health), pairing
+    - ``transport/`` — gRPC and HTTP health
     - ``admin/``     — independent FastAPI admin app
 
 ``config/`` is at the package root (not under ``app/``) because settings

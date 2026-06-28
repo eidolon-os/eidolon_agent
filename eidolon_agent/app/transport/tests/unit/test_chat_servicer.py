@@ -1,9 +1,7 @@
-"""EidolonAgentServicer — unary RPCs (ExchangePairingCode / ChatOnce / PushSignal).
+"""EidolonAgentServicer — Chat / PushSignal runtime RPCs.
 
-The bidi Chat RPC is covered end-to-end by tests/integration/. Here we
-mock the registry, pairing coordinator, signal bus, and the auth
-contextvar so we can drive the servicer directly without spinning up
-a real gRPC server.
+Here we mock the registry, signal bus, and the auth contextvar so we can
+drive the servicer directly without spinning up a real gRPC server.
 """
 
 from __future__ import annotations
@@ -19,7 +17,6 @@ import pytest
 from eidolon_agent.app.transport.grpc.chat_servicer import EidolonAgentServicer
 from eidolon_agent.app.transport.grpc.interceptors import _current_identity
 from eidolon_agent.app.transport.grpc.proto import pb
-from eidolon_agent.core.errors import NotFoundError
 from eidolon_agent.core.types.turn import TurnEventKind
 
 pytestmark = pytest.mark.unit
@@ -65,109 +62,6 @@ def _stub_instance(agent):
     )
 
 
-# ---- ExchangePairingCode --------------------------------------------------
-
-
-async def test_exchange_pairing_code_happy_path() -> None:
-    pairing = MagicMock()
-    pairing.exchange = AsyncMock(
-        return_value=SimpleNamespace(
-            device_id="dev-x",
-            token="JWT",
-            owner_id="owner-1",
-            companion_id="companion-1",
-            memory_realm_id="realm-1",
-            genome_id="genome-1",
-            expires_at=datetime(2030, 1, 1, tzinfo=timezone.utc),
-        )
-    )
-    svc = EidolonAgentServicer(
-        agent_registry=MagicMock(),
-        pairing=pairing,
-        signals_bus=MagicMock(),
-        proactive_bus=MagicMock(),
-    )
-    resp = await svc.ExchangePairingCode(
-        pb.ExchangeRequest(pairing_code="ABCDEFGH", device_id="dev-x"),
-        _make_context(),
-    )
-    assert resp.device_id == "dev-x"
-    assert resp.device_token == "JWT"
-    assert resp.owner_id == "owner-1"
-    assert resp.companion_id == "companion-1"
-    assert resp.memory_realm_id == "realm-1"
-    assert resp.genome_id == "genome-1"
-
-
-async def test_exchange_pairing_code_unknown_aborts_unauth() -> None:
-    pairing = MagicMock()
-    pairing.exchange = AsyncMock(side_effect=NotFoundError("no such code"))
-    ctx = _make_context()
-    svc = EidolonAgentServicer(
-        agent_registry=MagicMock(), pairing=pairing,
-        signals_bus=MagicMock(), proactive_bus=MagicMock(),
-    )
-    with pytest.raises(grpc.RpcError):
-        await svc.ExchangePairingCode(
-            pb.ExchangeRequest(pairing_code="GHOSTCDE"), ctx
-        )
-    ctx.abort.assert_awaited_once()
-    args, _ = ctx.abort.call_args
-    assert args[0] is grpc.StatusCode.UNAUTHENTICATED
-
-
-# ---- ChatOnce -------------------------------------------------------------
-
-
-async def test_chat_once_returns_assembled_assistant_text() -> None:
-    # Scripted events: STATE → DELTA × 2 → DONE
-    from eidolon_agent.core.types.turn import TurnEvent
-
-    events = [
-        TurnEvent(turn_id="t", seq=0, kind=TurnEventKind.STATE, data={"state": "speaking"}),
-        TurnEvent(turn_id="t", seq=1, kind=TurnEventKind.DELTA, data={"text": "hello "}),
-        TurnEvent(turn_id="t", seq=2, kind=TurnEventKind.DELTA, data={"text": "world"}),
-        TurnEvent(
-            turn_id="t",
-            seq=3,
-            kind=TurnEventKind.DONE,
-            data={"first_delta_ms": 120, "triage": "simple"},
-        ),
-    ]
-    registry = MagicMock()
-    registry.resolve_for_caller = AsyncMock(
-        return_value=_stub_instance(_scripted_agent(events))
-    )
-    svc = EidolonAgentServicer(
-        agent_registry=registry, pairing=MagicMock(),
-        signals_bus=SimpleNamespace(recent=AsyncMock(return_value=[])),
-        proactive_bus=MagicMock(),
-    )
-    token = _current_identity.set(_StubIdentity())
-    try:
-        resp = await svc.ChatOnce(
-            pb.ChatOnceRequest(conversation_id="c1", text="say hi"),
-            _make_context(),
-        )
-    finally:
-        _current_identity.reset(token)
-    assert resp.assistant_text == "hello world"
-    assert resp.triage == "simple"
-    assert resp.latency_first_delta_ms == 120
-
-
-async def test_chat_once_without_identity_aborts() -> None:
-    svc = EidolonAgentServicer(
-        agent_registry=MagicMock(), pairing=MagicMock(),
-        signals_bus=MagicMock(), proactive_bus=MagicMock(),
-    )
-    ctx = _make_context()
-    with pytest.raises(grpc.RpcError):
-        await svc.ChatOnce(pb.ChatOnceRequest(conversation_id="c", text="x"), ctx)
-    args, _ = ctx.abort.call_args
-    assert args[0] is grpc.StatusCode.UNAUTHENTICATED
-
-
 # ---- PushSignal -----------------------------------------------------------
 
 
@@ -175,7 +69,7 @@ async def test_push_signal_publishes_to_signal_bus() -> None:
     signals = MagicMock()
     signals.publish = AsyncMock()
     svc = EidolonAgentServicer(
-        agent_registry=MagicMock(), pairing=MagicMock(),
+        agent_registry=MagicMock(),
         signals_bus=signals, proactive_bus=MagicMock(),
     )
     req = pb.SignalRequest(
@@ -219,7 +113,7 @@ async def test_chat_cancels_active_turn_when_context_is_cancelled() -> None:
         return_value=_stub_instance(agent)
     )
     svc = EidolonAgentServicer(
-        agent_registry=registry, pairing=MagicMock(),
+        agent_registry=registry,
         signals_bus=SimpleNamespace(recent=AsyncMock(return_value=[])),
         proactive_bus=MagicMock(),
     )
@@ -291,7 +185,7 @@ async def test_chat_does_not_cancel_active_turn_when_context_is_done_but_not_can
         return_value=_stub_instance(agent)
     )
     svc = EidolonAgentServicer(
-        agent_registry=registry, pairing=MagicMock(),
+        agent_registry=registry,
         signals_bus=SimpleNamespace(recent=AsyncMock(return_value=[])),
         proactive_bus=MagicMock(),
     )
@@ -335,7 +229,7 @@ async def test_chat_start_inline_realtime_reaches_turn_input() -> None:
     signals = MagicMock()
     signals.recent = AsyncMock(return_value=[])
     svc = EidolonAgentServicer(
-        agent_registry=registry, pairing=MagicMock(),
+        agent_registry=registry,
         signals_bus=signals, proactive_bus=MagicMock(),
     )
 
@@ -396,7 +290,7 @@ async def test_chat_fuses_recent_signals_when_start_has_no_realtime() -> None:
         )
     ])
     svc = EidolonAgentServicer(
-        agent_registry=registry, pairing=MagicMock(),
+        agent_registry=registry,
         signals_bus=signals, proactive_bus=MagicMock(),
     )
 
@@ -420,7 +314,7 @@ async def test_push_signal_unknown_modality_falls_back_to_ambient() -> None:
     signals = MagicMock()
     signals.publish = AsyncMock()
     svc = EidolonAgentServicer(
-        agent_registry=MagicMock(), pairing=MagicMock(),
+        agent_registry=MagicMock(),
         signals_bus=signals, proactive_bus=MagicMock(),
     )
     from eidolon_agent.core.types.signal import SignalModality
