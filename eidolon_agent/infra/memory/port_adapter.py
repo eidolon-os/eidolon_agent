@@ -53,31 +53,68 @@ class EidolonMemoryPort:
             session_id=session_id,
         )
         memory_space_id = ctx.memory_space_id
-        session = await self._pool.session_for(memory_space_id)
-        try:
-            raw = await asyncio.wait_for(
-                session.call_tool(
-                    "eidolon_memory_search",
-                    {
-                        "query": query,
-                        "context": ctx.model_dump(mode="json"),
-                        "top_k": top_k,
-                    },
-                ),
-                timeout=timeout_s,
-            )
-        except TimeoutError:
-            _log.warning("memory search timed out for memory_space=%s", memory_space_id)
-            await self._pool.drop_session(memory_space_id, session=session)
-            return []
-        except MemoryUnavailableError:
-            _log.warning("memory search unavailable for memory_space=%s", memory_space_id)
-            await self._pool.drop_session(memory_space_id, session=session)
-            return []
-        except Exception:
-            _log.exception("memory search failed for memory_space=%s", memory_space_id)
-            return []
-        return _records_to_hits(raw.get("records") or [])
+        deadline = asyncio.get_running_loop().time() + timeout_s
+        for attempt in range(2):
+            try:
+                session = await self._pool.session_for(memory_space_id)
+            except MemoryUnavailableError:
+                _log.warning("memory search unavailable for memory_space=%s", memory_space_id)
+                return []
+            try:
+                raw = await asyncio.wait_for(
+                    session.call_tool(
+                        "eidolon_memory_search",
+                        {
+                            "query": query,
+                            "context": ctx.model_dump(mode="json"),
+                            "top_k": top_k,
+                        },
+                    ),
+                    timeout=_remaining_timeout(deadline),
+                )
+                return _records_to_hits(raw.get("records") or [])
+            except TimeoutError:
+                _log.warning("memory search timed out for memory_space=%s", memory_space_id)
+                await self._pool.drop_session(memory_space_id, session=session)
+                return []
+            except MemoryUnavailableError:
+                _log.warning(
+                    "memory search unavailable for memory_space=%s attempt=%d",
+                    memory_space_id,
+                    attempt + 1,
+                )
+                await self._pool.drop_session(memory_space_id, session=session)
+                if attempt == 0 and _remaining_timeout(deadline) > 0:
+                    continue
+                return []
+            except Exception:
+                _log.exception("memory search failed for memory_space=%s", memory_space_id)
+                return []
+        return []
+
+    async def _recall_context_once(
+        self,
+        session,
+        *,
+        query: str,
+        ctx,
+        plan: MemoryQueryPlan,
+        deadline: float,
+    ) -> dict:
+        return await asyncio.wait_for(
+            session.call_tool(
+                "eidolon_memory_recall_context",
+                {
+                    "query": query,
+                    "context": ctx.model_dump(mode="json"),
+                    "top_k": plan.semantic_k,
+                    "voice": plan.voice,
+                    "include_kg": True,
+                    "include_sensitive_kg": False,
+                },
+            ),
+            timeout=_remaining_timeout(deadline),
+        )
 
     async def recall_context(
         self,
@@ -109,37 +146,46 @@ class EidolonMemoryPort:
                 reason,
             )
             return MemoryRecallResult(degraded=True, degraded_reason=reason)
-        try:
-            raw = await asyncio.wait_for(
-                session.call_tool(
-                    "eidolon_memory_recall_context",
-                    {
-                        "query": query,
-                        "context": ctx.model_dump(mode="json"),
-                        "top_k": plan.semantic_k,
-                        "voice": plan.voice,
-                        "include_kg": True,
-                        "include_sensitive_kg": False,
-                    },
-                ),
-                timeout=timeout_s,
-            )
-        except TimeoutError:
-            _log.warning("memory recall timed out for memory_space=%s", memory_space_id)
-            await self._pool.drop_session(memory_space_id, session=session)
-            return MemoryRecallResult(degraded=True, degraded_reason="timeout")
-        except MemoryUnavailableError as exc:
-            reason = _memory_unavailable_reason(exc)
-            _log.warning(
-                "memory recall unavailable for memory_space=%s reason=%s",
-                memory_space_id,
-                reason,
-            )
-            await self._pool.drop_session(memory_space_id, session=session)
-            return MemoryRecallResult(degraded=True, degraded_reason=reason)
-        except Exception:
-            _log.exception("memory recall failed for memory_space=%s", memory_space_id)
-            return MemoryRecallResult(degraded=True, degraded_reason="error")
+        deadline = asyncio.get_running_loop().time() + timeout_s
+        for attempt in range(2):
+            try:
+                raw = await self._recall_context_once(
+                    session,
+                    query=query,
+                    ctx=ctx,
+                    plan=plan,
+                    deadline=deadline,
+                )
+                break
+            except TimeoutError:
+                _log.warning("memory recall timed out for memory_space=%s", memory_space_id)
+                await self._pool.drop_session(memory_space_id, session=session)
+                return MemoryRecallResult(degraded=True, degraded_reason="timeout")
+            except MemoryUnavailableError as exc:
+                reason = _memory_unavailable_reason(exc)
+                _log.warning(
+                    "memory recall unavailable for memory_space=%s reason=%s attempt=%d",
+                    memory_space_id,
+                    reason,
+                    attempt + 1,
+                )
+                await self._pool.drop_session(memory_space_id, session=session)
+                if attempt == 0 and _remaining_timeout(deadline) > 0:
+                    try:
+                        session = await self._pool.session_for(memory_space_id)
+                    except MemoryUnavailableError as retry_exc:
+                        reason = _memory_unavailable_reason(retry_exc)
+                        return MemoryRecallResult(
+                            degraded=True,
+                            degraded_reason=reason,
+                        )
+                    continue
+                return MemoryRecallResult(degraded=True, degraded_reason=reason)
+            except Exception:
+                _log.exception("memory recall failed for memory_space=%s", memory_space_id)
+                return MemoryRecallResult(degraded=True, degraded_reason="error")
+        else:
+            return MemoryRecallResult(degraded=True, degraded_reason="memory_unavailable")
         context = raw.get("context", "") or ""
         hits = _records_to_hits(raw.get("records") or [])
         kg_triples = raw.get("kg_triples") or []
@@ -309,3 +355,7 @@ def _memory_unavailable_reason(exc: MemoryUnavailableError) -> str:
     if isinstance(reason, str) and reason:
         return reason
     return "memory_unavailable"
+
+
+def _remaining_timeout(deadline: float) -> float:
+    return max(0.001, deadline - asyncio.get_running_loop().time())

@@ -120,7 +120,31 @@ async def test_search_drops_session_on_memory_unavailable() -> None:
     call = AsyncMock(side_effect=MemoryUnavailableError("stream closed"))
     port, session, pool, _ = _port(session_call=call)
     assert await port.search("owner-1", "x", memory_realm_id="realm-1") == []
-    pool.drop_session.assert_awaited_once_with("realm-1", session=session)
+    assert pool.drop_session.await_count == 2
+    pool.drop_session.assert_any_await("realm-1", session=session)
+
+
+async def test_search_retries_once_after_stale_session_unavailable() -> None:
+    stale_session = MagicMock()
+    stale_session.call_tool = AsyncMock(side_effect=MemoryUnavailableError("stream closed"))
+    fresh_session = MagicMock()
+    fresh_session.call_tool = AsyncMock(return_value={
+        "records": [
+            {
+                "id": "r1",
+                "value": "用户叫曼森",
+                "metadata": {"kind": "fact", "similarity": 1.0},
+            }
+        ]
+    })
+    port, _, pool, _ = _port()
+    pool.session_for = AsyncMock(side_effect=[stale_session, fresh_session])
+
+    hits = await port.search("owner-1", "名字", memory_realm_id="realm-1")
+
+    assert [hit.content for hit in hits] == ["用户叫曼森"]
+    assert pool.session_for.await_count == 2
+    pool.drop_session.assert_awaited_once_with("realm-1", session=stale_session)
 
 
 async def test_search_returns_empty_on_exception() -> None:
@@ -248,7 +272,46 @@ async def test_recall_context_drops_session_on_memory_unavailable_call() -> None
     assert hits == []
     assert degraded is True
     assert result.degraded_reason == "memory_stream_closed"
-    pool.drop_session.assert_awaited_once_with("realm-1", session=session)
+    assert pool.drop_session.await_count == 2
+    pool.drop_session.assert_any_await("realm-1", session=session)
+
+
+async def test_recall_context_retries_once_after_stale_session_unavailable() -> None:
+    stale_session = MagicMock()
+    stale_session.call_tool = AsyncMock(
+        side_effect=MemoryUnavailableError(
+            "stream closed",
+            details={"reason": "memory_stream_closed"},
+        )
+    )
+    fresh_session = MagicMock()
+    fresh_session.call_tool = AsyncMock(return_value={
+        "context": "用户叫曼森，在北京化工大学读书。",
+        "records": [
+            {
+                "id": "h1",
+                "value": "用户叫曼森，在北京化工大学读书。",
+                "metadata": {"kind": "fact", "similarity": 1.0},
+            }
+        ],
+    })
+    port, _, pool, _ = _port()
+    pool.session_for = AsyncMock(side_effect=[stale_session, fresh_session])
+
+    result = await port.recall_context(
+        "owner-1",
+        "我叫什么？我在哪里读书？",
+        memory_realm_id="realm-1",
+        plan=_plan(),
+        timeout_s=1.0,
+    )
+
+    ctx, hits, degraded = result
+    assert degraded is False
+    assert ctx == "用户叫曼森，在北京化工大学读书。"
+    assert [hit.id for hit in hits] == ["h1"]
+    assert pool.session_for.await_count == 2
+    pool.drop_session.assert_awaited_once_with("realm-1", session=stale_session)
 
 
 async def test_recall_context_returns_route_reason_on_unavailable_session() -> None:

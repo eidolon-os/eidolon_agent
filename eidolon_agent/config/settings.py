@@ -257,6 +257,7 @@ class TurnSettings(BaseModel):
     tool_batch_timeout_s: float | None = None
     compile_soft_timeout_ms: int = 100
     memory_recall_soft_timeout_ms: int = 200
+    explicit_memory_recall_timeout_ms: int = 4000
     first_delta_slo_p50_ms: int = 200
     first_delta_slo_p95_ms: int = 300
     history_context_window: int = 4

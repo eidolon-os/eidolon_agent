@@ -12,7 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-
 TRACE_SCHEMA_VERSION = "turn_trace.v1"
 
 
@@ -116,6 +115,7 @@ class TurnTrace:
     latency: LatencyBreakdown
     context_ledger: dict[str, Any] | None = None
     memory_trace: dict[str, Any] | None = None
+    memory_recall_query: dict[str, Any] | None = None
     memory_write_trace: dict[str, Any] | None = None
     tool_trace: list[ToolTrace] = field(default_factory=list)
     persona: PersonaTrace = field(default_factory=PersonaTrace)
@@ -149,6 +149,7 @@ class TurnTrace:
             "latency": self.latency.to_metadata(),
             "context_ledger": self.context_ledger,
             "memory_trace": self.memory_trace,
+            "memory_recall_query": self.memory_recall_query,
             "memory_write_trace": self.memory_write_trace,
             "tool_trace": [t.to_metadata() for t in self.tool_trace],
             "persona": self.persona.to_metadata(),

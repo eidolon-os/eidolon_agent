@@ -223,7 +223,8 @@ async def build_application(
     tool_registry = ToolRegistry()
     tool_registry.register(GetTimeTool())
     tool_registry.register(GetWeatherTool())
-    tool_registry.register(MemorySearchTool(memory_port))
+    explicit_memory_timeout_s = settings.turn.explicit_memory_recall_timeout_ms / 1000
+    tool_registry.register(MemorySearchTool(memory_port, timeout_s=explicit_memory_timeout_s))
     tool_registry.register(MemoryAssertFactTool(memory_port))
     tool_registry.register(MemoryForgetTool(memory_port))
     tool_registry.register(EmitEventTool(event_bus=container.event_bus))
@@ -386,7 +387,10 @@ def _build_turn_engine(
         history_manager=container.history_manager,
         memory_port=container.memory_port,
         history_window=harness.budget.history_window,
-        memory_timeout_s=container.settings.memory.recall_timeout_s,
+        memory_timeout_s=container.settings.turn.memory_recall_soft_timeout_ms / 1000,
+        explicit_memory_timeout_s=(
+            container.settings.turn.explicit_memory_recall_timeout_ms / 1000
+        ),
         context_budget_tokens=container.settings.turn.max_token_budget,
         context_budget_mode=container.settings.turn.context_budget_mode,
         harness=harness,

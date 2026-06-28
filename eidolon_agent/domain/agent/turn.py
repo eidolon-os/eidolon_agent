@@ -548,6 +548,7 @@ class TurnEngine:
                     ),
                     context_ledger=ti.metadata.get("context_ledger"),
                     memory_trace=ti.metadata.get("memory_trace"),
+                    memory_recall_query=ti.metadata.get("memory_recall_query"),
                     memory_write_trace=memory_write_trace,
                     tool_trace=tool_trace,
                     persona=PersonaTrace(
@@ -579,6 +580,7 @@ class TurnEngine:
                     "tool_ms": tool_ms_total,
                     "context_ledger": ti.metadata.get("context_ledger"),
                     "memory_trace": ti.metadata.get("memory_trace"),
+                    "memory_recall_query": ti.metadata.get("memory_recall_query"),
                     "memory_write_trace": memory_write_trace,
                     "tool_trace": [t.to_metadata() for t in tool_trace],
                     "context_structure_version": ti.metadata.get("context_structure_version"),

@@ -63,6 +63,7 @@ class ContextCompiler:
         memory_port=None,
         history_window: int = 4,
         memory_timeout_s: float = 0.2,
+        explicit_memory_timeout_s: float = 1.2,
         memory_top_k: int = 5,
         context_budget_tokens: int | None = None,
         context_budget_mode: str = "enabled",
@@ -78,6 +79,7 @@ class ContextCompiler:
         self._memory = memory_port
         self._history_window = history_window
         self._memory_timeout_s = memory_timeout_s
+        self._explicit_memory_timeout_s = explicit_memory_timeout_s
         self._memory_top_k = memory_top_k
         self._context_budget_tokens = context_budget_tokens
         self._context_budget_mode = _normalize_budget_mode(context_budget_mode)
@@ -109,7 +111,8 @@ class ContextCompiler:
                 dry_run_memory=[],
             ),
         )
-        memory_task = _timed("memory", self._memory_recall(ti))
+        memory_timeout_s = self._memory_timeout_for(ti.text or "")
+        memory_task = _timed("memory", self._memory_recall(ti, timeout_s=memory_timeout_s))
         summary_task = _timed("summary", self._summary_context(ti, policy))
         history_coro = (
             _empty_history()
@@ -394,7 +397,7 @@ class ContextCompiler:
             "degraded": memory_degraded,
             "degraded_reason": memory_degraded_reason,
             "elapsed_ms": memory_ms,
-            "timeout_ms": int(self._memory_timeout_s * 1000),
+            "timeout_ms": int(memory_timeout_s * 1000),
             "hit_ids": memory_hit_ids,
             "hit_count": len(memory_hit_ids),
             "kg_triple_ids": memory_kg_triple_ids,
@@ -542,7 +545,7 @@ class ContextCompiler:
     )
 
     async def _memory_recall(
-        self, ti: TurnInput
+        self, ti: TurnInput, *, timeout_s: float
     ) -> tuple[str | None, bool, list[str], str | None, list[str]] | None:
         """Memory recall branch for the parallel ``gather`` above.
 
@@ -573,28 +576,62 @@ class ContextCompiler:
                 semantic_k=self._memory_top_k,
                 voice=ti.caller.caller_kind.value == "livekit_voice",
             )
-            recall_query, query_source = await self._memory_recall_query(ti)
+            recall_queries, query_source = await self._memory_recall_queries(ti)
             ti.metadata["memory_recall_query"] = {
                 "source": query_source,
-                "preview": recall_query[:160],
+                "preview": " | ".join(recall_queries)[:160],
+                "queries": recall_queries,
+                "query_count": len(recall_queries),
             }
-            recall = await self._memory.recall_context(
-                owner_id=ti.caller.owner_id,
-                query=recall_query,
-                plan=plan,
-                timeout_s=self._memory_timeout_s,
-                companion_id=ti.caller.companion_id,
-                memory_realm_id=ti.caller.memory_realm_id,
-                device_id=ti.caller.device_id,
-                session_id=ti.session_id,
-            )
-            formatted, hits, _degraded = recall
-            kg_triples = getattr(recall, "kg_triples", []) or []
+            deadline = asyncio.get_running_loop().time() + timeout_s
+            contexts: list[str] = []
+            hit_ids: list[str] = []
+            kg_triples: list[dict] = []
+            degraded_reason: str | None = None
+            any_success = False
+            for recall_query in recall_queries:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    degraded_reason = degraded_reason or "timeout"
+                    break
+                recall = await self._memory.recall_context(
+                    owner_id=ti.caller.owner_id,
+                    query=recall_query,
+                    plan=plan,
+                    companion_id=ti.caller.companion_id,
+                    memory_realm_id=ti.caller.memory_realm_id,
+                    device_id=ti.caller.device_id,
+                    session_id=ti.session_id,
+                    timeout_s=remaining,
+                )
+                formatted, hits, _degraded = recall
+                if formatted:
+                    contexts.append(formatted)
+                    any_success = True
+                for hit in hits:
+                    hit_id = getattr(hit, "id", "")
+                    if hit_id and hit_id not in hit_ids:
+                        hit_ids.append(hit_id)
+                for triple in getattr(recall, "kg_triples", []) or []:
+                    if isinstance(triple, dict):
+                        triple_id = str(triple.get("id") or "")
+                        if triple_id and all(
+                            str(existing.get("id") or "") != triple_id
+                            for existing in kg_triples
+                        ):
+                            kg_triples.append(triple)
+                if _degraded and not any_success:
+                    degraded_reason = degraded_reason or getattr(
+                        recall,
+                        "degraded_reason",
+                        None,
+                    ) or "memory_unavailable"
+            _degraded = bool(degraded_reason and not any_success)
             return (
-                formatted or None,
+                _merge_memory_contexts(contexts) or None,
                 bool(_degraded),
-                [h.id for h in hits],
-                getattr(recall, "degraded_reason", None),
+                hit_ids,
+                degraded_reason if _degraded else None,
                 _kg_triple_ids(kg_triples),
             )
         except Exception as exc:
@@ -610,6 +647,11 @@ class ContextCompiler:
                 _exception_degraded_reason(exc),
                 [],
             )
+
+    def _memory_timeout_for(self, text: str) -> float:
+        if _is_explicit_memory_lookup(text):
+            return max(self._memory_timeout_s, self._explicit_memory_timeout_s)
+        return self._memory_timeout_s
 
     async def _summary_context(
         self, ti: TurnInput, policy: TurnRuntimePolicy
@@ -633,6 +675,13 @@ class ContextCompiler:
                 self._summary_timeout_s,
             )
             raise
+
+    async def _memory_recall_queries(self, ti: TurnInput) -> tuple[list[str], str]:
+        explicit_queries = _explicit_personal_memory_queries(ti.text or "")
+        if explicit_queries:
+            return explicit_queries, "explicit_personal_slots"
+        query, source = await self._memory_recall_query(ti)
+        return [query], source
 
     async def _memory_recall_query(self, ti: TurnInput) -> tuple[str, str]:
         """Build a recall query with a tiny history peek for anaphora.
@@ -874,6 +923,147 @@ def _truncate_for_background(text: str, limit: int = 220) -> str:
 def _truncate_for_query(text: str, limit: int = 120) -> str:
     text = text.strip()
     return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _merge_memory_contexts(contexts: list[str]) -> str:
+    blocks: list[str] = []
+    seen: set[str] = set()
+    for context in contexts:
+        cleaned = (context or "").strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        blocks.append(cleaned)
+    return "\n\n".join(blocks)
+
+
+def _explicit_personal_memory_queries(text: str) -> list[str]:
+    normalized = "".join((text or "").split()).lower()
+    if not normalized or not _is_explicit_memory_lookup(text):
+        return []
+
+    queries: list[str] = []
+    slot_phrases = (
+        (
+            "我的名字",
+            (
+                "我叫什么",
+                "我的名字",
+                "我是谁",
+                "怎么称呼我",
+                "叫我什么",
+            ),
+        ),
+        (
+            "我的大学在哪里读的",
+            (
+                "我在哪里读书",
+                "我在哪读书",
+                "我哪里读书",
+                "我哪儿读书",
+                "我在哪儿读书",
+                "我读的学校",
+                "我的学校",
+                "我的大学",
+                "哪所大学",
+                "哪个大学",
+                "在哪里上学",
+                "在哪上学",
+            ),
+        ),
+        (
+            "我的工作地点",
+            (
+                "哪里工作",
+                "在哪工作",
+                "在哪里工作",
+                "我的工作",
+                "工作地点",
+                "在哪儿工作",
+            ),
+        ),
+        (
+            "我的居住地",
+            (
+                "住哪里",
+                "住哪儿",
+                "住在哪里",
+                "住在哪儿",
+                "我住哪",
+                "我住在哪里",
+            ),
+        ),
+        (
+            "我的家乡",
+            (
+                "我是哪里人",
+                "我来自哪里",
+                "我的家乡",
+                "老家哪里",
+                "老家在哪",
+            ),
+        ),
+    )
+    for query, phrases in slot_phrases:
+        if any(phrase in normalized for phrase in phrases):
+            queries.append(query)
+    return queries
+
+
+def _is_explicit_memory_lookup(text: str) -> bool:
+    normalized = "".join((text or "").split()).lower()
+    if not normalized:
+        return False
+
+    memory_intent = any(
+        phrase in normalized
+        for phrase in (
+            "你记得",
+            "你还记得",
+            "记不记得",
+            "你知道我",
+            "关于我",
+            "告诉我我的",
+            "查一下我的",
+            "帮我找我的",
+        )
+    )
+    question_intent = any(
+        token in normalized
+        for token in ("?", "？", "吗", "什么", "哪里", "哪儿", "哪所", "在哪")
+    )
+    if not memory_intent and not question_intent:
+        return False
+
+    personal_fact = any(
+        phrase in normalized
+        for phrase in (
+            "我叫什么",
+            "我的名字",
+            "我是谁",
+            "我在哪里读书",
+            "我在哪读书",
+            "我哪里读书",
+            "我哪儿读书",
+            "我在哪儿读书",
+            "我读的学校",
+            "我的学校",
+            "我的大学",
+            "哪所大学",
+            "哪个大学",
+            "哪里工作",
+            "在哪工作",
+            "在哪里工作",
+            "我的工作",
+            "住哪里",
+            "住哪儿",
+            "住在哪里",
+            "住在哪儿",
+            "我是哪里人",
+            "我来自哪里",
+        )
+    )
+    return memory_intent or personal_fact
 
 
 def _kg_triple_ids(triples: object) -> list[str]:
