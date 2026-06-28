@@ -84,6 +84,8 @@ class MemoryAuditRow(BaseModel):
     owner_id: str
     companion_id: str
     started_at: datetime
+    trace_kind: str | None = None
+    durable_result: str | None = None
     disposition: str | None
     reason: str | None
     policy_version: str | None
@@ -237,6 +239,8 @@ async def list_memory_audit(
                 owner_id=row["owner_id"],
                 companion_id=row["companion_id"],
                 started_at=row["started_at"],
+                trace_kind=write.get("trace_kind"),
+                durable_result=write.get("durable_result"),
                 disposition=write.get("disposition"),
                 reason=write.get("reason"),
                 policy_version=write.get("policy_version"),

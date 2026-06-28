@@ -50,6 +50,8 @@ def build_turn_observability_summary(
             "context_injected": bool(memory.get("context_injected")),
         },
         "memory_write": {
+            "trace_kind": memory_write.get("trace_kind") or "memory_write_intent",
+            "durable_result": memory_write.get("durable_result") or "async_memory_worker",
             "disposition": memory_write.get("disposition"),
             "reason": memory_write.get("reason"),
             "fanout_allowed": bool(memory_write.get("fanout_allowed")),
@@ -123,6 +125,8 @@ def _development_guard_summary(guards: dict[str, Any]) -> dict[str, Any]:
             ),
         },
         "memory_write_policy": {
+            "trace_kind": memory_write.get("trace_kind") or "memory_write_intent",
+            "durable_result": memory_write.get("durable_result") or "async_memory_worker",
             "mode": memory_write.get("mode"),
             "shadow_only": bool(memory_write.get("shadow_only")),
             "fanout_allowed": bool(memory_write.get("fanout_allowed")),

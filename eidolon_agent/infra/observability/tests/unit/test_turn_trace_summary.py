@@ -112,6 +112,8 @@ def test_summary_is_prompt_safe_and_operator_friendly() -> None:
     assert summary["memory"]["hit_count"] == 2
     assert summary["memory"]["kg_triple_count"] == 3
     assert summary["memory"]["degraded_reason"] is None
+    assert summary["memory_write"]["trace_kind"] == "memory_write_intent"
+    assert summary["memory_write"]["durable_result"] == "async_memory_worker"
     assert summary["memory_write"]["disposition"] == "semantic_upsert"
     assert summary["tools"]["count"] == 2
     assert summary["tools"]["error_count"] == 1
@@ -130,6 +132,10 @@ def test_summary_is_prompt_safe_and_operator_friendly() -> None:
     assert summary["development_guards"]["context_budget"]["mode"] == "enabled"
     assert summary["development_guards"]["context_budget"]["dropped_count"] == 1
     assert summary["development_guards"]["memory_write_policy"]["fanout_allowed"] is True
+    assert (
+        summary["development_guards"]["memory_write_policy"]["trace_kind"]
+        == "memory_write_intent"
+    )
     assert summary["development_guards"]["tool_policy"]["schema_strict"] is True
     assert "secret prompt text" not in str(summary)
 

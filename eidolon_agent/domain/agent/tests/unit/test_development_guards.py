@@ -22,6 +22,8 @@ def test_memory_write_shadow_records_candidate_without_fanout() -> None:
     )
 
     assert trace["mode"] == "shadow"
+    assert trace["trace_kind"] == "memory_write_intent"
+    assert trace["durable_result"] == "async_memory_worker"
     assert trace["shadow_only"] is True
     assert trace["disposition"] == "semantic_upsert"
     assert trace["fanout_allowed"] is False

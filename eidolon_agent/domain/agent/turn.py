@@ -1046,6 +1046,8 @@ def _memory_write_trace(
         )
     metadata = disposition.to_metadata() if disposition is not None else {}
     return {
+        "trace_kind": "memory_write_intent",
+        "durable_result": "async_memory_worker",
         "source_turn_id": ti.turn_id,
         "conversation_id": ti.conversation_id,
         "privacy_mode": policy.privacy.mode,

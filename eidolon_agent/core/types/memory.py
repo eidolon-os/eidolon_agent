@@ -158,10 +158,35 @@ def classify_memory_write(
         "现在住在",
         "住在",
     )
+    stable_identity_markers = (
+        "我目前在",
+        "我现在在",
+        "我大学",
+        "我的大学",
+        "大学是",
+        "大学在",
+        "学校是",
+        "毕业于",
+        "就读于",
+        "读的",
+        "工作",
+        "上班",
+        "公司",
+        "i work",
+        "i study",
+        "my university",
+        "graduated from",
+    )
     if (
         any(k in text for k in strong_preference_markers)
         or (not is_question and any(k in text for k in weak_preference_markers))
-    ) or (not is_question and any(k in text for k in residence_markers)):
+    ) or (
+        not is_question
+        and (
+            any(k in text for k in residence_markers)
+            or any(k in text for k in stable_identity_markers)
+        )
+    ):
         return MemoryWriteDisposition(
             MemoryWriteDispositionKind.SEMANTIC_UPSERT,
             "stable_preference_or_identity",

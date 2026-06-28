@@ -1,7 +1,7 @@
 """Functional tests for the conversations browse router.
 
 Hits a real SQLite-backed FastAPI app (no mocks). We seed two
-conversations belonging to different users, drive a few turns + chat
+conversations belonging to different owners, drive a few turns + chat
 messages through the same repository write paths the real chat
 pipeline uses, then verify the read endpoints return what the admin
 UI will render.
@@ -39,8 +39,8 @@ async def _fresh_app(tmp_path) -> tuple[httpx.AsyncClient, DataStore]:
 async def _seed_turn(
     store: DataStore,
     *,
-    tenant_id: str,
-    user_id: str,
+    owner_id: str,
+    companion_id: str | None = None,
     conversation_id: str,
     turn_id: str,
     seq: int,
@@ -50,19 +50,40 @@ async def _seed_turn(
 ) -> None:
     """Write the same shape the real chat path emits."""
     del seq
+    companion_id = companion_id or f"{owner_id}-test"
+    genome_id = f"g:{owner_id}:default:v1"
+    realm_id = f"r:{owner_id}:default"
+    device_id = f"device-{owner_id}"
+    if await store.companions.get(companion_id) is None:
+        await store.owner_service.create_owner(owner_id=owner_id, display_name=owner_id)
+        await store.companion_workspace.initialize_workspace(
+            owner_id=owner_id,
+            companion_id=companion_id,
+            genome_id=genome_id,
+            realm_id=realm_id,
+        )
+    if await store.devices.get_device(device_id) is None:
+        await store.devices.create_device(
+            device_id=device_id,
+            owner_id=owner_id,
+            bound_companion_id=companion_id,
+            auth_type="token",
+            secret_ref="test",
+        )
     persist = build_eidolon_data_turn_persister(store, model_id_provider=lambda: "test/model-1")
     await persist(
         ti=TurnInput(
             turn_id=turn_id,
             conversation_id=conversation_id,
             session_id=f"session-{conversation_id}",
-            caller=CallerContext(
-                identity=Identity(
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    agent_instance_id="instance-X",
-                    device_id="device-X",
-                ),
+                caller=CallerContext(
+                    identity=Identity(
+                        owner_id=owner_id,
+                        companion_id=companion_id,
+                        device_id=device_id,
+                        memory_realm_id=realm_id,
+                        genome_id=genome_id,
+                    ),
                 caller_kind=CallerKind.WEB_CHAT,
                 trace_id=f"trace-{turn_id}",
                 request_id=f"request-{turn_id}",
@@ -129,8 +150,10 @@ async def _seed_turn(
                             "hit_count": 1,
                             "context_injected": True,
                         },
-                        "memory_write_trace": {
-                            "source_turn_id": turn_id,
+                            "memory_write_trace": {
+                                "trace_kind": "memory_write_intent",
+                                "durable_result": "async_memory_worker",
+                                "source_turn_id": turn_id,
                             "conversation_id": conversation_id,
                             "privacy_mode": "normal",
                             "disposition": "semantic_upsert",
@@ -156,7 +179,7 @@ async def _seed_turn(
     )
 
 
-async def test_list_turns_returns_newest_first_and_filters_by_user(tmp_path) -> None:
+async def test_list_turns_returns_newest_first_and_filters_by_owner(tmp_path) -> None:
     client, store = await _fresh_app(tmp_path)
 
     t0 = datetime(2026, 6, 3, 9, 0, 0, tzinfo=timezone.utc)
@@ -165,21 +188,21 @@ async def test_list_turns_returns_newest_first_and_filters_by_user(tmp_path) -> 
 
     await _seed_turn(
         store,
-        tenant_id="default", user_id="manson",
+        owner_id="manson",
         conversation_id="c-manson", turn_id="t-m-1", seq=0,
         user_text="铁锤几岁了？", assistant_text="铁锤今年 10 岁。",
         started_at=t0,
     )
     await _seed_turn(
         store,
-        tenant_id="default", user_id="manson",
+        owner_id="manson",
         conversation_id="c-manson", turn_id="t-m-2", seq=1,
         user_text="今天天气如何？", assistant_text="多云转晴。",
         started_at=t2,
     )
     await _seed_turn(
         store,
-        tenant_id="default", user_id="alice",
+        owner_id="alice",
         conversation_id="c-alice", turn_id="t-a-1", seq=0,
         user_text="Hi", assistant_text="Hello!",
         started_at=t1,
@@ -193,15 +216,15 @@ async def test_list_turns_returns_newest_first_and_filters_by_user(tmp_path) -> 
         ids = [t["turn_id"] for t in body["turns"]]
         assert ids == ["t-m-2", "t-a-1", "t-m-1"]
 
-        # Filter by user_id — only manson's two
-        r = await client.get("/api/admin/conversations/turns?user_id=manson")
+        # Filter by owner_id — only manson's two
+        r = await client.get("/api/admin/conversations/turns?owner_id=manson")
         body = r.json()
         ids = [t["turn_id"] for t in body["turns"]]
         assert ids == ["t-m-2", "t-m-1"]
         # Every row has the cheap-columns shape the schema promises
         for t in body["turns"]:
-            assert t["user_id"] == "manson"
-            assert t["tenant_id"] == "default"
+            assert t["owner_id"] == "manson"
+            assert t["companion_id"] == "manson-test"
             assert t["status"] == "ok"
             assert t["model"] == "test/model-1"
             assert t["observability_summary"]["privacy_mode"] == "normal"
@@ -214,14 +237,14 @@ async def test_memory_audit_lists_write_candidates_without_message_text(tmp_path
     t0 = datetime(2026, 6, 3, 9, 0, 0, tzinfo=timezone.utc)
     await _seed_turn(
         store,
-        tenant_id="default", user_id="manson",
+        owner_id="manson",
         conversation_id="c-1", turn_id="t-1", seq=0,
         user_text="以后叫我小满", assistant_text="好的，小满。",
         started_at=t0,
     )
 
     async with client:
-        r = await client.get("/api/admin/conversations/memory-audit?user_id=manson")
+        r = await client.get("/api/admin/conversations/memory-audit?owner_id=manson")
 
     assert r.status_code == 200
     body = r.json()
@@ -229,6 +252,8 @@ async def test_memory_audit_lists_write_candidates_without_message_text(tmp_path
     row = body["rows"][0]
     assert row["turn_id"] == "t-1"
     assert row["disposition"] == "semantic_upsert"
+    assert row["trace_kind"] == "memory_write_intent"
+    assert row["durable_result"] == "async_memory_worker"
     assert row["fanout_allowed"] is True
     assert row["privacy_mode"] == "normal"
     assert "小满" not in str(body)
@@ -240,7 +265,7 @@ async def test_get_turn_returns_messages_in_order(tmp_path) -> None:
     t0 = datetime(2026, 6, 3, 9, 0, 0, tzinfo=timezone.utc)
     await _seed_turn(
         store,
-        tenant_id="default", user_id="manson",
+        owner_id="manson",
         conversation_id="c-1", turn_id="t-1", seq=0,
         user_text="ping", assistant_text="pong",
         started_at=t0,
@@ -252,7 +277,9 @@ async def test_get_turn_returns_messages_in_order(tmp_path) -> None:
     assert r.status_code == 200
     body = r.json()
     assert body["turn_id"] == "t-1"
-    assert body["user_id"] == "manson"
+    assert body["owner_id"] == "manson"
+    assert body["companion_id"] == "manson-test"
+    assert body["memory_realm_id"] == "r:manson:default"
     assert body["latency_first_delta_ms"] == 120
     assert body["turn_trace"]["schema_version"] == "turn_trace.v1"
     assert body["turn_trace"]["boundary"] == "eidolon_agent.brain"
@@ -262,6 +289,7 @@ async def test_get_turn_returns_messages_in_order(tmp_path) -> None:
     assert summary["context"]["dropped_kinds"] == ["history"]
     assert summary["memory"]["degraded"] is True
     assert summary["memory"]["degraded_reason"] == "no_memory_route"
+    assert summary["memory_write"]["trace_kind"] == "memory_write_intent"
     assert summary["memory_write"]["disposition"] == "semantic_upsert"
     assert summary["tools"]["names"] == ["delegate_to_coworker"]
     assert summary["latency"]["compile_ms"] == 3
@@ -290,7 +318,7 @@ async def test_list_turns_pagination_cursor(tmp_path) -> None:
     for i in range(3):
         await _seed_turn(
             store,
-            tenant_id="default", user_id="manson",
+            owner_id="manson",
             conversation_id=f"c-{i}", turn_id=f"t-{i}", seq=0,
             user_text=f"q{i}", assistant_text=f"a{i}",
             started_at=base.replace(minute=i),
