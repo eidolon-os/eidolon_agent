@@ -38,7 +38,7 @@ async def test_discovery_client_ignores_shell_proxy_env(monkeypatch):
                 json={
                     "version": 1,
                     "nats": {"url": "nats://127.0.0.1:4222"},
-                    "users": [],
+                    "memory_realms": [],
                 },
                 request=httpx.Request("GET", url),
             )
@@ -66,11 +66,11 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
                 "turn_subject_template": "mem.turn.{memory_space_token}",
                 "cmd_subject_template": "mem.cmd.{memory_space_token}",
             },
-            "users": [
+            "memory_realms": [
                 {
-                    "memory_space_id": "default.alice.mochi",
-                    "tenant_id": "default",
-                    "owner_user_id": "alice",
+                    "memory_space_id": "r:benchmark:default",
+                    "memory_realm_id": "r:benchmark:default",
+                    "owner_id": "benchmark",
                     "companion_id": "mochi",
                     "enabled": True,
                     "mcp_http_url": "http://127.0.0.1:8031/mcp",
@@ -81,13 +81,19 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
                     "agent_reachable": True,
                 },
                 {
-                    "memory_space_id": "default.bob.mochi",
+                    "memory_space_id": "r:benchmark:disabled",
+                    "memory_realm_id": "r:benchmark:disabled",
+                    "owner_id": "benchmark",
+                    "companion_id": "disabled",
                     "enabled": False,
                     "mcp_http_url": "http://127.0.0.1:8032/mcp",
                     "agent_reachable": True,
                 },
                 {
-                    "memory_space_id": "default.charlie.mochi",
+                    "memory_space_id": "r:benchmark:unreachable",
+                    "memory_realm_id": "r:benchmark:unreachable",
+                    "owner_id": "benchmark",
+                    "companion_id": "unreachable",
                     "enabled": True,
                     "mcp_http_url": "http://127.0.0.1:8033/mcp",
                     "agent_reachable": False,
@@ -99,24 +105,24 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
 
     await routes.replace_from_discovery(discovery)
 
-    alice = await routes.route_for("default.alice.mochi")
+    alice = await routes.route_for("r:benchmark:default")
     assert alice is not None
     assert alice.mcp_url == "http://127.0.0.1:8031/mcp"
     assert alice.bearer_token == "secret"
-    assert await routes.route_for("default.bob.mochi") is None
-    assert await routes.route_for("default.charlie.mochi") is None
-    bob_route, bob_reason = await routes.route_status_for("default.bob.mochi")
-    charlie_route, charlie_reason = await routes.route_status_for("default.charlie.mochi")
-    ghost_route, ghost_reason = await routes.route_status_for("default.ghost.mochi")
+    assert await routes.route_for("r:benchmark:disabled") is None
+    assert await routes.route_for("r:benchmark:unreachable") is None
+    bob_route, bob_reason = await routes.route_status_for("r:benchmark:disabled")
+    charlie_route, charlie_reason = await routes.route_status_for("r:benchmark:unreachable")
+    ghost_route, ghost_reason = await routes.route_status_for("r:benchmark:ghost")
     assert bob_route is None and bob_reason == "memory_route_disabled"
     assert charlie_route is None and charlie_reason == "memory_route_unreachable"
     assert ghost_route is None and ghost_reason == "no_memory_route"
     assert await routes.endpoint_count() == 1
-    assert await routes.render_turn_subject("default.alice.mochi") == (
-        "mem.turn.b64_ZGVmYXVsdC5hbGljZS5tb2NoaQ"
+    assert await routes.render_turn_subject("r:benchmark:default") == (
+        "mem.turn.b64_cjpiZW5jaG1hcms6ZGVmYXVsdA"
     )
-    assert await routes.render_cmd_subject("default.alice.mochi") == (
-        "mem.cmd.b64_ZGVmYXVsdC5hbGljZS5tb2NoaQ"
+    assert await routes.render_cmd_subject("r:benchmark:default") == (
+        "mem.cmd.b64_cjpiZW5jaG1hcms6ZGVmYXVsdA"
     )
 
 
@@ -159,7 +165,7 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
                 "turn_subject_template": "turns.{memory_space_id}",
                 "cmd_subject_template": "cmds.{memory_space_id}",
             },
-            "users": [],
+            "memory_realms": [],
         }
     )
     routes = MemoryRoutingTable.from_static(endpoints=[], nats=NatsSettings())
@@ -168,14 +174,19 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
     pub = MemoryNatsPublisher(event_bus=bus, routes=routes)
 
     await pub.publish_turn(
-        user_id="alice",
+        owner_id="benchmark",
+        companion_id="test",
+        memory_realm_id="r:benchmark:default",
+        device_id="admin-console",
         session_id="s1",
         turn_id="t1",
-        user_text="hi",
+        owner_text="hi",
         assistant_text="hello",
     )
     await pub.publish_kg_add(
-        user_id="alice",
+        owner_id="benchmark",
+        companion_id="test",
+        memory_realm_id="r:benchmark:default",
         subject="self",
         predicate="likes",
         object_="oolong",
@@ -184,10 +195,14 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
     turn_event, turn_persistent = bus.events[0]
     cmd_event, cmd_persistent = bus.events[1]
     assert turn_persistent is True
-    assert turn_event.subject == "turns.b64_ZGVmYXVsdC5hbGljZS5kZWZhdWx0"
+    assert turn_event.subject == "turns.b64_cjpiZW5jaG1hcms6ZGVmYXVsdA"
     assert turn_event.payload["turn_id"] == "t1"
+    assert turn_event.payload["context"]["owner_id"] == "benchmark"
+    assert turn_event.payload["context"]["companion_id"] == "test"
+    assert turn_event.payload["context"]["memory_realm_id"] == "r:benchmark:default"
+    assert turn_event.payload["context"]["device_id"] == "admin-console"
     assert cmd_persistent is True
-    assert cmd_event.subject == "cmds.b64_ZGVmYXVsdC5hbGljZS5kZWZhdWx0"
+    assert cmd_event.subject == "cmds.b64_cjpiZW5jaG1hcms6ZGVmYXVsdA"
     assert cmd_event.payload["kind"] == "kg_add_triple"
     assert cmd_event.payload["issuer"] == "agent"
     assert cmd_event.payload["request_id"]
@@ -216,7 +231,11 @@ async def test_recall_context_calls_mcp_directly():
     class Session:
         async def call_tool(self, name, arguments):
             assert name == "eidolon_memory_recall_context"
-            assert arguments["context"]["memory_space_id"] == "default.alice.default"
+            assert arguments["context"]["owner_id"] == "benchmark"
+            assert arguments["context"]["companion_id"] == "test"
+            assert arguments["context"]["memory_realm_id"] == "r:benchmark:default"
+            assert arguments["context"]["device_id"] == "admin-console"
+            assert arguments["context"]["memory_space_id"] == "r:benchmark:default"
             return {
                 "context": "铁锤是一只狗。",
                 "records": [
@@ -230,7 +249,7 @@ async def test_recall_context_calls_mcp_directly():
 
     class Pool:
         async def session_for(self, memory_space_id):
-            assert memory_space_id == "default.alice.default"
+            assert memory_space_id == "r:benchmark:default"
             return Session()
 
         async def close_all(self):
@@ -246,13 +265,16 @@ async def test_recall_context_calls_mcp_directly():
         publisher=MemoryNatsPublisher(event_bus=object()),
     )
 
-    context, hits, degraded = await port.recall_context(
-        "alice",
+    result = await port.recall_context(
+        "benchmark",
         "铁锤是什么",
         plan=MemoryQueryPlan(semantic_k=3),
         timeout_s=1.0,
+        companion_id="test",
+        memory_realm_id="r:benchmark:default",
+        device_id="admin-console",
     )
 
-    assert degraded is False
-    assert context == "铁锤是一只狗。"
-    assert hits and hits[0].content == "铁锤是一只狗。"
+    assert result.degraded is False
+    assert result.context == "铁锤是一只狗。"
+    assert result.hits and result.hits[0].content == "铁锤是一只狗。"

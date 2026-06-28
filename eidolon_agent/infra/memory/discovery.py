@@ -28,14 +28,13 @@ class DiscoveryMcpAuth(BaseModel):
     token_env: str | None = None
 
 
-class DiscoveryUser(BaseModel):
+class DiscoveryMemoryRealm(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     memory_space_id: str
-    tenant_id: str | None = None
-    owner_user_id: str | None = None
+    memory_realm_id: str | None = None
+    owner_id: str | None = None
     companion_id: str | None = None
-    persona_id: str | None = None
     enabled: bool = True
     mcp_http_url: str
     mcp_auth: DiscoveryMcpAuth | None = None
@@ -59,7 +58,7 @@ class DiscoveryResponse(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     )
     nats: DiscoveryNats
-    users: list[DiscoveryUser] = Field(default_factory=list)
+    memory_realms: list[DiscoveryMemoryRealm] = Field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,17 +123,17 @@ class MemoryRoutingTable:
 
     async def replace_from_discovery(self, discovery: DiscoveryResponse) -> None:
         routes: dict[str, MemoryRoute] = {}
-        for user in discovery.users:
+        for realm in discovery.memory_realms:
             token: str | None = None
-            auth = user.mcp_auth
+            auth = realm.mcp_auth
             if auth and auth.type.lower() == "bearer" and auth.token_env:
                 token = os.environ.get(auth.token_env, "").strip() or None
-            routes[user.memory_space_id] = MemoryRoute(
-                memory_space_id=user.memory_space_id,
-                mcp_url=user.mcp_http_url,
+            routes[realm.memory_space_id] = MemoryRoute(
+                memory_space_id=realm.memory_space_id,
+                mcp_url=realm.mcp_http_url,
                 bearer_token=token,
-                enabled=user.enabled,
-                reachable=user.agent_reachable,
+                enabled=realm.enabled,
+                reachable=realm.agent_reachable,
             )
         async with self._lock:
             self._nats = MemoryNatsRoute(
