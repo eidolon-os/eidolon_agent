@@ -100,7 +100,19 @@ class MemoryPort(Protocol):
         """Publish an explicit KG triple write command."""
         ...
 
-    async def forget(self, user_id: str, query: str) -> int:
+    async def forget(
+        self,
+        user_id: str,
+        query: str,
+        *,
+        tenant_id: str | None = None,
+        companion_id: str | None = None,
+        persona_id: str | None = None,
+        agent_id: str | None = None,
+        device_id: str | None = None,
+        instance_id: str | None = None,
+        session_id: str = "default",
+    ) -> int:
         """Delete memories matching ``query``. Returns count removed."""
         ...
 

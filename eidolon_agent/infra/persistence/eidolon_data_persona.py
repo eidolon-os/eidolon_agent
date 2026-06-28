@@ -23,6 +23,8 @@ from eidolon_data.schema.models import (
 )
 from eidolon_data.services.datastore import DataStore
 from sqlalchemy import delete, desc, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from eidolon_agent.core.errors import NotFoundError
 from eidolon_agent.domain.personas.types import (
@@ -77,17 +79,25 @@ class EidolonDataPersonaInstanceStore:
             now = datetime.now(timezone.utc)
             genome_json = _instance_to_genome_json(instance, reason=reason)
             if row is None:
-                row = PersonaGenomeRow(
-                    genome_id=f"genome-{instance.instance_id}-{instance.overlay_version}",
-                    companion_id=instance.instance_id,
-                    version=instance.overlay_version,
-                    source_json=_instance_source_json(instance),
-                    genome_json=genome_json,
-                    evolution_state_json=instance.evolution_state.model_dump(mode="json"),
-                    created_at=instance.created_at,
-                    updated_at=now,
+                genome_id = f"genome-{instance.instance_id}-{instance.overlay_version}"
+                await _insert_ignore(
+                    session,
+                    PersonaGenomeRow,
+                    {
+                        "genome_id": genome_id,
+                        "companion_id": instance.instance_id,
+                        "version": instance.overlay_version,
+                        "source_json": _instance_source_json(instance),
+                        "genome_json": genome_json,
+                        "evolution_state_json": instance.evolution_state.model_dump(mode="json"),
+                        "created_at": instance.created_at,
+                        "updated_at": now,
+                    },
+                    index_elements=["genome_id"],
                 )
-                session.add(row)
+                row = await session.get(PersonaGenomeRow, genome_id)
+                if row is None:
+                    raise RuntimeError(f"persona genome insert failed: {genome_id}")
             else:
                 row.source_json = _instance_source_json(instance)
                 row.genome_json = genome_json
@@ -178,17 +188,25 @@ class EidolonDataPersonaInstanceStore:
             )
             now = datetime.now(timezone.utc)
             if row is None:
-                row = PersonaGenomeRow(
-                    genome_id=f"genome-{instance.instance_id}-{instance.overlay_version}",
-                    companion_id=instance.instance_id,
-                    version=instance.overlay_version,
-                    source_json=_instance_source_json(instance),
-                    genome_json=_instance_to_genome_json(instance, reason="save_with_history"),
-                    evolution_state_json=instance.evolution_state.model_dump(mode="json"),
-                    created_at=instance.created_at,
-                    updated_at=now,
+                genome_id = f"genome-{instance.instance_id}-{instance.overlay_version}"
+                await _insert_ignore(
+                    session,
+                    PersonaGenomeRow,
+                    {
+                        "genome_id": genome_id,
+                        "companion_id": instance.instance_id,
+                        "version": instance.overlay_version,
+                        "source_json": _instance_source_json(instance),
+                        "genome_json": _instance_to_genome_json(instance, reason="save_with_history"),
+                        "evolution_state_json": instance.evolution_state.model_dump(mode="json"),
+                        "created_at": instance.created_at,
+                        "updated_at": now,
+                    },
+                    index_elements=["genome_id"],
                 )
-                session.add(row)
+                row = await session.get(PersonaGenomeRow, genome_id)
+                if row is None:
+                    raise RuntimeError(f"persona genome insert failed: {genome_id}")
             else:
                 row.genome_json = _instance_to_genome_json(instance, reason="save_with_history")
                 row.evolution_state_json = instance.evolution_state.model_dump(mode="json")
@@ -581,17 +599,21 @@ async def _ensure_owner_and_companion(
     companion_id: str,
 ) -> None:
     await _ensure_owner(session, owner_id=owner_id, tenant_id=tenant_id, kind="person")
+    await _insert_ignore(
+        session,
+        CompanionRow,
+        {
+            "companion_id": companion_id,
+            "owner_id": owner_id,
+            "display_name": companion_id,
+            "kind": "companion",
+            "metadata_json": {"tenant_id": tenant_id, "source": "eidolon_agent.persona"},
+        },
+        index_elements=["companion_id"],
+    )
     companion = await session.get(CompanionRow, companion_id)
     if companion is None:
-        session.add(
-            CompanionRow(
-                companion_id=companion_id,
-                owner_id=owner_id,
-                display_name=companion_id,
-                kind="companion",
-                metadata_json={"tenant_id": tenant_id, "source": "eidolon_agent.persona"},
-            )
-        )
+        raise RuntimeError(f"companion insert failed: {companion_id}")
     else:
         companion.owner_id = owner_id
         metadata = dict(companion.metadata_json or {})
@@ -602,17 +624,40 @@ async def _ensure_owner_and_companion(
 
 
 async def _ensure_owner(session, *, owner_id: str, tenant_id: str, kind: str) -> None:
-    owner = await session.get(OwnerRow, owner_id)
-    if owner is None:
-        session.add(
-            OwnerRow(
-                owner_id=owner_id,
-                display_name=owner_id,
-                kind=kind,
-                profile_json={"tenant_id": tenant_id},
-            )
+    await _insert_ignore(
+        session,
+        OwnerRow,
+        {
+            "owner_id": owner_id,
+            "display_name": owner_id,
+            "kind": kind,
+            "profile_json": {"tenant_id": tenant_id},
+        },
+        index_elements=["owner_id"],
+    )
+    await session.flush()
+
+
+async def _insert_ignore(session, model, values: dict[str, Any], *, index_elements: list[str]) -> None:
+    dialect = session.get_bind().dialect.name
+    if dialect == "sqlite":
+        stmt = sqlite_insert(model).values(**values).on_conflict_do_nothing(
+            index_elements=index_elements
         )
-        await session.flush()
+        await session.execute(stmt)
+        return
+    if dialect == "postgresql":
+        stmt = pg_insert(model).values(**values).on_conflict_do_nothing(
+            index_elements=index_elements
+        )
+        await session.execute(stmt)
+        return
+    if len(index_elements) == 1:
+        pk_value = values.get(index_elements[0])
+        if pk_value is not None and await session.get(model, pk_value) is None:
+            session.add(model(**values))
+        return
+    session.add(model(**values))
 
 
 async def _get_current_genome(session, *, companion_id: str) -> PersonaGenomeRow | None:

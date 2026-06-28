@@ -6,6 +6,7 @@ all durable business rows are owned by ``eidolon_data``.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -22,6 +23,9 @@ from eidolon_data.schema.models import (
 )
 from eidolon_data.services.datastore import DataStore
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 
 from eidolon_agent.core.types import ChatMessage, MessageRole
 from eidolon_agent.core.types.long_task import CallbackStatus, LongTaskRecord, LongTaskStatus
@@ -57,7 +61,7 @@ def build_eidolon_data_history_hydrator(data_store: DataStore):
 
 
 def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provider):
-    async def _persist(
+    async def _persist_once(
         *,
         ti: TurnInput,
         status: TurnStatus,
@@ -84,21 +88,25 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                 companion_id=companion_id,
                 device_id=ti.caller.identity.device_id,
             )
-            conversation = await session.get(ConversationRow, ti.conversation_id)
-            if conversation is None:
-                conversation = ConversationRow(
-                    conversation_id=ti.conversation_id,
-                    owner_id=ti.caller.user_id,
-                    companion_id=companion_id,
-                    device_id=ti.caller.identity.device_id,
-                    metadata_json={
+            await _insert_ignore(
+                session,
+                ConversationRow,
+                {
+                    "conversation_id": ti.conversation_id,
+                    "owner_id": ti.caller.user_id,
+                    "companion_id": companion_id,
+                    "device_id": ti.caller.identity.device_id,
+                    "metadata_json": {
                         "tenant_id": ti.caller.tenant_id,
                         "agent_instance_id": ti.caller.agent_instance_id or "",
                         "session_id": ti.session_id,
                     },
-                )
-                session.add(conversation)
-                await session.flush()
+                },
+                index_elements=["conversation_id"],
+            )
+            conversation = await session.get(ConversationRow, ti.conversation_id)
+            if conversation is None:
+                raise RuntimeError(f"conversation insert failed: {ti.conversation_id}")
             conversation.updated_at = finished_at
 
             existing_turn = await session.get(TurnRow, ti.turn_id)
@@ -191,6 +199,16 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                     ),
                 )
             await session.commit()
+
+    async def _persist(**kwargs) -> None:
+        for attempt in range(5):
+            try:
+                await _persist_once(**kwargs)
+                return
+            except IntegrityError:
+                if attempt >= 4:
+                    raise
+                await asyncio.sleep(0)
 
     return _persist
 
@@ -539,41 +557,68 @@ async def _ensure_owner_companion_device(
     companion_id: str | None,
     device_id: str | None,
 ) -> None:
-    owner = await session.get(OwnerRow, owner_id)
-    if owner is None:
-        session.add(
-            OwnerRow(
-                owner_id=owner_id,
-                display_name=owner_id,
-                kind="person",
-                profile_json={"tenant_id": tenant_id},
-            )
-        )
+    await _insert_ignore(
+        session,
+        OwnerRow,
+        {
+            "owner_id": owner_id,
+            "display_name": owner_id,
+            "kind": "person",
+            "profile_json": {"tenant_id": tenant_id},
+        },
+        index_elements=["owner_id"],
+    )
     if companion_id:
-        companion = await session.get(CompanionRow, companion_id)
-        if companion is None:
-            session.add(
-                CompanionRow(
-                    companion_id=companion_id,
-                    owner_id=owner_id,
-                    display_name=companion_id,
-                    kind="companion",
-                    metadata_json={"tenant_id": tenant_id, "source": "eidolon_agent"},
-                )
-            )
+        await _insert_ignore(
+            session,
+            CompanionRow,
+            {
+                "companion_id": companion_id,
+                "owner_id": owner_id,
+                "display_name": companion_id,
+                "kind": "companion",
+                "metadata_json": {"tenant_id": tenant_id, "source": "eidolon_agent"},
+            },
+            index_elements=["companion_id"],
+        )
     if device_id:
-        device = await session.get(DeviceRow, device_id)
-        if device is None:
-            session.add(
-                DeviceRow(
-                    device_id=device_id,
-                    owner_id=owner_id,
-                    name=device_id,
-                    kind="agent_caller",
-                    metadata_json={"tenant_id": tenant_id, "source": "eidolon_agent"},
-                )
-            )
+        await _insert_ignore(
+            session,
+            DeviceRow,
+            {
+                "device_id": device_id,
+                "owner_id": owner_id,
+                "name": device_id,
+                "kind": "agent_caller",
+                "metadata_json": {"tenant_id": tenant_id, "source": "eidolon_agent"},
+            },
+            index_elements=["device_id"],
+        )
     await session.flush()
+
+
+async def _insert_ignore(session, model, values: dict[str, Any], *, index_elements: list[str]) -> None:
+    """Insert a row if absent without turning first-writer races into failures."""
+
+    dialect = session.get_bind().dialect.name
+    if dialect == "sqlite":
+        stmt = sqlite_insert(model).values(**values).on_conflict_do_nothing(
+            index_elements=index_elements
+        )
+        await session.execute(stmt)
+        return
+    if dialect == "postgresql":
+        stmt = pg_insert(model).values(**values).on_conflict_do_nothing(
+            index_elements=index_elements
+        )
+        await session.execute(stmt)
+        return
+    if len(index_elements) == 1:
+        pk_value = values.get(index_elements[0])
+        if pk_value is not None and await session.get(model, pk_value) is None:
+            session.add(model(**values))
+        return
+    session.add(model(**values))
 
 
 async def _next_turn_seq(session, conversation_id: str) -> int:

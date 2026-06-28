@@ -203,6 +203,12 @@ class TurnEngine:
                         removed = await self._memory.forget(
                             ti.caller.user_id,
                             ti.text or "",
+                            tenant_id=ti.caller.tenant_id,
+                            companion_id=ti.caller.agent_instance_id,
+                            agent_id=ti.caller.agent_instance_id,
+                            device_id=ti.caller.identity.device_id,
+                            instance_id=ti.caller.agent_instance_id,
+                            session_id=ti.session_id or "default",
                         )
                     except Exception:
                         _log.exception("memory forget failed")
@@ -759,14 +765,15 @@ class TurnEngine:
                 assistant_text=assistant_text,
                 timestamp_iso=started_at.isoformat(),
                 device_id=ti.caller.identity.device_id,
+                companion_id=ti.caller.agent_instance_id,
                 agent_instance_id=ti.caller.agent_instance_id,
-                persona_id=self._persona_template_id,
                 metadata={
                     "memory_write_disposition": write_trace["disposition"],
                     "memory_write_reason": write_trace["reason"],
                     "memory_policy_version": write_trace["policy_version"],
                     "source_component": "turn_engine",
                     "conversation_id": ti.conversation_id,
+                    "persona_template_id": self._persona_template_id,
                     "privacy_mode": policy.privacy.mode,
                 },
             )

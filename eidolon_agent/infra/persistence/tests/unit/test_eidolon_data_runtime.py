@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 import pytest
@@ -78,6 +79,55 @@ async def test_turn_persister_writes_eidolon_data_history(data_store: DataStore)
     assert rows[0]["agent_instance_id"] == "companion-1"
     assert rows[0]["tokens_out"] == 6
     assert rows[0]["metadata_"]["turn_trace"]["memory_write_trace"]["disposition"] == "skip"
+
+
+@pytest.mark.asyncio
+async def test_turn_persister_is_idempotent_under_concurrent_first_writes(
+    data_store: DataStore,
+) -> None:
+    persist = build_eidolon_data_turn_persister(data_store, model_id_provider=lambda: "fake")
+    now = datetime.now(timezone.utc)
+
+    async def _write(index: int) -> None:
+        ti = TurnInput(
+            turn_id=f"turn-{index}",
+            conversation_id="conversation-race",
+            session_id="session-1",
+            caller=CallerContext(
+                identity=Identity(
+                    tenant_id="tenant-1",
+                    user_id="user-race",
+                    agent_instance_id="companion-race",
+                    device_id="device-race",
+                ),
+                caller_kind=CallerKind.WEB_CHAT,
+                trace_id=f"trace-{index}",
+                request_id=f"request-{index}",
+            ),
+            trigger=TurnTrigger.USER_UTTERANCE,
+            text=f"hello {index}",
+        )
+        await persist(
+            ti=ti,
+            status=TurnStatus.OK,
+            triage_kind=TriageKind.SIMPLE,
+            started_at=now,
+            finished_at=now,
+            first_delta_ms=None,
+            total_ms=1,
+            usage_in=1,
+            usage_out=1,
+            error_code=None,
+            timings={},
+            user_text=f"hello {index}",
+            assistant_text=f"hi {index}",
+        )
+
+    await asyncio.gather(*(_write(i) for i in range(12)))
+
+    rows = await EidolonDataConversationReader(data_store).list_turns_by_user(user_id="user-race")
+    assert len(rows) == 12
+    assert sorted(row["seq"] for row in rows) == list(range(12))
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,10 @@ from pathlib import Path
 
 from eidolon_data import DataStore
 from eidolon_data import load_settings as load_data_settings
+from eidolon_data.adapters.admin_registry import (
+    EidolonDataAgentMetadataRepository,
+    EidolonDataUserRepository,
+)
 from eidolon_sdk.biz.runtime import PairingTokenVerifier
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
@@ -277,6 +281,11 @@ async def build_application(
     agent_registry = AgentRegistry(
         instance_factory=_build_companion,
         default_template_id=default_template_id,
+        active_instance_resolver=(
+            _build_active_instance_resolver(data_store)
+            if settings.runtime.recover_active_instances
+            else None
+        ),
     )
     for tpl in templates:
         agent_registry.register_template(
@@ -429,6 +438,36 @@ def _build_turn_engine(
         harness=harness,
         background_tasks=container.background_tasks,
     )
+
+
+def _build_active_instance_resolver(data_store: DataStore):
+    users = EidolonDataUserRepository(data_store)
+    agents = EidolonDataAgentMetadataRepository(data_store)
+
+    async def _resolve(
+        *,
+        tenant_id: str,
+        user_id: str,
+        requested_template_id: str | None = None,
+    ) -> tuple[str, str] | None:
+        del requested_template_id
+        try:
+            user = await users.get(user_id)
+            if user is None or not user.enabled or user.tenant_id != tenant_id:
+                return None
+            if not user.active_agent_id:
+                return None
+            agent = await agents.get(user.active_agent_id)
+            if agent is None:
+                return None
+            if agent.user_id != user_id or agent.tenant_id != tenant_id:
+                return None
+            return agent.agent_id, agent.template_id
+        except Exception:
+            _log.warning("active agent recovery failed for %s/%s", tenant_id, user_id, exc_info=True)
+            return None
+
+    return _resolve
 
 
 def _generate_persisted_secret(path: Path) -> str:

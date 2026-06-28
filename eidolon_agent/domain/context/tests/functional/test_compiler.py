@@ -159,6 +159,24 @@ async def test_memory_recall_appended_when_port_present() -> None:
     assert memory.calls and memory.calls[0]["query"] == "帮我回忆一下"
 
 
+async def test_memory_recall_uses_active_instance_as_companion_partition() -> None:
+    memory = _StubMemory(formatted="prior_episode_summary")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=memory,
+    )
+
+    await compiler.compile(make_turn_input("帮我回忆一下"))
+
+    identity = memory.calls[0]["identity"]
+    assert identity["tenant_id"] == "t"
+    assert identity["companion_id"] == "inst-test"
+    assert identity["agent_id"] == "inst-test"
+    assert identity["instance_id"] == "inst-test"
+
+
 async def test_memory_recall_query_includes_recent_history_for_anaphora() -> None:
     history = HistoryManager()
     await history.append(

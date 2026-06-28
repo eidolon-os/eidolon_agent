@@ -586,6 +586,7 @@ class ContextCompiler:
                 plan=plan,
                 timeout_s=self._memory_timeout_s,
                 tenant_id=ti.caller.tenant_id,
+                companion_id=ti.caller.agent_instance_id,
                 device_id=ti.caller.identity.device_id,
                 agent_id=ti.caller.agent_instance_id,
                 instance_id=ti.caller.agent_instance_id,

@@ -212,9 +212,6 @@ type = "forbidden"
 source_modules = ["eidolon_agent.infra"]
 forbidden_modules = ["eidolon_agent.domain"]
 ignore_imports = [
-    "eidolon_agent.infra.persistence.repositories -> eidolon_agent.domain.personas.types",
-    "eidolon_agent.infra.persistence.sql_persona_instance_store -> eidolon_agent.domain.personas.types",
-    "eidolon_agent.infra.persistence.sql_evolution_history_store -> eidolon_agent.domain.personas.types",
-    "eidolon_agent.infra.persistence.sql_persona_evolution_store -> eidolon_agent.domain.personas.types",
+    "eidolon_agent.infra.persistence.eidolon_data_persona -> eidolon_agent.domain.personas.types",
     "**.tests.** -> **",
 ]

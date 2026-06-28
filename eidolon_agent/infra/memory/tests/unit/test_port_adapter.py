@@ -271,7 +271,8 @@ async def test_forget_returns_removed_count() -> None:
     assert removed == 3
     name, args = call.await_args.args
     assert name == "eidolon_memory_forget"
-    assert args == {"query": "old chat"}
+    assert args["query"] == "old chat"
+    assert args["context"]["memory_space_id"] == "default.alice.default"
 
 
 async def test_forget_returns_zero_when_unsupported() -> None:

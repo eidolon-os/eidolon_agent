@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 import pytest
@@ -64,6 +65,29 @@ async def test_persona_instance_store_uses_persona_genomes(
 
     await store.delete("tenant-1", "user-1", "companion-1")
     assert await store.exists("tenant-1", "user-1", "companion-1") is False
+
+
+@pytest.mark.asyncio
+async def test_persona_instance_create_is_idempotent_under_concurrent_first_writes(
+    data_store: DataStore,
+    canonical_template_registry,
+) -> None:
+    store = EidolonDataPersonaInstanceStore(data_store)
+    template = canonical_template_registry.get("caretaker_jiezhi")
+
+    async def _create() -> None:
+        await store.create_from_template(
+            template=template,
+            tenant_id="tenant-1",
+            user_id="user-race",
+            instance_id="companion-race",
+        )
+
+    await asyncio.gather(*(_create() for _ in range(12)))
+
+    loaded = await store.load("tenant-1", "user-race", "companion-race")
+    assert loaded.overlay_version == 1
+    assert [item.instance_id for item in await store.list_all()] == ["companion-race"]
 
 
 @pytest.mark.asyncio

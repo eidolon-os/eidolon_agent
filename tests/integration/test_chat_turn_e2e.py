@@ -18,7 +18,7 @@ from tests.helpers import make_turn_input
 
 pytestmark = pytest.mark.integration
 
-MEMORY_SUBJECT = conversation_turn_subject("t.alice.caretaker_jiezhi")
+MEMORY_SUBJECT = conversation_turn_subject("t.alice.inst-test")
 
 
 async def test_simple_turn_e2e_streams_deltas_and_persists(

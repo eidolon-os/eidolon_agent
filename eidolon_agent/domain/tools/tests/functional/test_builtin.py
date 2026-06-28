@@ -130,13 +130,27 @@ async def test_memory_tools_use_memory_port(caller_ctx) -> None:
     assert search.content["records"][0]["content"] == "用户喜欢乌龙茶"
     assert memory.search_calls[0]["scope"] == "semantic"
     assert memory.search_calls[0]["identity"]["tenant_id"] == "t"
+    assert memory.search_calls[0]["identity"]["companion_id"] == "i"
     assert asserted.ok
     assert memory.asserted == [
-        ("u", "user", "prefers_drink", "乌龙茶", 0.8, "t", None, None)
+        ("u", "user", "prefers_drink", "乌龙茶", 0.8, "t", "i", None)
     ]
     assert forgotten.ok
     assert forgotten.content["removed"] == 3
-    assert memory.forgotten == [("u", "乌龙茶")]
+    assert memory.forgotten == [
+        (
+            "u",
+            "乌龙茶",
+            {
+                "tenant_id": "t",
+                "companion_id": "i",
+                "agent_id": "i",
+                "device_id": None,
+                "instance_id": "i",
+                "session_id": "default",
+            },
+        )
+    ]
 
 
 async def test_memory_tool_without_port_returns_error(caller_ctx) -> None:
@@ -205,6 +219,6 @@ class _FakeMemoryPort:
             (user_id, subject, predicate, object_, confidence, tenant_id, companion_id, persona_id)
         )
 
-    async def forget(self, user_id, query) -> int:
-        self.forgotten.append((user_id, query))
+    async def forget(self, user_id, query, **identity) -> int:
+        self.forgotten.append((user_id, query, identity))
         return 3

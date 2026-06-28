@@ -9,12 +9,16 @@ unrecognised caller spins up an agent on demand.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from eidolon_agent.core.errors import NotFoundError
 from eidolon_agent.domain.agent.companion import CompanionAgent
+
+ActiveInstanceResolver = Callable[..., Awaitable[tuple[str, str] | None] | tuple[str, str] | None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,12 +55,14 @@ class AgentRegistry:
         *,
         instance_factory,  # Callable[[AgentInstance], Awaitable[CompanionAgent]]
         default_template_id: str,
+        active_instance_resolver: ActiveInstanceResolver | None = None,
     ) -> None:
         self._templates: dict[str, AgentTemplate] = {}
         self._instances: dict[str, AgentInstance] = {}  # key: tenant_id/user_id
         self._lock = asyncio.Lock()
         self._factory = instance_factory
         self._default_template_id = default_template_id
+        self._active_instance_resolver = active_instance_resolver
 
     # ---- templates -----------------------------------------------------------
 
@@ -98,9 +104,18 @@ class AgentRegistry:
             if inst is not None:
                 return inst
             tpl_id = template_id or self._default_template_id
+            instance_id: str | None = None
+            resolved = await self._resolve_active_instance(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                requested_template_id=template_id,
+            )
+            if resolved is not None:
+                instance_id, resolved_template_id = resolved
+                tpl_id = resolved_template_id or tpl_id
             self.get_template(tpl_id)  # raises NotFoundError if not registered
             inst = AgentInstance(
-                instance_id=f"inst_{uuid.uuid4().hex[:12]}",
+                instance_id=instance_id or f"inst_{uuid.uuid4().hex[:12]}",
                 template_id=tpl_id,
                 tenant_id=tenant_id,
                 user_id=user_id,
@@ -108,3 +123,26 @@ class AgentRegistry:
             inst.agent = await self._factory(inst)
             self._instances[key] = inst
             return inst
+
+    async def _resolve_active_instance(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        requested_template_id: str | None,
+    ) -> tuple[str, str] | None:
+        if self._active_instance_resolver is None:
+            return None
+        resolved = self._active_instance_resolver(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            requested_template_id=requested_template_id,
+        )
+        if inspect.isawaitable(resolved):
+            resolved = await resolved
+        if resolved is None:
+            return None
+        instance_id, template_id = resolved
+        if not instance_id:
+            return None
+        return instance_id, template_id

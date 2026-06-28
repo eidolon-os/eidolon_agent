@@ -23,7 +23,7 @@ from tests.helpers import make_turn_input
 
 pytestmark = pytest.mark.integration
 
-MEMORY_SUBJECT = conversation_turn_subject("t.alice.caretaker_jiezhi")
+MEMORY_SUBJECT = conversation_turn_subject("t.alice.inst-test")
 
 
 async def test_tool_call_announces_real_tool_before_dispatch_and_feeds_result_to_llm(
@@ -355,8 +355,8 @@ async def test_forget_intent_calls_memory_port(turn_engine_factory) -> None:
         def __init__(self):
             self.calls = []
 
-        async def forget(self, user_id: str, query: str) -> int:
-            self.calls.append((user_id, query))
+        async def forget(self, user_id: str, query: str, **identity) -> int:
+            self.calls.append((user_id, query, identity))
             return 3
 
     memory = _Memory()
@@ -367,7 +367,20 @@ async def test_forget_intent_calls_memory_port(turn_engine_factory) -> None:
     done = next(ev for ev in events if ev.kind is TurnEventKind.DONE)
     assert done.data["action"] == "memory_forget"
     assert done.data["removed"] == 3
-    assert memory.calls == [("alice", "请忘记这件事")]
+    assert memory.calls == [
+        (
+            "alice",
+            "请忘记这件事",
+            {
+                "tenant_id": "t",
+                "companion_id": "inst-test",
+                "agent_id": "inst-test",
+                "device_id": None,
+                "instance_id": "inst-test",
+                "session_id": "s1",
+            },
+        )
+    ]
 
 
 async def test_memory_replay_remembers_call_name_preference(
@@ -657,8 +670,8 @@ class _ReplayMemory:
     async def recall_context(self, **_):
         return self.context, [], False
 
-    async def forget(self, user_id: str, query: str) -> int:
-        self.forget_calls.append((user_id, query))
+    async def forget(self, user_id: str, query: str, **identity) -> int:
+        self.forget_calls.append((user_id, query, identity))
         removed = 1 if self.context else 0
         self.context = ""
         return removed

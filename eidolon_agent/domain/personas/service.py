@@ -229,6 +229,10 @@ class PersonasService:
                     voice=True,
                 ),
                 timeout_s=self._memory_timeout_s,
+                tenant_id=tenant_id,
+                companion_id=instance_id,
+                agent_id=instance_id,
+                instance_id=instance_id,
             )
 
         adapted = self._memory_adapter.adapt(

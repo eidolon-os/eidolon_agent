@@ -217,13 +217,37 @@ class EidolonMemoryPort:
             persona_id=persona_id,
         )
 
-    async def forget(self, user_id: str, query: str) -> int:
+    async def forget(
+        self,
+        user_id: str,
+        query: str,
+        *,
+        tenant_id: str | None = None,
+        companion_id: str | None = None,
+        persona_id: str | None = None,
+        agent_id: str | None = None,
+        device_id: str | None = None,
+        instance_id: str | None = None,
+        session_id: str = "default",
+    ) -> int:
         # The memory service exposes ``eidolon_memory_forget`` via MCP in newer versions;
         # if absent, we no-op safely. Production should branch on capability negotiation.
-        ctx = build_memory_actor_context(user_id=user_id, session_id="default")
+        ctx = build_memory_actor_context(
+            user_id=user_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            companion_id=companion_id,
+            persona_id=persona_id,
+            agent_id=agent_id,
+            device_id=device_id,
+            instance_id=instance_id,
+        )
         session = await self._pool.session_for(ctx.memory_space_id)
         try:
-            result = await session.call_tool("eidolon_memory_forget", {"query": query})
+            result = await session.call_tool(
+                "eidolon_memory_forget",
+                {"query": query, "context": ctx.model_dump(mode="json")},
+            )
             return int(result.get("removed", 0))
         except Exception:
             _log.warning(

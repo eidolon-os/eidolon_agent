@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
+from eidolon_data import DataSettings, DataStore
+from eidolon_data.adapters.admin_registry import (
+    EidolonDataAgentMetadataRepository,
+    EidolonDataUserRepository,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from eidolon_sdk.biz.registry.models import AgentMetadataRecord, UserRegistryRecord
 
 from eidolon_agent.app.admin.routers import pairing as pairing_router
 from eidolon_agent.app.transport.pairing import PairingCoordinator
@@ -83,6 +91,54 @@ def test_issue_code_reports_memory_readiness_when_route_exists() -> None:
         "reason": None,
         "mcp_http_url": "http://127.0.0.1:8031/mcp",
     }
+
+
+async def test_memory_readiness_uses_active_agent_instance_when_data_store_exists(tmp_path) -> None:
+    store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
+    await store.init_schema()
+    await EidolonDataUserRepository(store).put(
+        UserRegistryRecord(
+            user_id="alice",
+            tenant_id="t",
+            active_agent_id="agent-active",
+            enabled=True,
+        )
+    )
+    await EidolonDataAgentMetadataRepository(store).put(
+        AgentMetadataRecord(
+            agent_id="agent-active",
+            tenant_id="t",
+            user_id="alice",
+            template_id="tpl",
+        )
+    )
+    routes = _routes(
+        MemoryRoute(
+            memory_space_id="t.alice.agent-active",
+            mcp_url="http://127.0.0.1:8031/mcp",
+        )
+    )
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                data_store=store,
+                memory_routes=routes,
+                memory_discovery_refresher=None,
+            )
+        )
+    )
+    try:
+        readiness = await pairing_router._ensure_memory_provisioned(
+            tenant_id="t",
+            user_id="alice",
+            default_template_id="tpl",
+            request=request,
+        )
+    finally:
+        await store.close()
+
+    assert readiness is not None
+    assert readiness.memory_space_id == "t.alice.agent-active"
 
 
 def test_issue_code_rejects_unprovisioned_memory_user() -> None:

@@ -66,7 +66,7 @@ class MemorySearchTool:
             voice=ctx.caller.caller_kind.value == "livekit_voice",
             timeout_s=self.schema.timeout_s,
             tenant_id=ctx.caller.tenant_id,
-            companion_id=ctx.persona_id,
+            companion_id=ctx.caller.agent_instance_id,
             agent_id=ctx.caller.agent_instance_id,
             device_id=ctx.caller.identity.device_id,
             instance_id=ctx.caller.agent_instance_id,
@@ -134,7 +134,7 @@ class MemoryAssertFactTool:
             object_,
             confidence=confidence,
             tenant_id=ctx.caller.tenant_id,
-            companion_id=ctx.persona_id,
+            companion_id=ctx.caller.agent_instance_id,
         )
         return ToolResult(
             call_id=call.id,
@@ -188,7 +188,16 @@ class MemoryForgetTool:
                 error_code="invalid_memory_query",
                 error_message="query is required",
             )
-        removed = await self._memory.forget(ctx.caller.user_id, query)
+        removed = await self._memory.forget(
+            ctx.caller.user_id,
+            query,
+            tenant_id=ctx.caller.tenant_id,
+            companion_id=ctx.caller.agent_instance_id,
+            agent_id=ctx.caller.agent_instance_id,
+            device_id=ctx.caller.identity.device_id,
+            instance_id=ctx.caller.agent_instance_id,
+            session_id=ctx.session_id or "default",
+        )
         return ToolResult(
             call_id=call.id,
             name=self.schema.name,

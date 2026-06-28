@@ -220,7 +220,7 @@ class _ReplayHarness:
     async def start(self) -> None:
         await self.event_bus.subscribe(
             conversation_turn_subject(
-                f"{_REPLAY_TENANT_ID}.{_REPLAY_USER_ID}.{_REPLAY_PERSONA_ID}"
+                f"{_REPLAY_TENANT_ID}.{_REPLAY_USER_ID}.{_REPLAY_AGENT_INSTANCE_ID}"
             ),
             self._on_memory_fanout,
         )
@@ -389,8 +389,8 @@ class _ReplayMemory:
         hits = [SimpleNamespace(id="replay-memory-1")] if self.context else []
         return self.context, hits, self.degraded
 
-    async def forget(self, user_id: str, query: str) -> int:
-        self.forget_calls.append((user_id, query))
+    async def forget(self, user_id: str, query: str, **identity: Any) -> int:
+        self.forget_calls.append((user_id, query, identity))
         removed = 1 if self.context else 0
         self.context = ""
         return removed
