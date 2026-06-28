@@ -27,6 +27,7 @@ class ChatTestRequest(BaseModel):
     owner_id: str = "demo"
     companion_id: str = "companion-demo"
     text: str = ""
+    persist_memory: bool = False
 
 
 @router.post("/chat/test")
@@ -77,12 +78,7 @@ async def chat_test(body: ChatTestRequest, request: Request):
 
             async def _requests():
                 metadata = struct_pb2.Struct()
-                metadata.update(
-                    {
-                        "caller_kind": "admin_test",
-                        "entrypoint": "admin_chat_test",
-                    }
-                )
+                metadata.update(_chat_test_metadata(persist_memory=body.persist_memory))
                 yield pb.ChatRequest(
                     start=pb.StartTurn(
                         turn_id=uuid.uuid4().hex,
@@ -120,8 +116,17 @@ def _sse(event: str, data: dict) -> str:
     return encode_sse_event(event, data).decode("utf-8")
 
 
+def _chat_test_metadata(*, persist_memory: bool) -> dict:
+    return {
+        "caller_kind": "admin_test",
+        "entrypoint": "admin_chat_test",
+        "private": not persist_memory,
+        "persist_memory": persist_memory,
+    }
+
+
 def _admin_console_device_id(*, owner_id: str, companion_id: str) -> str:
-    digest = hashlib.sha256(f"{owner_id}\0{companion_id}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{owner_id}\0{companion_id}".encode()).hexdigest()
     return f"admin-console-{digest[:16]}"
 
 
