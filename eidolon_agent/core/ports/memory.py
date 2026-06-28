@@ -19,43 +19,43 @@ class MemoryPort(Protocol):
 
     async def search(
         self,
-        owner_id: str,
+        owner_id: str | None,
         query: str,
         *,
-        companion_id: str,
         memory_realm_id: str,
-        device_id: str,
+        companion_id: str | None = None,
+        device_id: str | None = None,
         top_k: int = 5,
         scope: MemoryScope = MemoryScope.ALL,
         voice: bool = True,
         timeout_s: float = 0.2,
-        session_id: str = "default",
+        session_id: str | None = None,
     ) -> list[MemoryHit]:
         """Vector + KG fused retrieval. Returns [] on soft-timeout."""
         ...
 
     async def recall_context(
         self,
-        owner_id: str,
+        owner_id: str | None,
         query: str,
         *,
-        companion_id: str,
         memory_realm_id: str,
-        device_id: str,
         plan: MemoryQueryPlan,
+        companion_id: str | None = None,
+        device_id: str | None = None,
         timeout_s: float = 0.2,
-        session_id: str = "default",
+        session_id: str | None = None,
     ) -> MemoryRecallResult:
         """Returns prompt-ready recall context plus diagnostics."""
         ...
 
     async def write_turn(
         self,
-        owner_id: str,
-        companion_id: str,
+        owner_id: str | None,
+        companion_id: str | None,
         memory_realm_id: str,
-        device_id: str,
-        session_id: str,
+        device_id: str | None,
+        session_id: str | None,
         turn_id: str,
         owner_text: str,
         assistant_text: str,
@@ -67,8 +67,8 @@ class MemoryPort(Protocol):
 
     async def assert_fact(
         self,
-        owner_id: str,
-        companion_id: str,
+        owner_id: str | None,
+        companion_id: str | None,
         memory_realm_id: str,
         subject: str,
         predicate: str,
@@ -79,15 +79,30 @@ class MemoryPort(Protocol):
         """Publish an explicit KG triple write command."""
         ...
 
+    async def write_confirmed_fact(
+        self,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        device_id: str | None,
+        session_id: str | None,
+        text: str,
+        *,
+        confidence: float = 0.99,
+        tags: list[str] | None = None,
+    ) -> None:
+        """Publish a verbatim user-confirmed fact when KG shape is unsuitable."""
+        ...
+
     async def forget(
         self,
-        owner_id: str,
-        companion_id: str,
+        owner_id: str | None,
+        companion_id: str | None,
         memory_realm_id: str,
-        device_id: str,
+        device_id: str | None,
         query: str,
         *,
-        session_id: str = "default",
+        session_id: str | None = None,
     ) -> int:
         """Delete memories matching ``query``. Returns count removed."""
         ...

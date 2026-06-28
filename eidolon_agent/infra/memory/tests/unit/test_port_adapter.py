@@ -34,6 +34,7 @@ def _port(*, session_call=None, session_close=None, pub_methods=None):
         pub_methods = {}
     pub.publish_turn = pub_methods.get("publish_turn", AsyncMock())
     pub.publish_kg_add = pub_methods.get("publish_kg_add", AsyncMock())
+    pub.publish_confirmed_fact = pub_methods.get("publish_confirmed_fact", AsyncMock())
 
     return EidolonMemoryPort(pool=pool, publisher=pub), session, pool, pub
 
@@ -80,14 +81,26 @@ async def test_search_invokes_mcp_search_with_args() -> None:
         {"id": "r1", "value": "hello", "metadata": {"kind": "fragment", "similarity": 0.9}}
     ]})
     port, _, pool, _ = _port(session_call=call)
-    hits = await port.search("alice", "find x", top_k=3)
-    pool.session_for.assert_awaited_once_with("default.alice.default")
+    hits = await port.search(
+        "owner-1",
+        "find x",
+        companion_id="companion-1",
+        memory_realm_id="realm-1",
+        device_id="device-1",
+        session_id="s1",
+        top_k=3,
+    )
+    pool.session_for.assert_awaited_once_with("realm-1")
     call.assert_awaited_once()
     name, args = call.await_args.args
     assert name == "eidolon_memory_search"
     assert args["query"] == "find x"
     assert args["top_k"] == 3
-    assert args["context"]["memory_space_id"] == "default.alice.default"
+    assert args["context"]["owner_id"] == "owner-1"
+    assert args["context"]["companion_id"] == "companion-1"
+    assert args["context"]["memory_realm_id"] == "realm-1"
+    assert args["context"]["device_id"] == "device-1"
+    assert args["context"]["memory_space_id"] == "realm-1"
     assert len(hits) == 1
     assert hits[0].content == "hello"
 
@@ -99,21 +112,21 @@ async def test_search_returns_empty_on_timeout() -> None:
         return {}
 
     port, session, pool, _ = _port(session_call=_slow)
-    assert await port.search("alice", "x", timeout_s=0.01) == []
-    pool.drop_session.assert_awaited_once_with("default.alice.default", session=session)
+    assert await port.search("owner-1", "x", memory_realm_id="realm-1", timeout_s=0.01) == []
+    pool.drop_session.assert_awaited_once_with("realm-1", session=session)
 
 
 async def test_search_drops_session_on_memory_unavailable() -> None:
     call = AsyncMock(side_effect=MemoryUnavailableError("stream closed"))
     port, session, pool, _ = _port(session_call=call)
-    assert await port.search("alice", "x") == []
-    pool.drop_session.assert_awaited_once_with("default.alice.default", session=session)
+    assert await port.search("owner-1", "x", memory_realm_id="realm-1") == []
+    pool.drop_session.assert_awaited_once_with("realm-1", session=session)
 
 
 async def test_search_returns_empty_on_exception() -> None:
     call = AsyncMock(side_effect=RuntimeError("MCP down"))
     port, _, pool, _ = _port(session_call=call)
-    assert await port.search("alice", "x") == []
+    assert await port.search("owner-1", "x", memory_realm_id="realm-1") == []
     pool.drop_session.assert_not_awaited()
 
 
@@ -148,7 +161,15 @@ async def test_recall_context_returns_context_hits_and_degraded_false() -> None:
         ],
     })
     port, *_ = _port(session_call=call)
-    result = await port.recall_context("alice", "x", plan=_plan())
+    result = await port.recall_context(
+        "owner-1",
+        "x",
+        companion_id="companion-1",
+        memory_realm_id="realm-1",
+        device_id="device-1",
+        session_id="s1",
+        plan=_plan(),
+    )
     ctx, hits, degraded = result
     assert ctx == "prior conversation summary"
     assert [h.id for h in hits] == ["h1"]
@@ -169,13 +190,18 @@ async def test_recall_context_returns_context_hits_and_degraded_false() -> None:
     assert name == "eidolon_memory_recall_context"
     assert args["top_k"] == 5
     assert args["voice"] is True
-    assert args["context"]["memory_space_id"] == "default.alice.default"
+    assert args["context"]["owner_id"] == "owner-1"
+    assert args["context"]["companion_id"] == "companion-1"
+    assert args["context"]["memory_realm_id"] == "realm-1"
+    assert args["context"]["device_id"] == "device-1"
+    assert args["context"]["session_id"] == "s1"
+    assert args["context"]["memory_space_id"] == "realm-1"
 
 
 async def test_recall_context_returns_degraded_on_exception() -> None:
     call = AsyncMock(side_effect=RuntimeError("upstream"))
     port, _, pool, _ = _port(session_call=call)
-    result = await port.recall_context("alice", "x", plan=_plan())
+    result = await port.recall_context("owner-1", "x", memory_realm_id="realm-1", plan=_plan())
     ctx, hits, degraded = result
     assert ctx == ""
     assert hits == []
@@ -191,14 +217,20 @@ async def test_recall_context_drops_session_on_timeout() -> None:
         return {}
 
     port, session, pool, _ = _port(session_call=_slow)
-    result = await port.recall_context("alice", "x", plan=_plan(), timeout_s=0.01)
+    result = await port.recall_context(
+        "owner-1",
+        "x",
+        memory_realm_id="realm-1",
+        plan=_plan(),
+        timeout_s=0.01,
+    )
 
     ctx, hits, degraded = result
     assert ctx == ""
     assert hits == []
     assert degraded is True
     assert result.degraded_reason == "timeout"
-    pool.drop_session.assert_awaited_once_with("default.alice.default", session=session)
+    pool.drop_session.assert_awaited_once_with("realm-1", session=session)
 
 
 async def test_recall_context_drops_session_on_memory_unavailable_call() -> None:
@@ -209,14 +241,14 @@ async def test_recall_context_drops_session_on_memory_unavailable_call() -> None
         )
     )
     port, session, pool, _ = _port(session_call=call)
-    result = await port.recall_context("alice", "x", plan=_plan())
+    result = await port.recall_context("owner-1", "x", memory_realm_id="realm-1", plan=_plan())
 
     ctx, hits, degraded = result
     assert ctx == ""
     assert hits == []
     assert degraded is True
     assert result.degraded_reason == "memory_stream_closed"
-    pool.drop_session.assert_awaited_once_with("default.alice.default", session=session)
+    pool.drop_session.assert_awaited_once_with("realm-1", session=session)
 
 
 async def test_recall_context_returns_route_reason_on_unavailable_session() -> None:
@@ -224,11 +256,11 @@ async def test_recall_context_returns_route_reason_on_unavailable_session() -> N
     pool.session_for = AsyncMock(
         side_effect=MemoryUnavailableError(
             "no route",
-            details={"memory_space_id": "default.alice.default", "reason": "no_memory_route"},
+            details={"memory_space_id": "realm-1", "reason": "no_memory_route"},
         )
     )
 
-    result = await port.recall_context("alice", "x", plan=_plan())
+    result = await port.recall_context("owner-1", "x", memory_realm_id="realm-1", plan=_plan())
 
     ctx, hits, degraded = result
     assert ctx == ""
@@ -243,42 +275,83 @@ async def test_recall_context_returns_route_reason_on_unavailable_session() -> N
 async def test_write_turn_delegates_to_publisher() -> None:
     port, _, _, pub = _port()
     await port.write_turn(
-        "alice", "sess-1", "turn-1", user_text="hi", assistant_text="hello",
+        "owner-1", "companion-1", "realm-1", "device-1", "s1", "turn-1", "hi", "hello",
         metadata={"k": "v"},
     )
     pub.publish_turn.assert_awaited_once_with(
-        user_id="alice", session_id="sess-1", turn_id="turn-1",
-        user_text="hi", assistant_text="hello", metadata={"k": "v"},
-        tenant_id=None, companion_id=None, persona_id=None,
-        agent_instance_id=None, device_id=None,
+        owner_id="owner-1",
+        companion_id="companion-1",
+        memory_realm_id="realm-1",
+        device_id="device-1",
+        session_id="s1",
+        turn_id="turn-1",
+        owner_text="hi",
+        assistant_text="hello",
+        metadata={"k": "v"},
     )
 
 
 async def test_assert_fact_delegates_to_publisher() -> None:
     port, _, _, pub = _port()
-    await port.assert_fact("alice", "Alice", "lives_in", "Beijing", confidence=0.75)
+    await port.assert_fact(
+        "owner-1", "companion-1", "realm-1", "Alice", "lives_in", "Beijing",
+        confidence=0.75,
+    )
     pub.publish_kg_add.assert_awaited_once_with(
-        user_id="alice", subject="Alice", predicate="lives_in",
-        object_="Beijing", confidence=0.75, tenant_id=None,
-        companion_id=None, persona_id=None,
+        owner_id="owner-1",
+        companion_id="companion-1",
+        memory_realm_id="realm-1",
+        subject="Alice",
+        predicate="lives_in",
+        object_="Beijing",
+        confidence=0.75,
+    )
+
+
+async def test_write_confirmed_fact_delegates_to_publisher() -> None:
+    port, _, _, pub = _port()
+    await port.write_confirmed_fact(
+        "owner-1",
+        "companion-1",
+        "realm-1",
+        "device-1",
+        "s1",
+        "用户 最终验证时间 2026-06-28 20:00",
+        confidence=0.95,
+        tags=["kg_fallback"],
+    )
+    pub.publish_confirmed_fact.assert_awaited_once_with(
+        owner_id="owner-1",
+        companion_id="companion-1",
+        memory_realm_id="realm-1",
+        device_id="device-1",
+        session_id="s1",
+        text="用户 最终验证时间 2026-06-28 20:00",
+        confidence=0.95,
+        tags=["kg_fallback"],
     )
 
 
 async def test_forget_returns_removed_count() -> None:
     call = AsyncMock(return_value={"removed": 3})
     port, *_ = _port(session_call=call)
-    removed = await port.forget("alice", "old chat")
+    removed = await port.forget(
+        "owner-1", "companion-1", "realm-1", "device-1", "old chat", session_id="s1"
+    )
     assert removed == 3
     name, args = call.await_args.args
     assert name == "eidolon_memory_forget"
     assert args["query"] == "old chat"
-    assert args["context"]["memory_space_id"] == "default.alice.default"
+    assert args["context"]["memory_space_id"] == "realm-1"
+    assert args["context"]["owner_id"] == "owner-1"
+    assert args["context"]["companion_id"] == "companion-1"
+    assert args["context"]["device_id"] == "device-1"
 
 
 async def test_forget_returns_zero_when_unsupported() -> None:
     call = AsyncMock(side_effect=RuntimeError("no such tool"))
     port, *_ = _port(session_call=call)
-    assert await port.forget("alice", "x") == 0
+    assert await port.forget("owner-1", "companion-1", "realm-1", "device-1", "x") == 0
 
 
 # ---- health / close -------------------------------------------------------

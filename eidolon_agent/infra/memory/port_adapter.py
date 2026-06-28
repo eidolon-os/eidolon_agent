@@ -33,17 +33,17 @@ class EidolonMemoryPort:
 
     async def search(
         self,
-        owner_id: str,
+        owner_id: str | None,
         query: str,
         *,
+        memory_realm_id: str,
         top_k: int = 5,
         scope: MemoryScope = MemoryScope.ALL,
         voice: bool = True,
         timeout_s: float = 0.2,
-        companion_id: str,
-        memory_realm_id: str,
-        device_id: str,
-        session_id: str = "default",
+        companion_id: str | None = None,
+        device_id: str | None = None,
+        session_id: str | None = None,
     ) -> list[MemoryHit]:
         ctx = build_memory_actor_context(
             owner_id=owner_id,
@@ -81,15 +81,15 @@ class EidolonMemoryPort:
 
     async def recall_context(
         self,
-        owner_id: str,
+        owner_id: str | None,
         query: str,
         *,
+        memory_realm_id: str,
         plan: MemoryQueryPlan,
         timeout_s: float = 0.2,
-        companion_id: str,
-        memory_realm_id: str,
-        device_id: str,
-        session_id: str = "default",
+        companion_id: str | None = None,
+        device_id: str | None = None,
+        session_id: str | None = None,
     ) -> MemoryRecallResult:
         ctx = build_memory_actor_context(
             owner_id=owner_id,
@@ -154,11 +154,11 @@ class EidolonMemoryPort:
 
     async def write_turn(
         self,
-        owner_id: str,
-        companion_id: str,
+        owner_id: str | None,
+        companion_id: str | None,
         memory_realm_id: str,
-        device_id: str,
-        session_id: str,
+        device_id: str | None,
+        session_id: str | None,
         turn_id: str,
         owner_text: str,
         assistant_text: str,
@@ -179,8 +179,8 @@ class EidolonMemoryPort:
 
     async def assert_fact(
         self,
-        owner_id: str,
-        companion_id: str,
+        owner_id: str | None,
+        companion_id: str | None,
         memory_realm_id: str,
         subject: str,
         predicate: str,
@@ -198,15 +198,38 @@ class EidolonMemoryPort:
             confidence=confidence,
         )
 
+    async def write_confirmed_fact(
+        self,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        device_id: str | None,
+        session_id: str | None,
+        text: str,
+        *,
+        confidence: float = 0.99,
+        tags: list[str] | None = None,
+    ) -> None:
+        await self._pub.publish_confirmed_fact(
+            owner_id=owner_id,
+            companion_id=companion_id,
+            memory_realm_id=memory_realm_id,
+            device_id=device_id,
+            session_id=session_id,
+            text=text,
+            confidence=confidence,
+            tags=tags,
+        )
+
     async def forget(
         self,
-        owner_id: str,
-        companion_id: str,
+        owner_id: str | None,
+        companion_id: str | None,
         memory_realm_id: str,
-        device_id: str,
+        device_id: str | None,
         query: str,
         *,
-        session_id: str = "default",
+        session_id: str | None = None,
     ) -> int:
         # The memory service exposes ``eidolon_memory_forget`` via MCP in newer versions;
         # if absent, we no-op safely. Production should branch on capability negotiation.

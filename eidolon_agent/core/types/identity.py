@@ -20,11 +20,11 @@ def build_memory_space_id(*, memory_realm_id: str) -> str:
 
 def build_memory_actor_context(
     *,
-    owner_id: str,
-    companion_id: str,
     memory_realm_id: str,
-    device_id: str,
-    session_id: str,
+    owner_id: str | None = None,
+    companion_id: str | None = None,
+    device_id: str | None = None,
+    session_id: str | None = None,
 ) -> MemoryActorContext:
     """Build the actor context carried on every memory read/write."""
 

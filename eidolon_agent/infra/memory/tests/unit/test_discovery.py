@@ -191,9 +191,20 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
         predicate="likes",
         object_="oolong",
     )
+    await pub.publish_confirmed_fact(
+        owner_id="benchmark",
+        companion_id="test",
+        memory_realm_id="r:benchmark:default",
+        device_id="admin-console",
+        session_id="s1",
+        text="用户 最终验证时间 2026-06-28 20:00",
+        confidence=0.95,
+        tags=["kg_fallback"],
+    )
 
     turn_event, turn_persistent = bus.events[0]
     cmd_event, cmd_persistent = bus.events[1]
+    confirmed_event, confirmed_persistent = bus.events[2]
     assert turn_persistent is True
     assert turn_event.subject == "turns.b64_cjpiZW5jaG1hcms6ZGVmYXVsdA"
     assert turn_event.payload["turn_id"] == "t1"
@@ -207,6 +218,15 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
     assert cmd_event.payload["issuer"] == "agent"
     assert cmd_event.payload["request_id"]
     assert "command" not in cmd_event.payload
+    assert confirmed_persistent is True
+    assert confirmed_event.subject == "cmds.b64_cjpiZW5jaG1hcms6ZGVmYXVsdA"
+    assert confirmed_event.payload["kind"] == "user_confirm_fact"
+    assert confirmed_event.payload["issuer"] == "agent"
+    assert confirmed_event.payload["text"] == "用户 最终验证时间 2026-06-28 20:00"
+    assert confirmed_event.payload["source_device_id"] == "admin-console"
+    assert confirmed_event.payload["source_instance_id"] == "test"
+    assert confirmed_event.payload["session_id"] == "s1"
+    assert confirmed_event.payload["tags"] == ["kg_fallback"]
 
 
 def test_mcp_decode_prefers_structured_content_and_unwraps_fastmcp_result():

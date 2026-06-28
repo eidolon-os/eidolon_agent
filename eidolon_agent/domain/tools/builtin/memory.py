@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from eidolon_sdk.memory import KG_PREDICATE_VALUES
+
 from eidolon_agent.core.ports.memory import MemoryPort
 from eidolon_agent.core.ports.tool import ToolInvocationContext
 from eidolon_agent.core.types.memory import MemoryHit, MemoryScope
@@ -85,13 +87,21 @@ class MemoryAssertFactTool:
             description=(
                 "Store an explicit user-confirmed fact or preference in memory. Use only "
                 "when the user clearly asks you to remember something or confirms a stable "
-                "fact. Do not infer sensitive personal data."
+                "fact. Prefer canonical KG predicates when possible; if no predicate fits, "
+                "store the fact verbatim as user-confirmed memory. Do not infer sensitive "
+                "personal data."
             ),
             json_schema={
                 "type": "object",
                 "properties": {
                     "subject": {"type": "string", "description": "Fact subject."},
-                    "predicate": {"type": "string", "description": "Fact predicate."},
+                    "predicate": {
+                        "type": "string",
+                        "description": (
+                            "Fact predicate. Prefer one of: "
+                            f"{', '.join(KG_PREDICATE_VALUES)}."
+                        ),
+                    },
                     "object": {"type": "string", "description": "Fact object/value."},
                     "confidence": {
                         "type": "number",
@@ -112,9 +122,10 @@ class MemoryAssertFactTool:
         if self._memory is None:
             return _unavailable(call.id, self.schema.name)
         subject = str(call.arguments.get("subject") or "").strip()
-        predicate = str(call.arguments.get("predicate") or "").strip()
+        raw_predicate = str(call.arguments.get("predicate") or "").strip()
+        predicate = _normalize_kg_predicate(raw_predicate)
         object_ = str(call.arguments.get("object") or "").strip()
-        if not subject or not predicate or not object_:
+        if not subject or not raw_predicate or not object_:
             return ToolResult(
                 call_id=call.id,
                 name=self.schema.name,
@@ -125,6 +136,31 @@ class MemoryAssertFactTool:
         confidence = _bounded_float(
             call.arguments.get("confidence"), default=0.9, minimum=0.0, maximum=1.0
         )
+        if predicate is None:
+            text = _confirmed_fact_text(subject, raw_predicate, object_)
+            confirmed_confidence = max(confidence, 0.9)
+            await self._memory.write_confirmed_fact(
+                ctx.caller.owner_id,
+                ctx.caller.companion_id,
+                ctx.caller.memory_realm_id,
+                ctx.caller.device_id,
+                ctx.session_id,
+                text,
+                confidence=confirmed_confidence,
+                tags=["memory_assert_fact", "kg_fallback"],
+            )
+            return ToolResult(
+                call_id=call.id,
+                name=self.schema.name,
+                ok=True,
+                content={
+                    "stored": True,
+                    "kind": "confirmed_fact",
+                    "text": text,
+                    "predicate": raw_predicate,
+                    "confidence": confirmed_confidence,
+                },
+            )
         await self._memory.assert_fact(
             ctx.caller.owner_id,
             ctx.caller.companion_id,
@@ -218,6 +254,48 @@ def _scope(value: object) -> MemoryScope:
         return MemoryScope(raw)
     except ValueError:
         return MemoryScope.ALL
+
+
+_KG_PREDICATE_ALIASES: dict[str, str] = {
+    "工作地点": "works_at",
+    "工作地": "works_at",
+    "工作于": "works_at",
+    "工作记录": "works_at",
+    "工作信息": "works_at",
+    "在...工作": "works_at",
+    "在…工作": "works_at",
+    "住址": "lives_in",
+    "居住地": "lives_in",
+    "住在": "lives_in",
+    "学习地点": "studies_at",
+    "就读于": "studies_at",
+    "职位": "holds_role",
+    "角色": "holds_role",
+    "喜欢": "likes",
+    "喜好": "likes",
+    "不喜欢": "dislikes",
+    "讨厌": "dislikes",
+    "偏好": "prefers",
+    "承诺": "promised",
+    "计划": "planned_to",
+    "担心": "worried_about",
+    "拥有": "owns",
+    "使用": "uses",
+}
+
+
+def _normalize_kg_predicate(value: str) -> str | None:
+    text = value.strip()
+    if not text:
+        return None
+    canonical = text.lower().replace(" ", "_").replace("-", "_")
+    if canonical in KG_PREDICATE_VALUES:
+        return canonical
+    return _KG_PREDICATE_ALIASES.get(text)
+
+
+def _confirmed_fact_text(subject: str, predicate: str, object_: str) -> str:
+    return f"{subject} {predicate} {object_}".strip()
 
 
 def _bounded_int(value: object, *, default: int, minimum: int, maximum: int) -> int:

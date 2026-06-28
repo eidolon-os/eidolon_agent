@@ -13,7 +13,13 @@ from eidolon_agent.core.types.tool import ToolCall, ToolSchema
 def caller_ctx() -> ToolInvocationContext:
     return ToolInvocationContext(
         caller=CallerContext(
-            identity=Identity(tenant_id="t", user_id="u", agent_instance_id="i"),
+            identity=Identity(
+                owner_id="owner-1",
+                companion_id="companion-1",
+                device_id="device-1",
+                memory_realm_id="realm-1",
+                genome_id="genome-1",
+            ),
             caller_kind=CallerKind.WEB_CHAT,
             trace_id="trace",
             request_id="req",

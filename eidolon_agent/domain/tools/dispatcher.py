@@ -11,6 +11,7 @@ tool declares an ``idempotency_key_template``.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -155,6 +156,17 @@ class ToolDispatcher:
         try:
             return await self._invoke_one(tool, call, ctx=ctx)
         except Exception as exc:
+            _log.exception(
+                "tool invocation failed",
+                extra={
+                    "tool_name": call.name,
+                    "call_id": call.id,
+                    "turn_id": ctx.turn_id,
+                    "owner_id": ctx.caller.owner_id,
+                    "companion_id": ctx.caller.companion_id,
+                    "memory_realm_id": ctx.caller.memory_realm_id,
+                },
+            )
             return ToolResult(
                 call_id=call.id,
                 name=call.name,
@@ -240,13 +252,15 @@ class ToolDispatcher:
         if not tmpl:
             return None
         try:
-            return Template(tmpl).safe_substitute(
+            raw_key = Template(tmpl).safe_substitute(
                 owner_id=ctx.caller.owner_id,
                 companion_id=ctx.caller.companion_id,
                 memory_realm_id=ctx.caller.memory_realm_id,
                 turn_id=ctx.turn_id,
                 **call.arguments,
             )
+            digest = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+            return f"idemp_{digest}"
         except Exception:
             return None
 

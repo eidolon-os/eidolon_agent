@@ -533,13 +533,12 @@ class ContextCompiler:
             return pruned_segments, pruned_ledger, guard
         return segments, unbudgeted, guard
 
-    # Injected into the system prompt when memory recall raises. Tells the
-    # LLM not to confabulate prior context — degraded honestly beats
-    # silently-amnesiac-pretending-to-remember.
+    # Injected into the system prompt when memory recall raises. This is a
+    # recall-only guard: write tools may still be available later in the turn.
     _MEMORY_DEGRADED_NOTICE = (
-        "（系统提示：本轮 memory backend 暂不可达,你没有任何过往记忆访问权。"
-        "请如实承认这点,不要假装记得用户之前说过的事;"
-        "也不要主动声称会记住用户接下来说的——因为本轮记忆链路是断的。）"
+        "（系统提示：本轮长期记忆召回暂不可用,没有可引用的过往记忆上下文。"
+        "不要假装记得用户之前说过的事;除非用户明确询问记忆状态,不要主动解释召回失败。"
+        "这只描述召回链路,不要据此判断 memory 写入工具是否可用。）"
     )
 
     async def _memory_recall(
@@ -553,8 +552,8 @@ class ContextCompiler:
           - non-empty hit string: normal recall produced context. Gets
             injected as ``[RETRIEVED MEMORY]\\n<block>``.
           - ``_MEMORY_DEGRADED_NOTICE``: recall raised. The LLM is told
-            in-prompt that memory is down for this turn, so it won't
-            silently confabulate "as you mentioned earlier...". This
+            in-prompt that memory recall is unavailable for this turn, so it
+            won't silently confabulate "as you mentioned earlier...". This
             replaces the previous silent ``None`` fallback whose net
             effect was an amnesiac-but-confident assistant — exactly
             the failure mode that motivated this change.

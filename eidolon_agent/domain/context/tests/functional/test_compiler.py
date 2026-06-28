@@ -50,8 +50,27 @@ class _StubMemory:
         self._kg_triples = list(kg_triples or [])
         self.calls: list[dict] = []
 
-    async def recall_context(self, *, user_id, query, plan, timeout_s, **identity):
-        self.calls.append({"user_id": user_id, "query": query, "identity": identity})
+    async def recall_context(
+        self,
+        *,
+        owner_id,
+        companion_id,
+        memory_realm_id,
+        device_id,
+        session_id,
+        query,
+        plan,
+        timeout_s,
+    ):
+        self.calls.append({
+            "owner_id": owner_id,
+            "companion_id": companion_id,
+            "memory_realm_id": memory_realm_id,
+            "device_id": device_id,
+            "session_id": session_id,
+            "query": query,
+            "timeout_s": timeout_s,
+        })
         return MemoryRecallResult(
             context=self._formatted,
             hits=[SimpleNamespace(id="mem-1")],
@@ -137,9 +156,9 @@ async def test_persona_locator_args_match_turn_input() -> None:
     # just sanity-checks the default args go through).
     await compiler.compile(ti)
     call = personas.calls[0]
-    assert call["user_id"] == ti.caller.user_id
-    assert call["instance_id"] == f"{ti.caller.tenant_id}/{ti.caller.user_id}"
-    assert call["template_id"] == "tpl"
+    assert call["owner_id"] == ti.caller.owner_id
+    assert call["companion_id"] == "alice/companion-test"
+    assert call["genome_id"] == "tpl"
     assert call["user_text"] == "hi"
 
 
@@ -159,7 +178,7 @@ async def test_memory_recall_appended_when_port_present() -> None:
     assert memory.calls and memory.calls[0]["query"] == "帮我回忆一下"
 
 
-async def test_memory_recall_uses_active_instance_as_companion_partition() -> None:
+async def test_memory_recall_uses_turn_identity_as_companion_partition() -> None:
     memory = _StubMemory(formatted="prior_episode_summary")
     compiler = ContextCompiler(
         personas_service=_StubPersonas(),
@@ -170,11 +189,12 @@ async def test_memory_recall_uses_active_instance_as_companion_partition() -> No
 
     await compiler.compile(make_turn_input("帮我回忆一下"))
 
-    identity = memory.calls[0]["identity"]
-    assert identity["tenant_id"] == "t"
-    assert identity["companion_id"] == "inst-test"
-    assert identity["agent_id"] == "inst-test"
-    assert identity["instance_id"] == "inst-test"
+    call = memory.calls[0]
+    assert call["owner_id"] == "alice"
+    assert call["companion_id"] == "companion-test"
+    assert call["memory_realm_id"] == "realm-test"
+    assert call["device_id"] == "device-test"
+    assert call["session_id"] == "s1"
 
 
 async def test_memory_recall_query_includes_recent_history_for_anaphora() -> None:
@@ -252,9 +272,10 @@ async def test_memory_failure_injects_degraded_notice_into_prompt() -> None:
     system = msgs[0].content
     # The persona prompt still ships, AND the degraded notice rides along.
     assert "[PERSONA]" in system
-    assert "memory backend" in system  # part of the notice
+    assert "长期记忆召回暂不可用" in system  # part of the notice
     # The notice explicitly tells the LLM not to fake memory access.
-    assert "不要假装" in system or "如实承认" in system
+    assert "不要假装" in system
+    assert "不要据此判断 memory 写入工具是否可用" in system
 
 
 async def test_memory_success_does_not_inject_degraded_notice() -> None:
@@ -272,7 +293,7 @@ async def test_memory_success_does_not_inject_degraded_notice() -> None:
     system = msgs[0].content
     assert "[RETRIEVED MEMORY]" in system
     assert "暂不可达" not in system  # the notice keyword must not appear
-    assert "memory backend" not in system  # the notice keyword must not appear
+    assert "长期记忆召回暂不可用" not in system  # the notice keyword must not appear
 
 
 async def test_memory_soft_degraded_injects_degraded_notice() -> None:
@@ -287,7 +308,7 @@ async def test_memory_soft_degraded_injects_degraded_notice() -> None:
 
     msgs = await compiler.compile(ti)
 
-    assert "memory backend" in msgs[0].content
+    assert "长期记忆召回暂不可用" in msgs[0].content
     assert "memory" in ti.metadata["context_ledger"]["degraded_sources"]
 
 
@@ -632,6 +653,6 @@ async def test_budget_keeps_degraded_memory_notice_even_over_budget() -> None:
 
     msgs = await compiler.compile(ti)
 
-    assert "memory backend" in msgs[0].content
+    assert "长期记忆召回暂不可用" in msgs[0].content
     assert ti.metadata["memory_trace"]["context_injected"] is True
     assert "memory" in ti.metadata["context_ledger"]["degraded_sources"]

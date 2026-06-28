@@ -113,7 +113,7 @@ async def test_memory_tools_use_memory_port(caller_ctx) -> None:
                 "memory_assert_fact",
                 {
                     "subject": "user",
-                    "predicate": "prefers_drink",
+                    "predicate": "工作地点",
                     "object": "乌龙茶",
                     "confidence": 0.8,
                 },
@@ -129,26 +129,23 @@ async def test_memory_tools_use_memory_port(caller_ctx) -> None:
     assert search.ok
     assert search.content["records"][0]["content"] == "用户喜欢乌龙茶"
     assert memory.search_calls[0]["scope"] == "semantic"
-    assert memory.search_calls[0]["identity"]["tenant_id"] == "t"
-    assert memory.search_calls[0]["identity"]["companion_id"] == "i"
+    assert memory.search_calls[0]["companion_id"] == "companion-1"
+    assert memory.search_calls[0]["memory_realm_id"] == "realm-1"
+    assert memory.search_calls[0]["device_id"] == "device-1"
     assert asserted.ok
     assert memory.asserted == [
-        ("u", "user", "prefers_drink", "乌龙茶", 0.8, "t", "i", None)
+        ("owner-1", "companion-1", "realm-1", "user", "works_at", "乌龙茶", 0.8)
     ]
     assert forgotten.ok
     assert forgotten.content["removed"] == 3
     assert memory.forgotten == [
         (
-            "u",
+            "owner-1",
+            "companion-1",
+            "realm-1",
+            "device-1",
             "乌龙茶",
-            {
-                "tenant_id": "t",
-                "companion_id": "i",
-                "agent_id": "i",
-                "device_id": None,
-                "instance_id": "i",
-                "session_id": "default",
-            },
+            "default",
         )
     ]
 
@@ -166,32 +163,74 @@ async def test_memory_tool_without_port_returns_error(caller_ctx) -> None:
     assert res.error_code == "memory_port_unavailable"
 
 
+async def test_memory_assert_fact_falls_back_to_confirmed_fact_for_unknown_predicate(
+    caller_ctx,
+) -> None:
+    memory = _FakeMemoryPort()
+    reg = ToolRegistry()
+    reg.register(MemoryAssertFactTool(memory))
+
+    [res] = await ToolDispatcher(reg).dispatch_batch(
+        [
+            _call(
+                "memory_assert_fact",
+                {"subject": "user", "predicate": "神秘关系", "object": "x"},
+            )
+        ],
+        ctx=caller_ctx,
+    )
+
+    assert res.ok is True
+    assert res.content["kind"] == "confirmed_fact"
+    assert res.content["text"] == "user 神秘关系 x"
+    assert memory.asserted == []
+    assert memory.confirmed_facts == [
+        (
+            "owner-1",
+            "companion-1",
+            "realm-1",
+            "device-1",
+            None,
+            "user 神秘关系 x",
+            0.9,
+            ["memory_assert_fact", "kg_fallback"],
+        )
+    ]
+
+
 class _FakeMemoryPort:
     def __init__(self) -> None:
         self.search_calls: list[dict] = []
         self.asserted: list[tuple] = []
+        self.confirmed_facts: list[tuple] = []
         self.forgotten: list[tuple] = []
 
     async def search(
         self,
-        user_id,
+        owner_id,
         query,
         *,
+        companion_id,
+        memory_realm_id,
+        device_id,
         top_k=5,
         scope=None,
         voice=True,
         timeout_s=0.2,
-        **identity,
+        session_id="default",
     ):
         self.search_calls.append(
             {
-                "user_id": user_id,
+                "owner_id": owner_id,
+                "companion_id": companion_id,
+                "memory_realm_id": memory_realm_id,
+                "device_id": device_id,
                 "query": query,
                 "top_k": top_k,
                 "scope": getattr(scope, "value", scope),
                 "voice": voice,
                 "timeout_s": timeout_s,
-                "identity": identity,
+                "session_id": session_id,
             }
         )
         return [
@@ -205,20 +244,55 @@ class _FakeMemoryPort:
 
     async def assert_fact(
         self,
-        user_id,
+        owner_id,
+        companion_id,
+        memory_realm_id,
         subject,
         predicate,
         object_,
         *,
         confidence=0.9,
-        tenant_id=None,
-        companion_id=None,
-        persona_id=None,
     ) -> None:
         self.asserted.append(
-            (user_id, subject, predicate, object_, confidence, tenant_id, companion_id, persona_id)
+            (owner_id, companion_id, memory_realm_id, subject, predicate, object_, confidence)
         )
 
-    async def forget(self, user_id, query, **identity) -> int:
-        self.forgotten.append((user_id, query, identity))
+    async def write_confirmed_fact(
+        self,
+        owner_id,
+        companion_id,
+        memory_realm_id,
+        device_id,
+        session_id,
+        text,
+        *,
+        confidence=0.99,
+        tags=None,
+    ) -> None:
+        self.confirmed_facts.append(
+            (
+                owner_id,
+                companion_id,
+                memory_realm_id,
+                device_id,
+                session_id,
+                text,
+                confidence,
+                list(tags or []),
+            )
+        )
+
+    async def forget(
+        self,
+        owner_id,
+        companion_id,
+        memory_realm_id,
+        device_id,
+        query,
+        *,
+        session_id="default",
+    ) -> int:
+        self.forgotten.append(
+            (owner_id, companion_id, memory_realm_id, device_id, query, session_id)
+        )
         return 3

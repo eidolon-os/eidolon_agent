@@ -104,9 +104,8 @@ async def test_memory_failure_injects_degraded_notice_into_prompt() -> None:
     )
     msgs = await compiler.compile(make_turn_input("ask"))
     assert "[RETRIEVED MEMORY]" in msgs[0].content  # degraded notice is present
-    # The notice must include a clear "memory backend unavailable" cue so
-    # the LLM behavior is observable from the prompt alone.
-    assert "memory backend" in msgs[0].content.lower() or "记忆" in msgs[0].content
+    # The notice must clearly scope the failure to recall, not memory writes.
+    assert "长期记忆召回暂不可用" in msgs[0].content
     assert msgs[-1].content == "ask"
 
 

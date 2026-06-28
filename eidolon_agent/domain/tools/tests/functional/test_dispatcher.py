@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 import pytest
 
@@ -11,6 +12,22 @@ from eidolon_agent.core.types.tool import Permission, ToolCall, ToolResult
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 
 pytestmark = pytest.mark.functional
+
+
+class _FakeIdempotencyStore:
+    def __init__(self) -> None:
+        self.values: dict[str, bytes] = {}
+        self.keys_seen: list[str] = []
+
+    async def get(self, key: str) -> bytes | None:
+        self.keys_seen.append(key)
+        assert re.fullmatch(r"idemp_[0-9a-f]{64}", key)
+        return self.values.get(key)
+
+    async def put(self, key: str, value: bytes) -> None:
+        self.keys_seen.append(key)
+        assert re.fullmatch(r"idemp_[0-9a-f]{64}", key)
+        self.values[key] = value
 
 
 def _call(name: str, cid: str = "c", args: dict | None = None) -> ToolCall:
@@ -164,6 +181,36 @@ async def test_side_effect_tool_can_require_idempotency(stub_tool_factory, calle
 
     assert res.ok is False
     assert res.error_code == "tool_requires_idempotency"
+
+
+async def test_idempotency_key_hashes_runtime_identity_and_arguments(
+    stub_tool_factory,
+    caller_ctx,
+) -> None:
+    reg = ToolRegistry()
+    reg.register(stub_tool_factory(
+        "remember",
+        side_effect=True,
+        idempotency_key_template="${owner_id}:${companion_id}:${subject}:${predicate}:${object}",
+    ))
+    store = _FakeIdempotencyStore()
+
+    [res] = await ToolDispatcher(reg, idempotency_store=store).dispatch_batch(
+        [
+            _call(
+                "remember",
+                args={
+                    "subject": "用户",
+                    "predicate": "工作记录",
+                    "object": "在常州工作-异常定位-20260628-1950",
+                },
+            )
+        ],
+        ctx=caller_ctx,
+    )
+
+    assert res.ok is True
+    assert len(set(store.keys_seen)) == 1
 
 
 async def test_batch_timeout_returns_stable_errors(stub_tool_factory, caller_ctx) -> None:

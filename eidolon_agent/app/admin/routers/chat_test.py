@@ -42,6 +42,12 @@ async def chat_test(body: ChatTestRequest, request: Request):
     if not companion.default_memory_realm_id or not companion.current_genome_id:
         raise RuntimeError("companion has no default memory realm or current genome")
 
+    await _refresh_memory_discovery_for_admin_chat(
+        request,
+        owner_id=body.owner_id,
+        companion_id=body.companion_id,
+    )
+
     test_device_id = await _ensure_admin_console_device(
         data_store,
         owner_id=body.owner_id,
@@ -149,3 +155,24 @@ async def _ensure_admin_console_device(
         last_seen_at=now,
     )
     return device_id
+
+
+async def _refresh_memory_discovery_for_admin_chat(
+    request: Request,
+    *,
+    owner_id: str,
+    companion_id: str,
+) -> bool:
+    memory_refresher = getattr(request.app.state, "memory_discovery_refresher", None)
+    if memory_refresher is None:
+        return False
+    refreshed = await memory_refresher.refresh_once()
+    if not refreshed:
+        _log.warning(
+            "admin chat test memory discovery refresh failed before turn",
+            extra={
+                "owner_id": owner_id,
+                "companion_id": companion_id,
+            },
+        )
+    return refreshed
