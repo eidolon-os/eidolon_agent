@@ -261,6 +261,52 @@ async def test_chat_start_inline_realtime_reaches_turn_input() -> None:
     signals.recent.assert_not_awaited()
 
 
+async def test_chat_start_metadata_sets_caller_kind() -> None:
+    from eidolon_agent.core.types.identity import CallerKind
+    from eidolon_agent.core.types.turn import TurnEvent
+
+    captured = {}
+
+    async def _turn(ti):
+        captured["caller_kind"] = ti.caller.caller_kind
+        captured["metadata"] = ti.metadata
+        yield TurnEvent(turn_id=ti.turn_id, seq=0, kind=TurnEventKind.DONE, data={})
+
+    agent = MagicMock()
+    agent.run_turn = _turn
+    registry = MagicMock()
+    registry.resolve_for_caller = AsyncMock(return_value=_stub_instance(agent))
+    signals = MagicMock()
+    signals.recent = AsyncMock(return_value=[])
+    svc = EidolonAgentServicer(
+        agent_registry=registry,
+        signals_bus=signals,
+        proactive_bus=MagicMock(),
+    )
+
+    async def _req_iter():
+        yield pb.ChatRequest(
+            start=pb.StartTurn(
+                turn_id="t1",
+                conversation_id="c",
+                text="hi",
+                metadata={"caller_kind": "admin_test", "entrypoint": "admin_chat_test"},
+            )
+        )
+
+    ctx = _make_context()
+    ctx.cancelled = lambda: False
+    ctx.done = lambda: False
+    token = _current_identity.set(_StubIdentity())
+    try:
+        await svc.Chat(_req_iter(), ctx)
+    finally:
+        _current_identity.reset(token)
+
+    assert captured["caller_kind"] is CallerKind.ADMIN_TEST
+    assert captured["metadata"]["entrypoint"] == "admin_chat_test"
+
+
 async def test_chat_fuses_recent_signals_when_start_has_no_realtime() -> None:
     from datetime import timedelta
 

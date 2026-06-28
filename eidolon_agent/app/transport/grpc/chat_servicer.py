@@ -112,6 +112,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 except NotFoundError as exc:
                     await context.abort(grpc.StatusCode.FAILED_PRECONDITION, exc.message)
 
+                start_metadata = struct_to_dict(start.metadata)
                 realtime = _digest_from_dict(struct_to_dict(start.realtime))
                 if realtime is None:
                     recent_signals = await self._signals.recent(
@@ -132,7 +133,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                             memory_realm_id=identity.memory_realm_id,
                             genome_id=inst.genome_id,
                         ),
-                        caller_kind=CallerKind.LIVEKIT_VOICE,
+                        caller_kind=_caller_kind_from_metadata(start_metadata),
                         trace_id=dict(context.invocation_metadata()).get(
                             "x-trace-id", uuid.uuid4().hex
                         ),
@@ -143,7 +144,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     trigger=TurnTrigger.USER_UTTERANCE,
                     text=start.text,
                     realtime=realtime,
-                    metadata=struct_to_dict(start.metadata),
+                    metadata=start_metadata,
                 )
 
                 async def _emit_turn(_agent=agent, _ti=ti, _generation=generation) -> None:
@@ -296,6 +297,18 @@ def _digest_from_dict(data: dict) -> SignalDigest | None:
         confidence_overall=float(data.get("confidence_overall") or 0.0),
         notable_events=tuple(data.get("notable_events") or ()),
     )
+
+
+def _caller_kind_from_metadata(metadata: dict | None) -> CallerKind:
+    if not metadata:
+        return CallerKind.LIVEKIT_VOICE
+    raw = metadata.get("caller_kind")
+    if not raw:
+        return CallerKind.LIVEKIT_VOICE
+    try:
+        return CallerKind(str(raw))
+    except ValueError:
+        return CallerKind.LIVEKIT_VOICE
 
 
 def _signal_from_proto(signal) -> object:  # type: ignore[no-untyped-def]
