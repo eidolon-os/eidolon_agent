@@ -108,18 +108,19 @@ async def test_forget_intent_returns_action_marker(turn_engine_factory):
 
 
 @pytest.mark.asyncio
-async def test_tool_preamble_spoken_once_per_turn(turn_engine_factory):
-    """A retried tool call must not re-speak the same filler preamble.
+async def test_slow_tool_hint_emitted_once_per_turn(turn_engine_factory):
+    """A retried slow tool call must not repeat the wait hint.
 
-    Regression: a failing tool (e.g. get_weather) made the LLM retry across
-    several loop iterations, and the engine streamed the generic preamble
-    "我先调用相关工具处理一下。" as answer text on *every* iteration — the user
-    heard it 3x. The preamble is a status line and must be spoken at most once.
+    Fast tools should not get filler at all. If a tool is still running after
+    the latency threshold, the engine emits one delayed non-answer hint and
+    keeps it out of persisted answer text.
     """
+    from eidolon_agent.domain.agent.turn import ToolLatencyPolicy
     from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
     from eidolon_agent.domain.tools.builtin.weather import GetWeatherTool
 
     async def _always_fail(_location: str, _lang: str):
+        await asyncio.sleep(0.03)
         raise RuntimeError("weather backend unavailable")
 
     registry = ToolRegistry()
@@ -134,14 +135,23 @@ async def test_tool_preamble_spoken_once_per_turn(turn_engine_factory):
             [{"kind": "text", "text": "抱歉，天气接口暂时没有响应。"}],
         ]
     )
-    engine = turn_engine_factory(llm=llm, tool_dispatcher=dispatcher)
+    slow_hint = "稍等，我处理一下。"
+    engine = turn_engine_factory(
+        llm=llm,
+        tool_dispatcher=dispatcher,
+        tool_latency_policy=ToolLatencyPolicy(
+            slow_hint_delay_s=0.01,
+            slow_hint_text=slow_hint,
+        ),
+    )
 
     ti = make_turn_input("查一下北京天气")
     events = [ev async for ev in engine.run(ti)]
     deltas = [e for e in events if e.kind.value == "delta"]
     delta_texts = [e.data["text"] for e in deltas]
 
-    assert delta_texts.count("我先调用相关工具处理一下。") == 1
+    assert "我先调用相关工具处理一下。" not in delta_texts
+    assert delta_texts.count(slow_hint) == 1
     # The real answer still streams.
     assert any("抱歉" in t for t in delta_texts)
     # The model asked twice, but the second same-tool failure is suppressed
@@ -153,21 +163,21 @@ async def test_tool_preamble_spoken_once_per_turn(turn_engine_factory):
     assert tool_results[0].data["error"] == "weather_lookup_failed"
     assert tool_results[1].data["error"] == "tool_repeat_suppressed"
 
-    # ② role-tagging: the preamble is tagged as a status line (not answer);
-    # real answer deltas carry no preamble role.
-    preamble_deltas = [e for e in deltas if e.data["text"] == "我先调用相关工具处理一下。"]
-    assert all(e.data.get("role") == "tool_preamble" for e in preamble_deltas)
+    # The delayed hint is tagged as a non-answer wait hint; real answer deltas
+    # carry no hint role.
+    hint_deltas = [e for e in deltas if e.data["text"] == slow_hint]
+    assert all(e.data.get("role") == "slow_tool_hint" for e in hint_deltas)
     answer_deltas = [e for e in deltas if "抱歉" in e.data["text"]]
     assert answer_deltas and all(
-        e.data.get("role") != "tool_preamble" for e in answer_deltas
+        e.data.get("role") != "slow_tool_hint" for e in answer_deltas
     )
 
-    # The preamble must not pollute the persisted assistant answer text.
+    # The wait hint must not pollute the persisted assistant answer text.
     recent = await engine._history.recent_window(
         conversation_id=ti.conversation_id, window=10
     )
     assistant = [m for m in recent if m.role == MessageRole.ASSISTANT]
-    assert assistant and "我先调用相关工具处理一下。" not in assistant[-1].content
+    assert assistant and slow_hint not in assistant[-1].content
 
 
 @pytest.mark.asyncio

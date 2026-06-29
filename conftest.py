@@ -78,6 +78,7 @@ async def turn_engine_factory(personas_service, event_bus):
         tool_dispatcher=None,
         history=None,
         data_store=None,
+        tool_latency_policy=None,
     ):
         from eidolon_agent.domain.agent.turn import TurnEngine
 
@@ -138,6 +139,7 @@ async def turn_engine_factory(personas_service, event_bus):
                 else None
             ),
             background_tasks=background_tasks,
+            tool_latency_policy=tool_latency_policy,
         )
 
     return _factory

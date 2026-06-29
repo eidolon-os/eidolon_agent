@@ -80,3 +80,8 @@ runtime:
   log_dir: ~/eidolon/logs
   run_dir: ~/eidolon/run
   debug_dir: ~/eidolon/debug
+
+turn:
+  # Wait this long before speaking a brief "still working" hint for slow tools.
+  # Fast tool calls stay silent and only surface as UI/provider status events.
+  slow_tool_hint_delay_ms: 1500

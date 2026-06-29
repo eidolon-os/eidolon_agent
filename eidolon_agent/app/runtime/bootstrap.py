@@ -35,7 +35,7 @@ from eidolon_agent.core.types.tool import Permission
 from eidolon_agent.domain.agent.companion import CompanionAgent
 from eidolon_agent.domain.agent.registry import AgentRegistry, AgentTemplate
 from eidolon_agent.domain.agent.triage import TaskClassifier
-from eidolon_agent.domain.agent.turn import TurnEngine
+from eidolon_agent.domain.agent.turn import ToolLatencyPolicy, TurnEngine
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.domain.harness import HarnessBudget, RealtimeAgentHarness
@@ -423,6 +423,9 @@ def _build_turn_engine(
         ),
         harness=harness,
         background_tasks=container.background_tasks,
+        tool_latency_policy=ToolLatencyPolicy(
+            slow_hint_delay_s=container.settings.turn.slow_tool_hint_delay_ms / 1000,
+        ),
     )
 
 

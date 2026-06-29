@@ -43,3 +43,5 @@ runtime:
   log_dir: ~/eidolon/logs
   run_dir: ~/eidolon/run
   debug_dir: ~/eidolon/debug
+turn:
+  slow_tool_hint_delay_ms: 1500

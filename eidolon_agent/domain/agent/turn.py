@@ -26,6 +26,7 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
@@ -76,6 +77,15 @@ _log = logging.getLogger(__name__)
 _MAX_FAILURES_PER_TOOL_PER_TURN = 1
 
 
+@dataclass(frozen=True, slots=True)
+class ToolLatencyPolicy:
+    """UX policy for tool calls that take long enough to need a spoken hint."""
+
+    slow_hint_delay_s: float = 1.5
+    slow_hint_text: str = "稍等，我处理一下。"
+    slow_hint_role: str = "slow_tool_hint"
+
+
 class TurnEngine:
     """Per-instance Turn runner.
 
@@ -108,6 +118,7 @@ class TurnEngine:
         turn_persister=None,  # async callable; None disables durable turn persistence
         harness: RealtimeAgentHarness | None = None,
         background_tasks: BackgroundTaskRunner | None = None,
+        tool_latency_policy: ToolLatencyPolicy | None = None,
     ) -> None:
         self._compiler = compiler
         self._llm = llm
@@ -130,6 +141,7 @@ class TurnEngine:
         self._turn_persister = turn_persister
         self._harness = harness or RealtimeAgentHarness()
         self._background = background_tasks or BackgroundTaskRunner()
+        self._tool_latency_policy = tool_latency_policy or ToolLatencyPolicy()
 
     async def run(self, ti: TurnInput) -> AsyncIterator[TurnEvent]:
         """Run a single Turn. Yields TurnEvents until DONE or ERROR."""
@@ -258,11 +270,11 @@ class TurnEngine:
             yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.SPEAKING, time.time())
 
             tool_iters = 0
-            # Tool preambles ("我先调用相关工具处理一下。") are status lines, not
-            # answer content. A retried/looping tool call must not re-speak the
-            # same preamble — track what we've already announced this turn so the
-            # user hears each distinct status at most once.
-            announced_preambles: set[str] = set()
+            # Substantive brain-injected acknowledgements (currently coworker
+            # delegation) are answer content. Generic tool wait hints are latency
+            # driven later, during dispatch, so fast tools stay silent.
+            announced_answers: set[str] = set()
+            slow_tool_hint_emitted = False
             while True:
                 tool_calls: list[ToolCall] = []
                 finish_reason: LLMFinishReason | None = None
@@ -274,26 +286,23 @@ class TurnEngine:
                         yield TurnEvent.delta(ti.turn_id, seq.next(), delta.text_delta, time.time())
                     if delta.tool_call is not None:
                         tool_calls.append(delta.tool_call)
-                        announcement, announce_kind = _tool_announcement(delta.tool_call)
-                        if announcement and announcement not in announced_preambles:
-                            announced_preambles.add(announcement)
+                        answer_announcement = _tool_answer_announcement(delta.tool_call)
+                        if (
+                            answer_announcement
+                            and answer_announcement not in announced_answers
+                        ):
+                            announced_answers.add(answer_announcement)
                             if first_delta_ms is None:
                                 first_delta_ms = int((time.monotonic() - t0) * 1000)
                             # A substantive announcement (e.g. the coworker
                             # delegation ack) IS the turn's answer: count it as
                             # answer text and stream it with the default role.
-                            # A preamble is transient status chrome: tag the role
-                            # so the channel speaks it at most once and never as
-                            # answer, and keep it out of the persisted/memorized
-                            # answer text.
-                            if announce_kind == "answer":
-                                assistant_text_parts.append(announcement)
+                            assistant_text_parts.append(answer_announcement)
                             yield TurnEvent.delta(
                                 ti.turn_id,
                                 seq.next(),
-                                announcement,
+                                answer_announcement,
                                 time.time(),
-                                role=None if announce_kind == "answer" else "tool_preamble",
                             )
                         yield TurnEvent(
                             turn_id=ti.turn_id,
@@ -347,18 +356,55 @@ class TurnEngine:
                     tool_t0 = time.monotonic()
                     dispatched_results: list[ToolResult] = []
                     if dispatch_calls:
-                        dispatched_results = await self._tools.dispatch_batch(
-                            dispatch_calls,
-                            ctx=ToolInvocationContext(
-                                caller=ti.caller,
-                                turn_id=ti.turn_id,
-                                conversation_id=ti.conversation_id,
-                                session_id=ti.session_id,
-                                user_text=ti.text or "",
-                                companion_id=ti.caller.companion_id,
-                                memory_realm_id=ti.caller.memory_realm_id,
+                        dispatch_task = asyncio.create_task(
+                            self._tools.dispatch_batch(
+                                dispatch_calls,
+                                ctx=ToolInvocationContext(
+                                    caller=ti.caller,
+                                    turn_id=ti.turn_id,
+                                    conversation_id=ti.conversation_id,
+                                    session_id=ti.session_id,
+                                    user_text=ti.text or "",
+                                    companion_id=ti.caller.companion_id,
+                                    memory_realm_id=ti.caller.memory_realm_id,
+                                ),
                             ),
+                            name=f"turn-{ti.turn_id}-tool-dispatch",
                         )
+                        try:
+                            slow_hint_delay_s = (
+                                self._tool_latency_policy.slow_hint_delay_s
+                            )
+                            if (
+                                not slow_tool_hint_emitted
+                                and slow_hint_delay_s > 0
+                                and any(
+                                    call.name != DELEGATE_TO_COWORKER_TOOL
+                                    for call in dispatch_calls
+                                )
+                            ):
+                                done, _pending = await asyncio.wait(
+                                    {dispatch_task},
+                                    timeout=slow_hint_delay_s,
+                                    return_when=asyncio.FIRST_COMPLETED,
+                                )
+                                if dispatch_task not in done:
+                                    slow_tool_hint_emitted = True
+                                    if first_delta_ms is None:
+                                        first_delta_ms = int(
+                                            (time.monotonic() - t0) * 1000
+                                        )
+                                    yield TurnEvent.delta(
+                                        ti.turn_id,
+                                        seq.next(),
+                                        self._tool_latency_policy.slow_hint_text,
+                                        time.time(),
+                                        role=self._tool_latency_policy.slow_hint_role,
+                                    )
+                            dispatched_results = await dispatch_task
+                        finally:
+                            if not dispatch_task.done():
+                                dispatch_task.cancel()
                     tool_ms_total += int((time.monotonic() - tool_t0) * 1000)
                     results = _merge_tool_results(
                         tool_calls,
@@ -857,24 +903,11 @@ class _SeqGen:
         return self._n
 
 
-def _tool_announcement(call: ToolCall) -> tuple[str, str]:
-    """User-visible line for a tool call the model actually requested.
-
-    Returns ``(text, kind)`` where ``kind`` is:
-
-    * ``"answer"`` — substantive assistant reply for this turn. The harness
-      policy tells the model to *not* add a final result after delegating, so
-      this acknowledgement IS the turn's answer; it must be persisted and
-      counted as answer text.
-    * ``"preamble"`` — transient pre-tool status chrome (filler). Spoken at
-      most once per turn, never persisted or memorized as answer.
-    """
-
+def _tool_answer_announcement(call: ToolCall) -> str:
+    """Substantive answer text injected for tool calls that complete async."""
     if call.name == DELEGATE_TO_COWORKER_TOOL:
-        return "收到，我已交给后台 coworker 处理，会继续跟进。", "answer"
-    if call.name == "emit_event":
-        return "我来发送这个事件。", "preamble"
-    return "我先调用相关工具处理一下。", "preamble"
+        return "收到，我已交给后台 coworker 处理，会继续跟进。"
+    return ""
 
 
 def _suppressed_tool_result(call: ToolCall) -> ToolResult:
