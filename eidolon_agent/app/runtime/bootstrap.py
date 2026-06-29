@@ -78,6 +78,7 @@ from eidolon_agent.infra.persistence.eidolon_data_persona import (
 )
 from eidolon_agent.infra.persistence.eidolon_data_runtime import (
     EidolonDataLongTaskStore,
+    EidolonDataMemoryFanoutStatusSink,
     build_eidolon_data_history_hydrator,
     build_eidolon_data_turn_persister,
 )
@@ -177,7 +178,11 @@ async def build_application(
 
     # 7. Cross-cutting services -----------------------------------------------
     history = HistoryManager(hydrate_messages=build_eidolon_data_history_hydrator(data_store))
-    fanout = HistoryFanout(event_bus=container.event_bus, memory_routes=memory_routes)
+    fanout = HistoryFanout(
+        event_bus=container.event_bus,
+        memory_routes=memory_routes,
+        status_sink=EidolonDataMemoryFanoutStatusSink(data_store),
+    )
     background_tasks = BackgroundTaskRunner(component="agent")
     sig_bus = SignalBus()
     container.history_manager = history

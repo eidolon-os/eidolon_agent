@@ -10,11 +10,11 @@ from typing import Protocol, runtime_checkable
 
 @runtime_checkable
 class MemoryTurnSubjectResolver(Protocol):
-    """Renders the NATS subject for a user's memory turn writes.
+    """Renders the NATS subject for memory turn writes.
 
     Implemented by ``infra/memory/discovery.MemoryRoutingTable``. We declare
     the Protocol here so ``domain/history/fanout`` can depend on the
     structural contract instead of importing an infra type.
     """
 
-    async def render_turn_subject(self, user_id: str) -> str: ...
+    async def render_turn_subject(self, memory_space_id: str) -> str: ...

@@ -29,8 +29,40 @@ from sqlalchemy.exc import IntegrityError
 from eidolon_agent.core.types import ChatMessage, MessageRole
 from eidolon_agent.core.types.long_task import CallbackStatus, LongTaskRecord, LongTaskStatus
 from eidolon_agent.core.types.turn import TriageKind, TurnInput, TurnResult, TurnStatus
+from eidolon_agent.domain.history.fanout import MemoryFanoutStatus
 
 _LONG_TASK_PAYLOAD_KEY = "eidolon_agent_long_task"
+_MEMORY_FANOUT_EVENT_TYPE = "eidolon.memory.fanout.status"
+
+
+class EidolonDataMemoryFanoutStatusSink:
+    """Durable audit sink for agent -> memory fanout publish attempts."""
+
+    def __init__(self, data_store: DataStore) -> None:
+        self._data_store = data_store
+
+    async def record_memory_fanout(self, status: MemoryFanoutStatus) -> None:
+        await self._data_store.events.append(
+            event_id=uuid.uuid4().hex,
+            owner_id=status.owner_id,
+            subject_type="turn",
+            subject_id=status.turn_id,
+            event_type=_MEMORY_FANOUT_EVENT_TYPE,
+            actor_type="agent",
+            actor_id=status.companion_id,
+            payload_json={
+                "turn_id": status.turn_id,
+                "owner_id": status.owner_id,
+                "companion_id": status.companion_id,
+                "memory_realm_id": status.memory_realm_id,
+                "memory_space_id": status.memory_space_id,
+                "subject": status.subject,
+                "state": status.state,
+                "error": status.error,
+                "recorded_at": status.recorded_at,
+                "semantics": "published means accepted by NATS/JetStream, not yet absorbed by memory runner",
+            },
+        )
 
 
 def build_eidolon_data_history_hydrator(data_store: DataStore):

@@ -50,11 +50,15 @@ class CallerKind(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class Identity:
-    """Stable owner/companion/device identity tuple."""
+    """Stable runtime identity tuple.
+
+    ``device_id`` is present for physical/device-origin sessions and absent
+    for owner/web/cloud-task entrances.
+    """
 
     owner_id: str
     companion_id: str
-    device_id: str
+    device_id: str | None
     memory_realm_id: str
     genome_id: str
 
@@ -78,7 +82,7 @@ class CallerContext:
         return self.identity.companion_id
 
     @property
-    def device_id(self) -> str:
+    def device_id(self) -> str | None:
         return self.identity.device_id
 
     @property

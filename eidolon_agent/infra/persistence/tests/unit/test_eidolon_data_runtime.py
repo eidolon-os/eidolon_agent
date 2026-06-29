@@ -10,9 +10,11 @@ from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identit
 from eidolon_agent.core.types.long_task import LongTaskRecord, LongTaskStatus
 from eidolon_agent.core.types.messages import MessageRole
 from eidolon_agent.core.types.turn import TriageKind, TurnInput, TurnStatus, TurnTrigger
+from eidolon_agent.domain.history.fanout import MemoryFanoutStatus
 from eidolon_agent.infra.persistence.eidolon_data_runtime import (
     EidolonDataConversationReader,
     EidolonDataLongTaskStore,
+    EidolonDataMemoryFanoutStatusSink,
     build_eidolon_data_history_hydrator,
     build_eidolon_data_turn_persister,
 )
@@ -51,6 +53,38 @@ async def _provision_runtime_identity(
         auth_type="token",
         secret_ref="test",
     )
+
+
+@pytest.mark.asyncio
+async def test_memory_fanout_status_sink_records_event(data_store: DataStore) -> None:
+    await data_store.owner_service.create_owner(
+        owner_id="owner-1",
+        display_name="Owner 1",
+    )
+    sink = EidolonDataMemoryFanoutStatusSink(data_store)
+
+    await sink.record_memory_fanout(
+        MemoryFanoutStatus(
+            turn_id="turn-1",
+            owner_id="owner-1",
+            companion_id="companion-1",
+            memory_realm_id="realm-1",
+            memory_space_id="realm-1",
+            subject="eidolon.memory.turn.realm-1",
+            state="published",
+            error=None,
+            recorded_at="2026-06-29T00:00:00+00:00",
+        )
+    )
+
+    events = await data_store.events.list_for_subject(
+        subject_type="turn",
+        subject_id="turn-1",
+    )
+    assert len(events) == 1
+    assert events[0].event_type == "eidolon.memory.fanout.status"
+    assert events[0].payload_json["state"] == "published"
+    assert events[0].payload_json["memory_space_id"] == "realm-1"
 
 
 @pytest.mark.asyncio

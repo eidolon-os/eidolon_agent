@@ -92,6 +92,10 @@ class MemoryAuditRow(BaseModel):
     fanout_allowed: bool
     skipped_reason: str | None
     privacy_mode: str | None
+    fanout_publish_state: str | None = None
+    fanout_subject: str | None = None
+    fanout_error: str | None = None
+    fanout_recorded_at: str | None = None
 
 
 class MemoryAuditResponse(BaseModel):
@@ -231,6 +235,7 @@ async def list_memory_audit(
         write = trace.get("memory_write_trace") or {}
         if not write:
             continue
+        fanout = await _latest_memory_fanout_status(request, row["id"])
         out.append(
             MemoryAuditRow(
                 turn_id=row["id"],
@@ -247,10 +252,34 @@ async def list_memory_audit(
                 fanout_allowed=bool(write.get("fanout_allowed")),
                 skipped_reason=write.get("skipped_reason"),
                 privacy_mode=write.get("privacy_mode"),
+                fanout_publish_state=fanout.get("state") if fanout else None,
+                fanout_subject=fanout.get("subject") if fanout else None,
+                fanout_error=fanout.get("error") if fanout else None,
+                fanout_recorded_at=fanout.get("recorded_at") if fanout else None,
             )
         )
     next_before = out[-1].started_at if len(rows) == limit and out else None
     return MemoryAuditResponse(rows=out, next_before=next_before)
+
+
+async def _latest_memory_fanout_status(
+    request: Request, turn_id: str
+) -> dict[str, Any] | None:
+    data_store = getattr(request.app.state, "data_store", None)
+    if data_store is None:
+        return None
+    events = await data_store.events.list_for_subject(
+        subject_type="turn",
+        subject_id=turn_id,
+    )
+    matches = [
+        event
+        for event in events
+        if event.event_type == "eidolon.memory.fanout.status"
+    ]
+    if not matches:
+        return None
+    return dict(matches[-1].payload_json or {})
 
 
 @router.get("/conversations/turns/{turn_id}", response_model=TurnDetail)
