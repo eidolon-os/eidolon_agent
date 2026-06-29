@@ -40,7 +40,7 @@ async def _provision_runtime_identity(
     realm_id: str = "realm-1",
 ) -> None:
     await store.owner_service.create_owner(owner_id=owner_id, display_name=owner_id)
-    await store.companion_workspace.initialize_workspace(
+    await store.workspace_provisioning.provision_workspace(
         owner_id=owner_id,
         companion_id=companion_id,
         genome_id=genome_id,

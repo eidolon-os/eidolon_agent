@@ -85,7 +85,7 @@ async def delete_owner_data(owner_id: str, request: Request) -> DeleteOwnerDataR
             detail="data_store not configured; cannot delete user data",
         )
 
-    counts = await data_store.owner_data.delete_owner_data(owner_id)
+    counts = await data_store.owner_data_ops.delete_owner_data(owner_id)
     cleared_revocations = await _clear_owner_revocations(request, owner_id)
 
     return DeleteOwnerDataResponse(

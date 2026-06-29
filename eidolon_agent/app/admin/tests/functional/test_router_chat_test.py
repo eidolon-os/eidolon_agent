@@ -21,7 +21,7 @@ async def test_admin_chat_test_provisions_bound_console_device(tmp_path) -> None
     await store.init_schema()
     try:
         await store.owner_service.create_owner(owner_id="owner-1", display_name="Owner 1")
-        await store.companion_workspace.initialize_workspace(
+        await store.workspace_provisioning.provision_workspace(
             owner_id="owner-1",
             companion_id="companion-1",
             companion_display_name="Companion 1",
@@ -55,7 +55,7 @@ async def test_admin_chat_test_device_id_is_stable_per_owner_companion(tmp_path)
     await store.init_schema()
     try:
         await store.owner_service.create_owner(owner_id="owner-1", display_name="Owner 1")
-        await store.companion_workspace.initialize_workspace(
+        await store.workspace_provisioning.provision_workspace(
             owner_id="owner-1",
             companion_id="companion-1",
             companion_display_name="Companion 1",

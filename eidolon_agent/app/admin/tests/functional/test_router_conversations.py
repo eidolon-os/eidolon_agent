@@ -56,7 +56,7 @@ async def _seed_turn(
     device_id = f"device-{owner_id}"
     if await store.companions.get(companion_id) is None:
         await store.owner_service.create_owner(owner_id=owner_id, display_name=owner_id)
-        await store.companion_workspace.initialize_workspace(
+        await store.workspace_provisioning.provision_workspace(
             owner_id=owner_id,
             companion_id=companion_id,
             genome_id=genome_id,

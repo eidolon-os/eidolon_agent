@@ -75,7 +75,7 @@ async def test_persona_instance_store_loads_owner_workspace_genome(
         owner_id="benchmark",
         display_name="Benchmark",
     )
-    await data_store.companion_workspace.initialize_workspace(
+    await data_store.workspace_provisioning.provision_workspace(
         owner_id="benchmark",
         companion_id="test",
         companion_display_name="Test Companion",
