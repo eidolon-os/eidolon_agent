@@ -5,14 +5,18 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from eidolon_sdk.biz.body import BodyCapability, BodyCommandResult, BodyDevice
 
 from eidolon_agent.core.types.memory import MemoryHit, MemoryKind
 from eidolon_agent.core.types.tool import ToolCall
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import (
+    ControlBodyDeviceTool,
     EmitEventTool,
+    GetBodyCommandStatusTool,
     GetTimeTool,
     GetWeatherTool,
+    ListBodyDevicesTool,
     MemoryAssertFactTool,
     MemoryForgetTool,
     MemorySearchTool,
@@ -163,6 +167,58 @@ async def test_memory_tool_without_port_returns_error(caller_ctx) -> None:
     assert res.error_code == "memory_port_unavailable"
 
 
+async def test_body_control_tools_use_body_service(caller_ctx) -> None:
+    body = _FakeBodyControl()
+    reg = ToolRegistry()
+    reg.register(ListBodyDevicesTool(body))
+    reg.register(ControlBodyDeviceTool(body))
+    reg.register(GetBodyCommandStatusTool(body))
+    disp = ToolDispatcher(reg)
+
+    [listed] = await disp.dispatch_batch(
+        [_call("list_body_devices", {"include_offline": True})],
+        ctx=caller_ctx,
+    )
+    [sent] = await disp.dispatch_batch(
+        [
+            _call(
+                "control_body_device",
+                {
+                    "target": "box-3",
+                    "op": "sound.play",
+                    "payload": {"sound": "ping"},
+                },
+            )
+        ],
+        ctx=caller_ctx,
+    )
+    [status] = await disp.dispatch_batch(
+        [_call("get_body_command_status", {"command_id": "cmd-1"})],
+        ctx=caller_ctx,
+    )
+
+    assert listed.ok
+    assert listed.content["devices"][0]["capabilities"][0]["name"] == "sound.play"
+    assert sent.ok
+    assert sent.content["command_id"] == "cmd-1"
+    assert body.sent[0]["source_device_id"] == "device-1"
+    assert status.ok
+    assert status.content["status"] == "done"
+
+
+async def test_body_control_tool_without_service_returns_error(caller_ctx) -> None:
+    reg = ToolRegistry()
+    reg.register(ControlBodyDeviceTool(None))
+
+    [res] = await ToolDispatcher(reg).dispatch_batch(
+        [_call("control_body_device", {"target": "box-3", "op": "sound.play"})],
+        ctx=caller_ctx,
+    )
+
+    assert res.ok is False
+    assert res.error_code == "body_control_unavailable"
+
+
 async def test_memory_assert_fact_falls_back_to_confirmed_fact_for_unknown_predicate(
     caller_ctx,
 ) -> None:
@@ -196,6 +252,52 @@ async def test_memory_assert_fact_falls_back_to_confirmed_fact_for_unknown_predi
             ["memory_assert_fact", "kg_fallback"],
         )
     ]
+
+
+class _FakeBodyControl:
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+
+    async def list_devices(
+        self,
+        *,
+        owner_id: str,
+        companion_id: str,
+        source_device_id: str | None,
+        include_offline: bool = True,
+    ):
+        return [
+            BodyDevice(
+                device_id="box-3",
+                name="box-3",
+                status="online_control",
+                is_current_device=False,
+                capabilities=(BodyCapability(name="sound.play"),),
+            )
+        ]
+
+    async def send_command(self, **kwargs):
+        self.sent.append(kwargs)
+        return BodyCommandResult(
+            command_id="cmd-1",
+            device_id="box-3",
+            op="sound.play",
+            status="sent",
+        )
+
+    async def get_command_status(
+        self,
+        *,
+        owner_id: str,
+        companion_id: str,
+        command_id: str,
+    ):
+        return BodyCommandResult(
+            command_id=command_id,
+            device_id="box-3",
+            op="sound.play",
+            status="done",
+        )
 
 
 class _FakeMemoryPort:

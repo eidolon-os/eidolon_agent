@@ -602,11 +602,21 @@ async def _validate_owner_companion_device(
         raise RuntimeError(
             f"device {device_id!r} belongs to owner {device.owner_id!r}, not {owner_id!r}"
         )
+    if _is_admin_console_device(device):
+        await session.flush()
+        return
     if device.bound_companion_id != companion_id:
         raise RuntimeError(
             f"device {device_id!r} is bound to companion {device.bound_companion_id!r}, not {companion_id!r}"
         )
     await session.flush()
+
+
+def _is_admin_console_device(device: DeviceRow) -> bool:
+    if str(device.kind or "").strip().lower() == "admin_console":
+        return True
+    metadata = device.metadata_json or {}
+    return isinstance(metadata, dict) and metadata.get("source") == "eidolon_agent.admin.chat_test"
 
 
 async def _insert_ignore(session, model, values: dict[str, Any], *, index_elements: list[str]) -> None:

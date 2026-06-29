@@ -16,7 +16,7 @@ from eidolon_agent.app.admin.routers.chat_test import (
 pytestmark = pytest.mark.functional
 
 
-async def test_admin_chat_test_provisions_bound_console_device(tmp_path) -> None:
+async def test_admin_chat_test_provisions_unbound_console_device(tmp_path) -> None:
     store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
     await store.init_schema()
     try:
@@ -27,6 +27,14 @@ async def test_admin_chat_test_provisions_bound_console_device(tmp_path) -> None
             companion_display_name="Companion 1",
             genome_id="genome-1",
             realm_id="realm-1",
+        )
+        await store.devices.create_device(
+            device_id="real-body-1",
+            owner_id="owner-1",
+            name="Companion 1",
+            kind="esp32",
+            status="active",
+            bound_companion_id="companion-1",
         )
 
         device_id = await _ensure_admin_console_device(
@@ -44,8 +52,8 @@ async def test_admin_chat_test_provisions_bound_console_device(tmp_path) -> None
         assert row.owner_id == "owner-1"
         assert row.kind == "admin_console"
         assert row.status == "active"
-        assert row.bound_companion_id == "companion-1"
-        assert row.interaction_mode == "admin_test"
+        assert row.bound_companion_id is None
+        assert row.interaction_mode is None
     finally:
         await store.close()
 

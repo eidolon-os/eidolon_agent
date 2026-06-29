@@ -183,6 +183,14 @@ class LongTaskSettings(BaseModel):
     worker_lease_s: float = 3600.0
 
 
+class BodyControlSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    hub_base_url: str = "http://127.0.0.1:8082"
+    timeout_s: float = 5.0
+
+
 class PersonaSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -324,6 +332,7 @@ class Settings(BaseSettings):
     memory: MemorySettings = Field(default_factory=MemorySettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
     long_task: LongTaskSettings = Field(default_factory=LongTaskSettings)
+    body_control: BodyControlSettings = Field(default_factory=BodyControlSettings)
     persona: PersonaSettings = Field(default_factory=PersonaSettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     runtime_token: RuntimeTokenSettings = Field(default_factory=RuntimeTokenSettings)

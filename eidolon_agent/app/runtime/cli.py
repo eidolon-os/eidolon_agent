@@ -89,6 +89,9 @@ async def _run(args) -> int:  # type: ignore[no-untyped-def]
         await container.personas_service.stop()
     if container.memory_port is not None and hasattr(container.memory_port, "close"):
         await container.memory_port.close()
+    body_http_client = container.extras.get("body_control_http_client")
+    if body_http_client is not None and hasattr(body_http_client, "aclose"):
+        await body_http_client.aclose()
     if container.llm_router is not None and hasattr(container.llm_router, "close"):
         await container.llm_router.close()
     if container.data_store is not None and hasattr(container.data_store, "close"):

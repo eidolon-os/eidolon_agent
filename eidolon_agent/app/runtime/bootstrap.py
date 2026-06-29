@@ -20,6 +20,7 @@ import logging
 import secrets
 from pathlib import Path
 
+import httpx
 from eidolon_data import DataStore
 from eidolon_data import load_settings as load_data_settings
 from eidolon_sdk.biz.runtime import RuntimeTokenVerifier
@@ -36,6 +37,11 @@ from eidolon_agent.domain.agent.companion import CompanionAgent
 from eidolon_agent.domain.agent.registry import AgentRegistry, AgentTemplate
 from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.agent.turn import ToolLatencyPolicy, TurnEngine
+from eidolon_agent.domain.body_control import (
+    BodyControlService,
+    EidolonDataBodyDeviceStore,
+    HubBodyCommandClient,
+)
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.domain.harness import HarnessBudget, RealtimeAgentHarness
@@ -50,9 +56,12 @@ from eidolon_agent.domain.personas.ports import PersonaEventPort
 from eidolon_agent.domain.signals import SignalBus
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import (
+    ControlBodyDeviceTool,
     EmitEventTool,
+    GetBodyCommandStatusTool,
     GetTimeTool,
     GetWeatherTool,
+    ListBodyDevicesTool,
     MemoryAssertFactTool,
     MemoryForgetTool,
     MemorySearchTool,
@@ -230,6 +239,26 @@ async def build_application(
     tool_registry.register(MemorySearchTool(memory_port, timeout_s=explicit_memory_timeout_s))
     tool_registry.register(MemoryAssertFactTool(memory_port))
     tool_registry.register(MemoryForgetTool(memory_port))
+    body_control = None
+    if settings.body_control.enabled:
+        body_http_client = httpx.AsyncClient(timeout=settings.body_control.timeout_s)
+        body_command_client = HubBodyCommandClient(
+            body_http_client,
+            base_url=settings.body_control.hub_base_url,
+            timeout_s=settings.body_control.timeout_s,
+        )
+        body_control = BodyControlService(
+            device_store=EidolonDataBodyDeviceStore(
+                data_store,
+                runtime_client=body_command_client,
+            ),
+            command_port=body_command_client,
+        )
+        container.extras["body_control_http_client"] = body_http_client
+        container.extras["body_control"] = body_control
+    tool_registry.register(ListBodyDevicesTool(body_control))
+    tool_registry.register(ControlBodyDeviceTool(body_control))
+    tool_registry.register(GetBodyCommandStatusTool(body_control))
     tool_registry.register(EmitEventTool(event_bus=container.event_bus))
     delegate_tool = SubmitLongTaskTool(
         long_task_submitter=long_task_worker,

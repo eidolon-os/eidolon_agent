@@ -150,6 +150,70 @@ async def test_turn_persister_writes_eidolon_data_history(data_store: DataStore)
 
 
 @pytest.mark.asyncio
+async def test_turn_persister_allows_unbound_admin_console_device(
+    data_store: DataStore,
+) -> None:
+    await _provision_runtime_identity(
+        data_store,
+        owner_id="owner-admin",
+        companion_id="companion-admin",
+        device_id="real-body-admin",
+        genome_id="genome-admin",
+        realm_id="realm-admin",
+    )
+    await data_store.devices.create_device(
+        device_id="admin-console-1",
+        owner_id="owner-admin",
+        name="Admin Console (companion-admin)",
+        kind="admin_console",
+        status="active",
+        metadata_json={"source": "eidolon_agent.admin.chat_test"},
+    )
+    now = datetime.now(timezone.utc)
+    ti = TurnInput(
+        turn_id="turn-admin",
+        conversation_id="conversation-admin",
+        session_id="session-admin",
+        caller=CallerContext(
+            identity=Identity(
+                owner_id="owner-admin",
+                companion_id="companion-admin",
+                device_id="admin-console-1",
+                memory_realm_id="realm-admin",
+                genome_id="genome-admin",
+            ),
+            caller_kind=CallerKind.ADMIN_TEST,
+            trace_id="trace-admin",
+            request_id="request-admin",
+        ),
+        trigger=TurnTrigger.USER_UTTERANCE,
+        text="hello from admin",
+    )
+    persist = build_eidolon_data_turn_persister(data_store, model_id_provider=lambda: "fake")
+
+    await persist(
+        ti=ti,
+        status=TurnStatus.OK,
+        triage_kind=TriageKind.SIMPLE,
+        started_at=now,
+        finished_at=now,
+        first_delta_ms=1,
+        total_ms=2,
+        usage_in=3,
+        usage_out=4,
+        error_code=None,
+        timings={},
+        user_text="hello from admin",
+        assistant_text="hi",
+    )
+
+    rows = await EidolonDataConversationReader(data_store).list_turns_by_owner(
+        owner_id="owner-admin"
+    )
+    assert rows[0]["device_id"] == "admin-console-1"
+
+
+@pytest.mark.asyncio
 async def test_turn_persister_is_idempotent_under_concurrent_first_writes(
     data_store: DataStore,
 ) -> None:
