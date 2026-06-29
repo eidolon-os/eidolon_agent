@@ -161,14 +161,12 @@ async def build_application(
     personas_service = PersonasService(
         registry=tpl_reg,
         instances=instance_store,
-        memory_port=memory_port,
         llm_port=None,
         event_port=_PersonasEventAdapter(container.event_bus),
         audit_port=evolution_history,
         evolution_repo=evolution_history,
         observation_repo=persona_observations,
         proposal_repo=persona_proposals,
-        memory_timeout_s=settings.memory.recall_timeout_s,
     )
     await personas_service.start()
     container.persona_instance_store = instance_store

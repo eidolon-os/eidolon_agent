@@ -14,7 +14,7 @@ from eidolon_agent.domain.personas.ports import PersonaInstanceStore
 from eidolon_agent.domain.personas.reflection import PersonaReflectionEngine
 from eidolon_agent.domain.personas.registry import PersonaTemplateRegistry
 from eidolon_agent.domain.personas.runtime_state import PersonaRuntimeStateStore
-from eidolon_agent.domain.personas.service import PersonasService, build_default_personas_service
+from eidolon_agent.domain.personas.service import PersonasService
 from eidolon_agent.domain.personas.template_renderer import render_template_markdown
 from eidolon_agent.domain.personas.types import (
     Attention,
@@ -68,6 +68,5 @@ __all__ = [
     "PersonaTemplateSummary",
     "PersonasService",
     "YamlPersonaInstanceStore",
-    "build_default_personas_service",
     "render_template_markdown",
 ]

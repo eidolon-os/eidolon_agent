@@ -6,7 +6,6 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 from eidolon_agent.core.errors import (
     ConflictError,
@@ -18,7 +17,6 @@ from eidolon_agent.core.types.memory import MemoryHit
 from eidolon_agent.domain.personas.auto_evolution import PersonaAutoEvolutionPolicy
 from eidolon_agent.domain.personas.compiler import PersonaCompiler
 from eidolon_agent.domain.personas.evolution import PersonaEvolutionEngine
-from eidolon_agent.domain.personas.instance_store import YamlPersonaInstanceStore
 from eidolon_agent.domain.personas.memory_adapter import PersonaMemoryAdapter
 from eidolon_agent.domain.personas.ports import (
     NullPersonaAuditPort,
@@ -67,7 +65,6 @@ class PersonasService:
         runtime_state: PersonaRuntimeStateStore | None = None,
         signal_adapter: PersonaSignalAdapter | None = None,
         worker: PersonaEvolutionWorker | None = None,
-        memory_port: object | None = None,
         llm_port: PersonaLLMPort | None = None,
         event_port: PersonaEventPort | None = None,
         audit_port: PersonaAuditPort | None = None,
@@ -76,7 +73,6 @@ class PersonasService:
         proposal_repo: PersonaEvolutionProposalRepository | None = None,
         reflection: PersonaReflectionEngine | None = None,
         auto_evolution: PersonaAutoEvolutionPolicy | None = None,
-        memory_timeout_s: float = 0.2,
     ) -> None:
         self._registry = registry
         self._instances = instances
@@ -85,13 +81,6 @@ class PersonasService:
         self._evolution = evolution or PersonaEvolutionEngine()
         self._runtime = runtime_state or PersonaRuntimeStateStore()
         self._signal_adapter = signal_adapter or PersonaSignalAdapter()
-        # Persona compilation is intentionally memory-passive in the
-        # owner/companion runtime model. ContextCompiler owns recall with the
-        # full RuntimeIdentity, especially memory_realm_id and device_id.
-        # ``memory_port`` remains accepted for older tests/wiring, but the
-        # service only consumes explicit ``dry_run_memory`` for persona
-        # evolution previews.
-        del memory_port
         self._llm = llm_port
         self._events = event_port or NullPersonaEventPort()
         self._audit = audit_port or NullPersonaAuditPort()
@@ -100,7 +89,6 @@ class PersonasService:
         self._proposal_repo = proposal_repo
         self._reflection = reflection or PersonaReflectionEngine()
         self._auto_evolution = auto_evolution or PersonaAutoEvolutionPolicy()
-        del memory_timeout_s
         self._reflection_queue: asyncio.Queue[tuple[str, str, str]] = asyncio.Queue()
         self._reflection_pending: set[tuple[str, str, str]] = set()
         self._reflection_task: asyncio.Task | None = None
@@ -783,36 +771,6 @@ class PersonasService:
             )
         await self._proposal_repo.save(decided)
         return result
-
-
-async def build_default_personas_service(
-    *,
-    templates_dir: Path,
-    instances_dir: Path,
-    memory_port: object | None = None,
-    llm_port: PersonaLLMPort | None = None,
-    event_port: PersonaEventPort | None = None,
-    audit_port: PersonaAuditPort | None = None,
-    memory_timeout_s: float = 0.2,
-) -> PersonasService:
-    """Build a service with the legacy YAML store.
-
-    Production callers should instead build the eidolon_data-backed stores and
-    pass them to ``PersonasService`` directly — see ``app/runtime/bootstrap.py``.
-    This helper is preserved for tests and migration scripts that work off
-    raw YAML files.
-    """
-    registry = PersonaTemplateRegistry(templates_dir)
-    await registry.load_all()
-    return PersonasService(
-        registry=registry,
-        instances=YamlPersonaInstanceStore(instances_dir),
-        memory_port=memory_port,
-        llm_port=llm_port,
-        event_port=event_port,
-        audit_port=audit_port,
-        memory_timeout_s=memory_timeout_s,
-    )
 
 
 def _interaction_to_observation(

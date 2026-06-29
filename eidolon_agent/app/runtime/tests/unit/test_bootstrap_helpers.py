@@ -99,8 +99,8 @@ def test_build_turn_engine_wires_context_budget() -> None:
 
     engine = _build_turn_engine(
         container=container,
-        instance_id="inst",
-        template_id="tpl",
+        companion_id="companion",
+        genome_id="genome",
     )
 
     assert engine._compiler._context_budget_tokens == 1234  # type: ignore[attr-defined]

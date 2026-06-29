@@ -59,8 +59,6 @@ class MemoryHit:
 class MemoryRecallResult:
     """Prompt-ready memory recall result.
 
-    Iteration intentionally preserves the legacy ``(context, hits, degraded)``
-    shape so older tests and adapters can migrate without a broad flag day.
     ``degraded_reason`` is for operator traces, not prompt injection.
     """
 
@@ -69,11 +67,6 @@ class MemoryRecallResult:
     degraded: bool = False
     degraded_reason: str | None = None
     kg_triples: list[dict] = field(default_factory=list)
-
-    def __iter__(self):
-        yield self.context
-        yield self.hits
-        yield self.degraded
 
 
 @dataclass(frozen=True, slots=True)
