@@ -32,6 +32,7 @@ body_control:
   enabled: true
   hub_base_url: http://127.0.0.1:8082
   timeout_s: 5.0
+  cache_ttl_s: 3.0
 persona:
   templates_dir: eidolon_agent/domain/personas/templates
   instances_dir: ~/eidolon/personas/instances

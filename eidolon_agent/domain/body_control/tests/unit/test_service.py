@@ -34,6 +34,8 @@ async def test_send_command_resolves_named_online_device() -> None:
         owner_id="owner-1",
         companion_id="companion-1",
         source_device_id="device-206",
+        runtime_caller_id="rc-1",
+        runtime_session_id="rs-1",
         target="box-3",
         op="sound.play",
         payload={"sound": "ping"},
@@ -43,6 +45,9 @@ async def test_send_command_resolves_named_online_device() -> None:
     assert commands.sent == [
         {
             "device_id": "box-3",
+            "source_device_id": "device-206",
+            "runtime_caller_id": "rc-1",
+            "runtime_session_id": "rs-1",
             "op": "sound.play",
             "payload": {"sound": "ping"},
             "qos": "ack",

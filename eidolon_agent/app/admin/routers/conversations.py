@@ -56,6 +56,8 @@ class TurnSummary(BaseModel):
     genome_id: str | None
     trigger: str
     caller_kind: str | None
+    runtime_caller_id: str | None
+    runtime_session_id: str | None
     device_id: str | None
     started_at: datetime
     finished_at: datetime | None
@@ -129,6 +131,8 @@ class TurnDetail(BaseModel):
     genome_id: str | None
     trigger: str
     caller_kind: str | None
+    runtime_caller_id: str | None
+    runtime_session_id: str | None
     device_id: str | None
     started_at: datetime
     finished_at: datetime | None
@@ -188,6 +192,8 @@ async def list_turns(
             genome_id=r["genome_id"],
             trigger=r["trigger"],
             caller_kind=r["caller_kind"],
+            runtime_caller_id=r["runtime_caller_id"],
+            runtime_session_id=r["runtime_session_id"],
             device_id=r["device_id"],
             started_at=r["started_at"],
             finished_at=r["finished_at"],
@@ -303,6 +309,8 @@ async def get_turn(turn_id: str, request: Request) -> TurnDetail:
         genome_id=row["genome_id"],
         trigger=row["trigger"],
         caller_kind=row["caller_kind"],
+        runtime_caller_id=row["runtime_caller_id"],
+        runtime_session_id=row["runtime_session_id"],
         device_id=row["device_id"],
         started_at=row["started_at"],
         finished_at=row["finished_at"],

@@ -14,8 +14,10 @@ class ListBodyDevicesTool:
         name="list_body_devices",
         description=(
             "List the user's visible body devices, including names, online state, "
-            "aliases, and supported capabilities. Use before controlling a device "
-            "when the user names a body device, for example '点名一下小王'."
+            "aliases, and supported capabilities. Use when the user asks what "
+            "devices are available, when a target is ambiguous, or after a "
+            "control_body_device not_found/ambiguous error. Do not use this as "
+            "a required preflight for clear commands like '点名小王'."
         ),
         json_schema={
             "type": "object",
@@ -62,8 +64,9 @@ class ControlBodyDeviceTool:
         description=(
             "Send a capability command to one of the user's body devices. Use for "
             "actions like device.identify/点名, sound.play, display.update, "
-            "room.join, playback.stop, room.leave, or volume.set after choosing "
-            "a target device."
+            "room.join, playback.stop, room.leave, or volume.set. If the user "
+            "names a clear device, call this tool directly; it resolves names, "
+            "aliases, device_id, and 当前设备 internally."
         ),
         json_schema={
             "type": "object",
@@ -116,6 +119,8 @@ class ControlBodyDeviceTool:
                 owner_id=ctx.caller.owner_id,
                 companion_id=ctx.caller.companion_id,
                 source_device_id=ctx.caller.device_id,
+                runtime_caller_id=ctx.caller.runtime_caller_id,
+                runtime_session_id=ctx.caller.runtime_session_id,
                 target=str(call.arguments.get("target") or ""),
                 op=str(call.arguments.get("op") or ""),
                 payload=payload if isinstance(payload, dict) else {},

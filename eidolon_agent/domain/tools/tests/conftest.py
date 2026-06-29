@@ -23,6 +23,12 @@ def caller_ctx() -> ToolInvocationContext:
             caller_kind=CallerKind.WEB_CHAT,
             trace_id="trace",
             request_id="req",
+            runtime_caller_id="rc-test",
+            runtime_session_id="rs-test",
+            actor_kind="web_chat",
+            actor_id="browser-test",
+            display_name="Browser Test",
+            transport="test",
         ),
         turn_id="turn-1",
     )

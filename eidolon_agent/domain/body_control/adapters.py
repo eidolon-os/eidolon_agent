@@ -38,8 +38,6 @@ class EidolonDataBodyDeviceStore(BodyDeviceStorePort):
                 continue
             if row.bound_companion_id != companion_id:
                 continue
-            if _is_admin_console_device(row):
-                continue
             runtime = runtime_by_id.get(row.device_id, {})
             capabilities = capabilities_from_json(
                 row.capabilities_json or {},
@@ -113,12 +111,18 @@ class HubBodyCommandClient(BodyCommandPort):
         qos: str = "ack",
         ttl_ms: int = 30_000,
         priority: str = "normal",
+        source_device_id: str | None = None,
+        runtime_caller_id: str | None = None,
+        runtime_session_id: str | None = None,
     ) -> BodyCommandResult:
         body = await self._request_json(
             "POST",
             f"/api/admin/devices/{_quote(device_id)}/commands",
             json={
                 "op": op,
+                "source_device_id": source_device_id,
+                "runtime_caller_id": runtime_caller_id,
+                "runtime_session_id": runtime_session_id,
                 "payload": payload,
                 "ttl_ms": ttl_ms,
                 "qos": qos,
@@ -193,16 +197,6 @@ def _command_status(value: str):
     }:
         return normalized
     return "failed"
-
-
-def _is_admin_console_device(row: Any) -> bool:
-    kind = str(getattr(row, "kind", "") or "").strip().lower()
-    if kind == "admin_console":
-        return True
-    metadata = getattr(row, "metadata_json", None)
-    if isinstance(metadata, dict):
-        return str(metadata.get("source") or "") == "eidolon_agent.admin.chat_test"
-    return False
 
 
 def _body_status_from_runtime(value: Any):

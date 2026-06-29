@@ -6,6 +6,7 @@ as the routing key for companion runtime, history, and memory.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from enum import Enum
 
@@ -71,6 +72,12 @@ class CallerContext:
     caller_kind: CallerKind
     trace_id: str
     request_id: str
+    runtime_caller_id: str | None = None
+    runtime_session_id: str | None = None
+    actor_kind: str = ""
+    actor_id: str = ""
+    display_name: str = ""
+    transport: str = ""
     locale: str = "zh-CN"
 
     @property
@@ -92,3 +99,16 @@ class CallerContext:
     @property
     def genome_id(self) -> str:
         return self.identity.genome_id
+
+
+def derive_runtime_caller_id(
+    *,
+    owner_id: str,
+    companion_id: str,
+    actor_kind: str,
+    actor_id: str,
+) -> str:
+    digest = hashlib.sha256(
+        "\0".join((owner_id, companion_id, actor_kind, actor_id)).encode()
+    ).hexdigest()
+    return f"rc_{digest[:24]}"

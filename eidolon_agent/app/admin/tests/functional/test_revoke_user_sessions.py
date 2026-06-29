@@ -157,7 +157,7 @@ async def test_delete_owner_data_prefers_eidolon_data_store(tmp_path) -> None:
             conversation_id="conv-a",
             owner_id="alice",
             companion_id="companion-a",
-            device_id="dev-a",
+            source_device_id="dev-a",
         )
         await store.conversations.append_turn(
             turn_id="turn-a",

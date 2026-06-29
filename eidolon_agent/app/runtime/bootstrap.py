@@ -39,6 +39,7 @@ from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.agent.turn import ToolLatencyPolicy, TurnEngine
 from eidolon_agent.domain.body_control import (
     BodyControlService,
+    CachedBodyDeviceStore,
     EidolonDataBodyDeviceStore,
     HubBodyCommandClient,
 )
@@ -247,13 +248,18 @@ async def build_application(
             base_url=settings.body_control.hub_base_url,
             timeout_s=settings.body_control.timeout_s,
         )
-        body_control = BodyControlService(
-            device_store=EidolonDataBodyDeviceStore(
+        body_device_store = CachedBodyDeviceStore(
+            EidolonDataBodyDeviceStore(
                 data_store,
                 runtime_client=body_command_client,
             ),
+            ttl_s=settings.body_control.cache_ttl_s,
+        )
+        body_control = BodyControlService(
+            device_store=body_device_store,
             command_port=body_command_client,
         )
+        container.extras["body_device_store"] = body_device_store
         container.extras["body_control_http_client"] = body_http_client
         container.extras["body_control"] = body_control
     tool_registry.register(ListBodyDevicesTool(body_control))

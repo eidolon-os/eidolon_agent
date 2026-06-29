@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import uuid
-from datetime import datetime, timezone
 
 import grpc
 from eidolon_sdk.biz.runtime import resolve_shared_secret, sign_runtime_token
@@ -17,6 +15,7 @@ from pydantic import BaseModel
 
 from eidolon_agent.app.transport.grpc.codec import struct_to_dict
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
+from eidolon_agent.core.types.identity import derive_runtime_caller_id
 
 _log = logging.getLogger(__name__)
 
@@ -49,20 +48,20 @@ async def chat_test(body: ChatTestRequest, request: Request):
         companion_id=body.companion_id,
     )
 
-    test_device_id = await _ensure_admin_console_device(
-        data_store,
-        owner_id=body.owner_id,
-        companion_id=body.companion_id,
-    )
     jwt_secret = resolve_shared_secret(settings.runtime_token.jwt_secret)
     if not jwt_secret:
         raise RuntimeError("runtime token secret not configured")
-    device_token, _ = sign_runtime_token(
+    actor_id = f"admin-chat-test:{body.owner_id}:{body.companion_id}"
+    runtime_caller_id = _admin_runtime_caller_id(
+        owner_id=body.owner_id,
+        companion_id=body.companion_id,
+        actor_id=actor_id,
+    )
+    runtime_token, _ = sign_runtime_token(
         secret=jwt_secret,
         algorithm=settings.runtime_token.jwt_algorithm,
-        actor_kind="device",
-        actor_id=test_device_id,
-        device_id=test_device_id,
+        actor_kind="admin_console",
+        actor_id=actor_id,
         owner_id=body.owner_id,
         companion_id=body.companion_id,
         memory_realm_id=companion.default_memory_realm_id,
@@ -80,7 +79,13 @@ async def chat_test(body: ChatTestRequest, request: Request):
 
             async def _requests():
                 metadata = struct_pb2.Struct()
-                metadata.update(_chat_test_metadata(persist_memory=body.persist_memory))
+                metadata.update(
+                    _chat_test_metadata(
+                        persist_memory=body.persist_memory,
+                        runtime_caller_id=runtime_caller_id,
+                        actor_id=actor_id,
+                    )
+                )
                 yield pb.ChatRequest(
                     start=pb.StartTurn(
                         turn_id=uuid.uuid4().hex,
@@ -92,7 +97,7 @@ async def chat_test(body: ChatTestRequest, request: Request):
 
             stream = stub.Chat(
                 _requests(),
-                metadata=(("authorization", f"Bearer {device_token}"),),
+                metadata=(("authorization", f"Bearer {runtime_token}"),),
             )
             async for ev in stream:
                 kind = pb.TurnEvent.Kind.Name(ev.kind)
@@ -118,50 +123,31 @@ def _sse(event: str, data: dict) -> str:
     return encode_sse_event(event, data).decode("utf-8")
 
 
-def _chat_test_metadata(*, persist_memory: bool) -> dict:
+def _chat_test_metadata(
+    *,
+    persist_memory: bool,
+    runtime_caller_id: str = "",
+    actor_id: str = "",
+) -> dict:
     return {
         "caller_kind": "admin_test",
+        "runtime_caller_id": runtime_caller_id,
+        "actor_kind": "admin_console",
+        "actor_id": actor_id,
+        "caller_display_name": "Admin Chat Test",
         "entrypoint": "admin_chat_test",
         "private": not persist_memory,
         "persist_memory": persist_memory,
     }
 
 
-def _admin_console_device_id(*, owner_id: str, companion_id: str) -> str:
-    digest = hashlib.sha256(f"{owner_id}\0{companion_id}".encode()).hexdigest()
-    return f"admin-console-{digest[:16]}"
-
-
-async def _ensure_admin_console_device(
-    data_store,
-    *,
-    owner_id: str,
-    companion_id: str,
-) -> str:
-    device_id = _admin_console_device_id(owner_id=owner_id, companion_id=companion_id)
-    now = datetime.now(timezone.utc)
-    await data_store.devices.put_device(
-        device_id=device_id,
+def _admin_runtime_caller_id(*, owner_id: str, companion_id: str, actor_id: str) -> str:
+    return derive_runtime_caller_id(
         owner_id=owner_id,
-        name=f"Admin Console ({companion_id})",
-        kind="admin_console",
-        status="active",
-        approved_at=now,
-        approved_by="admin",
-        bound_companion_id=None,
-        interaction_mode=None,
-        auth_type="runtime_token",
-        capabilities_json={"chat_test": True},
-        network_json={"source": "eidolon_admin"},
-        access_policy_json={"scope": "admin_chat_test"},
-        metadata_json={
-            "source": "eidolon_agent.admin.chat_test",
-            "owner_id": owner_id,
-            "companion_id": companion_id,
-        },
-        last_seen_at=now,
+        companion_id=companion_id,
+        actor_kind="admin_console",
+        actor_id=actor_id,
     )
-    return device_id
 
 
 async def _refresh_memory_discovery_for_admin_chat(

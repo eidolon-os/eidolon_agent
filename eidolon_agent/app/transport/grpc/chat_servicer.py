@@ -17,7 +17,12 @@ from eidolon_agent.app.transport.grpc.codec import struct_to_dict, turn_event_to
 from eidolon_agent.app.transport.grpc.interceptors import current_identity
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
 from eidolon_agent.core.errors import EidolonError, NotFoundError
-from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
+from eidolon_agent.core.types.identity import (
+    CallerContext,
+    CallerKind,
+    Identity,
+    derive_runtime_caller_id,
+)
 from eidolon_agent.core.types.signal import SignalDigest
 from eidolon_agent.core.types.turn import TurnInput, TurnTrigger
 from eidolon_agent.domain.signals import SignalFuser
@@ -120,11 +125,36 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                         window_ms=signal_fuser.window_ms,
                     )
                     realtime = signal_fuser.fuse(recent_signals)
+                actor_kind = str(
+                    getattr(identity, "actor_kind", "")
+                    or start_metadata.get("actor_kind")
+                    or _caller_kind_from_metadata(start_metadata).value
+                )
+                actor_id = str(
+                    getattr(identity, "actor_id", "")
+                    or start_metadata.get("actor_id")
+                    or identity.device_id
+                    or conversation_id
+                )
+                runtime_caller_id = str(start_metadata.get("runtime_caller_id") or "").strip()
+                if not runtime_caller_id:
+                    runtime_caller_id = derive_runtime_caller_id(
+                        owner_id=identity.owner_id,
+                        companion_id=inst.companion_id,
+                        actor_kind=actor_kind,
+                        actor_id=actor_id,
+                    )
+                runtime_session_id = str(
+                    start_metadata.get("runtime_session_id")
+                    or getattr(identity, "session_id", None)
+                    or conversation_id
+                ).strip()
+                caller_kind = _caller_kind_from_metadata(start_metadata)
 
                 ti = TurnInput(
                     turn_id=start.turn_id or uuid.uuid4().hex,
                     conversation_id=conversation_id,
-                    session_id=conversation_id,  # one-to-one for now
+                    session_id=runtime_session_id,
                     caller=CallerContext(
                         identity=Identity(
                             owner_id=identity.owner_id,
@@ -133,13 +163,23 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                             memory_realm_id=identity.memory_realm_id,
                             genome_id=inst.genome_id,
                         ),
-                        caller_kind=_caller_kind_from_metadata(start_metadata),
+                        caller_kind=caller_kind,
                         trace_id=dict(context.invocation_metadata()).get(
                             "x-trace-id", uuid.uuid4().hex
                         ),
                         request_id=dict(context.invocation_metadata()).get(
                             "x-request-id", uuid.uuid4().hex
                         ),
+                        runtime_caller_id=runtime_caller_id,
+                        runtime_session_id=runtime_session_id,
+                        actor_kind=actor_kind,
+                        actor_id=actor_id,
+                        display_name=str(
+                            start_metadata.get("caller_display_name")
+                            or start_metadata.get("display_name")
+                            or actor_kind
+                        ),
+                        transport="grpc_chat",
                     ),
                     trigger=TurnTrigger.USER_UTTERANCE,
                     text=start.text,

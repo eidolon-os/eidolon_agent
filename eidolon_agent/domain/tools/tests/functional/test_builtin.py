@@ -202,6 +202,8 @@ async def test_body_control_tools_use_body_service(caller_ctx) -> None:
     assert sent.ok
     assert sent.content["command_id"] == "cmd-1"
     assert body.sent[0]["source_device_id"] == "device-1"
+    assert body.sent[0]["runtime_caller_id"] == "rc-test"
+    assert body.sent[0]["runtime_session_id"] == "rs-test"
     assert status.ok
     assert status.content["status"] == "done"
 

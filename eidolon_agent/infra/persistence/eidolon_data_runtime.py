@@ -15,9 +15,10 @@ from typing import Any
 from eidolon_data.schema.models import (
     CompanionRow,
     ConversationRow,
-    DeviceRow,
     JobRow,
     MessageRow,
+    RuntimeCallerRow,
+    RuntimeSessionRow,
     TurnRow,
 )
 from eidolon_data.services.datastore import DataStore
@@ -111,12 +112,20 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
     ) -> None:
         model_id = model_id_provider()
         companion_id = ti.caller.companion_id
+        runtime_caller_id = _runtime_caller_id(ti)
+        runtime_session_id = _runtime_session_id(ti)
         async with data_store.session_factory() as session:
-            await _validate_owner_companion_device(
+            await _validate_owner_companion(
                 session,
                 owner_id=ti.caller.owner_id,
                 companion_id=companion_id,
-                device_id=ti.caller.device_id,
+            )
+            await _upsert_runtime_caller(session, ti, runtime_caller_id=runtime_caller_id)
+            await _upsert_runtime_session(
+                session,
+                ti,
+                runtime_caller_id=runtime_caller_id,
+                runtime_session_id=runtime_session_id,
             )
             await _insert_ignore(
                 session,
@@ -125,10 +134,14 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                     "conversation_id": ti.conversation_id,
                     "owner_id": ti.caller.owner_id,
                     "companion_id": companion_id,
-                    "device_id": ti.caller.device_id,
+                    "runtime_caller_id": runtime_caller_id,
+                    "runtime_session_id": runtime_session_id,
+                    "source_device_id": ti.caller.device_id,
                     "metadata_json": {
                         "owner_id": ti.caller.owner_id,
                         "companion_id": companion_id,
+                        "runtime_caller_id": runtime_caller_id,
+                        "runtime_session_id": runtime_session_id,
                         "memory_realm_id": ti.caller.memory_realm_id,
                         "genome_id": ti.caller.genome_id,
                         "session_id": ti.session_id,
@@ -140,6 +153,9 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
             if conversation is None:
                 raise RuntimeError(f"conversation insert failed: {ti.conversation_id}")
             conversation.updated_at = finished_at
+            conversation.runtime_caller_id = runtime_caller_id
+            conversation.runtime_session_id = runtime_session_id
+            conversation.source_device_id = ti.caller.device_id
 
             existing_turn = await session.get(TurnRow, ti.turn_id)
             if existing_turn is None:
@@ -148,7 +164,9 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                     turn_id=ti.turn_id,
                     conversation_id=ti.conversation_id,
                     seq=seq,
-                    device_id=ti.caller.device_id,
+                    runtime_caller_id=runtime_caller_id,
+                    runtime_session_id=runtime_session_id,
+                    source_device_id=ti.caller.device_id,
                     trigger=ti.trigger.value,
                     status=status.value,
                     started_at=started_at,
@@ -184,7 +202,9 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                 existing_turn.status = status.value
                 existing_turn.started_at = started_at
                 existing_turn.finished_at = finished_at
-                existing_turn.device_id = ti.caller.device_id
+                existing_turn.runtime_caller_id = runtime_caller_id
+                existing_turn.runtime_session_id = runtime_session_id
+                existing_turn.source_device_id = ti.caller.device_id
                 existing_turn.trace_json = _trace_json(timings)
                 existing_turn.metrics_json = {
                     **(existing_turn.metrics_json or {}),
@@ -255,11 +275,10 @@ class EidolonDataLongTaskStore:
         now = datetime.now(timezone.utc)
         record = replace(record, created_at=record.created_at or now, updated_at=record.updated_at or now)
         async with self._data_store.session_factory() as session:
-            await _validate_owner_companion_device(
+            await _validate_owner_companion(
                 session,
                 owner_id=record.owner_id,
                 companion_id=record.companion_id,
-                device_id=record.device_id,
             )
             row = await session.get(JobRow, record.id)
             if row is None:
@@ -578,12 +597,11 @@ class EidolonDataConversationReader:
             return [_row_to_message(row) for row in rows]
 
 
-async def _validate_owner_companion_device(
+async def _validate_owner_companion(
     session,
     *,
     owner_id: str,
     companion_id: str,
-    device_id: str | None,
 ) -> None:
     companion = await session.get(CompanionRow, companion_id)
     if companion is None:
@@ -592,31 +610,104 @@ async def _validate_owner_companion_device(
         raise RuntimeError(
             f"companion {companion_id!r} belongs to owner {companion.owner_id!r}, not {owner_id!r}"
         )
-    if not device_id:
-        await session.flush()
-        return
-    device = await session.get(DeviceRow, device_id)
-    if device is None:
-        raise RuntimeError(f"device not provisioned: {device_id}")
-    if device.owner_id != owner_id:
-        raise RuntimeError(
-            f"device {device_id!r} belongs to owner {device.owner_id!r}, not {owner_id!r}"
-        )
-    if _is_admin_console_device(device):
-        await session.flush()
-        return
-    if device.bound_companion_id != companion_id:
-        raise RuntimeError(
-            f"device {device_id!r} is bound to companion {device.bound_companion_id!r}, not {companion_id!r}"
-        )
     await session.flush()
 
 
-def _is_admin_console_device(device: DeviceRow) -> bool:
-    if str(device.kind or "").strip().lower() == "admin_console":
-        return True
-    metadata = device.metadata_json or {}
-    return isinstance(metadata, dict) and metadata.get("source") == "eidolon_agent.admin.chat_test"
+async def _upsert_runtime_caller(session, ti: TurnInput, *, runtime_caller_id: str) -> None:
+    metadata = dict(ti.metadata or {})
+    actor_kind = str(ti.caller.actor_kind or metadata.get("actor_kind") or ti.caller.caller_kind.value)
+    actor_id = str(ti.caller.actor_id or metadata.get("actor_id") or ti.caller.device_id or runtime_caller_id)
+    row = await session.get(RuntimeCallerRow, runtime_caller_id)
+    now = datetime.now(timezone.utc)
+    if row is None:
+        row = RuntimeCallerRow(
+            caller_id=runtime_caller_id,
+            owner_id=ti.caller.owner_id,
+            companion_id=ti.caller.companion_id,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            first_seen_at=now,
+        )
+        session.add(row)
+    row.owner_id = ti.caller.owner_id
+    row.companion_id = ti.caller.companion_id
+    row.actor_kind = actor_kind
+    row.actor_id = actor_id
+    row.display_name = str(ti.caller.display_name or metadata.get("caller_display_name") or actor_kind)
+    row.source_device_id = ti.caller.device_id
+    row.status = "active"
+    row.metadata_json = {
+        "caller_kind": ti.caller.caller_kind.value,
+        "entrypoint": metadata.get("entrypoint"),
+        "session_id": ti.session_id,
+        "trace_id": ti.caller.trace_id,
+        "request_id": ti.caller.request_id,
+    }
+    row.last_seen_at = now
+    row.updated_at = now
+    await session.flush()
+
+
+async def _upsert_runtime_session(
+    session,
+    ti: TurnInput,
+    *,
+    runtime_caller_id: str,
+    runtime_session_id: str,
+) -> None:
+    metadata = dict(ti.metadata or {})
+    row = await session.get(RuntimeSessionRow, runtime_session_id)
+    now = datetime.now(timezone.utc)
+    if row is None:
+        row = RuntimeSessionRow(
+            session_id=runtime_session_id,
+            owner_id=ti.caller.owner_id,
+            companion_id=ti.caller.companion_id,
+            runtime_caller_id=runtime_caller_id,
+            source_device_id=ti.caller.device_id,
+            started_at=now,
+        )
+        session.add(row)
+    row.owner_id = ti.caller.owner_id
+    row.companion_id = ti.caller.companion_id
+    row.runtime_caller_id = runtime_caller_id
+    row.source_device_id = ti.caller.device_id
+    row.transport = str(ti.caller.transport or metadata.get("transport") or "grpc_chat")
+    row.status = "active"
+    row.metadata_json = {
+        "caller_kind": ti.caller.caller_kind.value,
+        "entrypoint": metadata.get("entrypoint"),
+        "conversation_id": ti.conversation_id,
+        "trace_id": ti.caller.trace_id,
+        "request_id": ti.caller.request_id,
+    }
+    row.last_seen_at = now
+    row.updated_at = now
+    await session.flush()
+
+
+def _runtime_caller_id(ti: TurnInput) -> str:
+    explicit_context = str(ti.caller.runtime_caller_id or "").strip()
+    if explicit_context:
+        return explicit_context
+    metadata = dict(ti.metadata or {})
+    explicit = str(metadata.get("runtime_caller_id") or "").strip()
+    if explicit:
+        return explicit
+    raise RuntimeError("runtime_caller_id was not built at transport boundary")
+
+
+def _runtime_session_id(ti: TurnInput) -> str:
+    explicit_context = str(ti.caller.runtime_session_id or "").strip()
+    if explicit_context:
+        return explicit_context
+    metadata = dict(ti.metadata or {})
+    explicit = str(metadata.get("runtime_session_id") or "").strip()
+    if explicit:
+        return explicit
+    if ti.session_id:
+        return ti.session_id
+    raise RuntimeError("runtime_session_id was not built at transport boundary")
 
 
 async def _insert_ignore(session, model, values: dict[str, Any], *, index_elements: list[str]) -> None:
@@ -655,6 +746,8 @@ def _turn_metadata_json(ti: TurnInput, triage_kind: TriageKind, timings: dict) -
         **(timings or {}),
         "owner_id": ti.caller.owner_id,
         "companion_id": ti.caller.companion_id,
+        "runtime_caller_id": _runtime_caller_id(ti),
+        "runtime_session_id": _runtime_session_id(ti),
         "memory_realm_id": ti.caller.memory_realm_id,
         "genome_id": ti.caller.genome_id,
         "session_id": ti.session_id,
@@ -793,7 +886,20 @@ def _turn_row_to_admin_dict(turn: TurnRow, conversation: ConversationRow) -> dic
         "seq": turn.seq,
         "trigger": turn.trigger,
         "caller_kind": metrics.get("caller_kind") or metadata.get("caller_kind"),
-        "device_id": turn.device_id or metrics.get("device_id") or metadata.get("device_id") or conversation.device_id,
+        "runtime_caller_id": (
+            turn.runtime_caller_id
+            or metadata.get("runtime_caller_id")
+            or conversation.runtime_caller_id
+        ),
+        "runtime_session_id": (
+            turn.runtime_session_id
+            or metadata.get("runtime_session_id")
+            or conversation.runtime_session_id
+        ),
+        "device_id": turn.source_device_id
+        or metrics.get("device_id")
+        or metadata.get("device_id")
+        or conversation.source_device_id,
         "started_at": turn.started_at,
         "finished_at": turn.finished_at,
         "status": turn.status,

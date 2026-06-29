@@ -60,6 +60,8 @@ class BodyControlService:
         ttl_ms: int = 30_000,
         priority: str = "normal",
         confirmed: bool = False,
+        runtime_caller_id: str | None = None,
+        runtime_session_id: str | None = None,
     ) -> BodyCommandResult:
         devices = await self.list_devices(
             owner_id=owner_id,
@@ -87,6 +89,9 @@ class BodyControlService:
 
         return await self._commands.send_command(
             device_id=device.device_id,
+            source_device_id=source_device_id,
+            runtime_caller_id=runtime_caller_id,
+            runtime_session_id=runtime_session_id,
             op=op,
             payload=payload,
             qos=qos,

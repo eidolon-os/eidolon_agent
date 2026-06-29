@@ -27,6 +27,9 @@ class BodyCommandPort(Protocol):
         qos: str = "ack",
         ttl_ms: int = 30_000,
         priority: str = "normal",
+        source_device_id: str | None = None,
+        runtime_caller_id: str | None = None,
+        runtime_session_id: str | None = None,
     ) -> BodyCommandResult: ...
 
     async def get_command_status(self, *, command_id: str) -> BodyCommandResult: ...

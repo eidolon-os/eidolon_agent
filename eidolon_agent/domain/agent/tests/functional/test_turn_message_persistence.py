@@ -39,7 +39,7 @@ async def test_turn_persists_user_and_assistant_messages(
             turn_row = await session.get(TurnRow, ti.turn_id)
             assert turn_row is not None, "TurnRow missing - _persist_turn did not run"
             assert turn_row.conversation_id == ti.conversation_id
-            assert turn_row.device_id == ti.caller.identity.device_id
+            assert turn_row.source_device_id == ti.caller.identity.device_id
             conversation_row = await session.get(ConversationRow, ti.conversation_id)
             assert conversation_row is not None
             assert conversation_row.updated_at is not None
@@ -103,7 +103,7 @@ async def test_persist_skips_messages_when_text_empty(
             turn_row = await session.get(TurnRow, ti.turn_id)
             assert turn_row is not None
             assert turn_row.status == "errored"
-            assert turn_row.device_id == ti.caller.identity.device_id
+            assert turn_row.source_device_id == ti.caller.identity.device_id
             messages = await _messages_for_turn(session, ti.turn_id)
 
         assert messages == [], "empty text should not insert blank message rows"
@@ -142,6 +142,13 @@ async def test_crisis_turn_persists_private_user_and_assistant_messages(
 async def _data_store(tmp_path: Path) -> DataStore:
     store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
     await store.init_schema()
+    await store.owner_service.create_owner(owner_id="alice", display_name="Alice")
+    await store.workspace_provisioning.provision_workspace(
+        owner_id="alice",
+        companion_id="companion-test",
+        genome_id="genome-test",
+        realm_id="realm-test",
+    )
     return store
 
 

@@ -55,6 +55,41 @@ async def _provision_runtime_identity(
     )
 
 
+def _caller(
+    *,
+    owner_id: str,
+    companion_id: str,
+    device_id: str | None,
+    realm_id: str,
+    genome_id: str,
+    caller_kind: CallerKind = CallerKind.WEB_CHAT,
+    trace_id: str = "trace-1",
+    request_id: str = "request-1",
+    runtime_caller_id: str = "rc-test",
+    runtime_session_id: str = "session-1",
+    actor_kind: str = "web_chat",
+    actor_id: str = "actor-1",
+) -> CallerContext:
+    return CallerContext(
+        identity=Identity(
+            owner_id=owner_id,
+            companion_id=companion_id,
+            device_id=device_id,
+            memory_realm_id=realm_id,
+            genome_id=genome_id,
+        ),
+        caller_kind=caller_kind,
+        trace_id=trace_id,
+        request_id=request_id,
+        runtime_caller_id=runtime_caller_id,
+        runtime_session_id=runtime_session_id,
+        actor_kind=actor_kind,
+        actor_id=actor_id,
+        display_name=actor_kind,
+        transport="test",
+    )
+
+
 @pytest.mark.asyncio
 async def test_memory_fanout_status_sink_records_event(data_store: DataStore) -> None:
     await data_store.owner_service.create_owner(
@@ -102,17 +137,12 @@ async def test_turn_persister_writes_eidolon_data_history(data_store: DataStore)
         turn_id="turn-1",
         conversation_id="conversation-1",
         session_id="session-1",
-        caller=CallerContext(
-            identity=Identity(
-                owner_id="owner-1",
-                companion_id="companion-1",
-                device_id="device-1",
-                memory_realm_id="realm-1",
-                genome_id="genome-1",
-            ),
-            caller_kind=CallerKind.WEB_CHAT,
-            trace_id="trace-1",
-            request_id="request-1",
+        caller=_caller(
+            owner_id="owner-1",
+            companion_id="companion-1",
+            device_id="device-1",
+            realm_id="realm-1",
+            genome_id="genome-1",
         ),
         trigger=TurnTrigger.USER_UTTERANCE,
         text="hello",
@@ -145,46 +175,46 @@ async def test_turn_persister_writes_eidolon_data_history(data_store: DataStore)
     rows = await EidolonDataConversationReader(data_store).list_turns_by_owner(owner_id="owner-1")
     assert rows[0]["owner_id"] == "owner-1"
     assert rows[0]["companion_id"] == "companion-1"
+    assert rows[0]["runtime_caller_id"] == "rc-test"
+    assert rows[0]["runtime_session_id"] == "session-1"
     assert rows[0]["tokens_out"] == 6
     assert rows[0]["metadata_"]["turn_trace"]["memory_write_trace"]["disposition"] == "skip"
+    assert await data_store.runtime_callers.get("rc-test") is not None
+    assert await data_store.runtime_sessions.get("session-1") is not None
 
 
 @pytest.mark.asyncio
-async def test_turn_persister_allows_unbound_admin_console_device(
+async def test_turn_persister_records_admin_test_without_device_row(
     data_store: DataStore,
 ) -> None:
-    await _provision_runtime_identity(
-        data_store,
+    await data_store.owner_service.create_owner(
+        owner_id="owner-admin",
+        display_name="Owner Admin",
+    )
+    await data_store.workspace_provisioning.provision_workspace(
         owner_id="owner-admin",
         companion_id="companion-admin",
-        device_id="real-body-admin",
         genome_id="genome-admin",
         realm_id="realm-admin",
-    )
-    await data_store.devices.create_device(
-        device_id="admin-console-1",
-        owner_id="owner-admin",
-        name="Admin Console (companion-admin)",
-        kind="admin_console",
-        status="active",
-        metadata_json={"source": "eidolon_agent.admin.chat_test"},
     )
     now = datetime.now(timezone.utc)
     ti = TurnInput(
         turn_id="turn-admin",
         conversation_id="conversation-admin",
         session_id="session-admin",
-        caller=CallerContext(
-            identity=Identity(
-                owner_id="owner-admin",
-                companion_id="companion-admin",
-                device_id="admin-console-1",
-                memory_realm_id="realm-admin",
-                genome_id="genome-admin",
-            ),
+        caller=_caller(
+            owner_id="owner-admin",
+            companion_id="companion-admin",
+            device_id=None,
+            realm_id="realm-admin",
+            genome_id="genome-admin",
             caller_kind=CallerKind.ADMIN_TEST,
             trace_id="trace-admin",
             request_id="request-admin",
+            runtime_caller_id="rc-admin",
+            runtime_session_id="session-admin",
+            actor_kind="admin_console",
+            actor_id="admin-chat-test",
         ),
         trigger=TurnTrigger.USER_UTTERANCE,
         text="hello from admin",
@@ -210,7 +240,9 @@ async def test_turn_persister_allows_unbound_admin_console_device(
     rows = await EidolonDataConversationReader(data_store).list_turns_by_owner(
         owner_id="owner-admin"
     )
-    assert rows[0]["device_id"] == "admin-console-1"
+    assert rows[0]["device_id"] is None
+    assert rows[0]["runtime_caller_id"] == "rc-admin"
+    assert rows[0]["runtime_session_id"] == "session-admin"
 
 
 @pytest.mark.asyncio
@@ -233,17 +265,17 @@ async def test_turn_persister_is_idempotent_under_concurrent_first_writes(
             turn_id=f"turn-{index}",
             conversation_id="conversation-race",
             session_id="session-1",
-            caller=CallerContext(
-                identity=Identity(
-                    owner_id="owner-race",
-                    companion_id="companion-race",
-                    device_id="device-race",
-                    memory_realm_id="realm-race",
-                    genome_id="genome-race",
-                ),
-                caller_kind=CallerKind.WEB_CHAT,
+            caller=_caller(
+                owner_id="owner-race",
+                companion_id="companion-race",
+                device_id="device-race",
+                realm_id="realm-race",
+                genome_id="genome-race",
                 trace_id=f"trace-{index}",
                 request_id=f"request-{index}",
+                runtime_caller_id="rc-race",
+                runtime_session_id="session-1",
+                actor_id="device-race",
             ),
             trigger=TurnTrigger.USER_UTTERANCE,
             text=f"hello {index}",

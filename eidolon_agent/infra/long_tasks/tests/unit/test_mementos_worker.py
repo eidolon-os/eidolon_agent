@@ -87,16 +87,16 @@ async def test_worker_publishes_proactive_report_on_success(tmp_path) -> None:
         worker_id="worker-test",
     )
 
-    await worker.submit(_record("task-1", agent_instance_id="inst_abc"))
+    await worker.submit(_record("task-1"))
     await worker.drain_once()
     # InMemoryEventBus delivers handlers on a scheduled task; let them run.
     await asyncio.sleep(0)
 
     assert len(received) == 1
     event = received[0]
-    assert event.subject == "agent.proactive.triggered.inst_abc"
+    assert event.subject == "agent.proactive.triggered.companion-test"
     assert event.payload == {
-        "instance_id": "inst_abc",
+        "instance_id": "companion-test",
         # conversation_id "c1" isn't a livekit triple and no device_id on the
         # record → unresolved (None). Resolution covered by
         # test_device_id_resolution.py.
@@ -112,41 +112,30 @@ async def test_worker_publishes_proactive_report_on_success(tmp_path) -> None:
 
     assert completed is not None
     assert completed.callback_status is CallbackStatus.DELIVERED
-    assert completed.callback_subject == "agent.proactive.triggered.inst_abc"
+    assert completed.callback_subject == "agent.proactive.triggered.companion-test"
     assert completed.callback_attempts == 1
     assert completed.callback_delivered_at is not None
 
 
-async def test_worker_skips_proactive_report_without_instance_id(tmp_path) -> None:
+async def test_worker_skips_proactive_report_without_event_bus(tmp_path) -> None:
     data_store = await _data_store(tmp_path)
     store = EidolonDataLongTaskStore(data_store)
     client = _FakeMementosClient()
-    bus = InMemoryEventBus()
-    received: list[Event] = []
-
-    async def _handler(event: Event) -> None:
-        received.append(event)
-
-    await bus.subscribe("agent.proactive.triggered.>", _handler)
-
     worker = MementosLongTaskWorker(
         store=store,
         client=client,
         config=MementosWorkerConfig(poll_interval_s=0.01, task_timeout_s=5),
         result_summarizer=_FakeResultSummarizer(),
-        event_bus=bus,
         worker_id="worker-test",
     )
 
     await worker.submit(_record("task-1"))
     await worker.drain_once()
-    await asyncio.sleep(0)
 
     completed = await store.get("task-1")
     await client.close()
     await data_store.close()
 
-    assert received == []
     assert completed is not None
     # No announcement claimed → callback stays pending.
     assert completed.callback_status is CallbackStatus.PENDING
@@ -155,17 +144,24 @@ async def test_worker_skips_proactive_report_without_instance_id(tmp_path) -> No
 async def _data_store(tmp_path) -> DataStore:
     store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
     await store.init_schema()
+    await store.owner_service.create_owner(owner_id="alice", display_name="Alice")
+    await store.workspace_provisioning.provision_workspace(
+        owner_id="alice",
+        companion_id="companion-test",
+        genome_id="genome-test",
+        realm_id="realm-test",
+    )
     return store
 
 
-def _record(task_id: str, *, agent_instance_id: str | None = None) -> LongTaskRecord:
+def _record(task_id: str) -> LongTaskRecord:
     session_key = session_key_for("alice", "2026-06-14")
     return LongTaskRecord(
         id=task_id,
         provider="mementos",
         status=LongTaskStatus.ACCEPTED,
-        tenant_id="t",
-        user_id="alice",
+        owner_id="alice",
+        companion_id="companion-test",
         conversation_id="c1",
         turn_id="turn-1",
         session_id="s1",
@@ -174,7 +170,8 @@ def _record(task_id: str, *, agent_instance_id: str | None = None) -> LongTaskRe
         task_date="2026-06-14",
         task_key=task_key_for(session_key, task_id),
         task="测试任务",
-        agent_instance_id=agent_instance_id,
+        memory_realm_id="realm-test",
+        genome_id="genome-test",
         expected_output="确认收到",
         context_summary="端到端测试",
     )
