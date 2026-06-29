@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol
 
-from eidolon_sdk.memory import ConversationTurnPayload, conversation_turn_subject
+from eidolon_sdk.memory import (
+    ConversationTurnPayload,
+    conversation_turn_subject,
+    envelope_memory_payload,
+)
 
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.identity import build_memory_actor_context
@@ -93,13 +97,17 @@ class HistoryFanout:
             device_id=device_id,
             session_id=session_id,
         )
-        memory_payload = ConversationTurnPayload(
+        turn_payload = ConversationTurnPayload(
             turn_id=turn_id,
             context=context,
             timestamp=timestamp_iso,
             user_text=user_text,
             assistant_text=assistant_text,
             metadata=payload_metadata,
+        )
+        memory_payload = envelope_memory_payload(
+            turn_payload,
+            trace_id=turn_id,
         ).model_dump(mode="json")
         try:
             status_subject = (
@@ -144,7 +152,10 @@ class HistoryFanout:
                 await self._bus.publish(
                     Event(
                         subject=Topics.emotion_turn(owner_id),
-                        payload={**memory_payload, "emotion": emotion_payload},
+                        payload={
+                            **turn_payload.model_dump(mode="json"),
+                            "emotion": emotion_payload,
+                        },
                         source="history.fanout",
                         metadata={"msg_id": turn_id},
                     ),

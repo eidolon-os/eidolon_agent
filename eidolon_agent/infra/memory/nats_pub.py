@@ -11,6 +11,7 @@ from eidolon_sdk.memory import (
     KgAddTripleCommand,
     UserConfirmedFactCommand,
     conversation_turn_subject,
+    envelope_memory_payload,
     memory_command_subject,
 )
 
@@ -56,7 +57,7 @@ class MemoryNatsPublisher:
             user_text=owner_text,
             assistant_text=assistant_text,
             metadata=metadata or {"source": "eidolon-agent"},
-        ).model_dump(mode="json")
+        )
         subject = (
             await self._routes.render_turn_subject(context.memory_space_id)
             if self._routes is not None
@@ -65,7 +66,9 @@ class MemoryNatsPublisher:
         await self._bus.publish(
             Event(
                 subject=subject,
-                payload=payload,
+                payload=envelope_memory_payload(payload, trace_id=turn_id).model_dump(
+                    mode="json"
+                ),
                 source="memory.nats_pub",
                 metadata={"msg_id": turn_id},
             ),
@@ -101,7 +104,7 @@ class MemoryNatsPublisher:
             valid_to=valid_to.isoformat() if valid_to else None,
             source_drawer_id=f"req:{request_id}",
             adapter_name="agent",
-        ).model_dump(mode="json")
+        )
         nats_subject = (
             await self._routes.render_cmd_subject(memory_space_id)
             if self._routes is not None
@@ -110,7 +113,9 @@ class MemoryNatsPublisher:
         await self._bus.publish(
             Event(
                 subject=nats_subject,
-                payload=payload,
+                payload=envelope_memory_payload(payload, trace_id=request_id).model_dump(
+                    mode="json"
+                ),
                 source="memory.nats_pub",
                 metadata={"msg_id": request_id},
             ),
@@ -148,7 +153,7 @@ class MemoryNatsPublisher:
             source_device_id=device_id or "",
             source_instance_id=companion_id or "",
             session_id=session_id or "",
-        ).model_dump(mode="json")
+        )
         nats_subject = (
             await self._routes.render_cmd_subject(memory_space_id)
             if self._routes is not None
@@ -157,7 +162,9 @@ class MemoryNatsPublisher:
         await self._bus.publish(
             Event(
                 subject=nats_subject,
-                payload=payload,
+                payload=envelope_memory_payload(payload, trace_id=request_id).model_dump(
+                    mode="json"
+                ),
                 source="memory.nats_pub",
                 metadata={"msg_id": request_id},
             ),

@@ -46,7 +46,7 @@ from eidolon_sdk.biz.runtime import (
     RuntimeTokenVerifier,
     device_revocation_keys,
     owner_revocation_keys,
-    sign_device_token,
+    sign_runtime_token,
 )
 from fastapi import FastAPI
 from sqlalchemy import func, select
@@ -56,6 +56,16 @@ from eidolon_agent.app.admin.routers import devices as devices_router
 pytestmark = pytest.mark.functional
 
 SECRET = "test-secret-32-bytes-long-aaaaaaaaa"
+
+
+def _sign_device_actor_token(*, device_id: str, **kwargs):
+    return sign_runtime_token(
+        secret=SECRET,
+        actor_kind="device",
+        actor_id=device_id,
+        device_id=device_id,
+        **kwargs,
+    )
 
 
 class _FakeKV:
@@ -244,8 +254,7 @@ async def test_verifier_rejects_token_after_owner_revoke() -> None:
     kv = _FakeKV()
     verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
 
-    token, _ = sign_device_token(
-        secret=SECRET,
+    token, _ = _sign_device_actor_token(
         device_id="web-abc12345",
         owner_id="manson",
         companion_id="companion-a",
@@ -275,13 +284,13 @@ async def test_verifier_owner_revoke_does_not_affect_other_owners() -> None:
     kv = _FakeKV()
     verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
 
-    manson_token, _ = sign_device_token(
-        secret=SECRET, device_id="web-1", owner_id="manson",
+    manson_token, _ = _sign_device_actor_token(
+        device_id="web-1", owner_id="manson",
         companion_id="companion-a", memory_realm_id="realm-a", genome_id="genome-a",
         scopes=["device"],
     )
-    default_token, _ = sign_device_token(
-        secret=SECRET, device_id="web-2", owner_id="default",
+    default_token, _ = _sign_device_actor_token(
+        device_id="web-2", owner_id="default",
         companion_id="companion-b", memory_realm_id="realm-b", genome_id="genome-b",
         scopes=["device"],
     )
@@ -306,15 +315,13 @@ async def test_verifier_device_level_revoke_still_works() -> None:
     kv = _FakeKV()
     verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
 
-    token, _ = sign_device_token(
-        secret=SECRET, device_id="dev-x", owner_id="alice",
+    token, _ = _sign_device_actor_token(
+        device_id="dev-x", owner_id="alice",
         companion_id="companion-a", memory_realm_id="realm-a", genome_id="genome-a",
         scopes=["device"],
     )
 
-    # Manually write a device-level revocation (no admin endpoint for
-    # this scope yet.
-    await kv.put("revoked.dev-x", b"manual-test")
+    await kv.put(device_revocation_keys("dev-x")[0], b"manual-test")
 
     with pytest.raises(RuntimeTokenRevokedError) as exc_info:
         await verifier.verify(token)
@@ -326,8 +333,7 @@ async def test_verifier_accepts_mac_device_id_without_invalid_kv_key() -> None:
     kv = _FakeKV()
     verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
 
-    token, _ = sign_device_token(
-        secret=SECRET,
+    token, _ = _sign_device_actor_token(
         device_id="1c:db:d4:7a:ef:0c",
         owner_id="alice",
         companion_id="companion-a",
@@ -345,8 +351,7 @@ async def test_verifier_rejects_mac_device_id_with_encoded_revocation_key() -> N
     verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
     device_id = "1c:db:d4:7a:ef:0c"
 
-    token, _ = sign_device_token(
-        secret=SECRET,
+    token, _ = _sign_device_actor_token(
         device_id=device_id,
         owner_id="alice",
         companion_id="companion-a",

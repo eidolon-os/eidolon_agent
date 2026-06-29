@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from eidolon_sdk.memory import conversation_turn_subject
+from eidolon_sdk.memory import MEMORY_SCHEMA_VERSION, conversation_turn_subject, unwrap_memory_payload
 
 from eidolon_agent.domain.history import HistoryFanout
 
@@ -53,7 +53,8 @@ async def test_publish_turn_emits_memory_event(event_bus) -> None:
     )
     await asyncio.sleep(0)
     assert len(received) == 1
-    payload = received[0].payload
+    assert received[0].payload["schema_version"] == MEMORY_SCHEMA_VERSION
+    payload = unwrap_memory_payload(received[0].payload)
     assert payload["context"]["owner_id"] == "alice"
     assert payload["context"]["companion_id"] == "companion-a"
     assert payload["context"]["memory_realm_id"] == "r_alice_default"
@@ -86,7 +87,7 @@ async def test_publish_turn_carries_resolved_actor_context(event_bus) -> None:
     )
     await asyncio.sleep(0)
 
-    ctx = received[0].payload["context"]
+    ctx = unwrap_memory_payload(received[0].payload)["context"]
     assert ctx["owner_id"] == "alice"
     assert ctx["companion_id"] == "mochi"
     assert ctx["memory_realm_id"] == "acme.alice.mochi"
@@ -121,7 +122,7 @@ async def test_publish_turn_merges_memory_policy_metadata(event_bus) -> None:
     )
     await asyncio.sleep(0)
 
-    metadata = received[0].payload["metadata"]
+    metadata = unwrap_memory_payload(received[0].payload)["metadata"]
     assert metadata["source"] == "eidolon-agent"
     assert metadata["source_component"] == "history.fanout"
     assert metadata["memory_write_disposition"] == "semantic_upsert"

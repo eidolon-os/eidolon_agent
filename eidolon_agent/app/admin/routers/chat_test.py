@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 
 import grpc
-from eidolon_sdk.biz.runtime import resolve_shared_secret, sign_device_token
+from eidolon_sdk.biz.runtime import resolve_shared_secret, sign_runtime_token
 from eidolon_sdk.core.streaming import encode_sse_event
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
@@ -57,9 +57,11 @@ async def chat_test(body: ChatTestRequest, request: Request):
     jwt_secret = resolve_shared_secret(settings.runtime_token.jwt_secret)
     if not jwt_secret:
         raise RuntimeError("runtime token secret not configured")
-    device_token, _ = sign_device_token(
+    device_token, _ = sign_runtime_token(
         secret=jwt_secret,
         algorithm=settings.runtime_token.jwt_algorithm,
+        actor_kind="device",
+        actor_id=test_device_id,
         device_id=test_device_id,
         owner_id=body.owner_id,
         companion_id=body.companion_id,

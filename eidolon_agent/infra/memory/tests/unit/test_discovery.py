@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from eidolon_sdk.memory import unwrap_memory_payload
 
 from eidolon_agent.config.settings import MemoryEndpoint, NatsSettings
 from eidolon_agent.infra.memory.discovery import (
@@ -207,26 +208,29 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
     confirmed_event, confirmed_persistent = bus.events[2]
     assert turn_persistent is True
     assert turn_event.subject == "turns.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
-    assert turn_event.payload["turn_id"] == "t1"
-    assert turn_event.payload["context"]["owner_id"] == "benchmark"
-    assert turn_event.payload["context"]["companion_id"] == "test"
-    assert turn_event.payload["context"]["memory_realm_id"] == "r_benchmark_default"
-    assert turn_event.payload["context"]["device_id"] == "admin-console"
+    turn_payload = unwrap_memory_payload(turn_event.payload)
+    assert turn_payload["turn_id"] == "t1"
+    assert turn_payload["context"]["owner_id"] == "benchmark"
+    assert turn_payload["context"]["companion_id"] == "test"
+    assert turn_payload["context"]["memory_realm_id"] == "r_benchmark_default"
+    assert turn_payload["context"]["device_id"] == "admin-console"
     assert cmd_persistent is True
     assert cmd_event.subject == "cmds.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
-    assert cmd_event.payload["kind"] == "kg_add_triple"
-    assert cmd_event.payload["issuer"] == "agent"
-    assert cmd_event.payload["request_id"]
-    assert "command" not in cmd_event.payload
+    cmd_payload = unwrap_memory_payload(cmd_event.payload)
+    assert cmd_payload["kind"] == "kg_add_triple"
+    assert cmd_payload["issuer"] == "agent"
+    assert cmd_payload["request_id"]
+    assert "command" not in cmd_payload
     assert confirmed_persistent is True
     assert confirmed_event.subject == "cmds.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
-    assert confirmed_event.payload["kind"] == "user_confirm_fact"
-    assert confirmed_event.payload["issuer"] == "agent"
-    assert confirmed_event.payload["text"] == "用户 最终验证时间 2026-06-28 20:00"
-    assert confirmed_event.payload["source_device_id"] == "admin-console"
-    assert confirmed_event.payload["source_instance_id"] == "test"
-    assert confirmed_event.payload["session_id"] == "s1"
-    assert confirmed_event.payload["tags"] == ["kg_fallback"]
+    confirmed_payload = unwrap_memory_payload(confirmed_event.payload)
+    assert confirmed_payload["kind"] == "user_confirm_fact"
+    assert confirmed_payload["issuer"] == "agent"
+    assert confirmed_payload["text"] == "用户 最终验证时间 2026-06-28 20:00"
+    assert confirmed_payload["source_device_id"] == "admin-console"
+    assert confirmed_payload["source_instance_id"] == "test"
+    assert confirmed_payload["session_id"] == "s1"
+    assert confirmed_payload["tags"] == ["kg_fallback"]
 
 
 def test_mcp_decode_prefers_structured_content_and_unwraps_fastmcp_result():
