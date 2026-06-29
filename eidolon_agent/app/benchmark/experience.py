@@ -695,9 +695,11 @@ def _make_turn_input(
         session_id="replay-session",
         caller=CallerContext(
             identity=Identity(
-                tenant_id=_REPLAY_TENANT_ID,
-                user_id=_REPLAY_USER_ID,
-                agent_instance_id=_REPLAY_AGENT_INSTANCE_ID,
+                owner_id=_REPLAY_USER_ID,
+                companion_id=_REPLAY_AGENT_INSTANCE_ID,
+                device_id=None,
+                memory_realm_id=f"{_REPLAY_TENANT_ID}.{_REPLAY_USER_ID}",
+                genome_id=_REPLAY_PERSONA_ID,
             ),
             caller_kind=CallerKind.WEB_CHAT,
             trace_id=f"replay-{turn_id}",
