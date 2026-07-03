@@ -60,3 +60,71 @@ def test_phrase_uses_persona_override_when_present() -> None:
         PersonaVoice.phrase(persona, "slow_tool_hint", "稍等一下")
         == "喵，我在查啦～"
     )
+
+
+class _StubPersonas:
+    def __init__(self, instance) -> None:
+        self._instance = instance
+
+    async def get_snapshot(self, *, owner_id, companion_id):
+        return SimpleNamespace(instance=self._instance, prompt_hint="心情不错")
+
+
+def _persona(spoken_phrases=None):
+    return SimpleNamespace(
+        style_compiler=SimpleNamespace(spoken_phrases=spoken_phrases or {})
+    )
+
+
+async def test_proactive_decision_uses_primary_text_when_present() -> None:
+    voice = PersonaVoice(_StubPersonas(_persona()))
+    d = await voice.proactive_decision(
+        owner_id="o",
+        companion_id="c",
+        intent="long_task_done",
+        primary_text="资料整理好啦",
+        fallback_default="我弄好了",
+    )
+    assert d.text == "资料整理好啦"
+    assert d.intent == "long_task_done"
+
+
+async def test_proactive_decision_fallback_is_framed_not_raw() -> None:
+    # No primary text (summary failed) → clean fallback, never raw output.
+    voice = PersonaVoice(_StubPersonas(_persona()))
+    d = await voice.proactive_decision(
+        owner_id="o",
+        companion_id="c",
+        intent="long_task_done",
+        primary_text="",
+        fallback_default="我把那件事弄好了。",
+    )
+    assert d.text == "我把那件事弄好了。"
+
+
+async def test_proactive_decision_honours_persona_phrase_override() -> None:
+    persona = _persona(
+        {"proactive_long_task_done": "搞定咯，人家很快的～"}
+    )
+    voice = PersonaVoice(_StubPersonas(persona))
+    d = await voice.proactive_decision(
+        owner_id="o",
+        companion_id="c",
+        intent="long_task_done",
+        primary_text="",
+        fallback_default="我弄好了",
+    )
+    assert d.text == "搞定咯，人家很快的～"
+
+
+async def test_proactive_decision_degrades_without_personas() -> None:
+    voice = PersonaVoice(personas_service=None)
+    d = await voice.proactive_decision(
+        owner_id="o",
+        companion_id="c",
+        intent="long_task_done",
+        primary_text="",
+        fallback_default="我弄好了",
+    )
+    assert d.text == "我弄好了"
+    assert d.style_hint == "long_task_done"

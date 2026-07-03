@@ -20,7 +20,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from eidolon_agent.domain.personas.types import CompanionPersona
+from eidolon_agent.domain.personas.types import (
+    CompanionPersona,
+    PersonaProactiveDecision,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +86,52 @@ class PersonaVoice:
             return None
         return card_from_persona(
             snapshot.instance, tone_hint=snapshot.prompt_hint or ""
+        )
+
+    async def proactive_decision(
+        self,
+        *,
+        owner_id: str,
+        companion_id: str,
+        intent: str,
+        primary_text: str = "",
+        fallback_default: str = "",
+        style_hint: str = "",
+    ) -> PersonaProactiveDecision:
+        """Assemble a persona-consistent proactive utterance (off hot path).
+
+        When the companion speaks unprompted (e.g. a finished long task), the
+        line must still sound like this companion and must NEVER be a raw data
+        dump. ``primary_text`` is the already-persona-rendered content (e.g. the
+        LLM summary); when it is empty we fall back to a persona-overridable
+        canned line (``spoken_phrases["proactive_<intent>"]``), never to raw
+        output. Resolves the persona once; degrades gracefully to the defaults
+        if the persona can't be loaded.
+        """
+        text = (primary_text or "").strip()
+        resolved_style = style_hint or intent
+        instance: CompanionPersona | None = None
+        if self._personas is not None and owner_id and companion_id:
+            try:
+                snapshot = await self._personas.get_snapshot(
+                    owner_id=owner_id, companion_id=companion_id
+                )
+                instance = snapshot.instance
+            except Exception:
+                instance = None
+        if not text:
+            text = self.phrase(
+                instance, f"proactive_{intent}", fallback_default
+            ).strip()
+        resolved_style = self.phrase(
+            instance, f"proactive_style_{intent}", resolved_style
+        )
+        return PersonaProactiveDecision(
+            companion_id=companion_id,
+            owner_id=owner_id,
+            intent=intent,
+            text=text,
+            style_hint=resolved_style,
         )
 
     @staticmethod

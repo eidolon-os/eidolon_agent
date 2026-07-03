@@ -117,6 +117,44 @@ async def test_worker_publishes_proactive_report_on_success(tmp_path) -> None:
     assert completed.callback_delivered_at is not None
 
 
+async def test_proactive_fallback_is_persona_framed_not_raw(tmp_path) -> None:
+    """When the TTS summary fails, the proactive report must not dump raw
+    output — PersonaVoice frames a clean fallback line instead."""
+    data_store = await _data_store(tmp_path)
+    store = EidolonDataLongTaskStore(data_store)
+    client = _FakeMementosClient()
+    bus = InMemoryEventBus()
+    received: list[Event] = []
+
+    async def _handler(event: Event) -> None:
+        received.append(event)
+
+    await bus.subscribe("agent.proactive.triggered.>", _handler)
+
+    worker = MementosLongTaskWorker(
+        store=store,
+        client=client,
+        config=MementosWorkerConfig(poll_interval_s=0.01, task_timeout_s=5),
+        result_summarizer=_NoneSummarizer(),  # summary fails → fallback path
+        persona_voice=_StubProactiveVoice(),
+        event_bus=bus,
+        worker_id="worker-test",
+    )
+
+    await worker.submit(_record("task-1"))
+    await worker.drain_once()
+    await asyncio.sleep(0)
+
+    await client.close()
+    await data_store.close()
+
+    assert len(received) == 1
+    text = received[0].payload["text"]
+    # Clean persona-framed line, NOT the raw mementos result text.
+    assert text == "我把刚才交代的那件事处理好了，细节你可以随时问我。"
+    assert "mementos coworker" not in text
+
+
 async def test_worker_skips_proactive_report_without_event_bus(tmp_path) -> None:
     data_store = await _data_store(tmp_path)
     store = EidolonDataLongTaskStore(data_store)
@@ -224,3 +262,32 @@ class _FakeResultSummarizer:
         assert record.id == "task-1"
         assert result_text == "mementos coworker 已收到 eidolon_agent 的测试任务。"
         return "测试任务已完成，Mementos 已确认收到。"
+
+
+class _NoneSummarizer:
+    async def summarize(self, record: LongTaskRecord, result_text: str) -> None:
+        return None
+
+
+class _StubProactiveVoice:
+    """Minimal PersonaVoice stand-in: echoes primary_text or the fallback."""
+
+    async def proactive_decision(
+        self,
+        *,
+        owner_id,
+        companion_id,
+        intent,
+        primary_text="",
+        fallback_default="",
+        style_hint="",
+    ):
+        from eidolon_agent.domain.personas.types import PersonaProactiveDecision
+
+        return PersonaProactiveDecision(
+            companion_id=companion_id,
+            owner_id=owner_id,
+            intent=intent,
+            text=(primary_text.strip() or fallback_default),
+            style_hint=style_hint or intent,
+        )

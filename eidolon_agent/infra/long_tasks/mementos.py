@@ -18,10 +18,6 @@ from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.long_task import LongTaskRecord, LongTaskStatus
 from eidolon_agent.core.types.topics import Topics
 
-# Longest fallback report spoken aloud when no TTS summary was produced — the
-# raw result text is truncated so the companion never reads a wall of text.
-_FALLBACK_REPORT_MAX_CHARS = 200
-
 _log = logging.getLogger(__name__)
 
 _TERMINAL_SUCCESS = {"RUN_END", "RUN_FINISHED"}
@@ -220,6 +216,7 @@ class MementosLongTaskWorker:
         client: MementosHttpClient,
         config: MementosWorkerConfig | None = None,
         result_summarizer: LongTaskResultSummarizerPort | None = None,
+        persona_voice=None,
         event_bus: EventBus | None = None,
         worker_id: str | None = None,
     ) -> None:
@@ -227,6 +224,9 @@ class MementosLongTaskWorker:
         self._client = client
         self._config = config or MementosWorkerConfig()
         self._result_summarizer = result_summarizer
+        # PersonaVoice (optional): frames the proactive report in the
+        # companion's voice and guarantees the fallback is never a raw dump.
+        self._persona_voice = persona_voice
         self._event_bus = event_bus
         self._worker_id = worker_id or f"agent-{uuid.uuid4().hex[:8]}"
         self._queue: asyncio.Queue[LongTaskRecord] = asyncio.Queue(
@@ -402,7 +402,28 @@ class MementosLongTaskWorker:
                 record.id,
             )
             return
-        report_text = (summary or result_text[:_FALLBACK_REPORT_MAX_CHARS]).strip()
+        # Persona-frame the proactive utterance. ``summary`` is already spoken
+        # in the companion's voice; when it is missing we must NOT dump raw
+        # task output over TTS — proactive_decision falls back to a clean,
+        # persona-overridable line (the full result stays on the job record for
+        # the user to ask about). Degrades to a plain default without persona.
+        intent = "long_task_done"
+        fallback_line = "我把刚才交代的那件事处理好了，细节你可以随时问我。"
+        style_hint = "report"
+        if self._persona_voice is not None:
+            decision = await self._persona_voice.proactive_decision(
+                owner_id=record.owner_id,
+                companion_id=companion_id,
+                intent=intent,
+                primary_text=summary or "",
+                fallback_default=fallback_line,
+                style_hint=style_hint,
+            )
+            report_text = decision.text.strip()
+            intent = decision.intent
+            style_hint = decision.style_hint
+        else:
+            report_text = (summary or fallback_line).strip()
         if not report_text:
             return
         subject = Topics.proactive_triggered(companion_id)
@@ -438,9 +459,9 @@ class MementosLongTaskWorker:
             payload={
                 "instance_id": companion_id,
                 "device_id": device_id,
-                "intent": "long_task_done",
+                "intent": intent,
                 "text": report_text,
-                "style_hint": "report",
+                "style_hint": style_hint,
             },
             trace_id=record.trace_id,
             source="mementos-long-task-worker",

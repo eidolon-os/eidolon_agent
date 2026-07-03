@@ -233,6 +233,7 @@ async def build_application(
                 llm_router,
                 persona_voice=PersonaVoice(personas_service),
             ),
+            persona_voice=PersonaVoice(personas_service),
             event_bus=container.event_bus,
         )
         long_task_worker.start()
