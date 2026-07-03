@@ -55,3 +55,62 @@ async def test_system_prompt_still_concatenates_both_parts(
     )
     assert compiled.stable_prompt in compiled.system_prompt
     assert compiled.volatile_prompt in compiled.system_prompt
+
+
+async def test_persona_components_render_in_stable_prefix(
+    canonical_template_registry, tmp_path
+):
+    base = await _instance(canonical_template_registry, tmp_path)
+    # Companion-first: author the components directly on the genome.
+    instance = base.model_copy(
+        update={
+            "goals": ("陪用户坚持早睡",),
+            "pinned_facts": ("用户叫小满", "用户在常州工作"),
+            "relationship_stage": "刚认识不久",
+            "example_dialogs": ("用户：累了。你：那先靠一会儿，我陪着你。",),
+        }
+    )
+    compiled = PersonaCompiler().compile(
+        instance=instance, runtime_state=await _mood("joy", 0.9)
+    )
+    # All componentized content is genome-stable → cached prefix, not the tail.
+    for token in ("陪用户坚持早睡", "用户叫小满", "刚认识不久", "靠一会儿"):
+        assert token in compiled.stable_prompt
+        assert token not in compiled.volatile_prompt
+
+
+async def test_components_absent_by_default(canonical_template_registry, tmp_path):
+    instance = await _instance(canonical_template_registry, tmp_path)
+    compiled = PersonaCompiler().compile(instance=instance)
+    # No components authored → no component headers leak into the prompt.
+    assert "自主动机" not in compiled.stable_prompt
+    assert "关系阶段" not in compiled.stable_prompt
+
+
+async def test_create_from_template_seeds_blueprint_components(tmp_path) -> None:
+    from eidolon_agent.domain.personas.instance_store import YamlCompanionPersonaStore
+    from eidolon_agent.domain.personas.types import (
+        IdentityCore,
+        PersonaMetadata,
+        PersonaTemplate,
+    )
+
+    template = PersonaTemplate(
+        metadata=PersonaMetadata(
+            template_id="t-seed", template_revision=1, archetype="伙伴",
+            name="小马", description="",
+        ),
+        identity_core=IdentityCore(base_pronouns="我/你"),
+        behavioral_knobs={},
+        goals=("帮用户完成今天的目标",),
+        example_dialogs=("用户：早。你：早呀，今天想先做点什么？",),
+    )
+    store = YamlCompanionPersonaStore(tmp_path / "instances")
+    persona = await store.create_from_template(
+        template=template, owner_id="alice", companion_id="pony-1"
+    )
+    # Blueprint components seed; owner-specific ones start empty.
+    assert persona.goals == ("帮用户完成今天的目标",)
+    assert persona.example_dialogs
+    assert persona.pinned_facts == ()
+    assert persona.relationship_stage == ""

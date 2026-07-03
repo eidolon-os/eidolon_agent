@@ -92,6 +92,9 @@ class YamlCompanionPersonaStore:
             memory_adapter=template.memory_adapter,
             evolution_rules=template.evolution_rules,
             assets=template.assets,
+            # Seed blueprint components; owner-specific ones authored per companion.
+            example_dialogs=template.example_dialogs,
+            goals=template.goals,
         )
         await self.save(persona, reason="create_from_template")
         return persona

@@ -138,6 +138,11 @@ class EidolonDataCompanionPersonaStore:
             memory_adapter=template.memory_adapter,
             evolution_rules=template.evolution_rules,
             assets=template.assets,
+            # Seed the blueprint-level components; owner-specific components
+            # (pinned_facts, relationship_stage) start empty and are authored
+            # per companion.
+            example_dialogs=template.example_dialogs,
+            goals=template.goals,
         )
         await self.save(persona, reason="create_from_template")
         return persona

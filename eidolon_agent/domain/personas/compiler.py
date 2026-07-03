@@ -27,6 +27,7 @@ class PersonaCompiler:
         )
         identity_block = _identity_block(instance)
         style_block, trace = _style_block(instance, effective_knobs)
+        components_block = _components_block(instance)
         memory_block = _memory_block(adapted_memory)
         runtime_state_block = _runtime_state_block(runtime_state)
         realtime_block = _realtime_block(realtime)
@@ -36,6 +37,8 @@ class PersonaCompiler:
         # change every turn → volatile tail (placed near the current request
         # by the context compiler). Concatenation preserves the old prompt.
         stable_parts = [identity_block, style_block]
+        if components_block:
+            stable_parts.append(components_block)
         volatile_parts = [
             block
             for block in (runtime_state_block, memory_block, realtime_block)
@@ -101,6 +104,29 @@ def _style_block(
                 trace.append(f"{knob_name}={knob.current:.3f} -> [{lo:.2f}, {hi:.2f}]")
                 break
     return "\n".join(lines), trace
+
+
+def _components_block(instance: CompanionPersona) -> str:
+    """Componentized persona content — stable within a genome version, so it
+    belongs in the cached prefix alongside identity/style. Renders only the
+    parts that are present (companion-first: authored per companion)."""
+    lines: list[str] = []
+    goals = getattr(instance, "goals", ()) or ()
+    if goals:
+        lines.append("你的目标（自主动机，可主动追求，但不打断当前对话）：")
+        lines.extend(f"- {g}" for g in goals)
+    relationship = str(getattr(instance, "relationship_stage", "") or "").strip()
+    if relationship:
+        lines.append(f"你与该用户的关系阶段：{relationship}")
+    pinned = getattr(instance, "pinned_facts", ()) or ()
+    if pinned:
+        lines.append("关于该用户你已确认并须始终牢记的事实：")
+        lines.extend(f"- {f}" for f in pinned)
+    examples = getattr(instance, "example_dialogs", ()) or ()
+    if examples:
+        lines.append("对话示例（体现你的说话风格，仅供模仿语气，不要照抄内容）：")
+        lines.extend(examples)
+    return "\n".join(lines)
 
 
 def _memory_block(adapted_memory: AdaptedMemoryContext) -> str:

@@ -266,6 +266,11 @@ class PersonaTemplate(BaseModel):
     memory_adapter: MemoryAdapterSpec = Field(default_factory=MemoryAdapterSpec)
     evolution_rules: tuple[EvolutionRule, ...] = ()
     assets: PersonaAssets = Field(default_factory=PersonaAssets)
+    # Componentized persona content (blueprint parts a seed can carry).
+    # example_dialogs teach voice by example (stronger than adjectives);
+    # goals are the companion's autonomous motivations.
+    example_dialogs: tuple[str, ...] = ()
+    goals: tuple[str, ...] = ()
 
 
 class CompanionPersona(BaseModel):
@@ -294,6 +299,13 @@ class CompanionPersona(BaseModel):
     evolution_rules: tuple[EvolutionRule, ...] = ()
     evolution_state: EvolutionState = Field(default_factory=EvolutionState)
     assets: PersonaAssets = Field(default_factory=PersonaAssets)
+    # Componentized persona content, authored per companion (companion-first;
+    # a seed template may prime example_dialogs/goals, the rest are owner-
+    # specific). All are stable within a genome version → cached prompt prefix.
+    example_dialogs: tuple[str, ...] = ()  # few-shot voice examples
+    goals: tuple[str, ...] = ()  # autonomous motivations
+    pinned_facts: tuple[str, ...] = ()  # owner-specific, never evicted
+    relationship_stage: str = ""  # familiarity with this owner (evolves)
 
 
 class PersonaTemplateSummary(BaseModel):
