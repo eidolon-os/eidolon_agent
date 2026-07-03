@@ -271,6 +271,9 @@ class TurnSettings(BaseModel):
     first_delta_slo_p50_ms: int = 200
     first_delta_slo_p95_ms: int = 300
     history_context_window: int = 4
+    # Widened recent-conversation window used when long-term memory recall
+    # degrades, so a long chat doesn't go amnesiac when memory is unavailable.
+    degraded_history_context_window: int = 12
     max_tool_iters: int = 4
     max_token_budget: int = 6000
     tool_schema_budget_tokens: int = 800

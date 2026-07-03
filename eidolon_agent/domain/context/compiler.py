@@ -62,6 +62,7 @@ class ContextCompiler:
         history_manager,
         memory_port=None,
         history_window: int = 4,
+        degraded_history_window: int = 12,
         memory_timeout_s: float = 0.2,
         explicit_memory_timeout_s: float = 1.2,
         memory_top_k: int = 5,
@@ -70,7 +71,7 @@ class ContextCompiler:
         summary_provider: ConversationSummaryProvider
         | Callable[..., Awaitable[str | None] | str | None]
         | None = None,
-        summary_timeout_s: float = 0.025,
+        summary_timeout_s: float = 0.1,
         harness: RealtimeAgentHarness | None = None,
     ) -> None:
         self._personas = personas_service
@@ -78,6 +79,12 @@ class ContextCompiler:
         self._history = history_manager
         self._memory = memory_port
         self._history_window = history_window
+        # When long-term memory recall degrades, the recent conversation window
+        # is the only thing standing between the model and amnesia on a long
+        # chat — so widen it. recent_window is a cheap in-memory read, so we
+        # always fetch the wider window and trim back to history_window when
+        # memory is healthy (memory health is only known after the gather).
+        self._degraded_history_window = max(degraded_history_window, history_window)
         self._memory_timeout_s = memory_timeout_s
         self._explicit_memory_timeout_s = explicit_memory_timeout_s
         self._memory_top_k = memory_top_k
@@ -120,7 +127,10 @@ class ContextCompiler:
         # (kept for referential continuity, e.g. resolving "那个" in the switch
         # utterance itself).
         topic_switch = bool(ti.metadata.get("topic_switch"))
-        history_window = 1 if topic_switch else self._history_window
+        # Fetch the widest window we might need; the effective window is chosen
+        # after the gather once we know whether memory degraded. A topic switch
+        # fences off all but the immediately-preceding turn.
+        fetch_window = 1 if topic_switch else self._degraded_history_window
         summary_task = (
             _empty_summary()
             if topic_switch
@@ -131,7 +141,7 @@ class ContextCompiler:
             if not policy.history_context_allowed
             else self._history.recent_window(
                 conversation_id=ti.conversation_id,
-                window=history_window,
+                window=fetch_window,
             )
         )
         history_task = _timed("history", history_coro)
@@ -335,7 +345,22 @@ class ContextCompiler:
         if isinstance(history, BaseException):
             _log.warning("history window raised: %s", history)
             history = []
-        elif history:
+        elif history and not topic_switch:
+            # Memory degraded → keep the wider window as a hedge against
+            # amnesia; healthy memory → trim back to the tight window so we
+            # don't dilute attention with stale turns.
+            effective_window = (
+                self._degraded_history_window
+                if memory_degraded
+                else self._history_window
+            )
+            if len(history) > effective_window:
+                history = history[-effective_window:]
+            ti.metadata["history_window_applied"] = {
+                "effective": effective_window,
+                "expanded_for_degraded_memory": memory_degraded,
+            }
+        if history:
             for idx, msg in enumerate(history):
                 history_segment = ContextSegment(
                     kind=ContextSegmentKind.HISTORY,

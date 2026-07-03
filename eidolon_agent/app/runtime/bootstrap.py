@@ -425,6 +425,7 @@ def _build_turn_engine(
         history_manager=container.history_manager,
         memory_port=container.memory_port,
         history_window=harness.budget.history_window,
+        degraded_history_window=container.settings.turn.degraded_history_context_window,
         memory_timeout_s=container.settings.turn.memory_recall_soft_timeout_ms / 1000,
         explicit_memory_timeout_s=(
             container.settings.turn.explicit_memory_recall_timeout_ms / 1000

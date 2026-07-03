@@ -17,6 +17,27 @@ class ContextSegmentKind(str, Enum):
     CURRENT_USER = "current_user"
 
 
+# How each segment behaves across turns, for KV-cache prefix analysis:
+#   stable      — invariant within a genome version (belongs in the cached
+#                 prefix; anything volatile mixed into it breaks the cache)
+#   append_only — grows at the tail, older entries stay byte-identical
+#   volatile    — recomputed every turn
+#   current     — the user's utterance, always last and always new
+_SEGMENT_VOLATILITY: dict[ContextSegmentKind, str] = {
+    ContextSegmentKind.PERSONA: "stable",
+    ContextSegmentKind.HARNESS_POLICY: "stable",
+    ContextSegmentKind.HISTORY: "append_only",
+    ContextSegmentKind.SUMMARY: "volatile",
+    ContextSegmentKind.MEMORY: "volatile",
+    ContextSegmentKind.REALTIME: "volatile",
+    ContextSegmentKind.CURRENT_USER: "current",
+}
+
+
+def segment_volatility(kind: ContextSegmentKind) -> str:
+    return _SEGMENT_VOLATILITY.get(kind, "volatile")
+
+
 @dataclass(frozen=True, slots=True)
 class ContextSegment:
     kind: ContextSegmentKind
@@ -62,6 +83,7 @@ class ContextLedger:
                     "kind": s.kind.value,
                     "source": s.source,
                     "token_estimate": s.token_estimate,
+                    "volatility": segment_volatility(s.kind),
                     "metadata": s.metadata,
                 }
                 for s in self.kept_segments
@@ -141,4 +163,5 @@ __all__ = [
     "ContextSegment",
     "ContextSegmentKind",
     "DroppedContextSegment",
+    "segment_volatility",
 ]

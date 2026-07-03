@@ -144,6 +144,82 @@ async def test_assembles_structured_system_background_and_current_user() -> None
     assert msgs[-1].role is MessageRole.USER
 
 
+async def _seed_history(history: HistoryManager, n_turns: int) -> None:
+    for i in range(n_turns):
+        for role, tag in ((MessageRole.USER, "u"), (MessageRole.ASSISTANT, "a")):
+            await history.append(
+                conversation_id="c1",
+                message=ChatMessage(
+                    id=uuid.uuid4().hex,
+                    role=role,
+                    content=f"turn-{i}-{tag}",
+                    created_at=_now(),
+                ),
+            )
+
+
+async def test_history_window_stays_tight_when_memory_healthy() -> None:
+    history = HistoryManager()
+    await _seed_history(history, 8)
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas("[PERSONA]\nhi"),
+        instance_locator=_locator,
+        history_manager=history,
+        memory_port=_StubMemory("some memory", degraded=False),
+        history_window=4,
+        degraded_history_window=12,
+    )
+    ti = make_turn_input("现在的问题")
+    system = (await compiler.compile(ti))[0].content
+    # Healthy memory → only the tight window (last 4 messages = turns 6,7).
+    assert "turn-7-a" in system
+    assert "turn-6-u" in system
+    assert "turn-5-a" not in system
+    assert ti.metadata["history_window_applied"]["effective"] == 4
+    assert ti.metadata["history_window_applied"]["expanded_for_degraded_memory"] is False
+
+
+async def test_history_window_expands_when_memory_degraded() -> None:
+    history = HistoryManager()
+    # 6 turns = 12 messages, exactly the degraded window.
+    await _seed_history(history, 6)
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas("[PERSONA]\nhi"),
+        instance_locator=_locator,
+        history_manager=history,
+        memory_port=_StubMemory("", degraded=True, degraded_reason="memory_unavailable"),
+        history_window=4,
+        degraded_history_window=12,
+        context_budget_mode="disabled",
+    )
+    ti = make_turn_input("现在的问题")
+    system = (await compiler.compile(ti))[0].content
+    # Degraded memory → widen the window so a long chat doesn't go amnesiac.
+    assert "turn-0-u" in system
+    assert "turn-5-a" in system
+    assert ti.metadata["history_window_applied"]["effective"] == 12
+    assert ti.metadata["history_window_applied"]["expanded_for_degraded_memory"] is True
+
+
+async def test_ledger_records_segment_volatility() -> None:
+    history = HistoryManager()
+    await _seed_history(history, 1)
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas("[PERSONA]\nhi"),
+        instance_locator=_locator,
+        history_manager=history,
+        memory_port=_StubMemory("mem"),
+    )
+    ti = make_turn_input("问题")
+    await compiler.compile(ti)
+    ledger = ti.metadata["context_ledger"]
+    vol = {s["kind"]: s["volatility"] for s in ledger["segments"]}
+    assert vol["persona"] == "stable"
+    assert vol["harness_policy"] == "stable"
+    assert vol.get("memory") == "volatile"
+    assert vol["current_user"] == "current"
+
+
 async def test_topic_switch_fences_off_prior_topic_history() -> None:
     history = HistoryManager()
     for i in range(4):
