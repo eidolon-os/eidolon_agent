@@ -16,6 +16,11 @@ from eidolon_agent.domain.personas.registry import PersonaTemplateRegistry
 from eidolon_agent.domain.personas.runtime_state import PersonaRuntimeStateStore
 from eidolon_agent.domain.personas.service import PersonasService
 from eidolon_agent.domain.personas.template_renderer import render_template_markdown
+from eidolon_agent.domain.personas.voice import (
+    PersonaCard,
+    PersonaVoice,
+    card_from_persona,
+)
 from eidolon_agent.domain.personas.types import (
     Attention,
     AttentionTarget,
@@ -47,6 +52,7 @@ __all__ = [
     "Energy",
     "MoodVector",
     "PersonaAutoEvolutionPolicy",
+    "PersonaCard",
     "PersonaCompiler",
     "PersonaEvolutionEngine",
     "PersonaEvolutionEvent",
@@ -66,7 +72,9 @@ __all__ = [
     "PersonaTemplate",
     "PersonaTemplateRegistry",
     "PersonaTemplateSummary",
+    "PersonaVoice",
     "PersonasService",
     "YamlCompanionPersonaStore",
+    "card_from_persona",
     "render_template_markdown",
 ]

@@ -51,6 +51,7 @@ from eidolon_agent.domain.long_tasks import LongTaskResultSummarizer
 from eidolon_agent.domain.personas import (
     PersonasService,
     PersonaTemplateRegistry,
+    PersonaVoice,
     YamlCompanionPersonaStore,
 )
 from eidolon_agent.domain.personas.ports import PersonaEventPort
@@ -228,7 +229,10 @@ async def build_application(
                 http_timeout_s=settings.long_task.worker_http_timeout_s,
                 lease_s=settings.long_task.worker_lease_s,
             ),
-            result_summarizer=LongTaskResultSummarizer(llm_router),
+            result_summarizer=LongTaskResultSummarizer(
+                llm_router,
+                persona_voice=PersonaVoice(personas_service),
+            ),
             event_bus=container.event_bus,
         )
         long_task_worker.start()

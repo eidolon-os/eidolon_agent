@@ -106,6 +106,10 @@ class StyleCompiler(BaseModel):
 
     knob_mappings: dict[str, tuple[StyleRange, ...]] = Field(default_factory=dict)
     base_instructions: tuple[str, ...] = ()
+    # Hot-path canned lines a persona may override (keyed by, e.g.,
+    # "tool_preamble", "slow_tool_hint", "refuse"). Read via PersonaVoice.phrase
+    # on the latency-critical path — template lookups only, never LLM-rendered.
+    spoken_phrases: dict[str, str] = Field(default_factory=dict)
 
 
 class RetrievedFactHandling(BaseModel):
