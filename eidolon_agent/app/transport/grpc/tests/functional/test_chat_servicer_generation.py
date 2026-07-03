@@ -100,7 +100,87 @@ async def test_explicit_cancel_drops_late_events(monkeypatch) -> None:
         context,
     )
 
-    assert context.written == []
+    # The cancel is acknowledged explicitly; no turn events leak after it.
+    assert len(context.written) == 1
+    ack = context.written[0]
+    assert ack.kind == pb.TurnEvent.ACK
+    assert ack.data["cancelled_turn_id"] == "to-cancel"
+    assert ack.data["already_done"] is False
+
+
+async def test_cancel_of_finished_turn_acks_already_done(monkeypatch) -> None:
+    identity = Identity(
+        owner_id="owner-1",
+        companion_id="companion-1",
+        device_id="dev-1",
+        memory_realm_id="realm-1",
+        genome_id="genome-1",
+    )
+    monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
+    context = _Context()
+    servicer = EidolonAgentServicer(
+        agent_registry=_Registry([_ImmediateAgent("hi")]),
+        signals_bus=_Signals(),
+        proactive_bus=None,
+    )
+
+    await servicer.Chat(
+        _Requests(
+            [pb.ChatRequest(cancel=pb.CancelTurn(turn_id="never-started"))]
+        ),
+        context,
+    )
+
+    assert len(context.written) == 1
+    ack = context.written[0]
+    assert ack.kind == pb.TurnEvent.ACK
+    assert ack.data["cancelled_turn_id"] == "never-started"
+    assert ack.data["already_done"] is True
+
+
+async def test_cancel_played_chars_stashed_on_turn_input(monkeypatch) -> None:
+    identity = Identity(
+        owner_id="owner-1",
+        companion_id="companion-1",
+        device_id="dev-1",
+        memory_realm_id="realm-1",
+        genome_id="genome-1",
+    )
+    monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
+    agent = _CapturingLateAgent()
+    context = _Context()
+    servicer = EidolonAgentServicer(
+        agent_registry=_Registry([agent]),
+        signals_bus=_Signals(),
+        proactive_bus=None,
+    )
+
+    await servicer.Chat(
+        _YieldingRequests(
+            [
+                pb.ChatRequest(
+                    start=pb.StartTurn(
+                        turn_id="to-truncate",
+                        conversation_id="conv",
+                        text="讲个故事",
+                    )
+                ),
+                pb.ChatRequest(
+                    cancel=pb.CancelTurn(
+                        turn_id="to-truncate",
+                        played_chars=7,
+                        played_ms=1234.5,
+                    )
+                ),
+            ]
+        ),
+        context,
+    )
+
+    assert agent.ti is not None
+    assert agent.ti.metadata["termination_cause"] == "client_cancel"
+    assert agent.ti.metadata["cancel_played_chars"] == 7
+    assert agent.ti.metadata["cancel_played_ms"] == 1234.5
 
 
 async def test_parallel_conversations_do_not_supersede_each_other(monkeypatch) -> None:
@@ -181,6 +261,18 @@ class _LateAfterCancelAgent:
             yield TurnEvent.done(ti.turn_id, 1, TurnStatus.OK, 0.0)
 
 
+class _CapturingLateAgent:
+    """Never finishes on its own; captures the TurnInput for assertions."""
+
+    def __init__(self) -> None:
+        self.ti = None
+
+    async def run_turn(self, ti):
+        self.ti = ti
+        await asyncio.sleep(1)
+        yield TurnEvent.done(ti.turn_id, 0, TurnStatus.OK, 0.0)
+
+
 class _ImmediateAgent:
     def __init__(self, text: str) -> None:
         self._text = text
@@ -217,6 +309,14 @@ class _Requests:
         if not self._frames:
             raise StopAsyncIteration
         return self._frames.pop(0)
+
+
+class _YieldingRequests(_Requests):
+    """Yields to the event loop between frames so spawned turns get to run."""
+
+    async def __anext__(self):
+        await asyncio.sleep(0)
+        return await super().__anext__()
 
 
 class _Context:

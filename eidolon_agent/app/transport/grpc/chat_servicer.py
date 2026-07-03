@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 
 import grpc
@@ -24,7 +25,12 @@ from eidolon_agent.core.types.identity import (
     derive_runtime_caller_id,
 )
 from eidolon_agent.core.types.signal import SignalDigest
-from eidolon_agent.core.types.turn import TurnInput, TurnTrigger
+from eidolon_agent.core.types.turn import (
+    TurnEvent,
+    TurnEventKind,
+    TurnInput,
+    TurnTrigger,
+)
 from eidolon_agent.domain.signals import SignalFuser
 
 _log = logging.getLogger(__name__)
@@ -57,6 +63,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         active_turns: set[asyncio.Task] = set()
         active_by_conversation: dict[str, asyncio.Task] = {}
         conversation_by_turn: dict[str, str] = {}
+        input_by_turn: dict[str, TurnInput] = {}
         generation_by_conversation: dict[str, int] = {}
         write_lock = asyncio.Lock()
         last_session_id: str | None = None
@@ -80,14 +87,50 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 payload = frame.WhichOneof("payload")
                 if payload == "cancel":
                     # Explicit cancel of a specific turn from the client.
+                    cancel_turn_id = frame.cancel.turn_id
+                    cancelled_live = False
                     for task in list(active_turns):
-                        if not task.done() and task.get_name() == f"turn-{frame.cancel.turn_id}":
-                            conv_id = conversation_by_turn.get(frame.cancel.turn_id)
+                        if not task.done() and task.get_name() == f"turn-{cancel_turn_id}":
+                            conv_id = conversation_by_turn.get(cancel_turn_id)
                             if conv_id:
                                 generation_by_conversation[conv_id] = (
                                     generation_by_conversation.get(conv_id, 0) + 1
                                 )
+                            # Stash the barge-in playback boundary on the
+                            # TurnInput before cancelling so the post-turn
+                            # persistence path can truncate the assistant text
+                            # to what the user actually heard.
+                            cancelled_ti = input_by_turn.get(cancel_turn_id)
+                            if cancelled_ti is not None:
+                                cancelled_ti.metadata["termination_cause"] = "client_cancel"
+                                if frame.cancel.HasField("played_chars"):
+                                    cancelled_ti.metadata["cancel_played_chars"] = int(
+                                        frame.cancel.played_chars
+                                    )
+                                if frame.cancel.HasField("played_ms"):
+                                    cancelled_ti.metadata["cancel_played_ms"] = float(
+                                        frame.cancel.played_ms
+                                    )
                             task.cancel()
+                            cancelled_live = True
+                    # Acknowledge the cancel so the client can distinguish
+                    # "cancel landed" from "turn had already finished" without
+                    # waiting for (or missing) the DONE event.
+                    async with write_lock:
+                        await context.write(
+                            turn_event_to_proto(
+                                TurnEvent(
+                                    turn_id=cancel_turn_id,
+                                    seq=0,
+                                    kind=TurnEventKind.ACK,
+                                    data={
+                                        "cancelled_turn_id": cancel_turn_id,
+                                        "already_done": not cancelled_live,
+                                    },
+                                    ts=time.time(),
+                                )
+                            )
+                        )
                     continue
                 if payload == "signal":
                     if last_session_id:
@@ -209,12 +252,14 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 active_turns.add(task)
                 active_by_conversation[conversation_id] = task
                 conversation_by_turn[ti.turn_id] = conversation_id
+                input_by_turn[ti.turn_id] = ti
 
                 def _discard_done(
                     done_task, *, conv_id=conversation_id, gen=generation, turn_id=ti.turn_id
                 ):
                     active_turns.discard(done_task)
                     conversation_by_turn.pop(turn_id, None)
+                    input_by_turn.pop(turn_id, None)
                     if (
                         generation_by_conversation.get(conv_id) == gen
                         and active_by_conversation.get(conv_id) is done_task
