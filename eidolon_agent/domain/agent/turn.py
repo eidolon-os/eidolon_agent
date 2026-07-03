@@ -257,6 +257,7 @@ class TurnEngine:
             control = self._control.classify(ti.text)
             ti.metadata["control_intent"] = control.intent.value
             if control.short_circuit:
+                ti.metadata["termination_cause"] = TerminationCause.USER_STOP.value
                 yield TurnEvent.done(
                     ti.turn_id,
                     seq.next(),
@@ -635,6 +636,8 @@ class TurnEngine:
                     triage=triage_kind.value,
                     caller_kind=ti.caller.caller_kind.value,
                     model=getattr(self._llm, "model_id", None),
+                    control_intent=ti.metadata.get("control_intent"),
+                    termination_cause=ti.metadata.get("termination_cause"),
                     latency=LatencyBreakdown(
                         guard_ms=_duration(ts_guard_ms, None),
                         triage_ms=_duration(ts_triage_ms, ts_guard_ms),

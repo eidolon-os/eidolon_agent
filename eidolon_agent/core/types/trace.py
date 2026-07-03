@@ -113,6 +113,10 @@ class TurnTrace:
     caller_kind: str | None
     model: str | None
     latency: LatencyBreakdown
+    # Reflex-layer control classification (P0-A) + why the turn ended, so a
+    # STOP short-circuit or topic switch is observable end to end.
+    control_intent: str | None = None
+    termination_cause: str | None = None
     context_ledger: dict[str, Any] | None = None
     memory_trace: dict[str, Any] | None = None
     memory_recall_query: dict[str, Any] | None = None
@@ -145,6 +149,8 @@ class TurnTrace:
                 "triage": self.triage,
                 "caller_kind": self.caller_kind,
                 "model": self.model,
+                "control_intent": self.control_intent,
+                "termination_cause": self.termination_cause,
             },
             "latency": self.latency.to_metadata(),
             "context_ledger": self.context_ledger,

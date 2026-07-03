@@ -119,12 +119,16 @@ async def test_stop_utterance_short_circuits_without_llm(turn_engine_factory):
             yield  # pragma: no cover
 
     engine = turn_engine_factory(llm=_BoomLLM())
-    events = [ev async for ev in engine.run(make_turn_input("停，别说了"))]
+    ti = make_turn_input("停，别说了")
+    events = [ev async for ev in engine.run(ti)]
 
     assert [e for e in events if e.kind.value == "delta"] == []
     done = [e for e in events if e.kind.value == "done"]
     assert done and done[0].data["termination_cause"] == "user_stop"
     assert done[0].data["control_intent"] == "hard_stop"
+    # Observable end to end: the control decision lands on the turn trace.
+    assert ti.metadata["control_intent"] == "hard_stop"
+    assert ti.metadata["termination_cause"] == "user_stop"
 
 
 @pytest.mark.asyncio
