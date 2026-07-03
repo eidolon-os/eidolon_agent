@@ -22,6 +22,8 @@ def _port(*, session_call=None, session_close=None, pub_methods=None):
     session = MagicMock()
     session.call_tool = session_call or AsyncMock(return_value={})
     session.close = session_close or AsyncMock()
+    # Capability negotiation: default to "server advertises everything".
+    session.supports = AsyncMock(return_value=True)
 
     pool = MagicMock()
     pool.session_for = AsyncMock(return_value=session)
@@ -415,6 +417,16 @@ async def test_forget_returns_zero_when_unsupported() -> None:
     call = AsyncMock(side_effect=RuntimeError("no such tool"))
     port, *_ = _port(session_call=call)
     assert await port.forget("owner-1", "companion-1", "realm-1", "device-1", "x") == 0
+
+
+async def test_forget_skips_call_when_capability_absent() -> None:
+    # Capability negotiation: server does not advertise forget -> no round-trip.
+    call = AsyncMock(return_value={"removed": 5})
+    port, session, *_ = _port(session_call=call)
+    session.supports = AsyncMock(return_value=False)
+    removed = await port.forget("owner-1", "companion-1", "realm-1", "device-1", "x")
+    assert removed == 0
+    call.assert_not_awaited()  # negotiated away, not attempted-and-failed
 
 
 # ---- health / close -------------------------------------------------------

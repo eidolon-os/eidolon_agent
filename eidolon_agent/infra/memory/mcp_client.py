@@ -32,6 +32,11 @@ class McpUserSession:
         self._client_cm = None
         self._http_client: httpx.AsyncClient | None = None
         self._lock = asyncio.Lock()
+        # Capability negotiation: the set of tool names the server advertises,
+        # probed once via list_tools and cached. None = not yet / couldn't
+        # probe, which callers treat as "unknown, attempt anyway" so gating
+        # never regresses behaviour when the probe itself fails.
+        self._tool_names: frozenset[str] | None = None
 
     async def _ensure(self):  # type: ignore[no-untyped-def]
         if self._session is not None:
@@ -85,6 +90,32 @@ class McpUserSession:
             return {"records": decoded}
         return {"result": decoded}
 
+    async def tool_names(self) -> frozenset[str] | None:
+        """Best-effort set of tool names the server advertises (cached).
+
+        Returns None if the server couldn't be probed; callers treat that as
+        "unknown — attempt anyway" so capability negotiation is strictly an
+        improvement over blind calls, never a regression.
+        """
+        if self._tool_names is not None:
+            return self._tool_names
+        try:
+            session = await self._ensure()
+            result = await session.list_tools()
+        except Exception:
+            return None
+        names = frozenset(
+            getattr(tool, "name", "")
+            for tool in (getattr(result, "tools", None) or [])
+        )
+        self._tool_names = names
+        return names
+
+    async def supports(self, name: str) -> bool:
+        """Whether the server advertises ``name`` (optimistic when unknown)."""
+        names = await self.tool_names()
+        return True if names is None else name in names
+
     def matches(self, *, mcp_url: str, bearer_token: str | None) -> bool:
         return self._url == mcp_url and self._token == bearer_token
 
@@ -107,6 +138,8 @@ class McpUserSession:
             except Exception:
                 pass
             self._http_client = None
+        # Re-probe capabilities after a reconnect (server may have changed).
+        self._tool_names = None
 
 
 def _decode_call_tool_result(result: Any) -> Any:

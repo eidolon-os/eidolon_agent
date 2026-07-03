@@ -240,6 +240,52 @@ async def test_call_tool_wraps_scalar_decode_in_result_key() -> None:
     assert out == {"result": 42}
 
 
+# ---- capability negotiation ----------------------------------------------
+
+
+async def test_supports_true_when_server_advertises_tool() -> None:
+    sess = _make_session({})
+    sess._session.list_tools = AsyncMock(
+        return_value=SimpleNamespace(
+            tools=[SimpleNamespace(name="eidolon_memory_recall_context"),
+                   SimpleNamespace(name="eidolon_memory_forget")]
+        )
+    )
+    assert await sess.supports("eidolon_memory_forget") is True
+    assert await sess.tool_names() == frozenset(
+        {"eidolon_memory_recall_context", "eidolon_memory_forget"}
+    )
+
+
+async def test_supports_false_when_tool_absent() -> None:
+    sess = _make_session({})
+    sess._session.list_tools = AsyncMock(
+        return_value=SimpleNamespace(
+            tools=[SimpleNamespace(name="eidolon_memory_recall_context")]
+        )
+    )
+    assert await sess.supports("eidolon_memory_forget") is False
+
+
+async def test_supports_optimistic_when_probe_fails() -> None:
+    # list_tools failing must NOT block calls — unknown means "attempt anyway".
+    sess = _make_session({})
+    sess._session.list_tools = AsyncMock(side_effect=RuntimeError("probe failed"))
+    assert await sess.tool_names() is None
+    assert await sess.supports("eidolon_memory_forget") is True
+
+
+async def test_tool_names_cached_after_first_probe() -> None:
+    sess = _make_session({})
+    probe = AsyncMock(
+        return_value=SimpleNamespace(tools=[SimpleNamespace(name="a")])
+    )
+    sess._session.list_tools = probe
+    await sess.supports("a")
+    await sess.supports("a")
+    probe.assert_awaited_once()  # cached, probed once
+
+
 async def test_call_tool_raises_memory_unavailable_on_exception() -> None:
     sess = _make_session(None, raise_on_call=True)
     with pytest.raises(MemoryUnavailableError, match="upstream broken"):

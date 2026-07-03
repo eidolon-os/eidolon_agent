@@ -277,8 +277,11 @@ class EidolonMemoryPort:
         *,
         session_id: str | None = None,
     ) -> int:
-        # The memory service exposes ``eidolon_memory_forget`` via MCP in newer versions;
-        # if absent, we no-op safely. Production should branch on capability negotiation.
+        # ``eidolon_memory_forget`` is an optional MCP capability (present only
+        # in newer memory versions). Negotiate first: if the server does not
+        # advertise it, skip cleanly with no error round-trip. If capability is
+        # unknown (probe failed), fall through and attempt — the try/except
+        # still catches an absent tool, so this never regresses.
         ctx = build_memory_actor_context(
             owner_id=owner_id,
             companion_id=companion_id,
@@ -287,6 +290,12 @@ class EidolonMemoryPort:
             session_id=session_id,
         )
         session = await self._pool.session_for(ctx.memory_space_id)
+        if not await session.supports("eidolon_memory_forget"):
+            _log.info(
+                "memory forget capability absent for memory_space=%s; skipping",
+                ctx.memory_space_id,
+            )
+            return 0
         try:
             result = await session.call_tool(
                 "eidolon_memory_forget",
