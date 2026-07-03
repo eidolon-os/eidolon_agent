@@ -13,6 +13,7 @@ import time
 import uuid
 
 import grpc
+from eidolon_sdk.biz.chat_stream import TerminationCause
 
 from eidolon_agent.app.transport.grpc.codec import struct_to_dict, turn_event_to_proto
 from eidolon_agent.app.transport.grpc.interceptors import current_identity
@@ -102,7 +103,9 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                             # to what the user actually heard.
                             cancelled_ti = input_by_turn.get(cancel_turn_id)
                             if cancelled_ti is not None:
-                                cancelled_ti.metadata["termination_cause"] = "client_cancel"
+                                cancelled_ti.metadata["termination_cause"] = (
+                                    TerminationCause.CLIENT_CANCEL.value
+                                )
                                 if frame.cancel.HasField("played_chars"):
                                     cancelled_ti.metadata["cancel_played_chars"] = int(
                                         frame.cancel.played_chars

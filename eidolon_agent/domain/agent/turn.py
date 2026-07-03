@@ -29,6 +29,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from eidolon_sdk.biz.chat_stream import DeltaRole, TerminationCause
 from eidolon_sdk.biz.dialogue_control import InterruptIntent
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
@@ -85,7 +86,7 @@ class ToolLatencyPolicy:
 
     slow_hint_delay_s: float = 1.5
     slow_hint_text: str = "稍等，我处理一下。"
-    slow_hint_role: str = "slow_tool_hint"
+    slow_hint_role: str = DeltaRole.SLOW_TOOL_HINT.value
 
 
 class TurnEngine:
@@ -261,7 +262,7 @@ class TurnEngine:
                     seq.next(),
                     TurnStatus.OK,
                     time.time(),
-                    termination_cause="user_stop",
+                    termination_cause=TerminationCause.USER_STOP.value,
                     control_intent=control.intent.value,
                 )
                 return
