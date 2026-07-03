@@ -51,7 +51,7 @@ async def test_turn_submits_persona_interaction(turn_engine_factory, personas_se
     # _post_turn runs as a fire-and-forget task after DONE is yielded.
     await engine._background.drain(timeout_s=1)
     await personas_service._worker.drain_once()
-    runtime_state = await personas_service._runtime.snapshot(instance_id="companion-test")
+    runtime_state = await personas_service._runtime.snapshot(companion_id="companion-test")
     assert "注意力在用户身上" in runtime_state.to_prompt_hint()
 
 

@@ -5,14 +5,14 @@ from __future__ import annotations
 from collections import defaultdict
 
 from eidolon_agent.core.types.memory import MemoryHit
-from eidolon_agent.domain.personas.types import AdaptedMemoryContext, PersonaInstance
+from eidolon_agent.domain.personas.types import AdaptedMemoryContext, CompanionPersona
 
 
 class PersonaMemoryAdapter:
     def adapt(
         self,
         *,
-        instance: PersonaInstance,
+        instance: CompanionPersona,
         formatted_context: str,
         hits: list[MemoryHit],
         degraded: bool = False,

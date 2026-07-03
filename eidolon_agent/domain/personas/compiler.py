@@ -1,12 +1,12 @@
-"""Compile a persona instance into LLM-facing prompt text."""
+"""Compile a companion persona into LLM-facing prompt text."""
 
 from __future__ import annotations
 
 from eidolon_agent.domain.personas.types import (
     AdaptedMemoryContext,
     BehavioralKnob,
+    CompanionPersona,
     CompiledPersona,
-    PersonaInstance,
     PersonaRuntimeState,
 )
 
@@ -15,7 +15,7 @@ class PersonaCompiler:
     def compile(
         self,
         *,
-        instance: PersonaInstance,
+        instance: CompanionPersona,
         adapted_memory: AdaptedMemoryContext | None = None,
         runtime_state: PersonaRuntimeState | None = None,
         realtime: dict | None = None,
@@ -40,8 +40,8 @@ class PersonaCompiler:
             parts.append(realtime_block)
 
         return CompiledPersona(
-            instance_id=instance.instance_id,
-            overlay_version=instance.overlay_version,
+            companion_id=instance.companion_id,
+            version=instance.version,
             system_prompt="\n\n".join(parts),
             identity_block=identity_block,
             style_block=style_block,
@@ -55,7 +55,7 @@ class PersonaCompiler:
         )
 
 
-def _identity_block(instance: PersonaInstance) -> str:
+def _identity_block(instance: CompanionPersona) -> str:
     core = instance.identity_core
     lines = [
         f"你是「{instance.metadata.name}」（{instance.metadata.archetype}）。",
@@ -71,7 +71,7 @@ def _identity_block(instance: PersonaInstance) -> str:
 
 
 def _style_block(
-    instance: PersonaInstance,
+    instance: CompanionPersona,
     effective_knobs: dict[str, BehavioralKnob],
 ) -> tuple[str, list[str]]:
     lines = ["人格表现指令："]

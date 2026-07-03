@@ -8,9 +8,9 @@ service interface.
 from eidolon_agent.domain.personas.auto_evolution import PersonaAutoEvolutionPolicy
 from eidolon_agent.domain.personas.compiler import PersonaCompiler
 from eidolon_agent.domain.personas.evolution import PersonaEvolutionEngine
-from eidolon_agent.domain.personas.instance_store import YamlPersonaInstanceStore
+from eidolon_agent.domain.personas.instance_store import YamlCompanionPersonaStore
 from eidolon_agent.domain.personas.memory_adapter import PersonaMemoryAdapter
-from eidolon_agent.domain.personas.ports import PersonaInstanceStore
+from eidolon_agent.domain.personas.ports import CompanionPersonaStore
 from eidolon_agent.domain.personas.reflection import PersonaReflectionEngine
 from eidolon_agent.domain.personas.registry import PersonaTemplateRegistry
 from eidolon_agent.domain.personas.runtime_state import PersonaRuntimeStateStore
@@ -19,13 +19,13 @@ from eidolon_agent.domain.personas.template_renderer import render_template_mark
 from eidolon_agent.domain.personas.types import (
     Attention,
     AttentionTarget,
+    CompanionPersona,
     CompiledPersona,
     Energy,
     MoodVector,
     PersonaEvolutionEvent,
     PersonaEvolutionProposal,
     PersonaEvolutionResult,
-    PersonaInstance,
     PersonaInteractionEvent,
     PersonaMockResult,
     PersonaObservation,
@@ -41,6 +41,8 @@ from eidolon_agent.domain.personas.types import (
 __all__ = [
     "Attention",
     "AttentionTarget",
+    "CompanionPersona",
+    "CompanionPersonaStore",
     "CompiledPersona",
     "Energy",
     "MoodVector",
@@ -50,8 +52,6 @@ __all__ = [
     "PersonaEvolutionEvent",
     "PersonaEvolutionProposal",
     "PersonaEvolutionResult",
-    "PersonaInstance",
-    "PersonaInstanceStore",
     "PersonaInteractionEvent",
     "PersonaMemoryAdapter",
     "PersonaMockResult",
@@ -67,6 +67,6 @@ __all__ = [
     "PersonaTemplateRegistry",
     "PersonaTemplateSummary",
     "PersonasService",
-    "YamlPersonaInstanceStore",
+    "YamlCompanionPersonaStore",
     "render_template_markdown",
 ]

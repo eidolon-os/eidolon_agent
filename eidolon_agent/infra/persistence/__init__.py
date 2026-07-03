@@ -15,7 +15,7 @@ from eidolon_agent.infra.persistence.eidolon_data_persona import (
     EidolonDataCustomTemplateStore,
     EidolonDataEvolutionHistoryStore,
     EidolonDataPersonaEvolutionProposalStore,
-    EidolonDataPersonaInstanceStore,
+    EidolonDataCompanionPersonaStore,
     EidolonDataPersonaObservationStore,
 )
 from eidolon_agent.infra.persistence.eidolon_data_runtime import (
@@ -38,7 +38,7 @@ __all__ = [
     "EidolonDataLongTaskStore",
     "EidolonDataMemoryFanoutStatusSink",
     "EidolonDataPersonaEvolutionProposalStore",
-    "EidolonDataPersonaInstanceStore",
+    "EidolonDataCompanionPersonaStore",
     "EidolonDataPersonaObservationStore",
     "build_eidolon_data_history_hydrator",
     "build_eidolon_data_turn_persister",

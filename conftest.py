@@ -15,7 +15,7 @@ from eidolon_agent.domain.history import HistoryFanout, HistoryManager
 from eidolon_agent.domain.personas import (
     PersonasService,
     PersonaTemplateRegistry,
-    YamlPersonaInstanceStore,
+    YamlCompanionPersonaStore,
 )
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import EmitEventTool, SubmitLongTaskTool
@@ -56,7 +56,7 @@ async def canonical_template_registry():
 
 @pytest.fixture
 def persona_instance_store(tmp_path):
-    return YamlPersonaInstanceStore(tmp_path / "instances")
+    return YamlCompanionPersonaStore(tmp_path / "instances")
 
 
 @pytest.fixture
@@ -104,7 +104,7 @@ async def turn_engine_factory(personas_service, event_bus):
             tools.register(SubmitLongTaskTool(long_task_submitter=long_task_submitter))
             tool_dispatcher = ToolDispatcher(tools)
 
-        def loc(_tenant, _user, _conv):
+        def loc(_owner, _companion, _conv):
             return ("inst-test", "caretaker_jiezhi")
 
         compiler = ContextCompiler(

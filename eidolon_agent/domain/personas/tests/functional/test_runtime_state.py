@@ -13,7 +13,7 @@ pytestmark = pytest.mark.functional
 async def test_runtime_state_updates_and_prompts():
     store = PersonaRuntimeStateStore()
     state = await store.update(
-        instance_id="i",
+        companion_id="i",
         emotion="joy",
         emotion_delta=0.7,
         energy_level=0.9,
@@ -34,7 +34,7 @@ async def test_runtime_state_decays():
         mood=MoodVector(joy=1.0, intensity=1.0, updated_at=old),
         updated_at=old,
     )
-    state = await store.snapshot(instance_id="i")
+    state = await store.snapshot(companion_id="i")
     assert state.mood.joy < 1.0
     assert state.mood.intensity < 1.0
 
@@ -42,16 +42,15 @@ async def test_runtime_state_decays():
 @pytest.mark.asyncio
 async def test_runtime_state_not_written_to_instance_yaml(personas_service, persona_instance_store):
     await personas_service.create_instance(
-        tenant_id="t",
-        user_id="u",
-        instance_id="i-runtime",
+        owner_id="u",
+        companion_id="i-runtime",
         template_id="caretaker_jiezhi",
     )
     await personas_service.update_runtime_state(
-        instance_id="i-runtime",
+        companion_id="i-runtime",
         emotion="sad",
         emotion_delta=0.8,
     )
-    loaded = await persona_instance_store.load("t", "u", "i-runtime")
+    loaded = await persona_instance_store.load("u", "i-runtime")
     assert not hasattr(loaded, "runtime_state")
 

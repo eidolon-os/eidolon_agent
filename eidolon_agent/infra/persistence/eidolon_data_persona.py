@@ -1,10 +1,10 @@
 """Persona persistence backed by ``eidolon_data``.
 
-The persona domain still speaks in ``PersonaInstance`` and proposal/observation
+The persona domain speaks in ``CompanionPersona`` and proposal/observation
 objects. This adapter maps those types onto Eidolon's sovereign schema:
 
 * ``companions`` are the long-lived persona subjects.
-* ``persona_genomes`` hold versioned persona instance snapshots.
+* ``persona_genomes`` hold versioned companion persona snapshots.
 * ``events`` hold custom template state, evolution history, observations, and
   proposal state.
 """
@@ -29,16 +29,16 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from eidolon_agent.core.errors import NotFoundError
 from eidolon_agent.domain.personas.types import (
     BehavioralKnob,
+    CompanionPersona,
     EvolutionState,
     IdentityCore,
     PersonaAssets,
     PersonaEvolutionProposal,
     PersonaEvolutionResult,
-    PersonaInstance,
     PersonaMetadata,
-    StyleCompiler,
     PersonaObservation,
     PersonaTemplate,
+    StyleCompiler,
 )
 from eidolon_agent.infra.persistence.custom_template_types import (
     CustomTemplateAlreadyExists,
@@ -54,49 +54,48 @@ _CUSTOM_TEMPLATE_KEY = "custom_template"
 _CUSTOM_TEMPLATE_KIND = "agent_custom_template"
 
 
-class EidolonDataPersonaInstanceStore:
-    """``PersonaInstanceStore`` implemented on ``persona_genomes``."""
+class EidolonDataCompanionPersonaStore:
+    """``CompanionPersonaStore`` implemented on ``persona_genomes``."""
 
     def __init__(self, data_store: DataStore) -> None:
         self._data_store = data_store
 
-    async def exists(self, tenant_id: str, user_id: str, instance_id: str) -> bool:
-        return await self._load_or_none(tenant_id, user_id, instance_id) is not None
+    async def exists(self, owner_id: str, companion_id: str) -> bool:
+        return await self._load_or_none(owner_id, companion_id) is not None
 
-    async def load(self, tenant_id: str, user_id: str, instance_id: str) -> PersonaInstance:
-        instance = await self._load_or_none(tenant_id, user_id, instance_id)
-        if instance is None:
-            raise NotFoundError(f"persona instance not found: {tenant_id}/{user_id}/{instance_id}")
-        return instance
+    async def load(self, owner_id: str, companion_id: str) -> CompanionPersona:
+        persona = await self._load_or_none(owner_id, companion_id)
+        if persona is None:
+            raise NotFoundError(f"companion persona not found: {owner_id}/{companion_id}")
+        return persona
 
-    async def save(self, instance: PersonaInstance, *, reason: str = "") -> None:
+    async def save(self, persona: CompanionPersona, *, reason: str = "") -> None:
         async with self._data_store.session_factory() as session:
             await _ensure_owner_and_companion(
                 session,
-                owner_id=instance.user_id,
-                tenant_id=instance.tenant_id,
-                companion_id=instance.instance_id,
+                owner_id=persona.owner_id,
+                companion_id=persona.companion_id,
             )
             row = await _get_genome_by_version(
                 session,
-                companion_id=instance.instance_id,
-                version=instance.overlay_version,
+                companion_id=persona.companion_id,
+                version=persona.version,
             )
             now = datetime.now(timezone.utc)
-            genome_json = _instance_to_genome_json(instance, reason=reason)
+            genome_json = _persona_to_genome_json(persona, reason=reason)
             if row is None:
-                genome_id = f"genome-{instance.instance_id}-{instance.overlay_version}"
+                genome_id = f"genome-{persona.companion_id}-{persona.version}"
                 await _insert_ignore(
                     session,
                     PersonaGenomeRow,
                     {
                         "genome_id": genome_id,
-                        "companion_id": instance.instance_id,
-                        "version": instance.overlay_version,
-                        "source_json": _instance_source_json(instance),
+                        "companion_id": persona.companion_id,
+                        "version": persona.version,
+                        "source_json": _persona_source_json(persona),
                         "genome_json": genome_json,
-                        "evolution_state_json": instance.evolution_state.model_dump(mode="json"),
-                        "created_at": instance.created_at,
+                        "evolution_state_json": persona.evolution_state.model_dump(mode="json"),
+                        "created_at": persona.created_at,
                         "updated_at": now,
                     },
                     index_elements=["genome_id"],
@@ -105,12 +104,12 @@ class EidolonDataPersonaInstanceStore:
                 if row is None:
                     raise RuntimeError(f"persona genome insert failed: {genome_id}")
             else:
-                row.source_json = _instance_source_json(instance)
+                row.source_json = _persona_source_json(persona)
                 row.genome_json = genome_json
-                row.evolution_state_json = instance.evolution_state.model_dump(mode="json")
+                row.evolution_state_json = persona.evolution_state.model_dump(mode="json")
                 row.updated_at = now
 
-            companion = await session.get(CompanionRow, instance.instance_id)
+            companion = await session.get(CompanionRow, persona.companion_id)
             if companion is not None:
                 companion.current_genome_id = row.genome_id
                 companion.updated_at = now
@@ -120,18 +119,16 @@ class EidolonDataPersonaInstanceStore:
         self,
         *,
         template: PersonaTemplate,
-        tenant_id: str,
-        user_id: str,
-        instance_id: str,
-    ) -> PersonaInstance:
+        owner_id: str,
+        companion_id: str,
+    ) -> CompanionPersona:
         now = datetime.now(timezone.utc)
-        instance = PersonaInstance(
-            instance_id=instance_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
+        persona = CompanionPersona(
+            companion_id=companion_id,
+            owner_id=owner_id,
             origin_template_id=template.metadata.template_id,
             origin_template_revision=template.metadata.template_revision,
-            overlay_version=1,
+            version=1,
             created_at=now,
             updated_at=now,
             metadata=template.metadata,
@@ -142,10 +139,10 @@ class EidolonDataPersonaInstanceStore:
             evolution_rules=template.evolution_rules,
             assets=template.assets,
         )
-        await self.save(instance, reason="create_from_template")
-        return instance
+        await self.save(persona, reason="create_from_template")
+        return persona
 
-    async def list_all(self) -> list[PersonaInstance]:
+    async def list_all(self) -> list[CompanionPersona]:
         async with self._data_store.session_factory() as session:
             rows = (
                 (
@@ -161,51 +158,50 @@ class EidolonDataPersonaInstanceStore:
                 .scalars()
                 .all()
             )
-            return [_genome_row_to_instance(row) for row in rows]
+            return [_genome_row_to_persona(row) for row in rows]
 
-    async def delete(self, tenant_id: str, user_id: str, instance_id: str) -> None:
+    async def delete(self, owner_id: str, companion_id: str) -> None:
         async with self._data_store.session_factory() as session:
-            companion = await session.get(CompanionRow, instance_id)
-            if companion is not None and companion.owner_id == user_id:
+            companion = await session.get(CompanionRow, companion_id)
+            if companion is not None and companion.owner_id == owner_id:
                 companion.current_genome_id = None
                 companion.status = "deleted"
                 companion.updated_at = datetime.now(timezone.utc)
             await session.execute(
-                delete(PersonaGenomeRow).where(PersonaGenomeRow.companion_id == instance_id)
+                delete(PersonaGenomeRow).where(PersonaGenomeRow.companion_id == companion_id)
             )
             await session.commit()
 
     async def save_with_history(
         self,
-        instance: PersonaInstance,
+        persona: CompanionPersona,
         result: PersonaEvolutionResult,
     ) -> None:
         async with self._data_store.session_factory() as session:
             await _ensure_owner_and_companion(
                 session,
-                owner_id=instance.user_id,
-                tenant_id=instance.tenant_id,
-                companion_id=instance.instance_id,
+                owner_id=persona.owner_id,
+                companion_id=persona.companion_id,
             )
             row = await _get_genome_by_version(
                 session,
-                companion_id=instance.instance_id,
-                version=instance.overlay_version,
+                companion_id=persona.companion_id,
+                version=persona.version,
             )
             now = datetime.now(timezone.utc)
             if row is None:
-                genome_id = f"genome-{instance.instance_id}-{instance.overlay_version}"
+                genome_id = f"genome-{persona.companion_id}-{persona.version}"
                 await _insert_ignore(
                     session,
                     PersonaGenomeRow,
                     {
                         "genome_id": genome_id,
-                        "companion_id": instance.instance_id,
-                        "version": instance.overlay_version,
-                        "source_json": _instance_source_json(instance),
-                        "genome_json": _instance_to_genome_json(instance, reason="save_with_history"),
-                        "evolution_state_json": instance.evolution_state.model_dump(mode="json"),
-                        "created_at": instance.created_at,
+                        "companion_id": persona.companion_id,
+                        "version": persona.version,
+                        "source_json": _persona_source_json(persona),
+                        "genome_json": _persona_to_genome_json(persona, reason="save_with_history"),
+                        "evolution_state_json": persona.evolution_state.model_dump(mode="json"),
+                        "created_at": persona.created_at,
                         "updated_at": now,
                     },
                     index_elements=["genome_id"],
@@ -214,18 +210,18 @@ class EidolonDataPersonaInstanceStore:
                 if row is None:
                     raise RuntimeError(f"persona genome insert failed: {genome_id}")
             else:
-                row.genome_json = _instance_to_genome_json(instance, reason="save_with_history")
-                row.evolution_state_json = instance.evolution_state.model_dump(mode="json")
+                row.genome_json = _persona_to_genome_json(persona, reason="save_with_history")
+                row.evolution_state_json = persona.evolution_state.model_dump(mode="json")
                 row.updated_at = now
-            companion = await session.get(CompanionRow, instance.instance_id)
+            companion = await session.get(CompanionRow, persona.companion_id)
             if companion is not None:
                 companion.current_genome_id = row.genome_id
                 companion.updated_at = now
             session.add(
                 _event_row(
-                    owner_id=instance.user_id,
+                    owner_id=persona.owner_id,
                     subject_type="persona",
-                    subject_id=instance.instance_id,
+                    subject_id=persona.companion_id,
                     event_type="persona.evolution.applied",
                     payload_json={_EVOLUTION_KEY: result.model_dump(mode="json")},
                 )
@@ -234,18 +230,17 @@ class EidolonDataPersonaInstanceStore:
 
     async def _load_or_none(
         self,
-        tenant_id: str,
-        user_id: str,
-        instance_id: str,
-    ) -> PersonaInstance | None:
+        owner_id: str,
+        companion_id: str,
+    ) -> CompanionPersona | None:
         async with self._data_store.session_factory() as session:
-            row = await _get_current_genome(session, companion_id=instance_id)
+            row = await _get_current_genome(session, companion_id=companion_id)
             if row is None:
                 return None
-            instance = _genome_row_to_instance(row, owner_id=user_id)
-            if instance.tenant_id != tenant_id or instance.user_id != user_id:
+            persona = _genome_row_to_persona(row, owner_id=owner_id)
+            if persona.owner_id != owner_id:
                 return None
-            return instance
+            return persona
 
 
 class EidolonDataEvolutionHistoryStore:
@@ -258,13 +253,13 @@ class EidolonDataEvolutionHistoryStore:
         await self.record(result)
 
     async def record(self, result: PersonaEvolutionResult) -> None:
-        owner_id = await self._owner_for_instance(result.instance_id)
+        owner_id = await self._owner_for_companion(result.companion_id)
         async with self._data_store.session_factory() as session:
             session.add(
                 _event_row(
                     owner_id=owner_id,
                     subject_type="persona",
-                    subject_id=result.instance_id,
+                    subject_id=result.companion_id,
                     event_type="persona.evolution.applied",
                     payload_json={_EVOLUTION_KEY: result.model_dump(mode="json")},
                 )
@@ -272,7 +267,7 @@ class EidolonDataEvolutionHistoryStore:
             await session.commit()
 
     async def list_for_instance(
-        self, instance_id: str, *, limit: int = 50
+        self, companion_id: str, *, limit: int = 50
     ) -> list[PersonaEvolutionResult]:
         async with self._data_store.session_factory() as session:
             rows = (
@@ -280,7 +275,7 @@ class EidolonDataEvolutionHistoryStore:
                     await session.execute(
                         select(EventRow)
                         .where(EventRow.subject_type == "persona")
-                        .where(EventRow.subject_id == instance_id)
+                        .where(EventRow.subject_id == companion_id)
                         .where(EventRow.event_type == "persona.evolution.applied")
                         .order_by(desc(EventRow.created_at))
                         .limit(limit)
@@ -298,9 +293,9 @@ class EidolonDataEvolutionHistoryStore:
                 return None
             return _event_to_evolution(row)
 
-    async def _owner_for_instance(self, instance_id: str) -> str:
+    async def _owner_for_companion(self, companion_id: str) -> str:
         async with self._data_store.session_factory() as session:
-            companion = await session.get(CompanionRow, instance_id)
+            companion = await session.get(CompanionRow, companion_id)
             return companion.owner_id if companion is not None else "owner-default"
 
 
@@ -314,13 +309,12 @@ class EidolonDataPersonaObservationStore:
         async with self._data_store.session_factory() as session:
             await _ensure_owner_and_companion(
                 session,
-                owner_id=observation.user_id,
-                tenant_id=observation.tenant_id,
-                companion_id=observation.instance_id,
+                owner_id=observation.owner_id,
+                companion_id=observation.companion_id,
             )
             session.add(
                 _event_row(
-                    owner_id=observation.user_id,
+                    owner_id=observation.owner_id,
                     subject_type="persona_observation",
                     subject_id=observation.id,
                     event_type="persona.observation.saved",
@@ -331,13 +325,13 @@ class EidolonDataPersonaObservationStore:
 
     async def list_for_instance(
         self,
-        instance_id: str,
+        companion_id: str,
         *,
         status: str | None = None,
         limit: int = 50,
     ) -> list[PersonaObservation]:
         observations = await self._latest_observations()
-        rows = [item for item in observations if item.instance_id == instance_id]
+        rows = [item for item in observations if item.companion_id == companion_id]
         if status is not None:
             rows = [item for item in rows if item.status == status]
         rows.sort(key=lambda item: item.created_at, reverse=True)
@@ -389,13 +383,12 @@ class EidolonDataPersonaEvolutionProposalStore:
         async with self._data_store.session_factory() as session:
             await _ensure_owner_and_companion(
                 session,
-                owner_id=proposal.user_id,
-                tenant_id=proposal.tenant_id,
-                companion_id=proposal.instance_id,
+                owner_id=proposal.owner_id,
+                companion_id=proposal.companion_id,
             )
             session.add(
                 _event_row(
-                    owner_id=proposal.user_id,
+                    owner_id=proposal.owner_id,
                     subject_type="persona_proposal",
                     subject_id=proposal.id,
                     event_type="persona.proposal.saved",
@@ -406,7 +399,7 @@ class EidolonDataPersonaEvolutionProposalStore:
 
     async def list_for_instance(
         self,
-        instance_id: str,
+        companion_id: str,
         *,
         status: str | None = None,
         limit: int = 50,
@@ -414,7 +407,7 @@ class EidolonDataPersonaEvolutionProposalStore:
         proposals = [
             item
             for item in (await self._latest_proposals_by_id()).values()
-            if item.instance_id == instance_id
+            if item.companion_id == companion_id
         ]
         if status is not None:
             proposals = [item for item in proposals if item.status == status]
@@ -461,10 +454,10 @@ class EidolonDataCustomTemplateStore:
     async def exists(self, template_id: str) -> bool:
         return await self.get(template_id) is not None
 
-    async def list_all(self, *, tenant_id: str | None = None) -> list[CustomTemplateView]:
+    async def list_all(self, *, owner_id: str | None = None) -> list[CustomTemplateView]:
         rows = list((await self._latest_templates_by_id()).values())
-        if tenant_id is not None:
-            rows = [row for row in rows if row.tenant_id == tenant_id]
+        if owner_id is not None:
+            rows = [row for row in rows if row.owner_id == owner_id]
         rows.sort(key=lambda row: row.created_at)
         return rows
 
@@ -472,7 +465,7 @@ class EidolonDataCustomTemplateStore:
         self,
         *,
         template_id: str,
-        tenant_id: str,
+        owner_id: str,
         display_name: str,
         archetype: str,
         yaml_body: str,
@@ -481,10 +474,10 @@ class EidolonDataCustomTemplateStore:
         if await self.exists(template_id):
             raise CustomTemplateAlreadyExists(f"template {template_id!r} already exists")
         async with self._data_store.session_factory() as session:
-            await _ensure_owner(session, owner_id=tenant_id, tenant_id=tenant_id, kind="team")
+            await _ensure_owner(session, owner_id=owner_id, kind="team")
             view = CustomTemplateView(
                 template_id=template_id,
-                tenant_id=tenant_id,
+                owner_id=owner_id,
                 display_name=display_name,
                 archetype=archetype,
                 yaml_body=yaml_body,
@@ -495,7 +488,7 @@ class EidolonDataCustomTemplateStore:
             session.add(
                 _custom_template_event(
                     template_id=template_id,
-                    owner_id=tenant_id,
+                    owner_id=owner_id,
                     view=view,
                     event_type="persona_template.custom.saved",
                 )
@@ -516,7 +509,7 @@ class EidolonDataCustomTemplateStore:
         now = datetime.now(timezone.utc)
         view = CustomTemplateView(
             template_id=template_id,
-            tenant_id=current.tenant_id,
+            owner_id=current.owner_id,
             display_name=display_name if display_name is not None else current.display_name,
             archetype=current.archetype,
             yaml_body=yaml_body if yaml_body is not None else current.yaml_body,
@@ -528,7 +521,7 @@ class EidolonDataCustomTemplateStore:
             session.add(
                 _custom_template_event(
                     template_id=template_id,
-                    owner_id=current.tenant_id,
+                    owner_id=current.owner_id,
                     view=view,
                     event_type="persona_template.custom.saved",
                 )
@@ -544,7 +537,7 @@ class EidolonDataCustomTemplateStore:
             session.add(
                 _custom_template_event(
                     template_id=template_id,
-                    owner_id=current.tenant_id,
+                    owner_id=current.owner_id,
                     view=current,
                     event_type="persona_template.custom.deleted",
                     deleted=True,
@@ -601,10 +594,9 @@ async def _ensure_owner_and_companion(
     session,
     *,
     owner_id: str,
-    tenant_id: str,
     companion_id: str,
 ) -> None:
-    await _ensure_owner(session, owner_id=owner_id, tenant_id=tenant_id, kind="person")
+    await _ensure_owner(session, owner_id=owner_id, kind="person")
     await _insert_ignore(
         session,
         CompanionRow,
@@ -613,7 +605,7 @@ async def _ensure_owner_and_companion(
             "owner_id": owner_id,
             "display_name": companion_id,
             "kind": "companion",
-            "metadata_json": {"tenant_id": tenant_id, "source": "eidolon_agent.persona"},
+            "metadata_json": {"source": "eidolon_agent.persona"},
         },
         index_elements=["companion_id"],
     )
@@ -623,13 +615,12 @@ async def _ensure_owner_and_companion(
     else:
         companion.owner_id = owner_id
         metadata = dict(companion.metadata_json or {})
-        metadata.setdefault("tenant_id", tenant_id)
         metadata["source"] = "eidolon_agent.persona"
         companion.metadata_json = metadata
     await session.flush()
 
 
-async def _ensure_owner(session, *, owner_id: str, tenant_id: str, kind: str) -> None:
+async def _ensure_owner(session, *, owner_id: str, kind: str) -> None:
     await _insert_ignore(
         session,
         OwnerRow,
@@ -637,7 +628,7 @@ async def _ensure_owner(session, *, owner_id: str, tenant_id: str, kind: str) ->
             "owner_id": owner_id,
             "display_name": owner_id,
             "kind": kind,
-            "profile_json": {"tenant_id": tenant_id},
+            "profile_json": {},
         },
         index_elements=["owner_id"],
     )
@@ -698,35 +689,38 @@ async def _get_genome_by_version(
     ).scalar_one_or_none()
 
 
-def _instance_to_genome_json(instance: PersonaInstance, *, reason: str = "") -> dict[str, Any]:
+def _persona_to_genome_json(persona: CompanionPersona, *, reason: str = "") -> dict[str, Any]:
     return {
-        _INSTANCE_KEY: instance.model_dump(mode="json"),
-        "tenant_id": instance.tenant_id,
-        "user_id": instance.user_id,
-        "origin_template_id": instance.origin_template_id,
-        "origin_template_revision": instance.origin_template_revision,
-        "overlay_version": instance.overlay_version,
+        _INSTANCE_KEY: persona.model_dump(mode="json"),
+        "owner_id": persona.owner_id,
+        "origin_template_id": persona.origin_template_id,
+        "origin_template_revision": persona.origin_template_revision,
+        "version": persona.version,
         "reason": reason,
     }
 
 
-def _instance_source_json(instance: PersonaInstance) -> dict[str, Any]:
+def _persona_source_json(persona: CompanionPersona) -> dict[str, Any]:
     return {
         "source_type": "template",
-        "template_id": instance.origin_template_id,
-        "template_revision": instance.origin_template_revision,
-        "generated_at": instance.created_at.isoformat(),
+        "template_id": persona.origin_template_id,
+        "template_revision": persona.origin_template_revision,
+        "generated_at": persona.created_at.isoformat(),
     }
 
 
-def _genome_row_to_instance(
+def _genome_row_to_persona(
     row: PersonaGenomeRow,
     *,
     owner_id: str | None = None,
-) -> PersonaInstance:
+) -> CompanionPersona:
     genome_json = row.genome_json or {}
     if _INSTANCE_KEY in genome_json:
-        return PersonaInstance.model_validate(genome_json[_INSTANCE_KEY])
+        # ``CompanionPersona`` carries a model-level legacy-key shim
+        # (``migrate_legacy_identity_keys``) so pre-rename rows that still say
+        # ``user_id`` / ``instance_id`` / ``overlay_version`` / ``tenant_id``
+        # validate cleanly.
+        return CompanionPersona.model_validate(genome_json[_INSTANCE_KEY])
 
     identity = genome_json.get("identity") if isinstance(genome_json.get("identity"), dict) else {}
     style = genome_json.get("style") if isinstance(genome_json.get("style"), dict) else {}
@@ -749,13 +743,12 @@ def _genome_row_to_instance(
     rules = _string_tuple(boundaries.get("rules") or boundaries.get("unbreakable_rules"))
     taboos = _string_tuple(boundaries.get("taboos"))
     now = datetime.now(timezone.utc)
-    return PersonaInstance(
-        instance_id=row.companion_id,
-        tenant_id=owner_id or _owner_id_from_companion(row.companion_id),
-        user_id=owner_id or _owner_id_from_companion(row.companion_id),
+    return CompanionPersona(
+        companion_id=row.companion_id,
+        owner_id=owner_id or _owner_id_from_companion(row.companion_id),
         origin_template_id=row.genome_id,
         origin_template_revision=row.version,
-        overlay_version=row.version,
+        version=row.version,
         created_at=row.created_at or now,
         updated_at=row.updated_at or now,
         metadata=PersonaMetadata(
@@ -858,9 +851,12 @@ def _custom_template_event(
 
 def _custom_template_payload_to_view(payload: dict[str, Any]) -> CustomTemplateView:
     template = dict(payload[_CUSTOM_TEMPLATE_KEY])
+    # Legacy-key shim: rows written before the vocabulary rename stored the
+    # owning identity under "tenant_id".
+    owner = template.get("owner_id", template.get("tenant_id"))
     return CustomTemplateView(
         template_id=str(template["template_id"]),
-        tenant_id=str(template["tenant_id"]),
+        owner_id=str(owner),
         display_name=str(template["display_name"]),
         archetype=str(template["archetype"]),
         yaml_body=str(template["yaml_body"]),
@@ -871,9 +867,9 @@ def _custom_template_payload_to_view(payload: dict[str, Any]) -> CustomTemplateV
 
 
 __all__ = [
+    "EidolonDataCompanionPersonaStore",
     "EidolonDataCustomTemplateStore",
     "EidolonDataEvolutionHistoryStore",
     "EidolonDataPersonaEvolutionProposalStore",
-    "EidolonDataPersonaInstanceStore",
     "EidolonDataPersonaObservationStore",
 ]

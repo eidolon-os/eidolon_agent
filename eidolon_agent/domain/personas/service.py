@@ -23,9 +23,9 @@ from eidolon_agent.domain.personas.ports import (
     NullPersonaEventPort,
     PersonaAuditPort,
     PersonaEventPort,
+    CompanionPersonaStore,
     PersonaEvolutionProposalRepository,
     PersonaEvolutionRepository,
-    PersonaInstanceStore,
     PersonaLLMPort,
     PersonaObservationRepository,
 )
@@ -34,12 +34,12 @@ from eidolon_agent.domain.personas.registry import PersonaTemplateRegistry
 from eidolon_agent.domain.personas.runtime_state import PersonaRuntimeStateStore
 from eidolon_agent.domain.personas.signal_adapter import PersonaSignalAdapter
 from eidolon_agent.domain.personas.types import (
+    CompanionPersona,
     CompiledPersona,
     PersonaEvolutionChange,
     PersonaEvolutionEvent,
     PersonaEvolutionProposal,
     PersonaEvolutionResult,
-    PersonaInstance,
     PersonaInteractionEvent,
     PersonaMockResult,
     PersonaObservation,
@@ -58,7 +58,7 @@ class PersonasService:
         self,
         *,
         registry: PersonaTemplateRegistry,
-        instances: PersonaInstanceStore,
+        instances: CompanionPersonaStore,
         compiler: PersonaCompiler | None = None,
         memory_adapter: PersonaMemoryAdapter | None = None,
         evolution: PersonaEvolutionEngine | None = None,
@@ -89,8 +89,8 @@ class PersonasService:
         self._proposal_repo = proposal_repo
         self._reflection = reflection or PersonaReflectionEngine()
         self._auto_evolution = auto_evolution or PersonaAutoEvolutionPolicy()
-        self._reflection_queue: asyncio.Queue[tuple[str, str, str]] = asyncio.Queue()
-        self._reflection_pending: set[tuple[str, str, str]] = set()
+        self._reflection_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+        self._reflection_pending: set[tuple[str, str]] = set()
         self._reflection_task: asyncio.Task | None = None
         self._worker = worker or PersonaEvolutionWorker(
             instances=self._instances,
@@ -127,59 +127,53 @@ class PersonasService:
     async def create_instance(
         self,
         *,
-        tenant_id: str,
-        user_id: str,
-        instance_id: str,
+        owner_id: str,
+        companion_id: str,
         template_id: str,
-    ) -> PersonaInstance:
+    ) -> CompanionPersona:
         template = self._registry.get(template_id)
-        instance = await self._instances.create_from_template(
+        persona = await self._instances.create_from_template(
             template=template,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            instance_id=instance_id,
+            owner_id=owner_id,
+            companion_id=companion_id,
         )
         await self._events.publish_persona_updated(
-            instance.instance_id,
+            persona.companion_id,
             {"reason": "created", "template_id": template_id},
         )
-        return instance
+        return persona
 
     async def get_instance(
         self,
         *,
-        tenant_id: str,
-        user_id: str,
-        instance_id: str,
+        owner_id: str,
+        companion_id: str,
         template_id: str | None = None,
-    ) -> PersonaInstance:
+    ) -> CompanionPersona:
         try:
-            return await self._instances.load(tenant_id, user_id, instance_id)
+            return await self._instances.load(owner_id, companion_id)
         except NotFoundError:
             if template_id is None:
                 raise
             return await self.create_instance(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                instance_id=instance_id,
+                owner_id=owner_id,
+                companion_id=companion_id,
                 template_id=template_id,
             )
 
     async def get_snapshot(
         self,
         *,
-        tenant_id: str,
-        user_id: str,
-        instance_id: str,
+        owner_id: str,
+        companion_id: str,
         template_id: str | None = None,
     ) -> PersonaSnapshot:
         instance = await self.get_instance(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            instance_id=instance_id,
+            owner_id=owner_id,
+            companion_id=companion_id,
             template_id=template_id,
         )
-        runtime_state = await self._runtime.snapshot(instance_id=instance_id)
+        runtime_state = await self._runtime.snapshot(companion_id=companion_id)
         return PersonaSnapshot(
             instance=instance,
             runtime_state=runtime_state,
@@ -197,9 +191,8 @@ class PersonasService:
         dry_run_memory: list[MemoryHit] | None = None,
     ) -> CompiledPersona:
         snapshot = await self.get_snapshot(
-            tenant_id=owner_id,
-            user_id=owner_id,
-            instance_id=companion_id,
+            owner_id=owner_id,
+            companion_id=companion_id,
             template_id=genome_id,
         )
         instance = snapshot.instance
@@ -223,16 +216,15 @@ class PersonasService:
         ):
             try:
                 await self._record_triggered_observations(
-                    tenant_id=owner_id,
-                    user_id=owner_id,
-                    instance_id=companion_id,
+                    owner_id=owner_id,
+                    companion_id=companion_id,
                     kinds=adapted.triggered_events,
                     source="memory_adapter",
                     summary="memory policy triggered persona observation",
                     evidence={"query": user_text[:500], "degraded": degraded},
                     memory_ids=tuple(hit.id for hit in hits),
                 )
-                self._schedule_reflection(owner_id, owner_id, companion_id)
+                self._schedule_reflection(owner_id, companion_id)
             except Exception:
                 _log.exception("record persona memory observation failed")
         return self._compiler.compile(
@@ -245,7 +237,7 @@ class PersonasService:
     async def update_runtime_state(
         self,
         *,
-        instance_id: str,
+        companion_id: str,
         emotion: str | None = None,
         emotion_delta: float = 0.0,
         energy_level: float | None = None,
@@ -253,7 +245,7 @@ class PersonasService:
         focus_score: float | None = None,
     ):
         return await self._runtime.update(
-            instance_id=instance_id,
+            companion_id=companion_id,
             emotion=emotion,
             emotion_delta=emotion_delta,
             energy_level=energy_level,
@@ -270,7 +262,7 @@ class PersonasService:
         observation = _interaction_to_observation(normalized)
         if observation is not None and self._observation_repo is not None:
             await self._observation_repo.add(observation)
-            self._schedule_reflection(event.owner_id, event.owner_id, event.companion_id)
+            self._schedule_reflection(event.owner_id, event.companion_id)
         if observation is not None and self._auto_reflection_ready():
             self._worker.submit(normalized.model_copy(update={"genome_id": None}))
         else:
@@ -280,22 +272,20 @@ class PersonasService:
         update = self._signal_adapter.to_runtime_update(signal)
         if not update:
             return
-        await self._runtime.update(instance_id=signal.companion_id, **update)
+        await self._runtime.update(companion_id=signal.companion_id, **update)
 
     async def evolve(
         self,
         *,
-        tenant_id: str,
-        user_id: str,
-        instance_id: str,
+        owner_id: str,
+        companion_id: str,
         events: list[PersonaEvolutionEvent],
         dry_run: bool = False,
         template_id: str | None = None,
     ) -> PersonaEvolutionResult:
         instance = await self.get_instance(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            instance_id=instance_id,
+            owner_id=owner_id,
+            companion_id=companion_id,
             template_id=template_id,
         )
         normalized = [
@@ -313,15 +303,15 @@ class PersonasService:
             # Bump version every time we persist a new overlay. The concrete
             # store owns how the versioned snapshot and audit record are made
             # durable.
-            evolved = evolved.model_copy(update={"overlay_version": instance.overlay_version + 1})
+            evolved = evolved.model_copy(update={"version": instance.version + 1})
             await self._instances.save(evolved, reason="evolve")
             await self._audit.record_evolution(result)
             await self._events.publish_evolution_applied(
-                instance_id,
+                companion_id,
                 result.model_dump(mode="json"),
             )
             await self._events.publish_persona_updated(
-                instance_id,
+                companion_id,
                 {"reason": "evolution", "changes": result.model_dump(mode="json")["changes"]},
             )
         return result
@@ -329,17 +319,15 @@ class PersonasService:
     async def evolve_now(
         self,
         *,
-        tenant_id: str,
-        user_id: str,
-        instance_id: str,
+        owner_id: str,
+        companion_id: str,
         events: list[PersonaEvolutionEvent],
         dry_run: bool = False,
         template_id: str | None = None,
     ) -> PersonaEvolutionResult:
         return await self.evolve(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            instance_id=instance_id,
+            owner_id=owner_id,
+            companion_id=companion_id,
             events=events,
             dry_run=dry_run,
             template_id=template_id,
@@ -348,25 +336,23 @@ class PersonasService:
     async def mock_memory_trigger(
         self,
         *,
-        tenant_id: str,
-        user_id: str,
-        instance_id: str,
+        owner_id: str,
+        companion_id: str,
         user_text: str,
         memory_hits: list[MemoryHit],
         apply: bool = False,
         template_id: str | None = None,
     ) -> PersonaMockResult:
         compiled = await self.compile_prompt(
-            owner_id=user_id,
-            companion_id=instance_id,
+            owner_id=owner_id,
+            companion_id=companion_id,
             genome_id=template_id,
             user_text=user_text,
             dry_run_memory=memory_hits,
         )
         instance = await self.get_instance(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            instance_id=instance_id,
+            owner_id=owner_id,
+            companion_id=companion_id,
             template_id=template_id,
         )
         adapted = self._memory_adapter.adapt(
@@ -381,9 +367,8 @@ class PersonasService:
         evolution = None
         if events:
             evolution = await self.evolve(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                instance_id=instance_id,
+                owner_id=owner_id,
+                companion_id=companion_id,
                 template_id=template_id,
                 events=events,
                 dry_run=not apply,
@@ -400,17 +385,17 @@ class PersonasService:
 
     # ---- Admin surface --------------------------------------------------
 
-    async def list_instances(self) -> list[PersonaInstance]:
-        """Return every persona instance across tenants/users.
+    async def list_instances(self) -> list[CompanionPersona]:
+        """Return every companion persona across owners.
 
-        Used by the admin UI to render the global instance table. Order is
+        Used by the admin UI to render the global persona table. Order is
         whatever the store returns — admin frontend sorts client-side.
         """
         return await self._instances.list_all()
 
-    async def delete_instance(self, *, tenant_id: str, user_id: str, instance_id: str) -> None:
-        await self._instances.delete(tenant_id, user_id, instance_id)
-        await self._events.publish_persona_updated(instance_id, {"reason": "deleted"})
+    async def delete_instance(self, *, owner_id: str, companion_id: str) -> None:
+        await self._instances.delete(owner_id, companion_id)
+        await self._events.publish_persona_updated(companion_id, {"reason": "deleted"})
 
     async def reload_templates(self) -> int:
         """Re-scan ``templates_dir`` and return the new template count."""
@@ -424,15 +409,14 @@ class PersonasService:
     async def rollback_evolution(
         self,
         *,
-        tenant_id: str,
-        user_id: str,
-        instance_id: str,
+        owner_id: str,
+        companion_id: str,
         delta_id: str,
     ) -> PersonaEvolutionResult:
         """Reverse the changes recorded under ``delta_id``.
 
         Reads the audit row, applies its inverse (each ``old`` value restored
-        onto the corresponding knob), bumps ``overlay_version``, and persists.
+        onto the corresponding knob), bumps ``version``, and persists.
         The original audit row remains; a new audit row marks the rollback
         as a separate event so the timeline reads forward only.
         """
@@ -442,7 +426,7 @@ class PersonasService:
         if original is None:
             raise NotFoundError(f"evolution delta not found: {delta_id}")
         instance = await self.get_instance(
-            tenant_id=tenant_id, user_id=user_id, instance_id=instance_id
+            owner_id=owner_id, companion_id=companion_id
         )
         # Apply inverse: each change[].path → restore old value on the knob.
         knobs = dict(instance.behavioral_knobs)
@@ -460,39 +444,39 @@ class PersonasService:
         rolled = instance.model_copy(
             update={
                 "behavioral_knobs": knobs,
-                "overlay_version": instance.overlay_version + 1,
+                "version": instance.version + 1,
                 "updated_at": datetime.now(timezone.utc),
             }
         )
         await self._instances.save(rolled, reason=f"rollback:{delta_id}")
         result = PersonaEvolutionResult(
-            instance_id=instance_id,
+            companion_id=companion_id,
             applied=True,
             changes=tuple(reverse_changes),
             rationale=f"rollback of {delta_id}",
         )
         await self._audit.record_evolution(result)
         await self._events.publish_persona_updated(
-            instance_id,
+            companion_id,
             {"reason": "rollback", "delta_id": delta_id},
         )
         return result
 
     async def list_evolution_history(
-        self, instance_id: str, *, limit: int = 50
+        self, companion_id: str, *, limit: int = 50
     ) -> list[PersonaEvolutionResult]:
-        """Return the recent applied evolution rows for an instance.
+        """Return the recent applied evolution rows for a companion persona.
 
-        Admin uses this to render the per-instance history view. Requires a
+        Admin uses this to render the per-persona history view. Requires a
         ``PersonaEvolutionRepository`` to have been wired; without one the
         method returns an empty list (the audit trail simply isn't persisted).
         """
         if self._evolution_repo is None:
             return []
-        return await self._evolution_repo.list_for_instance(instance_id, limit=limit)
+        return await self._evolution_repo.list_for_instance(companion_id, limit=limit)
 
     async def record_observation(self, observation: PersonaObservation) -> None:
-        """Record durable evidence for a personal instance.
+        """Record durable evidence for a companion persona.
 
         This is intentionally a service method so admin/runtime callers do not
         import persistence repositories or write observation rows directly.
@@ -501,17 +485,15 @@ class PersonasService:
             return
         await self._observation_repo.add(observation)
         self._schedule_reflection(
-            observation.tenant_id,
-            observation.user_id,
-            observation.instance_id,
+            observation.owner_id,
+            observation.companion_id,
         )
 
     async def _record_triggered_observations(
         self,
         *,
-        tenant_id: str,
-        user_id: str,
-        instance_id: str,
+        owner_id: str,
+        companion_id: str,
         kinds: tuple[str, ...],
         source: str,
         summary: str,
@@ -525,9 +507,8 @@ class PersonasService:
             await self._observation_repo.add(
                 PersonaObservation(
                     id=f"obs-{uuid.uuid4().hex}",
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    instance_id=instance_id,
+                    owner_id=owner_id,
+                    companion_id=companion_id,
                     kind=kind,
                     source=source,
                     strength=0.55,
@@ -541,7 +522,7 @@ class PersonasService:
 
     async def list_observations(
         self,
-        instance_id: str,
+        companion_id: str,
         *,
         status: str | None = None,
         limit: int = 50,
@@ -549,7 +530,7 @@ class PersonasService:
         if self._observation_repo is None:
             return []
         return await self._observation_repo.list_for_instance(
-            instance_id,
+            companion_id,
             status=status,
             limit=limit,
         )
@@ -557,21 +538,19 @@ class PersonasService:
     async def run_reflection(
         self,
         *,
-        tenant_id: str,
-        user_id: str,
-        instance_id: str,
+        owner_id: str,
+        companion_id: str,
         dry_run: bool = False,
         auto_apply: bool | None = None,
         limit: int = 50,
     ) -> list[PersonaEvolutionProposal]:
         """Aggregate observations into bounded evolution proposals."""
         instance = await self.get_instance(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            instance_id=instance_id,
+            owner_id=owner_id,
+            companion_id=companion_id,
         )
         observations = await self.list_observations(
-            instance_id,
+            companion_id,
             status="active",
             limit=limit,
         )
@@ -609,9 +588,8 @@ class PersonasService:
                     if refreshed is not None:
                         current = refreshed
                     instance = await self.get_instance(
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                        instance_id=instance_id,
+                        owner_id=owner_id,
+                        companion_id=companion_id,
                     )
                 else:
                     current = proposal.model_copy(update={"decision_reason": decision.reason})
@@ -627,7 +605,7 @@ class PersonasService:
 
     async def list_evolution_proposals(
         self,
-        instance_id: str,
+        companion_id: str,
         *,
         status: str | None = None,
         limit: int = 50,
@@ -635,7 +613,7 @@ class PersonasService:
         if self._proposal_repo is None:
             return []
         return await self._proposal_repo.list_for_instance(
-            instance_id,
+            companion_id,
             status=status,
             limit=limit,
         )
@@ -696,10 +674,10 @@ class PersonasService:
             and self._proposal_repo is not None
         )
 
-    def _schedule_reflection(self, tenant_id: str, user_id: str, instance_id: str) -> None:
+    def _schedule_reflection(self, owner_id: str, companion_id: str) -> None:
         if not self._auto_reflection_ready():
             return
-        key = (tenant_id, user_id, instance_id)
+        key = (owner_id, companion_id)
         if key in self._reflection_pending:
             return
         self._reflection_pending.add(key)
@@ -717,14 +695,13 @@ class PersonasService:
         await self._process_auto_reflection_key(key)
         return True
 
-    async def _process_auto_reflection_key(self, key: tuple[str, str, str]) -> None:
+    async def _process_auto_reflection_key(self, key: tuple[str, str]) -> None:
         self._reflection_pending.discard(key)
-        tenant_id, user_id, instance_id = key
+        owner_id, companion_id = key
         try:
             await self.run_reflection(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                instance_id=instance_id,
+                owner_id=owner_id,
+                companion_id=companion_id,
                 auto_apply=True,
             )
         except Exception:
@@ -743,9 +720,8 @@ class PersonasService:
         if self._proposal_repo is None:
             raise NotFoundError("evolution proposal repository not wired")
         instance = await self.get_instance(
-            tenant_id=proposal.tenant_id,
-            user_id=proposal.user_id,
-            instance_id=proposal.instance_id,
+            owner_id=proposal.owner_id,
+            companion_id=proposal.companion_id,
         )
         evolved, result = _apply_proposal(instance=instance, proposal=proposal)
         decided = proposal.model_copy(
@@ -758,15 +734,15 @@ class PersonasService:
             }
         )
         if result.applied:
-            evolved = evolved.model_copy(update={"overlay_version": instance.overlay_version + 1})
+            evolved = evolved.model_copy(update={"version": instance.version + 1})
             await self._instances.save(evolved, reason=f"proposal:{proposal.id}")
             await self._audit.record_evolution(result)
             await self._events.publish_evolution_applied(
-                proposal.instance_id,
+                proposal.companion_id,
                 result.model_dump(mode="json"),
             )
             await self._events.publish_persona_updated(
-                proposal.instance_id,
+                proposal.companion_id,
                 {"reason": publish_reason, "proposal_id": proposal.id},
             )
         await self._proposal_repo.save(decided)
@@ -799,9 +775,8 @@ def _interaction_to_observation(
         evidence["assistant_text"] = event.assistant_text[:500]
     return PersonaObservation(
         id=f"obs-{uuid.uuid4().hex}",
-        tenant_id=event.owner_id,
-        user_id=event.owner_id,
-        instance_id=event.companion_id,
+        owner_id=event.owner_id,
+        companion_id=event.companion_id,
         kind=kind,
         source=event.kind,
         strength=_clamp01(float(event.payload.get("strength", 0.6))),
@@ -814,9 +789,9 @@ def _interaction_to_observation(
 
 def _apply_proposal(
     *,
-    instance: PersonaInstance,
+    instance: CompanionPersona,
     proposal: PersonaEvolutionProposal,
-) -> tuple[PersonaInstance, PersonaEvolutionResult]:
+) -> tuple[CompanionPersona, PersonaEvolutionResult]:
     knobs = dict(instance.behavioral_knobs)
     changes: list[PersonaEvolutionChange] = []
     now = datetime.now(timezone.utc)
@@ -848,7 +823,7 @@ def _apply_proposal(
             )
         )
     result = PersonaEvolutionResult(
-        instance_id=instance.instance_id,
+        companion_id=instance.companion_id,
         applied=bool(changes),
         changes=tuple(changes),
         rationale=f"approved proposal {proposal.id}: {proposal.rationale}",

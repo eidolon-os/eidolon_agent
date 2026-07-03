@@ -8,7 +8,7 @@ from eidolon_agent.core.errors import EvolutionGuardError, ValidationError
 from eidolon_agent.core.types.memory import MemoryHit, MemoryKind
 from eidolon_agent.domain.personas import (
     PersonaTemplateRegistry,
-    YamlPersonaInstanceStore,
+    YamlCompanionPersonaStore,
 )
 from eidolon_agent.domain.personas.evolution import PersonaEvolutionEngine
 from eidolon_agent.domain.personas.memory_adapter import PersonaMemoryAdapter
@@ -46,16 +46,15 @@ async def test_all_builtin_templates_compile_with_medium_length_style(personas_s
     summaries = await personas_service.list_templates()
     seen_instructions: set[str] = set()
     for summary in summaries:
-        instance_id = f"i-{summary.template_id}"
+        companion_id = f"i-{summary.template_id}"
         await personas_service.create_instance(
-            tenant_id="owner",
-            user_id="owner",
-            instance_id=instance_id,
+            owner_id="owner",
+            companion_id=companion_id,
             template_id=summary.template_id,
         )
         compiled = await personas_service.compile_prompt(
             owner_id="owner",
-            companion_id=instance_id,
+            companion_id=companion_id,
             genome_id=summary.template_id,
             user_text="今天有点累",
         )
@@ -79,15 +78,14 @@ async def test_registry_rejects_schema_version(tmp_path):
 
 @pytest.mark.asyncio
 async def test_instance_is_full_copy(canonical_template_registry, tmp_path):
-    store = YamlPersonaInstanceStore(tmp_path / "instances")
+    store = YamlCompanionPersonaStore(tmp_path / "instances")
     template = canonical_template_registry.get("caretaker_jiezhi")
     instance = await store.create_from_template(
         template=template,
-        tenant_id="t",
-        user_id="u",
-        instance_id="i",
+        owner_id="u",
+        companion_id="i",
     )
-    loaded = await store.load("t", "u", "i")
+    loaded = await store.load("u", "i")
     assert loaded == instance
     assert loaded.origin_template_id == "caretaker_jiezhi"
     assert (
@@ -98,9 +96,8 @@ async def test_instance_is_full_copy(canonical_template_registry, tmp_path):
 @pytest.mark.asyncio
 async def test_compile_prompt_uses_style_mapping(personas_service):
     await personas_service.create_instance(
-        tenant_id="owner",
-        user_id="owner",
-        instance_id="i",
+        owner_id="owner",
+        companion_id="i",
         template_id="caretaker_jiezhi",
     )
     compiled = await personas_service.compile_prompt(
@@ -119,20 +116,18 @@ async def test_compile_prompt_uses_style_mapping(personas_service):
 @pytest.mark.asyncio
 async def test_get_snapshot_and_compile_prompt_include_runtime_state(personas_service):
     await personas_service.create_instance(
-        tenant_id="owner",
-        user_id="owner",
-        instance_id="i-snapshot",
+        owner_id="owner",
+        companion_id="i-snapshot",
         template_id="caretaker_jiezhi",
     )
     await personas_service.update_runtime_state(
-        instance_id="i-snapshot",
+        companion_id="i-snapshot",
         emotion="joy",
         emotion_delta=0.7,
     )
     snapshot = await personas_service.get_snapshot(
-        tenant_id="owner",
-        user_id="owner",
-        instance_id="i-snapshot",
+        owner_id="owner",
+        companion_id="i-snapshot",
     )
     assert "心情不错" in snapshot.prompt_hint
     compiled = await personas_service.compile_prompt(
@@ -147,9 +142,8 @@ async def test_get_snapshot_and_compile_prompt_include_runtime_state(personas_se
 @pytest.mark.asyncio
 async def test_memory_adapter_relation_policy(personas_service):
     await personas_service.create_instance(
-        tenant_id="owner",
-        user_id="owner",
-        instance_id="i-memory",
+        owner_id="owner",
+        companion_id="i-memory",
         template_id="caretaker_jiezhi",
     )
     hit = _hit(
@@ -157,9 +151,8 @@ async def test_memory_adapter_relation_policy(personas_service):
         metadata={"relation_type": "user_stressors", "emotion": "frustrated"},
     )
     result = await personas_service.mock_memory_trigger(
-        tenant_id="owner",
-        user_id="owner",
-        instance_id="i-memory",
+        owner_id="owner",
+        companion_id="i-memory",
         user_text="又被老板骂了",
         memory_hits=[hit],
         apply=False,
@@ -173,26 +166,22 @@ async def test_memory_adapter_relation_policy(personas_service):
 @pytest.mark.asyncio
 async def test_evolve_applies_and_persists(personas_service):
     await personas_service.create_instance(
-        tenant_id="t",
-        user_id="u",
-        instance_id="i-evolve",
+        owner_id="u",
+        companion_id="i-evolve",
         template_id="caretaker_jiezhi",
     )
     before = await personas_service.get_instance(
-        tenant_id="t",
-        user_id="u",
-        instance_id="i-evolve",
+        owner_id="u",
+        companion_id="i-evolve",
     )
     result = await personas_service.evolve(
-        tenant_id="t",
-        user_id="u",
-        instance_id="i-evolve",
+        owner_id="u",
+        companion_id="i-evolve",
         events=[PersonaEvolutionEvent(kind="positive_feedback_received", source="test")],
     )
     after = await personas_service.get_instance(
-        tenant_id="t",
-        user_id="u",
-        instance_id="i-evolve",
+        owner_id="u",
+        companion_id="i-evolve",
     )
     assert result.applied is True
     assert after.behavioral_knobs["intimacy"].current > before.behavioral_knobs["intimacy"].current
@@ -201,12 +190,11 @@ async def test_evolve_applies_and_persists(personas_service):
 @pytest.mark.asyncio
 async def test_evolution_rejects_unknown_target(canonical_template_registry, tmp_path):
     template = canonical_template_registry.get("caretaker_jiezhi")
-    store = YamlPersonaInstanceStore(tmp_path / "instances")
+    store = YamlCompanionPersonaStore(tmp_path / "instances")
     instance = await store.create_from_template(
         template=template,
-        tenant_id="t",
-        user_id="u",
-        instance_id="i",
+        owner_id="u",
+        companion_id="i",
     )
     bad = instance.model_copy(
         update={
@@ -227,11 +215,10 @@ async def test_evolution_rejects_unknown_target(canonical_template_registry, tmp
 @pytest.mark.asyncio
 async def test_memory_adapter_degrades_without_metadata(canonical_template_registry, tmp_path):
     template = canonical_template_registry.get("caretaker_jiezhi")
-    instance = await YamlPersonaInstanceStore(tmp_path / "instances").create_from_template(
+    instance = await YamlCompanionPersonaStore(tmp_path / "instances").create_from_template(
         template=template,
-        tenant_id="t",
-        user_id="u",
-        instance_id="i",
+        owner_id="u",
+        companion_id="i",
     )
     adapted = PersonaMemoryAdapter().adapt(
         instance=instance,
@@ -253,12 +240,12 @@ class _ObservationRepo:
 
     async def list_for_instance(
         self,
-        instance_id: str,
+        companion_id: str,
         *,
         status: str | None = None,
         limit: int = 50,
     ) -> list[PersonaObservation]:
-        rows = [row for row in self.rows.values() if row.instance_id == instance_id]
+        rows = [row for row in self.rows.values() if row.companion_id == companion_id]
         if status is not None:
             rows = [row for row in rows if row.status == status]
         return rows[:limit]
@@ -284,12 +271,12 @@ class _ProposalRepo:
 
     async def list_for_instance(
         self,
-        instance_id: str,
+        companion_id: str,
         *,
         status: str | None = None,
         limit: int = 50,
     ) -> list[PersonaEvolutionProposal]:
-        rows = [row for row in self.rows.values() if row.instance_id == instance_id]
+        rows = [row for row in self.rows.values() if row.companion_id == companion_id]
         if status is not None:
             rows = [row for row in rows if row.status == status]
         return rows[:limit]
@@ -314,35 +301,32 @@ async def test_reflection_proposal_approval_applies_clamped_knob_delta(
         proposal_repo=proposals,
     )
     await service.create_instance(
-        tenant_id="t",
-        user_id="u",
-        instance_id="i-prop",
+        owner_id="u",
+        companion_id="i-prop",
         template_id="strategic_mentor_xingqiao",
     )
     await service.record_observation(
         PersonaObservation(
             id="obs-1",
-            tenant_id="t",
-            user_id="u",
-            instance_id="i-prop",
+            owner_id="u",
+            companion_id="i-prop",
             kind="goal_progress_shared",
             confidence=0.9,
             strength=0.8,
         )
     )
     generated = await service.run_reflection(
-        tenant_id="t",
-        user_id="u",
-        instance_id="i-prop",
+        owner_id="u",
+        companion_id="i-prop",
         auto_apply=False,
     )
     assert generated
     assert generated[0].status == "pending"
-    before = await service.get_instance(tenant_id="t", user_id="u", instance_id="i-prop")
+    before = await service.get_instance(owner_id="u", companion_id="i-prop")
     result = await service.approve_evolution_proposal(generated[0].id)
-    after = await service.get_instance(tenant_id="t", user_id="u", instance_id="i-prop")
+    after = await service.get_instance(owner_id="u", companion_id="i-prop")
     assert result.applied is True
-    assert after.overlay_version == before.overlay_version + 1
+    assert after.version == before.version + 1
     assert (
         after.behavioral_knobs["structure"].current > before.behavioral_knobs["structure"].current
     )
@@ -365,32 +349,29 @@ async def test_reflection_auto_applies_low_risk_proposal(
         proposal_repo=proposals,
     )
     await service.create_instance(
-        tenant_id="t",
-        user_id="u",
-        instance_id="i-auto",
+        owner_id="u",
+        companion_id="i-auto",
         template_id="caretaker_jiezhi",
     )
     await service.record_observation(
         PersonaObservation(
             id="obs-auto",
-            tenant_id="t",
-            user_id="u",
-            instance_id="i-auto",
+            owner_id="u",
+            companion_id="i-auto",
             kind="positive_feedback_received",
             confidence=0.9,
             strength=0.8,
         )
     )
-    before = await service.get_instance(tenant_id="t", user_id="u", instance_id="i-auto")
+    before = await service.get_instance(owner_id="u", companion_id="i-auto")
     generated = await service.run_reflection(
-        tenant_id="t",
-        user_id="u",
-        instance_id="i-auto",
+        owner_id="u",
+        companion_id="i-auto",
     )
-    after = await service.get_instance(tenant_id="t", user_id="u", instance_id="i-auto")
+    after = await service.get_instance(owner_id="u", companion_id="i-auto")
     assert generated[0].status == "applied"
     assert generated[0].decided_by == "auto-evolution"
-    assert after.overlay_version == before.overlay_version + 1
+    assert after.version == before.version + 1
     assert after.behavioral_knobs["intimacy"].current == pytest.approx(
         before.behavioral_knobs["intimacy"].current + 0.03
     )
@@ -412,32 +393,29 @@ async def test_reflection_leaves_higher_risk_proposal_pending(
         proposal_repo=proposals,
     )
     await service.create_instance(
-        tenant_id="t",
-        user_id="u",
-        instance_id="i-review",
+        owner_id="u",
+        companion_id="i-review",
         template_id="caretaker_jiezhi",
     )
     await service.record_observation(
         PersonaObservation(
             id="obs-review",
-            tenant_id="t",
-            user_id="u",
-            instance_id="i-review",
+            owner_id="u",
+            companion_id="i-review",
             kind="stressor_memory_recalled",
             confidence=0.9,
             strength=0.8,
         )
     )
-    before = await service.get_instance(tenant_id="t", user_id="u", instance_id="i-review")
+    before = await service.get_instance(owner_id="u", companion_id="i-review")
     generated = await service.run_reflection(
-        tenant_id="t",
-        user_id="u",
-        instance_id="i-review",
+        owner_id="u",
+        companion_id="i-review",
     )
-    after = await service.get_instance(tenant_id="t", user_id="u", instance_id="i-review")
+    after = await service.get_instance(owner_id="u", companion_id="i-review")
     assert generated[0].status == "pending"
     assert "requires review" in (generated[0].decision_reason or "")
-    assert after.overlay_version == before.overlay_version
+    assert after.version == before.version
 
 
 @pytest.mark.asyncio
@@ -456,15 +434,13 @@ async def test_submit_interaction_auto_evolves_without_legacy_double_apply(
         proposal_repo=proposals,
     )
     await service.create_instance(
-        tenant_id="owner",
-        user_id="owner",
-        instance_id="i-auto-interaction",
+        owner_id="owner",
+        companion_id="i-auto-interaction",
         template_id="caretaker_jiezhi",
     )
     before = await service.get_instance(
-        tenant_id="owner",
-        user_id="owner",
-        instance_id="i-auto-interaction",
+        owner_id="owner",
+        companion_id="i-auto-interaction",
     )
     await service.submit_interaction(
         PersonaInteractionEvent(
@@ -476,9 +452,8 @@ async def test_submit_interaction_auto_evolves_without_legacy_double_apply(
         )
     )
     immediate = await service.get_instance(
-        tenant_id="owner",
-        user_id="owner",
-        instance_id="i-auto-interaction",
+        owner_id="owner",
+        companion_id="i-auto-interaction",
     )
     assert (
         immediate.behavioral_knobs["intimacy"].current
@@ -488,9 +463,8 @@ async def test_submit_interaction_auto_evolves_without_legacy_double_apply(
     await service._worker.drain_once()
     await service.drain_evolution_queue()
     after = await service.get_instance(
-        tenant_id="owner",
-        user_id="owner",
-        instance_id="i-auto-interaction",
+        owner_id="owner",
+        companion_id="i-auto-interaction",
     )
     assert after.behavioral_knobs["intimacy"].current == pytest.approx(
         before.behavioral_knobs["intimacy"].current + 0.03
@@ -512,16 +486,14 @@ async def test_proposal_rejects_non_knob_targets(
         proposal_repo=proposals,
     )
     await service.create_instance(
-        tenant_id="t",
-        user_id="u",
-        instance_id="i-bad-prop",
+        owner_id="u",
+        companion_id="i-bad-prop",
         template_id="caretaker_jiezhi",
     )
     bad = PersonaEvolutionProposal(
         id="proposal-bad",
-        tenant_id="t",
-        user_id="u",
-        instance_id="i-bad-prop",
+        owner_id="u",
+        companion_id="i-bad-prop",
         patches=(
             PersonaProposalPatch(
                 type="knob_delta",

@@ -1,7 +1,7 @@
 """Canonical personas domain types.
 
-Templates define the base personality genome. Instances are full per-user
-copies that evolve independently after a user binds a template.
+Templates define the base personality genome. Companion personas are full
+per-owner copies that evolve independently after an owner binds a template.
 """
 
 from __future__ import annotations
@@ -12,6 +12,37 @@ from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+# ---------------------------------------------------------------------------
+# Legacy-key shim (persistence compatibility).
+#
+# Rows persisted before the eidolon_data vocabulary rename may still carry the
+# old identity keys ``user_id`` / ``instance_id`` / ``overlay_version`` and the
+# removed ``tenant_id``. This single, centralized function maps old keys onto
+# the new field names and drops ``tenant_id`` so old DB rows / YAML files stay
+# readable. It is wired as a ``model_validator(mode="before")`` on every model
+# that is persisted with identity keys.
+# ---------------------------------------------------------------------------
+
+_LEGACY_IDENTITY_KEYS = {
+    "user_id": "owner_id",
+    "instance_id": "companion_id",
+    "overlay_version": "version",
+}
+
+
+def migrate_legacy_identity_keys(data: object) -> object:
+    if not isinstance(data, dict):
+        return data
+    if not (data.keys() & (_LEGACY_IDENTITY_KEYS.keys() | {"tenant_id"})):
+        return data
+    out = dict(data)
+    out.pop("tenant_id", None)
+    for old_key, new_key in _LEGACY_IDENTITY_KEYS.items():
+        if old_key in out:
+            value = out.pop(old_key)
+            out.setdefault(new_key, value)
+    return out
 
 
 class PersonaMetadata(BaseModel):
@@ -233,18 +264,22 @@ class PersonaTemplate(BaseModel):
     assets: PersonaAssets = Field(default_factory=PersonaAssets)
 
 
-class PersonaInstance(BaseModel):
+class CompanionPersona(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    instance_id: str
-    tenant_id: str
-    user_id: str
+    @model_validator(mode="before")
+    @classmethod
+    def _shim_legacy_keys(cls, data: object) -> object:
+        return migrate_legacy_identity_keys(data)
+
+    companion_id: str
+    owner_id: str
     origin_template_id: str
     origin_template_revision: int
-    # Monotonic per-instance version stamp. Incremented every time the
+    # Monotonic per-companion version stamp. Incremented every time the
     # evolution worker (or admin edit / rollback) writes a new overlay. Used
     # for observability (Turn metadata) and admin rollback comparisons.
-    overlay_version: int = Field(1, ge=1)
+    version: int = Field(1, ge=1)
     created_at: datetime
     updated_at: datetime
     metadata: PersonaMetadata
@@ -280,11 +315,11 @@ class AdaptedMemoryContext(BaseModel):
 class CompiledPersona(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    instance_id: str
-    # Snapshot of the instance's overlay_version at compile time. Threaded
+    companion_id: str
+    # Snapshot of the persona's version at compile time. Threaded
     # through the Turn pipeline so post-turn events / admin probes can answer
     # "which persona overlay produced this answer?" without an extra DB hit.
-    overlay_version: int = 1
+    version: int = 1
     system_prompt: str
     identity_block: str
     style_block: str
@@ -297,7 +332,7 @@ class CompiledPersona(BaseModel):
 class PersonaSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    instance: PersonaInstance
+    instance: CompanionPersona
     runtime_state: PersonaRuntimeState
     prompt_hint: str = ""
 
@@ -313,7 +348,7 @@ class PersonaEvolutionEvent(BaseModel):
 
 
 class PersonaObservation(BaseModel):
-    """Evidence about how a personal instance should evolve.
+    """Evidence about how a companion persona should evolve.
 
     Observations are durable evidence, not direct persona edits. The reflection
     step may convert several observations into a bounded proposal.
@@ -321,10 +356,14 @@ class PersonaObservation(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _shim_legacy_keys(cls, data: object) -> object:
+        return migrate_legacy_identity_keys(data)
+
     id: str
-    tenant_id: str
-    user_id: str
-    instance_id: str
+    owner_id: str
+    companion_id: str
     kind: str
     source: str = "system"
     status: Literal["active", "dismissed", "converted"] = "active"
@@ -349,14 +388,18 @@ class PersonaProposalPatch(BaseModel):
 
 
 class PersonaEvolutionProposal(BaseModel):
-    """Admin-reviewable evolution proposal for a personal instance."""
+    """Admin-reviewable evolution proposal for a companion persona."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _shim_legacy_keys(cls, data: object) -> object:
+        return migrate_legacy_identity_keys(data)
+
     id: str
-    tenant_id: str
-    user_id: str
-    instance_id: str
+    owner_id: str
+    companion_id: str
     status: Literal["pending", "applied", "rejected"] = "pending"
     patches: tuple[PersonaProposalPatch, ...] = ()
     confidence: float = Field(0.0, ge=0.0, le=1.0)
@@ -419,7 +462,12 @@ class PersonaEvolutionChange(BaseModel):
 class PersonaEvolutionResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    instance_id: str
+    @model_validator(mode="before")
+    @classmethod
+    def _shim_legacy_keys(cls, data: object) -> object:
+        return migrate_legacy_identity_keys(data)
+
+    companion_id: str
     applied: bool
     changes: tuple[PersonaEvolutionChange, ...] = ()
     events: tuple[PersonaEvolutionEvent, ...] = ()

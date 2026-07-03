@@ -8,9 +8,9 @@ from eidolon_data import DataSettings, DataStore
 from eidolon_agent.domain.personas import PersonasService, PersonaTemplateRegistry
 from eidolon_agent.domain.personas.types import PersonaInteractionEvent, PersonaObservation
 from eidolon_agent.infra.persistence.eidolon_data_persona import (
+    EidolonDataCompanionPersonaStore,
     EidolonDataEvolutionHistoryStore,
     EidolonDataPersonaEvolutionProposalStore,
-    EidolonDataPersonaInstanceStore,
     EidolonDataPersonaObservationStore,
 )
 
@@ -25,7 +25,7 @@ async def _build_personas_service(tmp_path: Path) -> tuple[PersonasService, Data
     evolution_history = EidolonDataEvolutionHistoryStore(data_store)
     service = PersonasService(
         registry=registry,
-        instances=EidolonDataPersonaInstanceStore(data_store),
+        instances=EidolonDataCompanionPersonaStore(data_store),
         audit_port=evolution_history,
         evolution_repo=evolution_history,
         observation_repo=EidolonDataPersonaObservationStore(data_store),
@@ -40,15 +40,13 @@ async def test_auto_evolution_applies_low_risk_feedback_end_to_end(tmp_path):
     try:
         await service.start()
         await service.create_instance(
-            tenant_id="u",
-            user_id="u",
-            instance_id="i-auto-e2e",
+            owner_id="u",
+            companion_id="i-auto-e2e",
             template_id="caretaker_jiezhi",
         )
         before = await service.get_instance(
-            tenant_id="u",
-            user_id="u",
-            instance_id="i-auto-e2e",
+            owner_id="u",
+            companion_id="i-auto-e2e",
         )
 
         await service.submit_interaction(
@@ -64,11 +62,10 @@ async def test_auto_evolution_applies_low_risk_feedback_end_to_end(tmp_path):
         await service.drain_evolution_queue()
 
         after = await service.get_instance(
-            tenant_id="u",
-            user_id="u",
-            instance_id="i-auto-e2e",
+            owner_id="u",
+            companion_id="i-auto-e2e",
         )
-        assert after.overlay_version == before.overlay_version + 1
+        assert after.version == before.version + 1
         assert after.behavioral_knobs["intimacy"].current == pytest.approx(
             before.behavioral_knobs["intimacy"].current + 0.03
         )
@@ -93,22 +90,19 @@ async def test_auto_evolution_keeps_higher_risk_stress_proposal_pending_e2e(tmp_
     service, data_store = await _build_personas_service(tmp_path)
     try:
         await service.create_instance(
-            tenant_id="u",
-            user_id="u",
-            instance_id="i-review-e2e",
+            owner_id="u",
+            companion_id="i-review-e2e",
             template_id="caretaker_jiezhi",
         )
         before = await service.get_instance(
-            tenant_id="u",
-            user_id="u",
-            instance_id="i-review-e2e",
+            owner_id="u",
+            companion_id="i-review-e2e",
         )
         await service.record_observation(
             PersonaObservation(
                 id="obs-review-e2e",
-                tenant_id="u",
-                user_id="u",
-                instance_id="i-review-e2e",
+                owner_id="u",
+                companion_id="i-review-e2e",
                 kind="stressor_memory_recalled",
                 source="e2e",
                 strength=0.9,
@@ -118,9 +112,8 @@ async def test_auto_evolution_keeps_higher_risk_stress_proposal_pending_e2e(tmp_
         )
 
         proposal_rows = await service.run_reflection(
-            tenant_id="u",
-            user_id="u",
-            instance_id="i-review-e2e",
+            owner_id="u",
+            companion_id="i-review-e2e",
             limit=50,
         )
         assert len(proposal_rows) == 1
@@ -128,11 +121,10 @@ async def test_auto_evolution_keeps_higher_risk_stress_proposal_pending_e2e(tmp_
         assert "requires review" in proposal_rows[0].decision_reason
 
         after = await service.get_instance(
-            tenant_id="u",
-            user_id="u",
-            instance_id="i-review-e2e",
+            owner_id="u",
+            companion_id="i-review-e2e",
         )
-        assert after.overlay_version == before.overlay_version
+        assert after.version == before.version
         assert (
             after.behavioral_knobs["intimacy"].current
             == before.behavioral_knobs["intimacy"].current

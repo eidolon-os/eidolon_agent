@@ -51,7 +51,7 @@ from eidolon_agent.domain.long_tasks import LongTaskResultSummarizer
 from eidolon_agent.domain.personas import (
     PersonasService,
     PersonaTemplateRegistry,
-    YamlPersonaInstanceStore,
+    YamlCompanionPersonaStore,
 )
 from eidolon_agent.domain.personas.ports import PersonaEventPort
 from eidolon_agent.domain.signals import SignalBus
@@ -83,7 +83,7 @@ from eidolon_agent.infra.persistence.eidolon_data_persona import (
     EidolonDataCustomTemplateStore,
     EidolonDataEvolutionHistoryStore,
     EidolonDataPersonaEvolutionProposalStore,
-    EidolonDataPersonaInstanceStore,
+    EidolonDataCompanionPersonaStore,
     EidolonDataPersonaObservationStore,
 )
 from eidolon_agent.infra.persistence.eidolon_data_runtime import (
@@ -156,12 +156,12 @@ async def build_application(
     container.custom_template_store = custom_template_store
     container.persona_template_registry = tpl_reg
     # Production wiring: eidolon_data-backed persona genomes. The legacy
-    # YamlPersonaInstanceStore remains available for diagnostic / forensic
+    # YamlCompanionPersonaStore remains available for diagnostic / forensic
     # scenarios.
     if settings.persona.storage == "yaml":
-        instance_store: object = YamlPersonaInstanceStore(Path(settings.persona.instances_dir))
+        instance_store: object = YamlCompanionPersonaStore(Path(settings.persona.instances_dir))
     else:
-        instance_store = EidolonDataPersonaInstanceStore(data_store)
+        instance_store = EidolonDataCompanionPersonaStore(data_store)
     # One adapter satisfies both PersonaAuditPort (write) and
     # PersonaEvolutionRepository (read) so worker writes audit rows AND admin
     # can paginate them. NullPersonaAuditPort is no longer used in production.

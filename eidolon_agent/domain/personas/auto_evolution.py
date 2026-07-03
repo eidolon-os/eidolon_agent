@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from eidolon_agent.domain.personas.types import (
+    CompanionPersona,
     PersonaEvolutionProposal,
-    PersonaInstance,
     PersonaObservation,
 )
 
@@ -30,7 +30,7 @@ class PersonaAutoEvolutionPolicy:
     def evaluate(
         self,
         *,
-        instance: PersonaInstance,
+        instance: CompanionPersona,
         proposal: PersonaEvolutionProposal,
         evidence: list[PersonaObservation],
         now: datetime | None = None,

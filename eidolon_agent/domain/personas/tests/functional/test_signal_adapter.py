@@ -47,9 +47,8 @@ async def test_submit_signal_updates_runtime_state(personas_service):
         )
     )
     snapshot = await personas_service.get_snapshot(
-        tenant_id="u",
-        user_id="u",
-        instance_id="i-signal",
+        owner_id="u",
+        companion_id="i-signal",
         template_id="caretaker_jiezhi",
     )
     assert snapshot.runtime_state.mood.joy > 0

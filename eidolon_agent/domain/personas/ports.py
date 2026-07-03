@@ -9,9 +9,9 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from eidolon_agent.domain.personas.types import (
+    CompanionPersona,
     PersonaEvolutionProposal,
     PersonaEvolutionResult,
-    PersonaInstance,
     PersonaObservation,
     PersonaTemplate,
 )
@@ -25,10 +25,10 @@ class PersonaLLMPort(Protocol):
 
 @runtime_checkable
 class PersonaEventPort(Protocol):
-    async def publish_persona_updated(self, instance_id: str, payload: dict) -> None:
+    async def publish_persona_updated(self, companion_id: str, payload: dict) -> None:
         ...
 
-    async def publish_evolution_applied(self, instance_id: str, payload: dict) -> None:
+    async def publish_evolution_applied(self, companion_id: str, payload: dict) -> None:
         ...
 
 
@@ -39,41 +39,38 @@ class PersonaAuditPort(Protocol):
 
 
 @runtime_checkable
-class PersonaInstanceStore(Protocol):
-    """Persistence boundary for per-user persona instance copies.
+class CompanionPersonaStore(Protocol):
+    """Persistence boundary for per-owner companion persona copies.
 
     Implementations include:
-      * ``YamlPersonaInstanceStore`` (legacy / migration source) reads one
-        YAML file per instance from ``settings.persona.instances_dir``.
-      * ``EidolonDataPersonaInstanceStore`` (production) stores versioned
-        instances as persona genomes owned by ``eidolon_data``.
+      * ``YamlCompanionPersonaStore`` (legacy / migration source) reads one
+        YAML file per companion from ``settings.persona.instances_dir``.
+      * ``EidolonDataCompanionPersonaStore`` (production) stores versioned
+        personas as persona genomes owned by ``eidolon_data``.
 
     Both implementations are async so the service layer can call them without
     knowing the backing store.
     """
 
-    async def exists(self, tenant_id: str, user_id: str, instance_id: str) -> bool: ...
+    async def exists(self, owner_id: str, companion_id: str) -> bool: ...
 
-    async def load(
-        self, tenant_id: str, user_id: str, instance_id: str
-    ) -> PersonaInstance: ...
+    async def load(self, owner_id: str, companion_id: str) -> CompanionPersona: ...
 
-    async def save(self, instance: PersonaInstance, *, reason: str = "") -> None: ...
+    async def save(self, persona: CompanionPersona, *, reason: str = "") -> None: ...
 
     async def create_from_template(
         self,
         *,
         template: PersonaTemplate,
-        tenant_id: str,
-        user_id: str,
-        instance_id: str,
-    ) -> PersonaInstance: ...
+        owner_id: str,
+        companion_id: str,
+    ) -> CompanionPersona: ...
 
-    async def list_all(self) -> list[PersonaInstance]:
-        """List every instance across tenants/users — used by the admin UI."""
+    async def list_all(self) -> list[CompanionPersona]:
+        """List every companion persona across owners — used by the admin UI."""
         ...
 
-    async def delete(self, tenant_id: str, user_id: str, instance_id: str) -> None: ...
+    async def delete(self, owner_id: str, companion_id: str) -> None: ...
 
 
 @runtime_checkable
@@ -88,7 +85,7 @@ class PersonaEvolutionRepository(Protocol):
     async def record(self, result: PersonaEvolutionResult) -> None: ...
 
     async def list_for_instance(
-        self, instance_id: str, *, limit: int = 50
+        self, companion_id: str, *, limit: int = 50
     ) -> list[PersonaEvolutionResult]: ...
 
     async def get(self, delta_id: str) -> PersonaEvolutionResult | None: ...
@@ -100,7 +97,7 @@ class PersonaObservationRepository(Protocol):
 
     async def list_for_instance(
         self,
-        instance_id: str,
+        companion_id: str,
         *,
         status: str | None = None,
         limit: int = 50,
@@ -119,7 +116,7 @@ class PersonaEvolutionProposalRepository(Protocol):
 
     async def list_for_instance(
         self,
-        instance_id: str,
+        companion_id: str,
         *,
         status: str | None = None,
         limit: int = 50,
@@ -129,10 +126,10 @@ class PersonaEvolutionProposalRepository(Protocol):
 
 
 class NullPersonaEventPort:
-    async def publish_persona_updated(self, instance_id: str, payload: dict) -> None:
+    async def publish_persona_updated(self, companion_id: str, payload: dict) -> None:
         return None
 
-    async def publish_evolution_applied(self, instance_id: str, payload: dict) -> None:
+    async def publish_evolution_applied(self, companion_id: str, payload: dict) -> None:
         return None
 
 

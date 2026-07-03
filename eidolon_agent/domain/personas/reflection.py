@@ -6,8 +6,8 @@ import uuid
 from collections import defaultdict
 
 from eidolon_agent.domain.personas.types import (
+    CompanionPersona,
     PersonaEvolutionProposal,
-    PersonaInstance,
     PersonaObservation,
     PersonaProposalPatch,
 )
@@ -25,7 +25,7 @@ class PersonaReflectionEngine:
     def reflect(
         self,
         *,
-        instance: PersonaInstance,
+        instance: CompanionPersona,
         observations: list[PersonaObservation],
         limit: int = 50,
     ) -> list[PersonaEvolutionProposal]:
@@ -47,9 +47,8 @@ class PersonaReflectionEngine:
             proposals.append(
                 PersonaEvolutionProposal(
                     id=f"proposal-{uuid.uuid4().hex}",
-                    tenant_id=instance.tenant_id,
-                    user_id=instance.user_id,
-                    instance_id=instance.instance_id,
+                    owner_id=instance.owner_id,
+                    companion_id=instance.companion_id,
                     patches=tuple(patches),
                     confidence=confidence,
                     rationale=_rationale_for_kind(kind),
@@ -59,7 +58,7 @@ class PersonaReflectionEngine:
         return proposals
 
     def _patches_for_kind(
-        self, *, instance: PersonaInstance, kind: str
+        self, *, instance: CompanionPersona, kind: str
     ) -> list[PersonaProposalPatch]:
         def knob(name: str, delta: float, rationale: str) -> PersonaProposalPatch | None:
             if name not in instance.behavioral_knobs:

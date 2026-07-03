@@ -9,15 +9,13 @@ pytestmark = pytest.mark.functional
 @pytest.mark.asyncio
 async def test_submit_interaction_is_nonblocking_and_worker_evolves(personas_service):
     await personas_service.create_instance(
-        tenant_id="u",
-        user_id="u",
-        instance_id="i-async",
+        owner_id="u",
+        companion_id="i-async",
         template_id="caretaker_jiezhi",
     )
     before = await personas_service.get_instance(
-        tenant_id="u",
-        user_id="u",
-        instance_id="i-async",
+        owner_id="u",
+        companion_id="i-async",
     )
     await personas_service.submit_interaction(
         PersonaInteractionEvent(
@@ -28,17 +26,15 @@ async def test_submit_interaction_is_nonblocking_and_worker_evolves(personas_ser
         )
     )
     immediate = await personas_service.get_instance(
-        tenant_id="u",
-        user_id="u",
-        instance_id="i-async",
+        owner_id="u",
+        companion_id="i-async",
     )
     assert immediate.behavioral_knobs["intimacy"].current == before.behavioral_knobs["intimacy"].current
 
     await personas_service._worker.drain_once()
     after = await personas_service.get_instance(
-        tenant_id="u",
-        user_id="u",
-        instance_id="i-async",
+        owner_id="u",
+        companion_id="i-async",
     )
     assert after.behavioral_knobs["intimacy"].current > before.behavioral_knobs["intimacy"].current
 
@@ -54,5 +50,5 @@ async def test_worker_updates_runtime_state(personas_service):
         )
     )
     await personas_service._worker.drain_once()
-    snapshot = await personas_service._runtime.snapshot(instance_id="i-state")
+    snapshot = await personas_service._runtime.snapshot(companion_id="i-state")
     assert snapshot.mood.joy == pytest.approx(0.5)

@@ -22,25 +22,25 @@ pytestmark = pytest.mark.functional
 
 async def test_list_instances_returns_every_known_overlay(personas_service):
     await personas_service.create_instance(
-        tenant_id="t", user_id="u1", instance_id="i1", template_id="caretaker_jiezhi"
+        owner_id="u1", companion_id="i1", template_id="caretaker_jiezhi"
     )
     await personas_service.create_instance(
-        tenant_id="t", user_id="u2", instance_id="i2", template_id="caretaker_jiezhi"
+        owner_id="u2", companion_id="i2", template_id="caretaker_jiezhi"
     )
     rows = await personas_service.list_instances()
-    assert {r.instance_id for r in rows} == {"i1", "i2"}
+    assert {r.companion_id for r in rows} == {"i1", "i2"}
 
 
 async def test_delete_instance_removes_overlay(personas_service):
     await personas_service.create_instance(
-        tenant_id="t", user_id="u", instance_id="i-del", template_id="caretaker_jiezhi"
+        owner_id="u", companion_id="i-del", template_id="caretaker_jiezhi"
     )
     await personas_service.delete_instance(
-        tenant_id="t", user_id="u", instance_id="i-del"
+        owner_id="u", companion_id="i-del"
     )
     with pytest.raises(NotFoundError):
         await personas_service.get_instance(
-            tenant_id="t", user_id="u", instance_id="i-del"
+            owner_id="u", companion_id="i-del"
         )
 
 
@@ -73,9 +73,9 @@ class _InMemoryEvolutionRepo:
         self.records[f"delta-{len(self.records)}"] = result
 
     async def list_for_instance(
-        self, instance_id: str, *, limit: int = 50
+        self, companion_id: str, *, limit: int = 50
     ) -> list[PersonaEvolutionResult]:
-        return [r for r in self.records.values() if r.instance_id == instance_id][
+        return [r for r in self.records.values() if r.companion_id == companion_id][
             -limit:
         ]
 
@@ -105,26 +105,25 @@ async def test_rollback_reverses_recorded_change(
         evolution_repo=repo,
     )
     await service.create_instance(
-        tenant_id="t", user_id="u", instance_id="i", template_id="caretaker_jiezhi",
+        owner_id="u", companion_id="i", template_id="caretaker_jiezhi",
     )
-    before = await service.get_instance(tenant_id="t", user_id="u", instance_id="i")
+    before = await service.get_instance(owner_id="u", companion_id="i")
 
     # Trigger an evolution → version bumps and audit row recorded.
     result = await service.evolve(
-        tenant_id="t",
-        user_id="u",
-        instance_id="i",
+        owner_id="u",
+        companion_id="i",
         events=[PersonaEvolutionEvent(kind="positive_feedback_received", source="test")],
     )
     assert result.applied
-    after_evolve = await service.get_instance(tenant_id="t", user_id="u", instance_id="i")
-    assert after_evolve.overlay_version == before.overlay_version + 1
+    after_evolve = await service.get_instance(owner_id="u", companion_id="i")
+    assert after_evolve.version == before.version + 1
 
     # Find the persisted delta id and roll it back.
     delta_id = next(iter(repo.records))
     # Stub the result with concrete changes for the rollback to act on.
     repo.records[delta_id] = PersonaEvolutionResult(
-        instance_id="i",
+        companion_id="i",
         applied=True,
         changes=(
             PersonaEvolutionChange(
@@ -136,17 +135,17 @@ async def test_rollback_reverses_recorded_change(
         ),
     )
     rolled = await service.rollback_evolution(
-        tenant_id="t", user_id="u", instance_id="i", delta_id=delta_id,
+        owner_id="u", companion_id="i", delta_id=delta_id,
     )
     assert rolled.applied is True
-    rolled_inst = await service.get_instance(tenant_id="t", user_id="u", instance_id="i")
+    rolled_inst = await service.get_instance(owner_id="u", companion_id="i")
     # Knob restored to pre-evolution value
     assert (
         rolled_inst.behavioral_knobs["intimacy"].current
         == pytest.approx(before.behavioral_knobs["intimacy"].current)
     )
     # Version bumped again, NOT decremented
-    assert rolled_inst.overlay_version == after_evolve.overlay_version + 1
+    assert rolled_inst.version == after_evolve.version + 1
 
 
 async def test_rollback_unknown_delta_raises(
@@ -161,9 +160,9 @@ async def test_rollback_unknown_delta_raises(
         evolution_repo=repo,
     )
     await service.create_instance(
-        tenant_id="t", user_id="u", instance_id="i", template_id="caretaker_jiezhi"
+        owner_id="u", companion_id="i", template_id="caretaker_jiezhi"
     )
     with pytest.raises(NotFoundError):
         await service.rollback_evolution(
-            tenant_id="t", user_id="u", instance_id="i", delta_id="ghost"
+            owner_id="u", companion_id="i", delta_id="ghost"
         )

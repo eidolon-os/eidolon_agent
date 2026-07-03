@@ -2,7 +2,7 @@
 
 Why this exists separately from :mod:`compiler`:
     ``PersonaCompiler.compile`` works on a fully-instantiated
-    :class:`PersonaInstance` plus runtime context (memory adapter, realtime
+    :class:`CompanionPersona` plus runtime context (memory adapter, realtime
     state, transient overlays). The output is meant to be fed straight to the
     LLM mid-turn — it bakes in evolution overlays and is not stable across
     calls. The Phase 25 use case is different: admin operator picks a

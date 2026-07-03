@@ -18,17 +18,17 @@ class PersonaRuntimeStateStore:
         self._states: dict[str, PersonaRuntimeState] = {}
         self._lock = asyncio.Lock()
 
-    async def snapshot(self, *, instance_id: str) -> PersonaRuntimeState:
+    async def snapshot(self, *, companion_id: str) -> PersonaRuntimeState:
         now = datetime.now(timezone.utc)
         async with self._lock:
-            state = self._states.get(instance_id, PersonaRuntimeState()).decayed(now)
-            self._states[instance_id] = state
+            state = self._states.get(companion_id, PersonaRuntimeState()).decayed(now)
+            self._states[companion_id] = state
             return state
 
     async def update(
         self,
         *,
-        instance_id: str,
+        companion_id: str,
         emotion: str | None = None,
         emotion_delta: float = 0.0,
         energy_level: float | None = None,
@@ -37,7 +37,7 @@ class PersonaRuntimeStateStore:
     ) -> PersonaRuntimeState:
         now = datetime.now(timezone.utc)
         async with self._lock:
-            current = self._states.get(instance_id, PersonaRuntimeState()).decayed(now)
+            current = self._states.get(companion_id, PersonaRuntimeState()).decayed(now)
             mood = current.mood
             if emotion is not None and hasattr(mood, emotion):
                 old_value = float(getattr(mood, emotion))
@@ -72,10 +72,10 @@ class PersonaRuntimeStateStore:
                 attention=attention,
                 updated_at=now,
             )
-            self._states[instance_id] = updated
+            self._states[companion_id] = updated
             return updated
 
-    async def reset(self, *, instance_id: str) -> None:
+    async def reset(self, *, companion_id: str) -> None:
         async with self._lock:
-            self._states.pop(instance_id, None)
+            self._states.pop(companion_id, None)
 

@@ -8,9 +8,9 @@ from datetime import datetime, timezone
 
 from eidolon_agent.domain.personas.evolution import PersonaEvolutionEngine
 from eidolon_agent.domain.personas.ports import (
+    CompanionPersonaStore,
     PersonaAuditPort,
     PersonaEventPort,
-    PersonaInstanceStore,
 )
 from eidolon_agent.domain.personas.runtime_state import PersonaRuntimeStateStore
 from eidolon_agent.domain.personas.types import (
@@ -26,7 +26,7 @@ class PersonaEvolutionWorker:
     def __init__(
         self,
         *,
-        instances: PersonaInstanceStore,
+        instances: CompanionPersonaStore,
         runtime_state: PersonaRuntimeStateStore,
         evolution: PersonaEvolutionEngine,
         audit_port: PersonaAuditPort,
@@ -90,11 +90,9 @@ class PersonaEvolutionWorker:
             evo_events = _interaction_to_evolution_events(event)
             if not event.genome_id or not evo_events:
                 return
-            instance = await self._instances.load(
-                event.owner_id, event.owner_id, event.companion_id
-            )
+            persona = await self._instances.load(event.owner_id, event.companion_id)
             evolved, result = self._evolution.evolve(
-                instance=instance,
+                instance=persona,
                 events=evo_events,
                 dry_run=False,
             )
@@ -102,7 +100,7 @@ class PersonaEvolutionWorker:
                 # Bump version; the concrete store owns how the versioned
                 # snapshot is made durable.
                 evolved = evolved.model_copy(
-                    update={"overlay_version": instance.overlay_version + 1}
+                    update={"version": persona.version + 1}
                 )
                 await self._instances.save(
                     evolved, reason=f"async_evolution:{event.kind}"
@@ -120,14 +118,14 @@ class PersonaEvolutionWorker:
     async def _apply_runtime_state(self, event: PersonaInteractionEvent) -> None:
         if event.kind == "turn_completed":
             await self._runtime.update(
-                instance_id=event.companion_id,
+                companion_id=event.companion_id,
                 attention_target=AttentionTarget.USER,
                 focus_score=0.65,
             )
         emotion = event.payload.get("emotion")
         if emotion:
             await self._runtime.update(
-                instance_id=event.companion_id,
+                companion_id=event.companion_id,
                 emotion=str(emotion),
                 emotion_delta=float(event.payload.get("emotion_delta", 0.15)),
             )

@@ -34,9 +34,9 @@ class CustomTemplateView:
         "archetype",
         "created_at",
         "display_name",
+        "owner_id",
         "revision",
         "template_id",
-        "tenant_id",
         "updated_at",
         "yaml_body",
     )
@@ -45,7 +45,7 @@ class CustomTemplateView:
         self,
         *,
         template_id: str,
-        tenant_id: str,
+        owner_id: str,
         display_name: str,
         archetype: str,
         yaml_body: str,
@@ -54,7 +54,7 @@ class CustomTemplateView:
         updated_at: datetime,
     ) -> None:
         self.template_id = template_id
-        self.tenant_id = tenant_id
+        self.owner_id = owner_id
         self.display_name = display_name
         self.archetype = archetype
         self.yaml_body = yaml_body
@@ -65,7 +65,7 @@ class CustomTemplateView:
     def to_dict(self) -> dict:
         return {
             "template_id": self.template_id,
-            "tenant_id": self.tenant_id,
+            "owner_id": self.owner_id,
             "display_name": self.display_name,
             "archetype": self.archetype,
             "yaml_body": self.yaml_body,

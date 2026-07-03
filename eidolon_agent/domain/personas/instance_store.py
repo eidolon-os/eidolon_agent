@@ -1,11 +1,11 @@
-"""YAML-backed PersonaInstanceStore implementation.
+"""YAML-backed CompanionPersonaStore implementation.
 
 Kept for local debugging and self-contained tests. Production uses the
 Eidolon Data persona adapter, which stores companion persona state as
 ``persona_genomes``.
 
 The class is async on every method (returning fast since file I/O is small)
-so it satisfies the ``PersonaInstanceStore`` protocol shared by persistence
+so it satisfies the ``CompanionPersonaStore`` protocol shared by persistence
 adapters.
 """
 
@@ -18,11 +18,11 @@ from pathlib import Path
 import yaml
 
 from eidolon_agent.core.errors import NotFoundError, ValidationError
-from eidolon_agent.domain.personas.types import PersonaInstance, PersonaTemplate
+from eidolon_agent.domain.personas.types import CompanionPersona, PersonaTemplate
 
 
-class YamlPersonaInstanceStore:
-    """One ``{instance_id}.yaml`` per instance under ``<root>/<tenant>/<user>/``.
+class YamlCompanionPersonaStore:
+    """One ``{companion_id}.yaml`` per companion under ``<root>/<owner>/``.
 
     All public methods are async even though the actual file I/O is sync —
     keeping the surface uniform with the SQL store means service-layer code
@@ -34,35 +34,31 @@ class YamlPersonaInstanceStore:
     def __init__(self, instances_dir: Path) -> None:
         self._dir = instances_dir
 
-    def path_for(self, tenant_id: str, user_id: str, instance_id: str) -> Path:
-        return self._dir / tenant_id / user_id / f"{instance_id}.yaml"
+    def path_for(self, owner_id: str, companion_id: str) -> Path:
+        return self._dir / owner_id / f"{companion_id}.yaml"
 
-    async def exists(self, tenant_id: str, user_id: str, instance_id: str) -> bool:
-        return await asyncio.to_thread(
-            self.path_for(tenant_id, user_id, instance_id).exists
-        )
+    async def exists(self, owner_id: str, companion_id: str) -> bool:
+        return await asyncio.to_thread(self.path_for(owner_id, companion_id).exists)
 
-    async def load(
-        self, tenant_id: str, user_id: str, instance_id: str
-    ) -> PersonaInstance:
-        path = self.path_for(tenant_id, user_id, instance_id)
+    async def load(self, owner_id: str, companion_id: str) -> CompanionPersona:
+        path = self.path_for(owner_id, companion_id)
 
-        def _read() -> PersonaInstance:
+        def _read() -> CompanionPersona:
             if not path.exists():
-                raise NotFoundError(f"persona instance not found: {path}")
+                raise NotFoundError(f"companion persona not found: {path}")
             try:
                 data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-                return PersonaInstance(**data)
+                return CompanionPersona(**data)
             except NotFoundError:
                 raise
             except Exception as exc:
-                raise ValidationError(f"{path}: instance schema error: {exc}") from exc
+                raise ValidationError(f"{path}: persona schema error: {exc}") from exc
 
         return await asyncio.to_thread(_read)
 
-    async def save(self, instance: PersonaInstance, *, reason: str = "") -> None:
-        path = self.path_for(instance.tenant_id, instance.user_id, instance.instance_id)
-        data = instance.model_dump(mode="json")
+    async def save(self, persona: CompanionPersona, *, reason: str = "") -> None:
+        path = self.path_for(persona.owner_id, persona.companion_id)
+        data = persona.model_dump(mode="json")
 
         def _write() -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,18 +73,16 @@ class YamlPersonaInstanceStore:
         self,
         *,
         template: PersonaTemplate,
-        tenant_id: str,
-        user_id: str,
-        instance_id: str,
-    ) -> PersonaInstance:
+        owner_id: str,
+        companion_id: str,
+    ) -> CompanionPersona:
         now = datetime.now(timezone.utc)
-        instance = PersonaInstance(
-            instance_id=instance_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
+        persona = CompanionPersona(
+            companion_id=companion_id,
+            owner_id=owner_id,
             origin_template_id=template.metadata.template_id,
             origin_template_revision=template.metadata.template_revision,
-            overlay_version=1,
+            version=1,
             created_at=now,
             updated_at=now,
             metadata=template.metadata,
@@ -99,27 +93,27 @@ class YamlPersonaInstanceStore:
             evolution_rules=template.evolution_rules,
             assets=template.assets,
         )
-        await self.save(instance, reason="create_from_template")
-        return instance
+        await self.save(persona, reason="create_from_template")
+        return persona
 
-    async def list_all(self) -> list[PersonaInstance]:
+    async def list_all(self) -> list[CompanionPersona]:
         def _scan() -> list[Path]:
             if not self._dir.exists():
                 return []
             return list(self._dir.rglob("*.yaml"))
 
         paths = await asyncio.to_thread(_scan)
-        out: list[PersonaInstance] = []
+        out: list[CompanionPersona] = []
         for p in paths:
             try:
                 data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-                out.append(PersonaInstance(**data))
+                out.append(CompanionPersona(**data))
             except Exception:
                 continue
         return out
 
-    async def delete(self, tenant_id: str, user_id: str, instance_id: str) -> None:
-        path = self.path_for(tenant_id, user_id, instance_id)
+    async def delete(self, owner_id: str, companion_id: str) -> None:
+        path = self.path_for(owner_id, companion_id)
 
         def _unlink() -> None:
             path.unlink(missing_ok=True)

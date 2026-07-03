@@ -12,10 +12,10 @@ from eidolon_agent.domain.personas.types import (
     PersonaObservation,
 )
 from eidolon_agent.infra.persistence.eidolon_data_persona import (
+    EidolonDataCompanionPersonaStore,
     EidolonDataCustomTemplateStore,
     EidolonDataEvolutionHistoryStore,
     EidolonDataPersonaEvolutionProposalStore,
-    EidolonDataPersonaInstanceStore,
     EidolonDataPersonaObservationStore,
 )
 
@@ -35,36 +35,35 @@ async def test_persona_instance_store_uses_persona_genomes(
     data_store: DataStore,
     canonical_template_registry,
 ) -> None:
-    store = EidolonDataPersonaInstanceStore(data_store)
+    store = EidolonDataCompanionPersonaStore(data_store)
     template = canonical_template_registry.get("caretaker_jiezhi")
 
     created = await store.create_from_template(
         template=template,
-        tenant_id="tenant-1",
-        user_id="user-1",
-        instance_id="companion-1",
+        owner_id="user-1",
+        companion_id="companion-1",
     )
-    loaded = await store.load("tenant-1", "user-1", "companion-1")
+    loaded = await store.load("user-1", "companion-1")
     assert loaded == created
-    assert loaded.overlay_version == 1
+    assert loaded.version == 1
 
     bumped = loaded.model_copy(
         update={
-            "overlay_version": 2,
+            "version": 2,
             "updated_at": datetime.now(timezone.utc),
         }
     )
     await store.save(bumped, reason="test")
-    fresh = await store.load("tenant-1", "user-1", "companion-1")
-    assert fresh.overlay_version == 2
-    assert [item.instance_id for item in await store.list_all()] == ["companion-1"]
+    fresh = await store.load("user-1", "companion-1")
+    assert fresh.version == 2
+    assert [item.companion_id for item in await store.list_all()] == ["companion-1"]
 
     companion = await data_store.companions.get("companion-1")
     assert companion is not None
     assert companion.current_genome_id == "genome-companion-1-2"
 
-    await store.delete("tenant-1", "user-1", "companion-1")
-    assert await store.exists("tenant-1", "user-1", "companion-1") is False
+    await store.delete("user-1", "companion-1")
+    assert await store.exists("user-1", "companion-1") is False
 
 
 @pytest.mark.asyncio
@@ -88,12 +87,11 @@ async def test_persona_instance_store_loads_owner_workspace_genome(
         realm_id="r_benchmark_default",
     )
 
-    store = EidolonDataPersonaInstanceStore(data_store)
-    loaded = await store.load("benchmark", "benchmark", "test")
+    store = EidolonDataCompanionPersonaStore(data_store)
+    loaded = await store.load("benchmark", "test")
 
-    assert loaded.instance_id == "test"
-    assert loaded.tenant_id == "benchmark"
-    assert loaded.user_id == "benchmark"
+    assert loaded.companion_id == "test"
+    assert loaded.owner_id == "benchmark"
     assert loaded.origin_template_id == "g_benchmark_default_v1"
     assert loaded.metadata.name == "Test"
     assert any("# Test" in item for item in loaded.style_compiler.base_instructions)
@@ -104,22 +102,21 @@ async def test_persona_instance_create_is_idempotent_under_concurrent_first_writ
     data_store: DataStore,
     canonical_template_registry,
 ) -> None:
-    store = EidolonDataPersonaInstanceStore(data_store)
+    store = EidolonDataCompanionPersonaStore(data_store)
     template = canonical_template_registry.get("caretaker_jiezhi")
 
     async def _create() -> None:
         await store.create_from_template(
             template=template,
-            tenant_id="tenant-1",
-            user_id="user-race",
-            instance_id="companion-race",
+            owner_id="user-race",
+            companion_id="companion-race",
         )
 
     await asyncio.gather(*(_create() for _ in range(12)))
 
-    loaded = await store.load("tenant-1", "user-race", "companion-race")
-    assert loaded.overlay_version == 1
-    assert [item.instance_id for item in await store.list_all()] == ["companion-race"]
+    loaded = await store.load("user-race", "companion-race")
+    assert loaded.version == 1
+    assert [item.companion_id for item in await store.list_all()] == ["companion-race"]
 
 
 @pytest.mark.asyncio
@@ -127,18 +124,17 @@ async def test_evolution_history_observations_and_proposals_use_events(
     data_store: DataStore,
     canonical_template_registry,
 ) -> None:
-    instance_store = EidolonDataPersonaInstanceStore(data_store)
+    instance_store = EidolonDataCompanionPersonaStore(data_store)
     template = canonical_template_registry.get("caretaker_jiezhi")
     await instance_store.create_from_template(
         template=template,
-        tenant_id="tenant-1",
-        user_id="user-1",
-        instance_id="companion-1",
+        owner_id="user-1",
+        companion_id="companion-1",
     )
 
     history = EidolonDataEvolutionHistoryStore(data_store)
     result = PersonaEvolutionResult(
-        instance_id="companion-1",
+        companion_id="companion-1",
         applied=True,
         rationale="test evolution",
     )
@@ -149,9 +145,8 @@ async def test_evolution_history_observations_and_proposals_use_events(
     observations = EidolonDataPersonaObservationStore(data_store)
     observation = PersonaObservation(
         id="obs-1",
-        tenant_id="tenant-1",
-        user_id="user-1",
-        instance_id="companion-1",
+        owner_id="user-1",
+        companion_id="companion-1",
         kind="positive_feedback_received",
         summary="user liked warmer tone",
     )
@@ -165,9 +160,8 @@ async def test_evolution_history_observations_and_proposals_use_events(
     proposals = EidolonDataPersonaEvolutionProposalStore(data_store)
     proposal = PersonaEvolutionProposal(
         id="proposal-1",
-        tenant_id="tenant-1",
-        user_id="user-1",
-        instance_id="companion-1",
+        owner_id="user-1",
+        companion_id="companion-1",
         rationale="nudge warmer",
     )
     await proposals.add(proposal)
@@ -184,12 +178,12 @@ async def test_custom_template_store_uses_events(
     canonical_template_registry,
 ) -> None:
     custom_store = EidolonDataCustomTemplateStore(data_store)
-    instance_store = EidolonDataPersonaInstanceStore(data_store)
+    instance_store = EidolonDataCompanionPersonaStore(data_store)
     yaml_body = canonical_template_registry.raw_yaml("caretaker_jiezhi")
 
     created = await custom_store.create(
         template_id="custom-care",
-        tenant_id="tenant-1",
+        owner_id="user-1",
         display_name="Custom Care",
         archetype="caretaker",
         yaml_body=yaml_body,
@@ -210,9 +204,8 @@ async def test_custom_template_store_uses_events(
     )
     await instance_store.create_from_template(
         template=template,
-        tenant_id="tenant-1",
-        user_id="user-1",
-        instance_id="companion-1",
+        owner_id="user-1",
+        companion_id="companion-1",
     )
     assert await custom_store.count_referring_instances("custom-care") == 1
     assert [item.template_id for item in await custom_store.list_all()] == ["custom-care"]

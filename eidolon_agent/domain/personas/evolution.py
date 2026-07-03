@@ -1,4 +1,4 @@
-"""Automatic evolution for persona instances."""
+"""Automatic evolution for companion personas."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from datetime import datetime, timezone
 from eidolon_agent.core.errors import EvolutionGuardError
 from eidolon_agent.domain.personas.types import (
     BehavioralKnob,
+    CompanionPersona,
     PersonaEvolutionChange,
     PersonaEvolutionEvent,
     PersonaEvolutionResult,
-    PersonaInstance,
 )
 
 
@@ -18,10 +18,10 @@ class PersonaEvolutionEngine:
     def evolve(
         self,
         *,
-        instance: PersonaInstance,
+        instance: CompanionPersona,
         events: list[PersonaEvolutionEvent],
         dry_run: bool = False,
-    ) -> tuple[PersonaInstance, PersonaEvolutionResult]:
+    ) -> tuple[CompanionPersona, PersonaEvolutionResult]:
         now = datetime.now(timezone.utc)
         knobs = dict(instance.behavioral_knobs)
         rule_timestamps = dict(instance.evolution_state.applied_rule_timestamps)
@@ -55,7 +55,7 @@ class PersonaEvolutionEngine:
                 )
 
         result = PersonaEvolutionResult(
-            instance_id=instance.instance_id,
+            companion_id=instance.companion_id,
             applied=bool(changes) and not dry_run,
             changes=tuple(changes),
             events=tuple(events),
