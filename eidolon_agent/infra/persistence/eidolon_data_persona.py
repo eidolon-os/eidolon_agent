@@ -296,7 +296,15 @@ class EidolonDataEvolutionHistoryStore:
     async def _owner_for_companion(self, companion_id: str) -> str:
         async with self._data_store.session_factory() as session:
             companion = await session.get(CompanionRow, companion_id)
-            return companion.owner_id if companion is not None else "owner-default"
+            if companion is None:
+                # No silent "owner-default": mis-attributing a companion's
+                # evolution history to a phantom owner corrupts the audit
+                # trail and the owner-scoped event queries that read it back.
+                # The companion must be provisioned before it can evolve.
+                raise NotFoundError(
+                    f"cannot record evolution: companion not provisioned: {companion_id}"
+                )
+            return companion.owner_id
 
 
 class EidolonDataPersonaObservationStore:

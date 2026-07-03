@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import pytest
 from eidolon_data import DataSettings, DataStore
 
+from eidolon_agent.core.errors import NotFoundError
 from eidolon_agent.domain.personas.types import (
     PersonaEvolutionProposal,
     PersonaEvolutionResult,
@@ -117,6 +118,23 @@ async def test_persona_instance_create_is_idempotent_under_concurrent_first_writ
     loaded = await store.load("user-race", "companion-race")
     assert loaded.version == 1
     assert [item.companion_id for item in await store.list_all()] == ["companion-race"]
+
+
+@pytest.mark.asyncio
+async def test_record_evolution_rejects_unprovisioned_companion(
+    data_store: DataStore,
+) -> None:
+    # No companion row exists → must fail loud rather than attribute the
+    # evolution event to a phantom "owner-default".
+    history = EidolonDataEvolutionHistoryStore(data_store)
+    result = PersonaEvolutionResult(
+        companion_id="ghost-companion",
+        applied=True,
+        rationale="should not persist",
+    )
+    with pytest.raises(NotFoundError):
+        await history.record_evolution(result)
+    assert await history.list_for_instance("ghost-companion") == []
 
 
 @pytest.mark.asyncio
