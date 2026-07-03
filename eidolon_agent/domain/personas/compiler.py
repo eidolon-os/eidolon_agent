@@ -53,6 +53,7 @@ class PersonaCompiler:
             system_prompt=system_prompt,
             stable_prompt=stable_prompt,
             volatile_prompt=volatile_prompt,
+            spoken_phrases=dict(instance.style_compiler.spoken_phrases),
             identity_block=identity_block,
             style_block=style_block,
             memory_block=memory_block,

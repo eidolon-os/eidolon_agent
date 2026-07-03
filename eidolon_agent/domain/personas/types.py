@@ -336,6 +336,10 @@ class CompiledPersona(BaseModel):
     # is their concatenation, kept for callers that want the whole thing.
     stable_prompt: str = ""
     volatile_prompt: str = ""
+    # Genome-defined hot-path canned lines (see StyleCompiler.spoken_phrases),
+    # threaded through so the turn engine can persona-override outward utterances
+    # (soften, slow-tool hint, coworker announcement) without an extra load.
+    spoken_phrases: dict[str, str] = Field(default_factory=dict)
     transient_knobs: dict[str, float] = Field(default_factory=dict)
     debug_trace: tuple[str, ...] = ()
 

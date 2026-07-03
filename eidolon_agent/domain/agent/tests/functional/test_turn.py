@@ -138,6 +138,32 @@ async def test_stop_plus_new_task_still_runs_the_turn(turn_engine_factory):
 
 
 @pytest.mark.asyncio
+async def test_persona_phrase_overrides_hot_path_line(turn_engine_factory):
+    """A genome-defined spoken_phrase overrides the default canned line."""
+    llm = FakeLLM(
+        script=[
+            [{"kind": "tool_call", "name": "delegate_to_coworker",
+              "arguments": {"instruction": "整理资料"}}],
+            [{"kind": "text", "text": "好的。"}],
+        ]
+    )
+    engine = turn_engine_factory(llm=llm)
+    ti = make_turn_input("帮我整理资料")
+    # Simulate the context compiler stashing the genome's canned lines.
+    ti.metadata["persona_spoken_phrases"] = {
+        "coworker_delegated": "喵～交给我啦，我这就去办。"
+    }
+
+    deltas = [
+        ev.data.get("text", "")
+        async for ev in engine.run(ti)
+        if ev.kind.value == "delta"
+    ]
+    assert any("喵～交给我啦" in t for t in deltas)
+    assert not any("收到，我已交给后台 coworker" in t for t in deltas)
+
+
+@pytest.mark.asyncio
 async def test_topic_switch_is_tagged_on_turn_input(turn_engine_factory):
     engine = turn_engine_factory()
     ti = make_turn_input("我们换个话题吧")

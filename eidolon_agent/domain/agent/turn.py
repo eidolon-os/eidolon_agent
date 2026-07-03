@@ -313,7 +313,9 @@ class TurnEngine:
                         yield TurnEvent.delta(ti.turn_id, seq.next(), delta.text_delta, time.time())
                     if delta.tool_call is not None:
                         tool_calls.append(delta.tool_call)
-                        answer_announcement = _tool_answer_announcement(delta.tool_call)
+                        answer_announcement = _tool_answer_announcement(
+                            delta.tool_call, ti
+                        )
                         if (
                             answer_announcement
                             and answer_announcement not in announced_answers
@@ -424,7 +426,11 @@ class TurnEngine:
                                     yield TurnEvent.delta(
                                         ti.turn_id,
                                         seq.next(),
-                                        self._tool_latency_policy.slow_hint_text,
+                                        _persona_phrase(
+                                            ti,
+                                            "slow_tool_hint",
+                                            self._tool_latency_policy.slow_hint_text,
+                                        ),
                                         time.time(),
                                         role=self._tool_latency_policy.slow_hint_role,
                                     )
@@ -510,9 +516,11 @@ class TurnEngine:
             final_text = "".join(assistant_text_parts)
             out_v = self._output_g.check(output_text=final_text, taboos=self._taboos_provider())
             if out_v.action is SafetyAction.SOFTEN:
-                # Crude soften: prefix; production would re-prompt LLM.
-                final_text = "（让我换个说法）" + final_text
-                yield TurnEvent.delta(ti.turn_id, seq.next(), "（让我换个说法）", time.time())
+                # Crude soften: prefix; production would re-prompt LLM. The
+                # prefix is persona-overridable via the genome's spoken_phrases.
+                soften_prefix = _persona_phrase(ti, "soften_prefix", "（让我换个说法）")
+                final_text = soften_prefix + final_text
+                yield TurnEvent.delta(ti.turn_id, seq.next(), soften_prefix, time.time())
             assistant_text_for_persist = final_text
             ts_output_ms = int((time.monotonic() - t0) * 1000)
             post_turn_allowed = True
@@ -947,11 +955,30 @@ class _SeqGen:
         return self._n
 
 
-def _tool_answer_announcement(call: ToolCall) -> str:
+def _tool_answer_announcement(call: ToolCall, ti: TurnInput) -> str:
     """Substantive answer text injected for tool calls that complete async."""
     if call.name == DELEGATE_TO_COWORKER_TOOL:
-        return "收到，我已交给后台 coworker 处理，会继续跟进。"
+        return _persona_phrase(
+            ti,
+            "coworker_delegated",
+            "收到，我已交给后台 coworker 处理，会继续跟进。",
+        )
     return ""
+
+
+def _persona_phrase(ti: TurnInput, key: str, default: str) -> str:
+    """Genome-overridable hot-path canned line (template lookup, no LLM).
+
+    Reads ``persona_spoken_phrases`` stashed on the TurnInput by the context
+    compiler. Pre-compile paths (refuse / forget ack) have no persona loaded
+    yet, so they fall back to ``default``.
+    """
+    phrases = ti.metadata.get("persona_spoken_phrases")
+    if isinstance(phrases, dict):
+        value = phrases.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return default
 
 
 def _suppressed_tool_result(call: ToolCall) -> ToolResult:

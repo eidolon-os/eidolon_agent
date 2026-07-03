@@ -195,6 +195,11 @@ class ContextCompiler:
         # for personas compiled before the split existed.
         persona_stable = getattr(persona, "stable_prompt", "") or persona.system_prompt
         persona_state = getattr(persona, "volatile_prompt", "")
+        # Stash genome-defined canned lines so the turn engine can
+        # persona-override hot-path utterances without a second persona load.
+        spoken_phrases = getattr(persona, "spoken_phrases", None)
+        if spoken_phrases:
+            ti.metadata["persona_spoken_phrases"] = dict(spoken_phrases)
         persona_segment = ContextSegment(
             kind=ContextSegmentKind.PERSONA,
             content="",
