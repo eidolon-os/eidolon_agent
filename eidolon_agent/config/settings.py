@@ -252,6 +252,11 @@ class RuntimeSettings(BaseModel):
     warmup_enabled: bool = True
     recover_active_instances: bool = True
     drain_timeout_s: int = 30
+    # Standalone profile: run the brain as a self-contained unit with no
+    # external services — in-process event bus + KV, a null memory port, no
+    # coworker worker. Lets the whole agent be started and exercised offline
+    # (input -> full TurnEvent stream + trace) for development and testing.
+    standalone: bool = False
 
 
 class TurnSettings(BaseModel):

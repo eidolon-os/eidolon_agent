@@ -70,12 +70,14 @@ from eidolon_agent.domain.tools.builtin import (
     SubmitLongTaskTool,
 )
 from eidolon_agent.infra.events import NatsEventBus, NatsKVStore
+from eidolon_agent.infra.events.adapters.inmem import InMemoryEventBus, InMemoryKVStore
 from eidolon_agent.infra.events.nats_bus import ensure_buckets
 from eidolon_agent.infra.llm import LLMRouter
 from eidolon_agent.infra.llm.providers.fake import FakeLLM
 from eidolon_agent.infra.long_tasks import MementosHttpClient, MementosLongTaskWorker
 from eidolon_agent.infra.long_tasks.mementos import MementosWorkerConfig
 from eidolon_agent.infra.memory import EidolonMemoryPort
+from eidolon_agent.infra.memory.null_port import NullMemoryPort
 from eidolon_agent.infra.memory.discovery import build_initial_memory_routes
 from eidolon_agent.infra.memory.mcp_client import McpClientPool
 from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
@@ -112,37 +114,57 @@ async def build_application(
     # (already created above)
 
     # 3. Eidolon Data + memory discovery + NATS -------------------------------
+    standalone = settings.runtime.standalone
     data_store = DataStore.open(load_data_settings())
     await data_store.init_schema()
     container.data_store = data_store
 
-    memory_routes, effective_nats_url, memory_refresher = await build_initial_memory_routes(
-        memory=settings.memory,
-        nats=settings.nats,
-    )
-    container.extras["memory_routes"] = memory_routes
+    memory_refresher = None
+    if standalone:
+        # Self-contained profile: no NATS, no memory service, no coworker.
+        # In-process bus + KV and a null memory port so the whole brain runs
+        # offline. Fanout/publisher tolerate memory_routes=None (they fall
+        # back to the canonical subject), so wiring stays on the normal path.
+        _log.info("bootstrap: standalone profile — in-process bus + null memory")
+        memory_routes = None
+        container.event_bus = InMemoryEventBus()
+        container.kv_buckets = {
+            name: InMemoryKVStore(bucket=name) for name in settings.nats.kv_buckets
+        }
+        memory_port: object = NullMemoryPort()
+        container.memory_port = memory_port
+    else:
+        memory_routes, effective_nats_url, memory_refresher = (
+            await build_initial_memory_routes(
+                memory=settings.memory,
+                nats=settings.nats,
+            )
+        )
+        container.extras["memory_routes"] = memory_routes
 
-    nats_bus = NatsEventBus(
-        effective_nats_url,
-        creds_path=str(settings.nats.creds_path) if settings.nats.creds_path else None,
-    )
-    await nats_bus.connect()
-    await ensure_buckets(nats_bus, settings.nats.kv_buckets)
-    container.event_bus = nats_bus
-    container.kv_buckets = {name: NatsKVStore(nats_bus, name) for name in settings.nats.kv_buckets}
+        nats_bus = NatsEventBus(
+            effective_nats_url,
+            creds_path=str(settings.nats.creds_path) if settings.nats.creds_path else None,
+        )
+        await nats_bus.connect()
+        await ensure_buckets(nats_bus, settings.nats.kv_buckets)
+        container.event_bus = nats_bus
+        container.kv_buckets = {
+            name: NatsKVStore(nats_bus, name) for name in settings.nats.kv_buckets
+        }
+
+        # 4. Memory MCP probe --------------------------------------------------
+        mem_pool = McpClientPool(routes=memory_routes)
+        mem_pub = MemoryNatsPublisher(event_bus=container.event_bus, routes=memory_routes)
+        memory_port = EidolonMemoryPort(
+            pool=mem_pool,
+            publisher=mem_pub,
+        )
+        container.memory_port = memory_port
+        if memory_refresher is not None:
+            memory_refresher.start()
+            container.extras["memory_discovery_refresher"] = memory_refresher
     revocation_kv = container.kv_buckets.get("DEVICE_REVOCATIONS")
-
-    # 4. Memory MCP probe ------------------------------------------------------
-    mem_pool = McpClientPool(routes=memory_routes)
-    mem_pub = MemoryNatsPublisher(event_bus=container.event_bus, routes=memory_routes)
-    memory_port = EidolonMemoryPort(
-        pool=mem_pool,
-        publisher=mem_pub,
-    )
-    container.memory_port = memory_port
-    if memory_refresher is not None:
-        memory_refresher.start()
-        container.extras["memory_discovery_refresher"] = memory_refresher
 
     # 5 + 6. Personas templates + per-user instance copies ---------------------
     # Templates have two backing stores: builtin yaml files (read-only,
@@ -214,7 +236,7 @@ async def build_application(
 
     # 10. Tools ----------------------------------------------------------------
     long_task_worker = None
-    if settings.long_task.transport == "mementos_http":
+    if settings.long_task.transport == "mementos_http" and not standalone:
         long_task_worker = MementosLongTaskWorker(
             store=EidolonDataLongTaskStore(data_store),
             client=MementosHttpClient(
@@ -378,6 +400,10 @@ def _build_llm_router(settings: Settings) -> LLMRouter:
     from eidolon_agent.infra.llm.providers import LiteLLMProvider
 
     providers: dict[str, object] = {"fake": FakeLLM()}
+    # Standalone runs offline — no provider credentials — so it must speak
+    # through the deterministic FakeLLM, never a real endpoint.
+    if settings.runtime.standalone:
+        return LLMRouter(providers=providers, default="fake", fallback_models=())
     for m in settings.llm.models:
         try:
             providers[m.name] = LiteLLMProvider(
