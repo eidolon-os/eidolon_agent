@@ -9,10 +9,11 @@ from dataclasses import replace
 import pytest
 from eidolon_data import DataSettings, DataStore
 from eidolon_data.schema.models import JobRow, TurnRow
-from eidolon_sdk.memory import conversation_turn_subject
+from eidolon_sdk.memory import conversation_turn_subject, unwrap_memory_payload
 from sqlalchemy import select
 
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
+from eidolon_agent.core.types.memory import MemoryRecallResult
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEventKind
 from eidolon_agent.domain.history import HistoryManager
@@ -23,7 +24,7 @@ from tests.helpers import make_turn_input
 
 pytestmark = pytest.mark.integration
 
-MEMORY_SUBJECT = conversation_turn_subject("t.alice.inst-test")
+MEMORY_SUBJECT = conversation_turn_subject("realm-test")
 
 
 async def test_tool_call_announces_real_tool_before_dispatch_and_feeds_result_to_llm(
@@ -160,7 +161,7 @@ async def test_llm_selected_long_task_persists_minimal_receipt_record(
     assert row is not None
     assert row.status == "accepted"
     payload = row.input_json["eidolon_agent_long_task"]
-    assert payload["tenant_id"] == "t"
+    assert payload["companion_id"] == "companion-test"
     assert row.owner_id == "alice"
     assert row.conversation_id == "c1"
     assert row.turn_id == "t1"
@@ -327,7 +328,7 @@ async def test_memory_backend_down_injects_degraded_notice(turn_engine_factory) 
     events = [ev async for ev in engine.run(make_turn_input("你还记得我喜欢什么吗？"))]
 
     assert events[-1].kind is TurnEventKind.DONE
-    assert "memory backend" in llm.messages[0].content
+    assert "长期记忆召回暂不可用" in llm.messages[0].content
     assert "不要假装" in llm.messages[0].content
 
 
@@ -355,8 +356,19 @@ async def test_forget_intent_calls_memory_port(turn_engine_factory) -> None:
         def __init__(self):
             self.calls = []
 
-        async def forget(self, user_id: str, query: str, **identity) -> int:
-            self.calls.append((user_id, query, identity))
+        async def forget(
+            self,
+            owner_id: str,
+            companion_id: str,
+            memory_realm_id: str,
+            device_id: str | None,
+            query: str,
+            *,
+            session_id: str = "default",
+        ) -> int:
+            self.calls.append(
+                (owner_id, companion_id, memory_realm_id, device_id, query, session_id)
+            )
             return 3
 
     memory = _Memory()
@@ -370,15 +382,11 @@ async def test_forget_intent_calls_memory_port(turn_engine_factory) -> None:
     assert memory.calls == [
         (
             "alice",
+            "companion-test",
+            "realm-test",
+            "device-test",
             "请忘记这件事",
-            {
-                "tenant_id": "t",
-                "companion_id": "inst-test",
-                "agent_id": "inst-test",
-                "device_id": None,
-                "instance_id": "inst-test",
-                "session_id": "s1",
-            },
+            "s1",
         )
     ]
 
@@ -391,8 +399,9 @@ async def test_memory_replay_remembers_call_name_preference(
     received = []
 
     async def _ingest(ev):
-        received.append(ev.payload)
-        if ev.payload["metadata"]["memory_write_disposition"] == "semantic_upsert":
+        payload = unwrap_memory_payload(ev.payload)
+        received.append(payload)
+        if payload["metadata"]["memory_write_disposition"] == "semantic_upsert":
             memory.context = "称呼偏好: 用户希望被叫作小满"
 
     await event_bus.subscribe(MEMORY_SUBJECT, _ingest)
@@ -422,8 +431,9 @@ async def test_memory_replay_user_correction_replaces_old_fact(
     memory = _ReplayMemory()
 
     async def _ingest(ev):
-        text = ev.payload["user_text"]
-        if ev.payload["metadata"]["memory_write_disposition"] == "semantic_upsert":
+        payload = unwrap_memory_payload(ev.payload)
+        text = payload["user_text"]
+        if payload["metadata"]["memory_write_disposition"] == "semantic_upsert":
             if "阿满" in text:
                 memory.context = "称呼偏好: 用户希望被叫作阿满"
             elif "小满" in text:
@@ -457,8 +467,9 @@ async def test_memory_replay_promise_is_labeled_and_forced_into_recall(
     received = []
 
     async def _ingest(ev):
-        received.append(ev.payload)
-        if ev.payload["metadata"]["memory_write_disposition"] == "promise_create":
+        payload = unwrap_memory_payload(ev.payload)
+        received.append(payload)
+        if payload["metadata"]["memory_write_disposition"] == "promise_create":
             memory.context = "强制承诺: 明天提醒用户喝水"
 
     await event_bus.subscribe(MEMORY_SUBJECT, _ingest)
@@ -507,7 +518,7 @@ async def test_temporary_turn_does_not_create_memory_replay(
     received = []
 
     async def _ingest(ev):
-        received.append(ev.payload)
+        received.append(unwrap_memory_payload(ev.payload))
         memory.context = "should not be written"
 
     await event_bus.subscribe(MEMORY_SUBJECT, _ingest)
@@ -665,13 +676,24 @@ async def test_multiturn_reference_uses_background_without_reexecution(
 class _ReplayMemory:
     def __init__(self, context: str = "") -> None:
         self.context = context
-        self.forget_calls: list[tuple[str, str]] = []
+        self.forget_calls: list[tuple] = []
 
     async def recall_context(self, **_):
-        return self.context, [], False
+        return MemoryRecallResult(context=self.context)
 
-    async def forget(self, user_id: str, query: str, **identity) -> int:
-        self.forget_calls.append((user_id, query, identity))
+    async def forget(
+        self,
+        owner_id: str,
+        companion_id: str,
+        memory_realm_id: str,
+        device_id: str | None,
+        query: str,
+        *,
+        session_id: str = "default",
+    ) -> int:
+        self.forget_calls.append(
+            (owner_id, companion_id, memory_realm_id, device_id, query, session_id)
+        )
         removed = 1 if self.context else 0
         self.context = ""
         return removed
@@ -686,6 +708,22 @@ async def _drain_background_tasks() -> None:
 async def _data_store(tmp_path) -> DataStore:
     store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
     await store.init_schema()
+    # Seed the identity used by tests.helpers.make_turn_input — the runtime
+    # persistence layer validates owner/companion existence before writing.
+    await store.owner_service.create_owner(owner_id="alice", display_name="alice")
+    await store.workspace_provisioning.provision_workspace(
+        owner_id="alice",
+        companion_id="companion-test",
+        genome_id="genome-test",
+        realm_id="realm-test",
+    )
+    await store.devices.create_device(
+        device_id="device-test",
+        owner_id="alice",
+        bound_companion_id="companion-test",
+        auth_type="token",
+        secret_ref="test",
+    )
     return store
 
 

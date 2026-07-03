@@ -12,6 +12,12 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+
+pytest.skip(
+    "admin persona/template routers moved out of eidolon_agent",
+    allow_module_level=True,
+)
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 

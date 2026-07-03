@@ -10,9 +10,8 @@ pytestmark = pytest.mark.functional
 def test_signal_adapter_ignores_low_confidence():
     update = PersonaSignalAdapter().to_runtime_update(
         PersonaSignalInput(
-            tenant_id="t",
-            user_id="u",
-            instance_id="i",
+            owner_id="u",
+            companion_id="i",
             dominant_emotion="happy",
             emotion_confidence=0.9,
             confidence_overall=0.4,
@@ -24,9 +23,8 @@ def test_signal_adapter_ignores_low_confidence():
 def test_signal_adapter_maps_digest_to_runtime_update():
     update = PersonaSignalAdapter().to_runtime_update(
         PersonaSignalInput(
-            tenant_id="t",
-            user_id="u",
-            instance_id="i",
+            owner_id="u",
+            companion_id="i",
             dominant_emotion="happy",
             emotion_confidence=0.9,
             presence="distracted",
@@ -41,16 +39,15 @@ def test_signal_adapter_maps_digest_to_runtime_update():
 async def test_submit_signal_updates_runtime_state(personas_service):
     await personas_service.submit_signal(
         PersonaSignalInput(
-            tenant_id="t",
-            user_id="u",
-            instance_id="i-signal",
+            owner_id="u",
+            companion_id="i-signal",
             dominant_emotion="happy",
             emotion_confidence=0.9,
             confidence_overall=0.9,
         )
     )
     snapshot = await personas_service.get_snapshot(
-        tenant_id="t",
+        tenant_id="u",
         user_id="u",
         instance_id="i-signal",
         template_id="caretaker_jiezhi",

@@ -194,7 +194,7 @@ async def test_recall_context_returns_context_hits_and_degraded_false() -> None:
         session_id="s1",
         plan=_plan(),
     )
-    ctx, hits, degraded = result
+    ctx, hits, degraded = result.context, result.hits, result.degraded
     assert ctx == "prior conversation summary"
     assert [h.id for h in hits] == ["h1"]
     assert hits[0].memory_time is not None
@@ -226,7 +226,7 @@ async def test_recall_context_returns_degraded_on_exception() -> None:
     call = AsyncMock(side_effect=RuntimeError("upstream"))
     port, _, pool, _ = _port(session_call=call)
     result = await port.recall_context("owner-1", "x", memory_realm_id="realm-1", plan=_plan())
-    ctx, hits, degraded = result
+    ctx, hits, degraded = result.context, result.hits, result.degraded
     assert ctx == ""
     assert hits == []
     assert degraded is True
@@ -249,7 +249,7 @@ async def test_recall_context_drops_session_on_timeout() -> None:
         timeout_s=0.01,
     )
 
-    ctx, hits, degraded = result
+    ctx, hits, degraded = result.context, result.hits, result.degraded
     assert ctx == ""
     assert hits == []
     assert degraded is True
@@ -267,7 +267,7 @@ async def test_recall_context_drops_session_on_memory_unavailable_call() -> None
     port, session, pool, _ = _port(session_call=call)
     result = await port.recall_context("owner-1", "x", memory_realm_id="realm-1", plan=_plan())
 
-    ctx, hits, degraded = result
+    ctx, hits, degraded = result.context, result.hits, result.degraded
     assert ctx == ""
     assert hits == []
     assert degraded is True
@@ -306,7 +306,7 @@ async def test_recall_context_retries_once_after_stale_session_unavailable() -> 
         timeout_s=1.0,
     )
 
-    ctx, hits, degraded = result
+    ctx, hits, degraded = result.context, result.hits, result.degraded
     assert degraded is False
     assert ctx == "用户叫曼森，在北京化工大学读书。"
     assert [hit.id for hit in hits] == ["h1"]
@@ -325,7 +325,7 @@ async def test_recall_context_returns_route_reason_on_unavailable_session() -> N
 
     result = await port.recall_context("owner-1", "x", memory_realm_id="realm-1", plan=_plan())
 
-    ctx, hits, degraded = result
+    ctx, hits, degraded = result.context, result.hits, result.degraded
     assert ctx == ""
     assert hits == []
     assert degraded is True

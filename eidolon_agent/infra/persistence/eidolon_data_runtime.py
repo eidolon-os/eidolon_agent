@@ -30,7 +30,7 @@ from sqlalchemy.exc import IntegrityError
 from eidolon_agent.core.types import ChatMessage, MessageRole
 from eidolon_agent.core.types.long_task import CallbackStatus, LongTaskRecord, LongTaskStatus
 from eidolon_agent.core.types.turn import TriageKind, TurnInput, TurnResult, TurnStatus
-from eidolon_agent.domain.history.fanout import MemoryFanoutStatus
+from eidolon_agent.domain.history import MemoryFanoutStatus
 
 _LONG_TASK_PAYLOAD_KEY = "eidolon_agent_long_task"
 _MEMORY_FANOUT_EVENT_TYPE = "eidolon.memory.fanout.status"

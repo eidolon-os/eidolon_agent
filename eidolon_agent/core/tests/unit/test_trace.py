@@ -31,7 +31,7 @@ def test_turn_trace_metadata_shape_is_prompt_safe() -> None:
         tool_trace=[
             ToolTrace(call_id="tc1", name="delegate_to_coworker", ok=True, latency_ms=2)
         ],
-        persona=PersonaTrace(instance_id="inst", template_id="tpl"),
+        persona=PersonaTrace(companion_id="inst", genome_id="tpl"),
         usage={"tokens_in": 10, "tokens_out": 5},
     ).to_metadata()
 

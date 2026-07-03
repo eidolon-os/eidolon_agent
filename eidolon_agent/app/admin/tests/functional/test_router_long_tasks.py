@@ -32,27 +32,33 @@ async def _seed_task(
     store: DataStore,
     *,
     task_id: str,
-    user_id: str,
+    owner_id: str,
     status: LongTaskStatus = LongTaskStatus.ACCEPTED,
     task_type: str = "research",
 ) -> None:
+    await store.owner_service.create_owner(owner_id=owner_id, display_name=owner_id)
+    await store.workspace_provisioning.provision_workspace(
+        owner_id=owner_id,
+        companion_id=f"agent-{owner_id}",
+        genome_id=f"genome-{owner_id}",
+        realm_id=f"realm-{owner_id}",
+    )
     task_store = EidolonDataLongTaskStore(store)
     await task_store.create(
         LongTaskRecord(
             id=task_id,
             provider="mementos",
             status=LongTaskStatus.ACCEPTED,
-            tenant_id="tenant-1",
-            user_id=user_id,
-            agent_instance_id=f"agent-{user_id}",
+            owner_id=owner_id,
+            companion_id=f"agent-{owner_id}",
             conversation_id=f"conv-{task_id}",
             turn_id=f"turn-{task_id}",
             session_id=f"session-{task_id}",
             trace_id=f"trace-{task_id}",
             tool_call_id=f"tool-{task_id}",
-            session_key=f"e.{user_id}.20260614",
+            session_key=f"e.{owner_id}.20260614",
             task_date="2026-06-14",
-            task_key=f"e.{user_id}.20260614.{task_id}",
+            task_key=f"e.{owner_id}.20260614.{task_id}",
             task=f"do {task_id}",
             user_text=f"user asked {task_id}",
             task_type=task_type,
@@ -82,16 +88,16 @@ async def _seed_task(
 async def test_list_long_tasks_filters_without_exposing_raw_db(tmp_path) -> None:
     client, store = await _fresh_app(tmp_path)
     try:
-        await _seed_task(store, task_id="task-1", user_id="alice")
+        await _seed_task(store, task_id="task-1", owner_id="alice")
         await _seed_task(
             store,
             task_id="task-2",
-            user_id="bob",
+            owner_id="bob",
             status=LongTaskStatus.SUCCEEDED,
             task_type="document_work",
         )
 
-        r = await client.get("/api/admin/long-tasks?user_id=bob&limit=20")
+        r = await client.get("/api/admin/long-tasks?owner_id=bob&limit=20")
         assert r.status_code == 200
         body = r.json()
         assert body["next_before"] is None
@@ -110,7 +116,7 @@ async def test_get_long_task_returns_debug_detail(tmp_path) -> None:
         await _seed_task(
             store,
             task_id="task-fail",
-            user_id="alice",
+            owner_id="alice",
             status=LongTaskStatus.FAILED,
         )
 

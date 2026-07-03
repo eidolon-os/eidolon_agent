@@ -604,15 +604,14 @@ class ContextCompiler:
                     session_id=ti.session_id,
                     timeout_s=remaining,
                 )
-                formatted, hits, _degraded = recall
-                if formatted:
-                    contexts.append(formatted)
+                if recall.context:
+                    contexts.append(recall.context)
                     any_success = True
-                for hit in hits:
+                for hit in recall.hits:
                     hit_id = getattr(hit, "id", "")
                     if hit_id and hit_id not in hit_ids:
                         hit_ids.append(hit_id)
-                for triple in getattr(recall, "kg_triples", []) or []:
+                for triple in recall.kg_triples or []:
                     if isinstance(triple, dict):
                         triple_id = str(triple.get("id") or "")
                         if triple_id and all(
@@ -620,12 +619,12 @@ class ContextCompiler:
                             for existing in kg_triples
                         ):
                             kg_triples.append(triple)
-                if _degraded and not any_success:
-                    degraded_reason = degraded_reason or getattr(
-                        recall,
-                        "degraded_reason",
-                        None,
-                    ) or "memory_unavailable"
+                if recall.degraded and not any_success:
+                    degraded_reason = (
+                        degraded_reason
+                        or recall.degraded_reason
+                        or "memory_unavailable"
+                    )
             _degraded = bool(degraded_reason and not any_success)
             return (
                 _merge_memory_contexts(contexts) or None,

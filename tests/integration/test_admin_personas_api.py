@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 import pytest
+
+pytest.skip(
+    "admin persona/template routers moved out of eidolon_agent",
+    allow_module_level=True,
+)
+
 from fastapi.testclient import TestClient
 
 from eidolon_agent.app.admin import build_admin_app
