@@ -188,11 +188,18 @@ class ContextCompiler:
         history_by_segment: dict[int, ChatMessage] = {}
         degraded_sources: list[str] = []
 
+        # KV-cache split: the stable identity/style prompt is the cached prefix
+        # (byte-invariant within a genome version); per-turn persona state
+        # (mood/energy) becomes a separate droppable PERSONA_STATE segment
+        # placed near the current request below. Fall back to the full prompt
+        # for personas compiled before the split existed.
+        persona_stable = getattr(persona, "stable_prompt", "") or persona.system_prompt
+        persona_state = getattr(persona, "volatile_prompt", "")
         persona_segment = ContextSegment(
             kind=ContextSegmentKind.PERSONA,
             content="",
             source="personas_service",
-            token_estimate=_estimate_tokens(persona.system_prompt),
+            token_estimate=_estimate_tokens(persona_stable),
             droppable=False,
             metadata=_context_tag_metadata(
                 authority="instruction",
@@ -206,7 +213,7 @@ class ContextCompiler:
             "[SYSTEM INSTRUCTIONS]\n"
             "authority=instruction; status=active; scope=this_turn_only; "
             "actionability=may_answer_from\n"
-            f"{persona.system_prompt}"
+            f"{persona_stable}"
         )
 
         harness_policy = self._harness.policy_prompt()
@@ -377,6 +384,32 @@ class ContextCompiler:
                 )
                 segments.append(history_segment)
                 history_by_segment[id(history_segment)] = msg
+
+        # Per-turn persona state (mood/energy) sits in the volatile tail, near
+        # the current request's attention hot zone — both to keep the identity
+        # prefix cacheable and to counter persona drift on long chats.
+        persona_state_segment: ContextSegment | None = None
+        if persona_state:
+            persona_state_segment = ContextSegment(
+                kind=ContextSegmentKind.PERSONA_STATE,
+                content="",
+                source="personas_service.state",
+                token_estimate=_estimate_tokens(persona_state),
+                priority=95,
+                metadata=_context_tag_metadata(
+                    authority="instruction",
+                    status="active",
+                    scope="this_turn_only",
+                    actionability="may_answer_from",
+                ),
+            )
+            segments.append(persona_state_segment)
+            system_parts_by_segment[id(persona_state_segment)] = (
+                "[CURRENT PERSONA STATE]\n"
+                "authority=instruction; status=active; scope=this_turn_only; "
+                "actionability=may_answer_from\n"
+                f"{persona_state}"
+            )
 
         current_user_segment: ContextSegment | None = None
         if ti.text:

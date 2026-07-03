@@ -325,6 +325,13 @@ class CompiledPersona(BaseModel):
     style_block: str
     memory_block: str
     runtime_state_block: str = ""
+    # KV-cache split (P1-C): ``stable_prompt`` is invariant within a genome
+    # version (identity + style) and belongs in the cached prompt prefix;
+    # ``volatile_prompt`` (mood/energy + per-turn memory/realtime) changes each
+    # turn and belongs at the tail near the current request. ``system_prompt``
+    # is their concatenation, kept for callers that want the whole thing.
+    stable_prompt: str = ""
+    volatile_prompt: str = ""
     transient_knobs: dict[str, float] = Field(default_factory=dict)
     debug_trace: tuple[str, ...] = ()
 

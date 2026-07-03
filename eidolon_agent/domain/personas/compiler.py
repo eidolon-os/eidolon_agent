@@ -31,18 +31,28 @@ class PersonaCompiler:
         runtime_state_block = _runtime_state_block(runtime_state)
         realtime_block = _realtime_block(realtime)
 
-        parts = [identity_block, style_block]
-        if runtime_state_block:
-            parts.append(runtime_state_block)
-        if memory_block:
-            parts.append(memory_block)
-        if realtime_block:
-            parts.append(realtime_block)
+        # KV-cache split: identity + style are invariant within a genome
+        # version → stable prefix; mood/energy + per-turn memory/realtime
+        # change every turn → volatile tail (placed near the current request
+        # by the context compiler). Concatenation preserves the old prompt.
+        stable_parts = [identity_block, style_block]
+        volatile_parts = [
+            block
+            for block in (runtime_state_block, memory_block, realtime_block)
+            if block
+        ]
+        stable_prompt = "\n\n".join(stable_parts)
+        volatile_prompt = "\n\n".join(volatile_parts)
+        system_prompt = "\n\n".join(
+            part for part in (stable_prompt, volatile_prompt) if part
+        )
 
         return CompiledPersona(
             companion_id=instance.companion_id,
             version=instance.version,
-            system_prompt="\n\n".join(parts),
+            system_prompt=system_prompt,
+            stable_prompt=stable_prompt,
+            volatile_prompt=volatile_prompt,
             identity_block=identity_block,
             style_block=style_block,
             memory_block=memory_block,
