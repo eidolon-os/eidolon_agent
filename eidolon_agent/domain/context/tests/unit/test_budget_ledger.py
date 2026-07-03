@@ -40,6 +40,34 @@ def test_persona_and_current_user_are_kept_even_over_budget() -> None:
     assert ledger.total_token_estimate == 220
     assert ledger.dropped_segments[0].kind is ContextSegmentKind.MEMORY
     assert ledger.dropped_segments[0].reason == "token_budget_exceeded"
+    # 80 + 60 + 80 mandatory tokens against a 50-token budget.
+    assert ledger.budget_overflow_tokens == 170
+    assert ledger.to_metadata()["budget_overflow_tokens"] == 170
+
+
+def test_no_overflow_recorded_when_mandatory_fits() -> None:
+    persona = _seg(ContextSegmentKind.PERSONA, 10)
+    policy = _seg(ContextSegmentKind.HARNESS_POLICY, 10)
+    current = _seg(ContextSegmentKind.CURRENT_USER, 10)
+
+    _kept, ledger = ContextBudget(max_tokens=30).prune([persona, policy, current])
+
+    assert ledger.budget_overflow_tokens == 0
+
+
+def test_budget_exactly_equal_to_mandatory_is_not_overflow() -> None:
+    persona = _seg(ContextSegmentKind.PERSONA, 25)
+    current = _seg(ContextSegmentKind.CURRENT_USER, 25)
+    memory = _seg(ContextSegmentKind.MEMORY, 1)
+
+    kept, ledger = ContextBudget(max_tokens=50).prune([persona, memory, current])
+
+    assert ledger.budget_overflow_tokens == 0
+    assert [s.kind for s in kept] == [
+        ContextSegmentKind.PERSONA,
+        ContextSegmentKind.CURRENT_USER,
+    ]
+    assert [d.kind for d in ledger.dropped_segments] == [ContextSegmentKind.MEMORY]
 
 
 def test_optional_segments_are_pruned_by_priority() -> None:

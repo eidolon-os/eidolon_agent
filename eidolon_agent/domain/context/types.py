@@ -41,6 +41,10 @@ class ContextLedger:
     kept_segments: list[ContextSegment] = field(default_factory=list)
     dropped_segments: list[DroppedContextSegment] = field(default_factory=list)
     degraded_sources: list[str] = field(default_factory=list)
+    # Set when the mandatory (non-droppable) segments alone exceed the token
+    # budget: nothing optional was admitted yet the prompt is already over.
+    # Surfaced in turn traces so operators see silent prompt bloat.
+    budget_overflow_tokens: int = 0
 
     @property
     def total_token_estimate(self) -> int:
@@ -52,6 +56,7 @@ class ContextLedger:
 
     def to_metadata(self) -> dict[str, Any]:
         return {
+            "budget_overflow_tokens": self.budget_overflow_tokens,
             "segments": [
                 {
                     "kind": s.kind.value,
@@ -95,6 +100,10 @@ class ContextBudget:
                 kept.append(seg)
 
         used = sum(s.token_estimate for s in kept)
+        # Mandatory segments are kept even over budget (dropping the persona
+        # or the user's own text would be worse), but silently exceeding the
+        # budget hides prompt bloat — record the overflow for the trace.
+        budget_overflow = max(0, used - self.max_tokens)
         kept_ids = {id(s) for s in kept}
         optional = [
             (idx, seg)
@@ -122,6 +131,7 @@ class ContextBudget:
         return ordered_kept, ContextLedger(
             kept_segments=ordered_kept,
             dropped_segments=dropped,
+            budget_overflow_tokens=budget_overflow,
         )
 
 
