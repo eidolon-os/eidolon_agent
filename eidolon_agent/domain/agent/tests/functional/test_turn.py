@@ -108,6 +108,86 @@ async def test_forget_intent_returns_action_marker(turn_engine_factory):
 
 
 @pytest.mark.asyncio
+async def test_stop_utterance_short_circuits_without_llm(turn_engine_factory):
+    """"停，别说了" must not reach the LLM and returns user_stop."""
+
+    class _BoomLLM:
+        model_id = "fake:boom"
+
+        async def stream(self, *_args, **_kwargs):
+            raise AssertionError("LLM must not be called for a stop command")
+            yield  # pragma: no cover
+
+    engine = turn_engine_factory(llm=_BoomLLM())
+    events = [ev async for ev in engine.run(make_turn_input("停，别说了"))]
+
+    assert [e for e in events if e.kind.value == "delta"] == []
+    done = [e for e in events if e.kind.value == "done"]
+    assert done and done[0].data["termination_cause"] == "user_stop"
+    assert done[0].data["control_intent"] == "hard_stop"
+
+
+@pytest.mark.asyncio
+async def test_stop_plus_new_task_still_runs_the_turn(turn_engine_factory):
+    """"停一下再帮我查天气" carries a task — it must NOT short-circuit."""
+    engine = turn_engine_factory()
+    events = [ev async for ev in engine.run(make_turn_input("停一下再帮我查天气"))]
+    done = [e for e in events if e.kind.value == "done"]
+    assert done and done[0].data.get("termination_cause") != "user_stop"
+    assert [e for e in events if e.kind.value == "delta"]
+
+
+@pytest.mark.asyncio
+async def test_topic_switch_is_tagged_on_turn_input(turn_engine_factory):
+    engine = turn_engine_factory()
+    ti = make_turn_input("我们换个话题吧")
+    _events = [ev async for ev in engine.run(ti)]
+    assert ti.metadata.get("topic_switch") is True
+    assert ti.metadata.get("control_intent") == "topic_switch"
+
+
+@pytest.mark.asyncio
+async def test_barge_in_persists_only_heard_text(turn_engine_factory):
+    """A cancelled turn records only the played prefix, not the full reply."""
+
+    class _SlowLLM:
+        model_id = "fake:slow"
+
+        async def stream(self, *_args, **_kwargs):
+            from eidolon_agent.core.types.llm import LLMDelta
+
+            yield LLMDelta(text_delta="你好呀，")
+            yield LLMDelta(text_delta="今天我想跟你聊很多很多事情")
+            await asyncio.sleep(5)  # user barges in here
+
+    engine = turn_engine_factory(llm=_SlowLLM())
+    ti = make_turn_input("跟我聊聊")
+    # Simulate the transport stashing the TTS playback boundary on cancel:
+    # the user only heard the first 4 characters ("你好呀，").
+    ti.metadata["cancel_played_chars"] = 4
+
+    async def _drive():
+        async for _ev in engine.run(ti):
+            pass
+
+    task = asyncio.create_task(_drive())
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # Give the background persistence tasks a tick to run.
+    await asyncio.sleep(0.05)
+    recent = await engine._history.recent_window(
+        conversation_id=ti.conversation_id, window=10
+    )
+    assistant = [m for m in recent if m.role == MessageRole.ASSISTANT]
+    assert assistant, "heard prefix should be persisted"
+    assert assistant[-1].content == "你好呀，"
+    assert "聊很多" not in assistant[-1].content
+
+
+@pytest.mark.asyncio
 async def test_slow_tool_hint_emitted_once_per_turn(turn_engine_factory):
     """A retried slow tool call must not repeat the wait hint.
 

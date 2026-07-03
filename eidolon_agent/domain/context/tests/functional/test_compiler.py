@@ -144,6 +144,49 @@ async def test_assembles_structured_system_background_and_current_user() -> None
     assert msgs[-1].role is MessageRole.USER
 
 
+async def test_topic_switch_fences_off_prior_topic_history() -> None:
+    history = HistoryManager()
+    for i in range(4):
+        await history.append(
+            conversation_id="c1",
+            message=ChatMessage(
+                id=uuid.uuid4().hex,
+                role=MessageRole.USER,
+                content=f"old-topic-user-{i}",
+                created_at=_now(),
+            ),
+        )
+        await history.append(
+            conversation_id="c1",
+            message=ChatMessage(
+                id=uuid.uuid4().hex,
+                role=MessageRole.ASSISTANT,
+                content=f"old-topic-answer-{i}",
+                created_at=_now(),
+            ),
+        )
+
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas("[PERSONA]\nhi"),
+        instance_locator=_locator,
+        history_manager=history,
+        memory_port=None,
+        summary_provider=_StubSummary("这是旧话题的滚动摘要"),
+    )
+
+    ti = make_turn_input("我们换个话题吧")
+    ti.metadata["topic_switch"] = True
+    system = (await compiler.compile(ti))[0].content
+
+    # The rolling summary describes the old topic and must be fenced off.
+    assert "旧话题的滚动摘要" not in system
+    # Deep history from the old topic must not bleed into the new one; only
+    # the immediately-preceding turn survives for referential continuity.
+    assert "old-topic-answer-0" not in system
+    assert "old-topic-answer-1" not in system
+    assert "old-topic-answer-3" in system
+
+
 async def test_persona_locator_args_match_turn_input() -> None:
     personas = _StubPersonas()
     compiler = ContextCompiler(

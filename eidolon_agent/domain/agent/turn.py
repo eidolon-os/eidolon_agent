@@ -29,6 +29,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from eidolon_sdk.biz.dialogue_control import InterruptIntent
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
 from eidolon_agent.core.errors import GuardrailBlockedError, TurnCancelledError
@@ -58,6 +59,7 @@ from eidolon_agent.core.types.turn import (
     TurnInput,
     TurnStatus,
 )
+from eidolon_agent.domain.agent.control_intent import ControlIntentClassifier
 from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails.crisis import CrisisHandler
@@ -106,6 +108,7 @@ class TurnEngine:
         input_guardrail: InputGuardrail,
         output_guardrail: OutputGuardrail,
         crisis: CrisisHandler,
+        control_classifier: ControlIntentClassifier | None = None,
         event_bus=None,
         personas_service=None,
         persona_template_id: str | None = None,
@@ -129,6 +132,7 @@ class TurnEngine:
         self._input_g = input_guardrail
         self._output_g = output_guardrail
         self._crisis = crisis
+        self._control = control_classifier or ControlIntentClassifier()
         self._bus = event_bus
         self._personas = personas_service
         self._persona_template_id = persona_template_id
@@ -241,6 +245,28 @@ class TurnEngine:
                     removed=removed,
                 )
                 return
+
+            # ---- Reflex control intent (stop / topic switch) ---------------
+            # Runs before triage on the final utterance. A whole-utterance
+            # stop must never reach the LLM: emit a DONE tagged
+            # ``termination_cause="user_stop"`` so the upstream channel can
+            # circuit-break TTS/rendering. A topic switch tags the TurnInput
+            # so the context compiler can fence off the prior topic. Mirrors
+            # the channel's Tier0 fast-path via the shared SDK taxonomy.
+            control = self._control.classify(ti.text)
+            ti.metadata["control_intent"] = control.intent.value
+            if control.short_circuit:
+                yield TurnEvent.done(
+                    ti.turn_id,
+                    seq.next(),
+                    TurnStatus.OK,
+                    time.time(),
+                    termination_cause="user_stop",
+                    control_intent=control.intent.value,
+                )
+                return
+            if control.intent is InterruptIntent.TOPIC_SWITCH:
+                ti.metadata["topic_switch"] = True
 
             # ---- Triage -----------------------------------------------------
             triage_kind = self._triage.classify(ti.text)
@@ -542,6 +568,23 @@ class TurnEngine:
         except asyncio.CancelledError:
             status = TurnStatus.CANCELLED
             error_code = TurnCancelledError.code
+            # Barge-in truncation: persist only what the user actually heard.
+            # The transport stashes the TTS playback boundary (character offset
+            # into the streamed answer text) on CancelTurn; truncate the
+            # accumulated assistant text there so history / chat_messages /
+            # memory fanout never record words that were cut off before
+            # playback. Absent boundary => keep the full streamed text
+            # (unknown, not "nothing heard"). This keeps the companion's
+            # memory aligned with the user's real auditory experience.
+            heard_text = "".join(assistant_text_parts)
+            played_chars = ti.metadata.get("cancel_played_chars")
+            if played_chars is not None:
+                heard_text = heard_text[: max(0, int(played_chars))]
+            assistant_text_for_persist = heard_text
+            # Let the heard exchange reach memory/history via the standard
+            # post-turn path (skipped when there is nothing heard).
+            if heard_text:
+                post_turn_allowed = True
             yield TurnEvent.error(ti.turn_id, seq.next(), error_code, "cancelled", time.time())
             raise
         except GuardrailBlockedError as exc:

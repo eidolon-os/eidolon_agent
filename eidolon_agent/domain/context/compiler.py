@@ -113,13 +113,25 @@ class ContextCompiler:
         )
         memory_timeout_s = self._memory_timeout_for(ti.text or "")
         memory_task = _timed("memory", self._memory_recall(ti, timeout_s=memory_timeout_s))
-        summary_task = _timed("summary", self._summary_context(ti, policy))
+        # Topic switch fencing: when the reflex layer flagged this turn as a
+        # topic switch, the rolling summary and most of the recent window
+        # describe the *previous* topic and would bleed into the new one. Skip
+        # the summary and shrink the window to the immediately-preceding turn
+        # (kept for referential continuity, e.g. resolving "那个" in the switch
+        # utterance itself).
+        topic_switch = bool(ti.metadata.get("topic_switch"))
+        history_window = 1 if topic_switch else self._history_window
+        summary_task = (
+            _empty_summary()
+            if topic_switch
+            else _timed("summary", self._summary_context(ti, policy))
+        )
         history_coro = (
             _empty_history()
             if not policy.history_context_allowed
             else self._history.recent_window(
                 conversation_id=ti.conversation_id,
-                window=self._history_window,
+                window=history_window,
             )
         )
         history_task = _timed("history", history_coro)
@@ -734,6 +746,12 @@ async def _timed(_name: str, coro):  # type: ignore[no-untyped-def]
 
 async def _empty_history() -> list[ChatMessage]:
     return []
+
+
+async def _empty_summary() -> tuple[None, int]:
+    # Matches the (value, elapsed_ms) shape _timed() yields so the gather
+    # unpacker treats a fenced-off summary the same as an absent one.
+    return None, 0
 
 
 async def _call_summary_provider(provider, *, conversation_id: str) -> str | None:  # type: ignore[no-untyped-def]
