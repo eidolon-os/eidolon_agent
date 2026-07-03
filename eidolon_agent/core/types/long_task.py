@@ -60,6 +60,12 @@ class LongTaskRecord:
     urgency: str = "normal"
     expected_output: str = ""
     context_summary: str = ""
+    # Delegation contract (Anthropic multi-agent lesson: a subagent needs a
+    # bounded objective, an output contract, a tool/step budget, and a rough
+    # duration to work well). 0 tool_budget = coworker default; empty
+    # expected_duration_hint = unspecified.
+    tool_budget: int = 0
+    expected_duration_hint: str = ""
     attachments: list[dict[str, Any]] = field(default_factory=list)
     request_payload: dict[str, Any] = field(default_factory=dict)
     mementos_session_id: str | None = None

@@ -81,6 +81,8 @@ class SubmitLongTaskTool:
             "expected_output": args["expected_result"],
             "context": args["context"],
             "context_summary": args["context"],
+            "tool_budget": args["tool_budget"],
+            "expected_duration_hint": args["expected_duration_hint"],
             "progress_subject": progress_subject,
         }
         record = LongTaskRecord(
@@ -106,6 +108,8 @@ class SubmitLongTaskTool:
             urgency=payload["urgency"],
             expected_output=payload["expected_output"],
             context_summary=payload["context_summary"],
+            tool_budget=payload["tool_budget"],
+            expected_duration_hint=payload["expected_duration_hint"],
             request_payload=payload,
             callback_subject=progress_subject,
         )
@@ -196,6 +200,22 @@ def _delegate_schema() -> ToolSchema:
                         "only necessary details; omit unrelated private information."
                     ),
                 },
+                "tool_budget": {
+                    "type": "integer",
+                    "description": (
+                        "Rough ceiling on how many steps/tool calls the coworker should "
+                        "spend before reporting back. Omit or 0 to let the coworker "
+                        "decide. Use a small number for quick lookups, larger for "
+                        "multi-step research."
+                    ),
+                },
+                "expected_duration_hint": {
+                    "type": "string",
+                    "description": (
+                        "Rough expected duration to set the user's expectation, e.g. "
+                        "'几分钟', '大约一小时', '今天之内'."
+                    ),
+                },
             },
             "required": ["instruction"],
             "additionalProperties": False,
@@ -218,7 +238,20 @@ def _normalize_arguments(arguments: dict) -> dict[str, str]:
         "urgency": str(arguments.get("urgency") or "normal").strip() or "normal",
         "expected_result": str(arguments.get("expected_result") or "").strip(),
         "context": str(arguments.get("context") or "").strip(),
+        "tool_budget": _coerce_tool_budget(arguments.get("tool_budget")),
+        "expected_duration_hint": str(
+            arguments.get("expected_duration_hint") or ""
+        ).strip(),
     }
+
+
+def _coerce_tool_budget(value: object) -> int:
+    """Best-effort int; a malformed budget must not fail the delegation."""
+    try:
+        budget = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
+    return budget if budget > 0 else 0
 
 
 def _localized_now(locale: str) -> datetime:
