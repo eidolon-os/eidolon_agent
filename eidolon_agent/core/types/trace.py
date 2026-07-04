@@ -113,6 +113,9 @@ class TurnTrace:
     caller_kind: str | None
     model: str | None
     latency: LatencyBreakdown
+    # Cross-hop correlation id (channel->agent->memory). Persisted in the turn
+    # trace so a turn can be joined to its channel origin and memory ingestion.
+    trace_id: str | None = None
     # Reflex-layer control classification (P0-A) + why the turn ended, so a
     # STOP short-circuit or topic switch is observable end to end.
     control_intent: str | None = None
@@ -149,6 +152,7 @@ class TurnTrace:
                 "triage": self.triage,
                 "caller_kind": self.caller_kind,
                 "model": self.model,
+                "trace_id": self.trace_id,
                 "control_intent": self.control_intent,
                 "termination_cause": self.termination_cause,
             },

@@ -183,6 +183,44 @@ async def test_cancel_played_chars_stashed_on_turn_input(monkeypatch) -> None:
     assert agent.ti.metadata["cancel_played_ms"] == 1234.5
 
 
+async def test_start_turn_trace_id_reaches_turn_input(monkeypatch) -> None:
+    identity = Identity(
+        owner_id="owner-1",
+        companion_id="companion-1",
+        device_id="dev-1",
+        memory_realm_id="realm-1",
+        genome_id="genome-1",
+    )
+    monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
+    agent = _CapturingLateAgent()
+    context = _Context()
+    servicer = EidolonAgentServicer(
+        agent_registry=_Registry([agent]),
+        signals_bus=_Signals(),
+        proactive_bus=None,
+    )
+
+    await servicer.Chat(
+        _YieldingRequests(
+            [
+                pb.ChatRequest(
+                    start=pb.StartTurn(
+                        turn_id="t1",
+                        conversation_id="conv",
+                        text="你好",
+                        trace_id="channel-trace-123",
+                    )
+                ),
+            ]
+        ),
+        context,
+    )
+
+    # The caller-minted per-turn trace id propagates onto the TurnInput.
+    assert agent.ti is not None
+    assert agent.ti.caller.trace_id == "channel-trace-123"
+
+
 async def test_parallel_conversations_do_not_supersede_each_other(monkeypatch) -> None:
     identity = Identity(
         owner_id="owner-1",

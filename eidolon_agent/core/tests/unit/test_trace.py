@@ -32,6 +32,7 @@ def test_turn_trace_metadata_shape_is_prompt_safe() -> None:
             ToolTrace(call_id="tc1", name="delegate_to_coworker", ok=True, latency_ms=2)
         ],
         persona=PersonaTrace(companion_id="inst", genome_id="tpl"),
+        trace_id="trace-abc",
         control_intent="hard_stop",
         termination_cause="user_stop",
         usage={"tokens_in": 10, "tokens_out": 5},
@@ -40,6 +41,7 @@ def test_turn_trace_metadata_shape_is_prompt_safe() -> None:
     assert trace["schema_version"] == TRACE_SCHEMA_VERSION
     assert trace["boundary"] == "eidolon_agent.brain"
     assert trace["turn"]["turn_id"] == "t1"
+    assert trace["turn"]["trace_id"] == "trace-abc"
     assert trace["turn"]["control_intent"] == "hard_stop"
     assert trace["turn"]["termination_cause"] == "user_stop"
     assert trace["latency"]["compile_ms"] == 20

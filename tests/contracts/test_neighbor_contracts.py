@@ -56,15 +56,17 @@ async def test_fanout_payload_round_trips_to_memory_contract() -> None:
         user_text="你好",
         assistant_text="你好呀",
         timestamp_iso="2026-07-03T00:00:00+00:00",
+        trace_id="trace-xyz",
         metadata={"memory_write_disposition": "semantic_upsert"},
     )
     await asyncio.sleep(0)
 
     assert len(received) == 1
     # Memory unwraps the versioned envelope, then parses the turn payload.
-    payload = ConversationTurnPayload.model_validate(
-        unwrap_memory_payload(received[0].payload)
-    )
+    envelope = received[0].payload
+    # The correlation id rides the envelope (channel->agent->memory tracing).
+    assert envelope.get("trace_id") == "trace-xyz"
+    payload = ConversationTurnPayload.model_validate(unwrap_memory_payload(envelope))
     assert payload.turn_id == "t1"
     assert payload.user_text == "你好"
     assert payload.assistant_text == "你好呀"

@@ -636,6 +636,7 @@ class TurnEngine:
                     triage=triage_kind.value,
                     caller_kind=ti.caller.caller_kind.value,
                     model=getattr(self._llm, "model_id", None),
+                    trace_id=ti.caller.trace_id,
                     control_intent=ti.metadata.get("control_intent"),
                     termination_cause=ti.metadata.get("termination_cause"),
                     latency=LatencyBreakdown(
@@ -868,6 +869,7 @@ class TurnEngine:
                 user_text=ti.text or "",
                 assistant_text=assistant_text,
                 timestamp_iso=started_at.isoformat(),
+                trace_id=ti.caller.trace_id,
                 metadata={
                     "memory_write_disposition": write_trace["disposition"],
                     "memory_write_reason": write_trace["reason"],

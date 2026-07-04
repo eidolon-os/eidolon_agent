@@ -196,6 +196,14 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     or conversation_id
                 ).strip()
                 caller_kind = _caller_kind_from_metadata(start_metadata)
+                # Correlation id for cross-hop tracing (channel->agent->memory).
+                # Prefer the per-turn trace_id the caller minted; fall back to
+                # call-level x-trace-id, then a fresh uuid.
+                trace_id = (
+                    str(start.trace_id or "").strip()
+                    or dict(context.invocation_metadata()).get("x-trace-id", "")
+                    or uuid.uuid4().hex
+                )
 
                 ti = TurnInput(
                     turn_id=start.turn_id or uuid.uuid4().hex,
@@ -210,9 +218,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                             genome_id=inst.genome_id,
                         ),
                         caller_kind=caller_kind,
-                        trace_id=dict(context.invocation_metadata()).get(
-                            "x-trace-id", uuid.uuid4().hex
-                        ),
+                        trace_id=trace_id,
                         request_id=dict(context.invocation_metadata()).get(
                             "x-request-id", uuid.uuid4().hex
                         ),

@@ -62,6 +62,7 @@ class HistoryFanout:
         user_text: str,
         assistant_text: str,
         timestamp_iso: str,
+        trace_id: str | None = None,
         emotion_payload: dict | None = None,
         metadata: dict | None = None,
     ) -> MemoryFanoutStatus:
@@ -105,9 +106,11 @@ class HistoryFanout:
             assistant_text=assistant_text,
             metadata=payload_metadata,
         )
+        # Correlation id for cross-hop tracing; falls back to turn_id when the
+        # caller didn't thread one (keeps old behaviour for other callers).
         memory_payload = envelope_memory_payload(
             turn_payload,
-            trace_id=turn_id,
+            trace_id=trace_id or turn_id,
         ).model_dump(mode="json")
         try:
             status_subject = (
