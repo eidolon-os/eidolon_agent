@@ -17,30 +17,28 @@ import asyncio
 import json
 import os
 import subprocess
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import grpc
 import httpx
-from bench_chat import (
-    _bench_one_turn_per_stream,
-    _bench_reused_stream,
-)
-from bench_chat import (
-    _issue_token as _issue_chat_token,
-)
-from replay_live_service import (
+from eidolon_agent.app.benchmark.live_service import (
     _issue_token as _issue_live_token,
 )
-from replay_live_service import (
+from eidolon_agent.app.benchmark.live_service import (
     _run_scenarios as _run_live_service_scenarios,
 )
-from replay_live_service import (
+from eidolon_agent.app.benchmark.live_service import (
     _startup_failure_report,
     ensure_registry_user,
+    issue_runtime_token,
 )
 
+from eidolon_agent.app.transport.grpc.codec import struct_to_dict
+from eidolon_agent.app.transport.grpc.proto import pb, pbg
 from eidolon_agent.app.runtime.bootstrap import _build_llm_router
 from eidolon_agent.config import load_settings
 from eidolon_agent.infra.benchmark import (
@@ -61,6 +59,10 @@ from eidolon_agent.infra.benchmark.users import (
 )
 from eidolon_agent.app.benchmark import load_replay_scenarios
 from eidolon_agent.app.benchmark.experience import ExperienceReplayRunner
+from eidolon_agent.app.benchmark.suites import (
+    LIVE_AGENT_MEMORY_BENCHMARK_NAME,
+    live_agent_memory_experience_scenarios,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = Path("~/eidolon/debug/reports/realtime")
@@ -70,6 +72,15 @@ DEFAULT_LIVE_SERVICE_FIXTURE = Path("tests/benchmark/fixtures/live_service_smoke
 DEFAULT_REGISTRY_HTTP = (
     os.getenv("EIDOLON_BENCHMARK_REGISTRY_HTTP") or "http://127.0.0.1:9000/api"
 )
+PROMPTS = [
+    "你好，我刚醒来，今天感觉怎么样？",
+    "帮我想想晚饭吃什么。",
+    "讲个笑话。",
+    "如果一个朋友最近情绪低落，怎么安慰？",
+    "总结一下我们刚才聊了什么。",
+    "再来一句鼓励的话。",
+    "晚安。",
+]
 
 
 async def main() -> int:
@@ -83,6 +94,14 @@ async def main() -> int:
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--profile", default="voice")
     parser.add_argument("--fixture", action="append", type=Path, default=[])
+    parser.add_argument(
+        "--agent-memory-benchmark",
+        action="store_true",
+        help=(
+            "Run the built-in live real-service benchmark for agent + memory "
+            f"experience ({LIVE_AGENT_MEMORY_BENCHMARK_NAME})."
+        ),
+    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--benchmark-runs-dir", type=Path, default=DEFAULT_BENCHMARK_RUNS_DIR)
     parser.add_argument(
@@ -145,6 +164,12 @@ async def main() -> int:
     parser.add_argument("--admin-delay-s", type=float, default=0.2)
     parser.add_argument("--admin-timeout-s", type=float, default=5.0)
     parser.add_argument("--http-timeout-s", type=float, default=20.0)
+    parser.add_argument(
+        "--turn-timeout-s",
+        type=float,
+        default=45.0,
+        help="Maximum seconds to wait for a single live-service turn stream.",
+    )
     args = parser.parse_args()
     try:
         identity = resolve_benchmark_identity(
@@ -244,6 +269,145 @@ async def _run_in_process(fixtures: list[Path]) -> dict[str, Any]:
     return await ExperienceReplayRunner().run_many(scenarios)
 
 
+async def _bench_one_turn_per_stream(
+    grpc_target: str,
+    token: str,
+    turns: int,
+    conversation_id: str,
+) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    metadata = _authorization_metadata(token)
+    for idx in range(turns):
+        prompt = PROMPTS[idx % len(PROMPTS)]
+        turn_id = uuid.uuid4().hex
+        async with grpc.aio.insecure_channel(grpc_target) as channel:
+            stub = pbg.EidolonAgentStub(channel)
+            results.append(
+                await _run_one_grpc_turn(
+                    stub,
+                    metadata,
+                    conversation_id,
+                    turn_id,
+                    prompt,
+                )
+            )
+    return results
+
+
+async def _bench_reused_stream(
+    grpc_target: str,
+    token: str,
+    turns: int,
+    conversation_id: str,
+) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    metadata = _authorization_metadata(token)
+    async with grpc.aio.insecure_channel(grpc_target) as channel:
+        stub = pbg.EidolonAgentStub(channel)
+        send_queue: asyncio.Queue[pb.ChatRequest | None] = asyncio.Queue()
+
+        async def _requests():
+            while True:
+                item = await send_queue.get()
+                if item is None:
+                    return
+                yield item
+
+        call = stub.Chat(_requests(), metadata=metadata)
+        try:
+            for idx in range(turns):
+                prompt = PROMPTS[idx % len(PROMPTS)]
+                turn_id = uuid.uuid4().hex
+                started = time.monotonic()
+                await send_queue.put(
+                    pb.ChatRequest(
+                        start=pb.StartTurn(
+                            turn_id=turn_id,
+                            conversation_id=conversation_id,
+                            text=prompt,
+                        )
+                    )
+                )
+                first_delta_ms: int | None = None
+                total_ms: int | None = None
+                error: str | None = None
+                async for ev in call:
+                    if ev.turn_id != turn_id:
+                        continue
+                    kind = pb.TurnEvent.Kind.Name(ev.kind)
+                    if kind == "DELTA" and first_delta_ms is None:
+                        first_delta_ms = int((time.monotonic() - started) * 1000)
+                    elif kind == "DONE":
+                        total_ms = int((time.monotonic() - started) * 1000)
+                        break
+                    elif kind == "ERROR":
+                        total_ms = int((time.monotonic() - started) * 1000)
+                        data = struct_to_dict(ev.data) if ev.data else {}
+                        error = str(data.get("message") or data.get("code") or "error")
+                        break
+                results.append(
+                    {
+                        "turn": idx + 1,
+                        "turn_id": turn_id,
+                        "first_delta_ms": first_delta_ms,
+                        "total_ms": total_ms,
+                        "error": error,
+                    }
+                )
+        finally:
+            await send_queue.put(None)
+            call.cancel()
+    return results
+
+
+async def _run_one_grpc_turn(
+    stub,
+    metadata: tuple[tuple[str, str], ...],
+    conversation_id: str,
+    turn_id: str,
+    prompt: str,
+) -> dict[str, Any]:
+    started = time.monotonic()
+
+    async def _requests():
+        yield pb.ChatRequest(
+            start=pb.StartTurn(
+                turn_id=turn_id,
+                conversation_id=conversation_id,
+                text=prompt,
+            )
+        )
+        while True:
+            await asyncio.sleep(3600)
+
+    first_delta_ms: int | None = None
+    total_ms: int | None = None
+    error: str | None = None
+    call = stub.Chat(_requests(), metadata=metadata)
+    try:
+        async for ev in call:
+            kind = pb.TurnEvent.Kind.Name(ev.kind)
+            if kind == "DELTA" and first_delta_ms is None:
+                first_delta_ms = int((time.monotonic() - started) * 1000)
+            elif kind == "DONE":
+                total_ms = int((time.monotonic() - started) * 1000)
+                break
+            elif kind == "ERROR":
+                total_ms = int((time.monotonic() - started) * 1000)
+                data = struct_to_dict(ev.data) if ev.data else {}
+                error = str(data.get("message") or data.get("code") or "error")
+                break
+    finally:
+        call.cancel()
+    return {
+        "turn": -1,
+        "turn_id": turn_id,
+        "first_delta_ms": first_delta_ms,
+        "total_ms": total_ms,
+        "error": error,
+    }
+
+
 async def _run_live_grpc(args: argparse.Namespace) -> dict[str, Any]:
     user_id = args.user
     conversation_id = args.conversation or f"bench-{uuid.uuid4().hex[:8]}"
@@ -256,13 +420,11 @@ async def _run_live_grpc(args: argparse.Namespace) -> dict[str, Any]:
                 tenant_id=args.tenant,
                 user_id=user_id,
             )
-        token, resolved_user_id = await _issue_chat_token(
-            http,
-            args.grpc,
-            args.http,
-            args.tenant,
-            user_id,
-            args.template,
+        token, resolved_user_id = await issue_runtime_token(
+            tenant_id=args.tenant,
+            user_id=user_id,
+            template_id=args.template,
+            device_name="live-grpc-benchmark",
         )
     if args.reuse_stream:
         rows = await _bench_reused_stream(args.grpc, token, args.turns, conversation_id)
@@ -310,7 +472,11 @@ async def _run_live_service(
     args: argparse.Namespace,
     fixtures: list[Path],
 ) -> dict[str, Any]:
-    scenarios = load_replay_scenarios(fixtures)
+    scenarios = (
+        live_agent_memory_experience_scenarios()
+        if args.agent_memory_benchmark
+        else load_replay_scenarios(fixtures)
+    )
     user_id = args.user
     try:
         async with httpx.AsyncClient(timeout=args.http_timeout_s, trust_env=False) as http:
@@ -341,6 +507,7 @@ async def _run_live_service(
                 conversation_id=args.conversation or f"replay-live-{uuid.uuid4().hex[:8]}",
                 admin_delay_s=args.admin_delay_s,
                 admin_timeout_s=args.admin_timeout_s,
+                turn_timeout_s=args.turn_timeout_s,
             )
             report["provisioning"] = provisioning
             return report
@@ -414,6 +581,10 @@ def _source_report_summary(report: dict[str, Any]) -> dict[str, Any]:
         "summary": report.get("summary"),
         "metrics": report.get("metrics"),
     }
+
+
+def _authorization_metadata(token: str) -> tuple[tuple[str, str], ...]:
+    return (("authorization", f"Bearer {token}"),)
 
 
 async def _generate_llm_summary(

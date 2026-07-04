@@ -19,11 +19,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from eidolon_sdk.core.runtime import BackgroundTaskRunner
 from eidolon_sdk.memory import conversation_turn_subject
 
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
+from eidolon_agent.core.types.memory import MemoryRecallResult
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEventKind, TurnInput, TurnTrigger
 from eidolon_agent.domain.agent import TaskClassifier, TurnEngine
@@ -216,11 +218,12 @@ class _ReplayHarness:
         )
         self.memory_fanouts: list[dict[str, Any]] = []
         self.captured_traces: dict[str, dict[str, Any]] = {}
+        self.background_tasks = BackgroundTaskRunner(component="experience-replay")
 
     async def start(self) -> None:
         await self.event_bus.subscribe(
             conversation_turn_subject(
-                f"{_REPLAY_TENANT_ID}.{_REPLAY_USER_ID}.{_REPLAY_AGENT_INSTANCE_ID}"
+                f"{_REPLAY_TENANT_ID}.{_REPLAY_USER_ID}"
             ),
             self._on_memory_fanout,
         )
@@ -271,6 +274,7 @@ class _ReplayHarness:
                 assistant_parts.append(str(ev.data.get("text") or ""))
             elif ev.kind in {TurnEventKind.DONE, TurnEventKind.ERROR}:
                 total_ms = int((time.monotonic() - t0) * 1000)
+        await self.background_tasks.drain(timeout_s=2.0)
         await _drain_background_tasks()
 
         result = TurnReplayResult(
@@ -297,8 +301,9 @@ class _ReplayHarness:
     async def _on_memory_fanout(self, ev: Event) -> None:
         payload = dict(ev.payload)
         self.memory_fanouts.append(payload)
-        disposition = (payload.get("metadata") or {}).get("memory_write_disposition")
-        user_text = str(payload.get("user_text") or "")
+        turn_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+        disposition = (turn_payload.get("metadata") or {}).get("memory_write_disposition")
+        user_text = str(turn_payload.get("user_text") or "")
         if disposition == "semantic_upsert":
             self.memory.context = _semantic_context_from_text(user_text)
         elif disposition == "promise_create":
@@ -332,6 +337,7 @@ class _ReplayHarness:
             persona_template_id=_REPLAY_PERSONA_ID,
             memory_port=self.memory,
             turn_persister=self._capture_turn,
+            background_tasks=self.background_tasks,
         )
 
     async def _capture_turn(self, **kwargs: Any) -> None:
@@ -381,16 +387,38 @@ class _ReplayMemory:
         self.context = context
         self.degraded = degraded
         self.raise_on_recall = raise_on_recall
-        self.forget_calls: list[tuple[str, str]] = []
+        self.forget_calls: list[dict[str, Any]] = []
 
     async def recall_context(self, **_: Any):
         if self.raise_on_recall:
             raise RuntimeError("memory backend down")
         hits = [SimpleNamespace(id="replay-memory-1")] if self.context else []
-        return self.context, hits, self.degraded
+        return MemoryRecallResult(
+            context=self.context,
+            hits=hits,
+            degraded=self.degraded,
+        )
 
-    async def forget(self, user_id: str, query: str, **identity: Any) -> int:
-        self.forget_calls.append((user_id, query, identity))
+    async def forget(
+        self,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        device_id: str | None,
+        query: str,
+        *,
+        session_id: str | None = None,
+    ) -> int:
+        self.forget_calls.append(
+            {
+                "owner_id": owner_id,
+                "companion_id": companion_id,
+                "memory_realm_id": memory_realm_id,
+                "device_id": device_id,
+                "query": query,
+                "session_id": session_id,
+            }
+        )
         removed = 1 if self.context else 0
         self.context = ""
         return removed

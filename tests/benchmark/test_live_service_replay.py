@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from eidolon_agent.app.benchmark.suites import live_agent_memory_experience_scenarios
-from scripts import replay_live_service
+from eidolon_agent.app.benchmark import live_service as replay_live_service
 
 
 def test_live_turn_checks_read_admin_observability_summary() -> None:

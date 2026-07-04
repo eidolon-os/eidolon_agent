@@ -13,7 +13,8 @@ Useful commands:
   --output ~/eidolon/debug/reports/replay/in-process-latest.json \
   --markdown ~/eidolon/debug/reports/replay/in-process-latest.md
 
-./.venv/bin/python scripts/replay_live_service.py \
+./.venv/bin/python scripts/bench_realtime.py \
+  --mode live-service \
   --fixture tests/benchmark/fixtures/live_service_smoke.jsonl
 
 ./.venv/bin/python scripts/compare_replay_reports.py \
@@ -72,13 +73,12 @@ Standard daily command:
 Real service E2E command:
 
 ```bash
-./.venv/bin/python scripts/replay_live_service.py \
+./.venv/bin/python scripts/bench_realtime.py \
+  --mode live-service \
   --agent-memory-benchmark \
   --http http://127.0.0.1:8081 \
   --grpc 127.0.0.1:45051 \
-  --output ~/eidolon/debug/reports/replay/live-agent-memory-latest.json \
-  --markdown ~/eidolon/debug/reports/replay/live-agent-memory-latest.md \
-  --html ~/eidolon/debug/reports/replay/live-agent-memory-latest.html
+  --output-dir ~/eidolon/debug/reports/realtime
 ```
 
 The live tier uses the running stack: real gRPC Chat, real admin HTTP, SQLite
