@@ -173,6 +173,11 @@ class TurnEngine:
         tool_repeat_suppressed_count = 0
         handoff_summaries: list[dict] = []
         runtime_policy = TurnRuntimePolicy.from_metadata(ti.metadata)
+        # Speculative (preemptive) turn: streamed to warm the LLM on a partial
+        # transcript, but ephemeral — no history append, no durable turn row,
+        # no memory fanout, no persona interaction. Nothing about an unconfirmed
+        # guess may leak into memory/history.
+        speculative = bool(ti.metadata.get("speculative"))
         post_turn_allowed = False
         post_turn_scheduled = False
         recent_history_persisted = False
@@ -524,21 +529,23 @@ class TurnEngine:
                 yield TurnEvent.delta(ti.turn_id, seq.next(), soften_prefix, time.time())
             assistant_text_for_persist = final_text
             ts_output_ms = int((time.monotonic() - t0) * 1000)
-            post_turn_allowed = True
+            # Speculative turns never persist/fan out (unconfirmed guess).
+            post_turn_allowed = not speculative
 
             # Keep recent history deterministic for the next turn. This is a
             # cheap in-memory append, not durable persistence; durable SQLite
             # writes and external fanout remain after DONE.
-            try:
-                await self._persist_messages(
-                    ti,
-                    ti.text or "",
-                    final_text,
-                    is_private=runtime_policy.mark_messages_private,
-                )
-                recent_history_persisted = True
-            except Exception:
-                _log.exception("recent history append failed")
+            if not speculative:
+                try:
+                    await self._persist_messages(
+                        ti,
+                        ti.text or "",
+                        final_text,
+                        is_private=runtime_policy.mark_messages_private,
+                    )
+                    recent_history_persisted = True
+                except Exception:
+                    _log.exception("recent history append failed")
 
             # ---- P0 diagnostic: phase timings ------------------------------
             _log_turn_timings(
@@ -564,16 +571,18 @@ class TurnEngine:
             )
 
             # User has their answer; persistence + fanout can take their time.
-            post_turn_scheduled = True
-            self._background.create(
-                self._post_turn(
-                    ti,
-                    final_text,
-                    started_at,
-                    history_already_persisted=recent_history_persisted,
-                ),
-                name=f"turn-{ti.turn_id}-post-turn",
-            )
+            # Speculative turns are ephemeral — skip entirely.
+            if not speculative:
+                post_turn_scheduled = True
+                self._background.create(
+                    self._post_turn(
+                        ti,
+                        final_text,
+                        started_at,
+                        history_already_persisted=recent_history_persisted,
+                    ),
+                    name=f"turn-{ti.turn_id}-post-turn",
+                )
 
         except asyncio.CancelledError:
             status = TurnStatus.CANCELLED
@@ -592,8 +601,9 @@ class TurnEngine:
                 heard_text = heard_text[: max(0, int(played_chars))]
             assistant_text_for_persist = heard_text
             # Let the heard exchange reach memory/history via the standard
-            # post-turn path (skipped when there is nothing heard).
-            if heard_text:
+            # post-turn path (skipped when nothing heard, or when speculative —
+            # an unconfirmed guess never persists even the part that streamed).
+            if heard_text and not speculative:
                 post_turn_allowed = True
             yield TurnEvent.error(ti.turn_id, seq.next(), error_code, "cancelled", time.time())
             raise
@@ -610,8 +620,8 @@ class TurnEngine:
             # Persist the turn row (latency + phase timings) for every outcome.
             # Fire-and-forget: the user already has their answer, and a durable
             # store hiccup must never affect the stream. Disabled when no
-            # turn_persister is injected.
-            if self._turn_persister is not None:
+            # turn_persister is injected, or for speculative (ephemeral) turns.
+            if self._turn_persister is not None and not speculative:
                 total_ms = int((time.monotonic() - t0) * 1000)
                 memory_write_trace = _memory_write_trace(
                     ti=ti,
@@ -734,7 +744,7 @@ class TurnEngine:
                     ),
                     name=f"turn-{ti.turn_id}-post-turn",
                 )
-            if self._bus is not None:
+            if self._bus is not None and not speculative:
                 self._background.create(
                     self._publish_turn_completed(
                         ti=ti,

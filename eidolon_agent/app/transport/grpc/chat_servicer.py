@@ -164,6 +164,11 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     await context.abort(grpc.StatusCode.FAILED_PRECONDITION, exc.message)
 
                 start_metadata = struct_to_dict(start.metadata)
+                # Preemptive/speculative turn: warm the LLM on a partial
+                # transcript; the turn engine keeps it ephemeral (no persist /
+                # fanout) until it would be confirmed.
+                if start.speculative:
+                    start_metadata["speculative"] = True
                 realtime = _digest_from_dict(struct_to_dict(start.realtime))
                 if realtime is None:
                     recent_signals = await self._signals.recent(

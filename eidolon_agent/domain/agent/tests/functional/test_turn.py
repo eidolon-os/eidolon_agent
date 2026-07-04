@@ -45,6 +45,26 @@ async def test_done_turn_has_recent_history_even_if_stream_closes(turn_engine_fa
 
 
 @pytest.mark.asyncio
+async def test_speculative_turn_streams_but_does_not_persist(turn_engine_factory):
+    """A speculative (preemptive) turn replies but leaves no trace: no history
+    append, so an unconfirmed guess can't leak into memory/context."""
+    engine = turn_engine_factory()
+    ti = make_turn_input("讲个笑话")
+    ti.metadata["speculative"] = True
+
+    events = [ev async for ev in engine.run(ti)]
+    # It still streams a reply and completes.
+    assert any(e.kind.value == "delta" for e in events)
+    assert events[-1].kind.value == "done"
+
+    # But nothing lands in the recent-history window.
+    recent = await engine._history.recent_window(
+        conversation_id=ti.conversation_id, window=10
+    )
+    assert recent == []
+
+
+@pytest.mark.asyncio
 async def test_turn_submits_persona_interaction(turn_engine_factory, personas_service):
     engine = turn_engine_factory()
     _events = [ev async for ev in engine.run(make_turn_input("你好"))]
