@@ -16,6 +16,7 @@ from eidolon_agent.app.admin.routers import (
     chat_test,
     conversations,
     devices,
+    genome_authoring,
     long_tasks,
     reports,
 )
@@ -72,5 +73,6 @@ def build_admin_app(
     )
     app.include_router(long_tasks.router, prefix="/api/admin", tags=["long-tasks"])
     app.include_router(reports.router, prefix="/api/admin", tags=["reports"])
+    app.include_router(genome_authoring.router, prefix="/api/admin", tags=["genome-authoring"])
 
     return app

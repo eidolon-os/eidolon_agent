@@ -69,7 +69,9 @@ class EidolonDataCompanionPersonaStore:
             raise NotFoundError(f"companion persona not found: {owner_id}/{companion_id}")
         return persona
 
-    async def save(self, persona: CompanionPersona, *, reason: str = "") -> None:
+    async def save(
+        self, persona: CompanionPersona, *, reason: str = "", prompt_markdown: str | None = None
+    ) -> None:
         async with self._data_store.session_factory() as session:
             await _ensure_owner_and_companion(
                 session,
@@ -83,21 +85,29 @@ class EidolonDataCompanionPersonaStore:
             )
             now = datetime.now(timezone.utc)
             genome_json = _persona_to_genome_json(persona, reason=reason)
+            # Every version links back to the authored origin (v1, self-referential)
+            # so a reset-to-origin can walk the chain back. Backward-compatible:
+            # rows written before this stamp simply have a null base.
+            base_genome_id = f"genome-{persona.companion_id}-1"
             if row is None:
                 genome_id = f"genome-{persona.companion_id}-{persona.version}"
+                insert_values = {
+                    "genome_id": genome_id,
+                    "companion_id": persona.companion_id,
+                    "version": persona.version,
+                    "base_genome_id": base_genome_id,
+                    "source_json": _persona_source_json(persona),
+                    "genome_json": genome_json,
+                    "evolution_state_json": persona.evolution_state.model_dump(mode="json"),
+                    "created_at": persona.created_at,
+                    "updated_at": now,
+                }
+                if prompt_markdown is not None:
+                    insert_values["prompt_markdown"] = prompt_markdown
                 await _insert_ignore(
                     session,
                     PersonaGenomeRow,
-                    {
-                        "genome_id": genome_id,
-                        "companion_id": persona.companion_id,
-                        "version": persona.version,
-                        "source_json": _persona_source_json(persona),
-                        "genome_json": genome_json,
-                        "evolution_state_json": persona.evolution_state.model_dump(mode="json"),
-                        "created_at": persona.created_at,
-                        "updated_at": now,
-                    },
+                    insert_values,
                     index_elements=["genome_id"],
                 )
                 row = await session.get(PersonaGenomeRow, genome_id)
@@ -108,6 +118,8 @@ class EidolonDataCompanionPersonaStore:
                 row.genome_json = genome_json
                 row.evolution_state_json = persona.evolution_state.model_dump(mode="json")
                 row.updated_at = now
+                if prompt_markdown is not None:
+                    row.prompt_markdown = prompt_markdown
 
             companion = await session.get(CompanionRow, persona.companion_id)
             if companion is not None:

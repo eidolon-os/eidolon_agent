@@ -14,6 +14,7 @@ from eidolon_agent.core.errors import (
     ValidationError,
 )
 from eidolon_agent.core.types.memory import MemoryHit
+from eidolon_agent.domain.personas.authoring import assemble_genome, render_authored_markdown
 from eidolon_agent.domain.personas.auto_evolution import PersonaAutoEvolutionPolicy
 from eidolon_agent.domain.personas.compiler import PersonaCompiler
 from eidolon_agent.domain.personas.evolution import PersonaEvolutionEngine
@@ -99,6 +100,56 @@ class PersonasService:
             audit_port=self._audit,
             event_port=self._events,
         )
+
+    async def author_genome(
+        self,
+        *,
+        owner_id: str,
+        companion_id: str,
+        name: str,
+        archetype: str = "companion",
+        description: str = "",
+        pronouns: str = "她",
+        values: tuple[str, ...] = (),
+        taboos: tuple[str, ...] = (),
+        unbreakable_rules: tuple[str, ...] = (),
+        style: tuple[str, ...] = (),
+        example_dialogs: tuple[str, ...] = (),
+        goals: tuple[str, ...] = (),
+        pinned_facts: tuple[str, ...] = (),
+        relationship_stage: str = "",
+        knobs: dict[str, float] | None = None,
+    ) -> CompanionPersona:
+        """Companion-first authoring: assemble the owner's content into a new
+        genome version and persist it (v1 on create, current+1 on edit). The
+        assembled CompanionPersona validates; prompt_markdown is rendered too."""
+        if await self._instances.exists(owner_id, companion_id):
+            current = await self._instances.load(owner_id, companion_id)
+            version = current.version + 1
+        else:
+            version = 1
+        persona = assemble_genome(
+            owner_id=owner_id,
+            companion_id=companion_id,
+            version=version,
+            name=name,
+            archetype=archetype,
+            description=description,
+            pronouns=pronouns,
+            values=values,
+            taboos=taboos,
+            unbreakable_rules=unbreakable_rules,
+            style=style,
+            example_dialogs=example_dialogs,
+            goals=goals,
+            pinned_facts=pinned_facts,
+            relationship_stage=relationship_stage,
+            knobs=knobs,
+        )
+        await self._instances.save(
+            persona, reason="admin_authoring", prompt_markdown=render_authored_markdown(persona)
+        )
+        return persona
 
     async def start(self) -> None:
         await self._worker.start()
