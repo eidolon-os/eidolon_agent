@@ -178,6 +178,13 @@ async def test_turn_persister_writes_eidolon_data_history(data_store: DataStore)
     assert rows[0]["runtime_caller_id"] == "rc-test"
     assert rows[0]["runtime_session_id"] == "session-1"
     assert rows[0]["tokens_out"] == 6
+    # trace_id lands in the first-class indexed column (not just trace_json).
+    assert rows[0]["trace_id"] == "trace-1"
+    async with data_store.session_factory() as session:
+        from eidolon_data.schema.models import TurnRow
+
+        turn_row = await session.get(TurnRow, "turn-1")
+    assert turn_row is not None and turn_row.trace_id == "trace-1"
     assert rows[0]["metadata_"]["turn_trace"]["memory_write_trace"]["disposition"] == "skip"
     assert await data_store.runtime_callers.get("rc-test") is not None
     assert await data_store.runtime_sessions.get("session-1") is not None

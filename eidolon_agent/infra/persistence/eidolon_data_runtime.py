@@ -171,6 +171,7 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                     status=status.value,
                     started_at=started_at,
                     finished_at=finished_at,
+                    trace_id=ti.caller.trace_id or None,
                     trace_json=_trace_json(timings),
                     metrics_json=_turn_metrics_json(
                         result=TurnResult(
@@ -205,6 +206,7 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                 existing_turn.runtime_caller_id = runtime_caller_id
                 existing_turn.runtime_session_id = runtime_session_id
                 existing_turn.source_device_id = ti.caller.device_id
+                existing_turn.trace_id = ti.caller.trace_id or None
                 existing_turn.trace_json = _trace_json(timings)
                 existing_turn.metrics_json = {
                     **(existing_turn.metrics_json or {}),
@@ -910,7 +912,7 @@ def _turn_row_to_admin_dict(turn: TurnRow, conversation: ConversationRow) -> dic
         "tokens_out": metrics.get("tokens_out") or 0,
         "cost_usd_micro": metrics.get("cost_usd_micro") or 0,
         "model": metrics.get("model"),
-        "trace_id": metadata.get("trace_id"),
+        "trace_id": turn.trace_id or metadata.get("trace_id"),
         "error_code": metrics.get("error_code"),
         "metadata_": metadata,
         "owner_id": conversation.owner_id,
