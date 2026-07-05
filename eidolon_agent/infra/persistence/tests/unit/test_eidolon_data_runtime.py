@@ -195,6 +195,78 @@ async def test_turn_persister_writes_eidolon_data_history(data_store: DataStore)
 
 
 @pytest.mark.asyncio
+async def test_turn_persister_emits_agent_turn_failed_on_errored(data_store: DataStore) -> None:
+    """P3 (agent) — an errored turn writes agent.turn.failed; a normal turn does not."""
+    await _provision_runtime_identity(
+        data_store,
+        owner_id="owner-e",
+        companion_id="companion-e",
+        device_id="device-e",
+        genome_id="genome-e",
+        realm_id="realm-e",
+    )
+    now = datetime.now(timezone.utc)
+
+    def _ti(turn_id: str, text: str) -> TurnInput:
+        return TurnInput(
+            turn_id=turn_id,
+            conversation_id="conv-e",
+            session_id="sess-e",
+            caller=_caller(
+                owner_id="owner-e",
+                companion_id="companion-e",
+                device_id="device-e",
+                realm_id="realm-e",
+                genome_id="genome-e",
+            ),
+            trigger=TurnTrigger.USER_UTTERANCE,
+            text=text,
+        )
+
+    persist = build_eidolon_data_turn_persister(data_store, model_id_provider=lambda: "fake")
+
+    await persist(
+        ti=_ti("turn-err", "boom?"),
+        status=TurnStatus.ERRORED,
+        triage_kind=TriageKind.SIMPLE,
+        started_at=now,
+        finished_at=now,
+        first_delta_ms=None,
+        total_ms=42,
+        usage_in=0,
+        usage_out=0,
+        error_code="llm_timeout",
+        timings={},
+        user_text="boom?",
+        assistant_text="",
+    )
+    events = await data_store.events.list_for_subject(subject_type="turn", subject_id="turn-err")
+    ev = assert_event(events, event_type="agent.turn.failed")
+    assert ev.source == "agent" and ev.severity == "error" and ev.outcome == "failure"
+    assert ev.owner_id == "owner-e" and ev.companion_id == "companion-e"
+    assert ev.reason == "llm_timeout" and ev.payload_json["error_code"] == "llm_timeout"
+
+    # a normal (OK) turn must NOT emit agent.turn.failed
+    await persist(
+        ti=_ti("turn-ok", "hi"),
+        status=TurnStatus.OK,
+        triage_kind=TriageKind.SIMPLE,
+        started_at=now,
+        finished_at=now,
+        first_delta_ms=1,
+        total_ms=2,
+        usage_in=1,
+        usage_out=1,
+        error_code=None,
+        timings={},
+        user_text="hi",
+        assistant_text="ok",
+    )
+    ok_events = await data_store.events.list_for_subject(subject_type="turn", subject_id="turn-ok")
+    assert not any(e.event_type == "agent.turn.failed" for e in ok_events)
+
+
+@pytest.mark.asyncio
 async def test_turn_persister_records_admin_test_without_device_row(
     data_store: DataStore,
 ) -> None:

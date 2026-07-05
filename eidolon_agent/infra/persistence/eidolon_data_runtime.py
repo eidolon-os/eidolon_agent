@@ -289,6 +289,27 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                         ),
                     ),
                 )
+            if status is TurnStatus.ERRORED:
+                # Exceptional turn outcome → audit event (normal turns are derived
+                # from TurnRow). Same transaction as the turn row.
+                session.add(
+                    build_event(
+                        event_type="agent.turn.failed",
+                        owner_id=ti.caller.owner_id,
+                        companion_id=companion_id,
+                        subject_type="turn",
+                        subject_id=ti.turn_id,
+                        actor_type="agent",
+                        trace_id=ti.caller.trace_id or None,
+                        reason=error_code or None,
+                        payload_json={
+                            "error_code": error_code,
+                            "triage_kind": triage_kind.value,
+                            "total_latency_ms": total_ms,
+                            "model": model_id,
+                        },
+                    )
+                )
             await session.commit()
 
     async def _persist(**kwargs) -> None:
