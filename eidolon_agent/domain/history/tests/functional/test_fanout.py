@@ -5,7 +5,11 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from eidolon_sdk.memory import MEMORY_SCHEMA_VERSION, conversation_turn_subject, unwrap_memory_payload
+from eidolon_sdk.memory import (
+    MEMORY_SCHEMA_VERSION,
+    conversation_turn_subject,
+    unwrap_memory_payload,
+)
 
 from eidolon_agent.domain.history import HistoryFanout
 
@@ -64,6 +68,28 @@ async def test_publish_turn_emits_memory_event(event_bus) -> None:
     assert payload["metadata"]["source_turn_id"] == "turn-1"
     assert status.state == "published"
     assert sink.statuses[-1].turn_id == "turn-1"
+    # No explicit trace_id → falls back to turn_id, so the agent status and the
+    # memory-absorbed event end up sharing one correlation id.
+    assert status.trace_id == "turn-1"
+
+
+async def test_publish_turn_threads_explicit_trace_id(event_bus) -> None:
+    sink = _StatusSink()
+    fanout = HistoryFanout(event_bus=event_bus, status_sink=sink)
+    status = await fanout.publish_turn(
+        owner_id="alice",
+        companion_id="companion-a",
+        memory_realm_id="r_alice_default",
+        device_id=None,
+        session_id="s",
+        turn_id="turn-9",
+        user_text="hi",
+        assistant_text="yo",
+        timestamp_iso="2026-05-22T10:00:00Z",
+        trace_id="trace-abc",
+    )
+    assert status.trace_id == "trace-abc"
+    assert sink.statuses[-1].trace_id == "trace-abc"
 
 
 async def test_publish_turn_carries_resolved_actor_context(event_bus) -> None:

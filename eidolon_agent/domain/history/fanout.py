@@ -32,6 +32,7 @@ class MemoryFanoutStatus:
     state: str
     error: str | None = None
     recorded_at: str = ""
+    trace_id: str | None = None
 
 
 class MemoryFanoutStatusSink(Protocol):
@@ -77,6 +78,7 @@ class HistoryFanout:
                 subject=None,
                 state="skipped_no_bus",
                 error=None,
+                trace_id=trace_id,
             )
             await self._record_status(status)
             return status
@@ -136,6 +138,7 @@ class HistoryFanout:
                 subject=status_subject,
                 state="published",
                 error=None,
+                trace_id=trace_id,
             )
         except Exception as exc:
             _log.exception("fanout to memory failed")
@@ -148,6 +151,7 @@ class HistoryFanout:
                 subject=status_subject,
                 state="publish_failed",
                 error=str(exc),
+                trace_id=trace_id,
             )
         await self._record_status(status)
         if emotion_payload:
@@ -179,6 +183,7 @@ class HistoryFanout:
         subject: str | None,
         state: str,
         error: str | None,
+        trace_id: str | None = None,
     ) -> MemoryFanoutStatus:
         return MemoryFanoutStatus(
             owner_id=owner_id,
@@ -190,6 +195,9 @@ class HistoryFanout:
             state=state,
             error=error,
             recorded_at=datetime.now(timezone.utc).isoformat(),
+            # Same fallback as the published envelope (line: trace_id or turn_id) so the
+            # agent-side status and memory-side absorbed event share one correlation id.
+            trace_id=trace_id or turn_id,
         )
 
     async def _record_status(self, status: MemoryFanoutStatus) -> None:

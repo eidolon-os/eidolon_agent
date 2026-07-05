@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 from eidolon_data import DataSettings, DataStore
+from eidolon_data.testing import assert_event
 
 from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
 from eidolon_agent.core.types.long_task import LongTaskRecord, LongTaskStatus
@@ -109,6 +110,7 @@ async def test_memory_fanout_status_sink_records_event(data_store: DataStore) ->
             state="published",
             error=None,
             recorded_at="2026-06-29T00:00:00+00:00",
+            trace_id="trace-xyz",
         )
     )
 
@@ -120,6 +122,8 @@ async def test_memory_fanout_status_sink_records_event(data_store: DataStore) ->
     assert events[0].event_type == "eidolon.memory.fanout.status"
     assert events[0].payload_json["state"] == "published"
     assert events[0].payload_json["memory_space_id"] == "realm-1"
+    assert events[0].trace_id == "trace-xyz"  # correlation carried onto the audit row
+    assert events[0].source == "agent"
 
 
 @pytest.mark.asyncio
@@ -362,3 +366,89 @@ async def test_long_task_store_maps_records_to_jobs(data_store: DataStore) -> No
 
     rows = await store.list_for_admin(owner_id="owner-1", task_type="writing")
     assert [row.id for row in rows] == ["task-1"]
+
+
+async def test_long_task_transitions_emit_job_lifecycle_events(data_store: DataStore) -> None:
+    """L3 (agent) — job.* events fire on state transitions; progress churn does not."""
+    await _provision_runtime_identity(
+        data_store,
+        owner_id="owner-j",
+        companion_id="companion-j",
+        device_id="device-j",
+        genome_id="genome-j",
+        realm_id="realm-j",
+    )
+    store = EidolonDataLongTaskStore(data_store)
+    record = LongTaskRecord(
+        id="job-lc",
+        provider="mementos",
+        status=LongTaskStatus.ACCEPTED,
+        owner_id="owner-j",
+        companion_id="companion-j",
+        memory_realm_id="realm-j",
+        genome_id="genome-j",
+        device_id="device-j",
+        conversation_id="conv-j",
+        turn_id="turn-j",
+        session_id="sess-j",
+        trace_id="trace-j",
+        session_key="sk",
+        task_date="2026-06-27",
+        task_key="tk",
+        task="write report",
+        task_type="writing",
+    )
+
+    await store.accept(record)                                          # ACCEPTED — no event
+    await store.mark_queued("job-lc", worker_id="w1")                   # → job.queued
+    await store.attach_mementos_run("job-lc", mementos_session_id="m1")  # → job.running
+    await store.append_progress("job-lc", {"seq": 1})                  # RUNNING→RUNNING — no event
+    await store.complete("job-lc", result_text="done")                 # → job.succeeded
+
+    events = await data_store.events.list_for_subject(subject_type="job", subject_id="job-lc")
+    assert {e.event_type for e in events} == {"job.queued", "job.running", "job.succeeded"}
+    succeeded = assert_event(events, event_type="job.succeeded")
+    assert succeeded.source == "agent"
+    assert succeeded.companion_id == "companion-j"
+    assert succeeded.trace_id == "trace-j"       # trace correlation carried from the record
+    assert succeeded.event_class == "audit"
+
+
+async def test_long_task_failure_emits_job_failed(data_store: DataStore) -> None:
+    await _provision_runtime_identity(
+        data_store,
+        owner_id="owner-f",
+        companion_id="companion-f",
+        device_id="device-f",
+        genome_id="genome-f",
+        realm_id="realm-f",
+    )
+    store = EidolonDataLongTaskStore(data_store)
+    record = LongTaskRecord(
+        id="job-f",
+        provider="mementos",
+        status=LongTaskStatus.ACCEPTED,
+        owner_id="owner-f",
+        companion_id="companion-f",
+        memory_realm_id="realm-f",
+        genome_id="genome-f",
+        device_id="device-f",
+        conversation_id="conv-f",
+        turn_id="turn-f",
+        session_id="sess-f",
+        trace_id="trace-f",
+        session_key="sk",
+        task_date="2026-06-27",
+        task_key="tk",
+        task="write report",
+        task_type="writing",
+    )
+
+    await store.accept(record)
+    await store.mark_failed("job-f", error_code="boom", error_message="kaboom")
+
+    events = await data_store.events.list_for_subject(subject_type="job", subject_id="job-f")
+    failed = assert_event(events, event_type="job.failed")
+    assert failed.outcome == "failure"      # from catalog default
+    assert failed.severity == "error"
+    assert failed.payload_json.get("error_code") == "boom"

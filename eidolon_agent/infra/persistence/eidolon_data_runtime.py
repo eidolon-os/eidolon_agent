@@ -12,6 +12,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
+from eidolon_data.events.facade import build_event
 from eidolon_data.schema.models import (
     CompanionRow,
     ConversationRow,
@@ -35,6 +36,39 @@ from eidolon_agent.domain.history import MemoryFanoutStatus
 _LONG_TASK_PAYLOAD_KEY = "eidolon_agent_long_task"
 _MEMORY_FANOUT_EVENT_TYPE = "eidolon.memory.fanout.status"
 
+# Long-task status → job.* lifecycle event. Only these transitions are audit-worthy;
+# progress/poll churn (RUNNING→RUNNING) is filtered by the status-change guard.
+_JOB_STATUS_EVENT = {
+    LongTaskStatus.QUEUED: "job.queued",
+    LongTaskStatus.RUNNING: "job.running",
+    LongTaskStatus.SUCCEEDED: "job.succeeded",
+    LongTaskStatus.FAILED: "job.failed",
+    LongTaskStatus.CANCELLED: "job.cancelled",
+    LongTaskStatus.TIMED_OUT: "job.timed_out",
+}
+
+
+def _emit_job_transition(session, *, before: LongTaskStatus, after: LongTaskRecord) -> None:
+    """Emit a job.* lifecycle event when the status actually changes (same transaction)."""
+    event_type = _JOB_STATUS_EVENT.get(after.status)
+    if event_type is None or after.status == before:
+        return
+    payload = {"provider": after.provider, "kind": after.task_type, "status": after.status.value}
+    if after.error_code:
+        payload["error_code"] = after.error_code
+    session.add(
+        build_event(
+            event_type=event_type,
+            owner_id=after.owner_id,
+            companion_id=after.companion_id,
+            subject_type="job",
+            subject_id=after.id,
+            actor_type="agent",
+            trace_id=getattr(after, "trace_id", None),
+            payload_json=payload,
+        )
+    )
+
 
 class EidolonDataMemoryFanoutStatusSink:
     """Durable audit sink for agent -> memory fanout publish attempts."""
@@ -43,14 +77,17 @@ class EidolonDataMemoryFanoutStatusSink:
         self._data_store = data_store
 
     async def record_memory_fanout(self, status: MemoryFanoutStatus) -> None:
-        await self._data_store.events.append(
-            event_id=uuid.uuid4().hex,
+        # Contract-carrying facade (source="agent", tier from catalog). Standalone
+        # fire-and-forget emit; auto event id. Not same-tx (cross-boundary handoff).
+        await self._data_store.events.record_event(
             owner_id=status.owner_id,
+            companion_id=status.companion_id,
             subject_type="turn",
             subject_id=status.turn_id,
             event_type=_MEMORY_FANOUT_EVENT_TYPE,
             actor_type="agent",
             actor_id=status.companion_id,
+            trace_id=status.trace_id,
             payload_json={
                 "turn_id": status.turn_id,
                 "owner_id": status.owner_id,
@@ -535,6 +572,7 @@ class EidolonDataLongTaskStore:
             record = _job_row_to_record(row)
             updated = mutator(record, datetime.now(timezone.utc))
             _apply_record_to_job_row(row, updated)
+            _emit_job_transition(session, before=record.status, after=updated)
             await session.commit()
             return updated
 
