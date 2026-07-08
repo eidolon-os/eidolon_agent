@@ -211,7 +211,7 @@ class ObservabilitySettings(BaseModel):
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_json: bool = True
-    log_dir: Path = Path("logs")
+    log_dir: Path = Path("~/eidolon/logs/agent")
     metrics_enabled: bool = True
     metrics_path: str = "/metrics"
     otel_enabled: bool = False
@@ -246,7 +246,7 @@ class RuntimeTokenSettings(BaseModel):
 class RuntimeSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    log_dir: Path = Path("~/eidolon/logs")
+    log_dir: Path = Path("~/eidolon/logs/agent")
     run_dir: Path = Path("~/eidolon/run")
     debug_dir: Path = Path("~/eidolon/debug")
     warmup_enabled: bool = True

@@ -60,3 +60,25 @@ personas/overlays/
 
 # Stray literal ~ dir (created by Path("~") without expanduser)
 ~/
+
+# Local OS/editor/runtime hygiene
+**/.DS_Store
+._*
+**/._*
+.AppleDouble/
+.LSOverride
+.Spotlight-V100/
+.Trashes/
+.fseventsd/
+Thumbs.db
+desktop.ini
+*.swo
+*~
+*.tmp
+*.bak
+.claude/
+.import_linter_cache/
+*.pid
+*.sock
+*.db-wal
+*.db-shm

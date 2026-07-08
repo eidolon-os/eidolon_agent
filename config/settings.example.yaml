@@ -76,14 +76,14 @@ persona:
 observability:
   log_level: INFO
   log_json: true
-  log_dir: ~/eidolon/logs
+  log_dir: ~/eidolon/logs/agent
 
 runtime_token:
   jwt_secret: PAIRING_JWT_SECRET
   jwt_algorithm: HS256
 
 runtime:
-  log_dir: ~/eidolon/logs
+  log_dir: ~/eidolon/logs/agent
   run_dir: ~/eidolon/run
   debug_dir: ~/eidolon/debug
 
