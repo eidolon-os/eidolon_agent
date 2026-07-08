@@ -630,6 +630,8 @@ async def _ensure_owner_and_companion(
             "owner_id": owner_id,
             "display_name": companion_id,
             "kind": "companion",
+            "is_master": False,
+            "companion_type": "slave",
             "metadata_json": {"source": "eidolon_agent.persona"},
         },
         index_elements=["companion_id"],
@@ -639,6 +641,9 @@ async def _ensure_owner_and_companion(
         raise RuntimeError(f"companion insert failed: {companion_id}")
     else:
         companion.owner_id = owner_id
+        companion.companion_type = companion.companion_type or (
+            "master" if companion.is_master else "slave"
+        )
         metadata = dict(companion.metadata_json or {})
         metadata["source"] = "eidolon_agent.persona"
         companion.metadata_json = metadata
