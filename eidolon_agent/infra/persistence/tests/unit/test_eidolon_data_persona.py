@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -19,6 +20,7 @@ from eidolon_agent.infra.persistence.eidolon_data_persona import (
     EidolonDataPersonaEvolutionProposalStore,
     EidolonDataPersonaObservationStore,
 )
+from eidolon_agent.infra.events.adapters.inmem import InMemoryKVStore
 
 
 @pytest.fixture
@@ -31,11 +33,23 @@ async def data_store(tmp_path):
         await store.close()
 
 
+async def _provision(data_store: DataStore, *, owner_id: str, companion_id: str) -> None:
+    await data_store.owner_service.create_owner(owner_id=owner_id, display_name=owner_id)
+    await data_store.workspace_provisioning.provision_workspace(
+        owner_id=owner_id,
+        companion_id=companion_id,
+        companion_display_name=companion_id,
+        genome_id=f"g_{owner_id}_{companion_id}_v1".replace("-", "_"),
+        realm_id=f"r_{owner_id}_{companion_id}".replace("-", "_"),
+    )
+
+
 @pytest.mark.asyncio
 async def test_persona_instance_store_uses_persona_genomes(
     data_store: DataStore,
     canonical_template_registry,
 ) -> None:
+    await _provision(data_store, owner_id="user-1", companion_id="companion-1")
     store = EidolonDataCompanionPersonaStore(data_store)
     template = canonical_template_registry.get("caretaker_jiezhi")
 
@@ -84,7 +98,6 @@ async def test_persona_instance_store_loads_owner_workspace_genome(
             "identity": {"name": "Test", "archetype": "companion"},
             "style": {"tone": "warm", "initiative": "balanced"},
         },
-        prompt_markdown="# Test\n\nReply warmly.",
         realm_id="r_benchmark_default",
     )
 
@@ -95,7 +108,40 @@ async def test_persona_instance_store_loads_owner_workspace_genome(
     assert loaded.owner_id == "benchmark"
     assert loaded.origin_template_id == "g_benchmark_default_v1"
     assert loaded.metadata.name == "Test"
-    assert any("# Test" in item for item in loaded.style_compiler.base_instructions)
+    assert any("warm" in item.lower() for item in loaded.style_compiler.base_instructions)
+
+
+@pytest.mark.asyncio
+async def test_persona_instance_store_writes_hot_path_cache_keys(
+    data_store: DataStore,
+    canonical_template_registry,
+) -> None:
+    await _provision(data_store, owner_id="user-cache", companion_id="companion-cache")
+    cache = InMemoryKVStore(bucket="EIDOLON_CACHE")
+    store = EidolonDataCompanionPersonaStore(data_store, cache_kv=cache)
+    template = canonical_template_registry.get("caretaker_jiezhi")
+
+    await store.create_from_template(
+        template=template,
+        owner_id="user-cache",
+        companion_id="companion-cache",
+    )
+
+    current = await cache.get("persona:current:user-cache:companion-cache")
+    assert current is not None
+    current_payload = json.loads(current.decode("utf-8"))
+    genome_id = current_payload["genome_id"]
+    assert genome_id == "g_user_cache_companion_cache_v1"
+    assert current_payload["genome_hash"].startswith("pgv1_")
+
+    genome = await cache.get(f"persona:genome:{genome_id}")
+    assert genome is not None
+    genome_payload = json.loads(genome.decode("utf-8"))
+    assert genome_payload["schema_version"] == "eidolon.persona_genome.v1"
+    assert genome_payload["genome_json"]["schema_version"] == "eidolon.persona_genome.v1"
+
+    await store.delete("user-cache", "companion-cache")
+    assert await cache.get("persona:current:user-cache:companion-cache") is None
 
 
 @pytest.mark.asyncio
@@ -103,6 +149,7 @@ async def test_persona_instance_create_is_idempotent_under_concurrent_first_writ
     data_store: DataStore,
     canonical_template_registry,
 ) -> None:
+    await _provision(data_store, owner_id="user-race", companion_id="companion-race")
     store = EidolonDataCompanionPersonaStore(data_store)
     template = canonical_template_registry.get("caretaker_jiezhi")
 
@@ -142,6 +189,7 @@ async def test_evolution_history_observations_and_proposals_use_events(
     data_store: DataStore,
     canonical_template_registry,
 ) -> None:
+    await _provision(data_store, owner_id="user-1", companion_id="companion-1")
     instance_store = EidolonDataCompanionPersonaStore(data_store)
     template = canonical_template_registry.get("caretaker_jiezhi")
     await instance_store.create_from_template(
@@ -219,6 +267,13 @@ async def test_custom_template_store_uses_events(
                 update={"template_id": "custom-care", "template_revision": 2}
             )
         }
+    )
+    await data_store.workspace_provisioning.provision_workspace(
+        owner_id="user-1",
+        companion_id="companion-1",
+        companion_display_name="companion-1",
+        genome_id="g_user_1_companion_1_v1",
+        realm_id="r_user_1_companion_1",
     )
     await instance_store.create_from_template(
         template=template,

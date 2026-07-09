@@ -2,7 +2,7 @@
 
 Owners author a companion's genome directly (companion-first; no template reuse).
 This module turns the free-text-primary authored content into a validated
-``CompanionPersona`` and renders a human-readable ``prompt_markdown`` view. Pure
+``CompanionPersona`` and renders a human-readable prompt preview. Pure
 functions — no I/O — so they are trivially unit-testable and side-effect free.
 """
 

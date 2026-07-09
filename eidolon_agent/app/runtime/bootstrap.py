@@ -184,7 +184,10 @@ async def build_application(
     if settings.persona.storage == "yaml":
         instance_store: object = YamlCompanionPersonaStore(Path(settings.persona.instances_dir))
     else:
-        instance_store = EidolonDataCompanionPersonaStore(data_store)
+        instance_store = EidolonDataCompanionPersonaStore(
+            data_store,
+            cache_kv=container.kv_buckets.get("EIDOLON_CACHE"),
+        )
     # One adapter satisfies both PersonaAuditPort (write) and
     # PersonaEvolutionRepository (read) so worker writes audit rows AND admin
     # can paginate them. NullPersonaAuditPort is no longer used in production.

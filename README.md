@@ -319,11 +319,12 @@ service EidolonAgent {
 ```
 
 `AuthInterceptor` 在每个 RPC 上校验 `Bearer <runtime_token>`（JWT，HS256）。Token 必须携带
-`RuntimeIdentity(owner_id, companion_id, device_id, memory_realm_id, genome_id)`。
+`RuntimeIdentity(schema_version, owner_id, companion_id, device_id, memory_realm_id, genome_id, genome_hash, compiler_version)`。
 
 Agent 是 companion runtime，不负责 owner 注册、device pairing、或 companion 选择。外部调用方
 必须在进入 Agent 前完成 device -> companion 绑定，并重新签发包含具体 companion/genome/realm 的
-runtime token。对话热路径不会再按 owner 查询 active companion。
+runtime token。对话热路径不会再按 owner 查询 active companion；session/turn metadata 会锁定
+`genome_id + genome_hash`，会话中不热切换人格。
 
 ### HTTP（`:8180`）—— 健康探针
 

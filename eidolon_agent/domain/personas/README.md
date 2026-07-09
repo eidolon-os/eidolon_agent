@@ -59,7 +59,7 @@ worker when product needs them.)
 `dry_run_memory` hits through `PersonaMemoryAdapter`, then compiles the current
 knobs and runtime state into LLM-facing instructions. Runtime recall is owned
 by `ContextCompiler`, because only that layer has the full
-`RuntimeIdentity(owner_id, companion_id, device_id, memory_realm_id, genome_id)`.
+`RuntimeIdentity(schema_version, owner_id, companion_id, device_id, memory_realm_id, genome_id, genome_hash, compiler_version)`.
 
 ## Ports
 

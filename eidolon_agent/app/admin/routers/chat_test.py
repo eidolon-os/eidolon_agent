@@ -41,6 +41,9 @@ async def chat_test(body: ChatTestRequest, request: Request):
         raise RuntimeError("companion not found for owner")
     if not companion.default_memory_realm_id or not companion.current_genome_id:
         raise RuntimeError("companion has no default memory realm or current genome")
+    genome = await data_store.persona_repo.get_genome(companion.current_genome_id)
+    if genome is None or genome.status != "committed":
+        raise RuntimeError("companion current genome is not committed")
 
     await _refresh_memory_discovery_for_admin_chat(
         request,
@@ -66,6 +69,9 @@ async def chat_test(body: ChatTestRequest, request: Request):
         companion_id=body.companion_id,
         memory_realm_id=companion.default_memory_realm_id,
         genome_id=companion.current_genome_id,
+        schema_version=genome.schema_version,
+        genome_hash=genome.genome_hash,
+        compiler_version=genome.compiler_version,
         scopes=["admin-chat-test"],
         ttl_seconds=600,
     )

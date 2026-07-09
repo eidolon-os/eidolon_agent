@@ -62,6 +62,9 @@ class Identity:
     device_id: str | None
     memory_realm_id: str
     genome_id: str
+    schema_version: str = ""
+    genome_hash: str = ""
+    compiler_version: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +102,18 @@ class CallerContext:
     @property
     def genome_id(self) -> str:
         return self.identity.genome_id
+
+    @property
+    def genome_hash(self) -> str:
+        return self.identity.genome_hash
+
+    @property
+    def schema_version(self) -> str:
+        return self.identity.schema_version
+
+    @property
+    def compiler_version(self) -> str:
+        return self.identity.compiler_version
 
 
 def derive_runtime_caller_id(

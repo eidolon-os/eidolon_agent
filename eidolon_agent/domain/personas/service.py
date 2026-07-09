@@ -14,7 +14,7 @@ from eidolon_agent.core.errors import (
     ValidationError,
 )
 from eidolon_agent.core.types.memory import MemoryHit
-from eidolon_agent.domain.personas.authoring import assemble_genome, render_authored_markdown
+from eidolon_agent.domain.personas.authoring import assemble_genome
 from eidolon_agent.domain.personas.auto_evolution import PersonaAutoEvolutionPolicy
 from eidolon_agent.domain.personas.compiler import PersonaCompiler
 from eidolon_agent.domain.personas.evolution import PersonaEvolutionEngine
@@ -122,7 +122,7 @@ class PersonasService:
     ) -> CompanionPersona:
         """Companion-first authoring: assemble the owner's content into a new
         genome version and persist it (v1 on create, current+1 on edit). The
-        assembled CompanionPersona validates; prompt_markdown is rendered too."""
+        assembled CompanionPersona validates and is stored as PersonaGenomeV1."""
         if await self._instances.exists(owner_id, companion_id):
             current = await self._instances.load(owner_id, companion_id)
             version = current.version + 1
@@ -146,9 +146,7 @@ class PersonasService:
             relationship_stage=relationship_stage,
             knobs=knobs,
         )
-        await self._instances.save(
-            persona, reason="admin_authoring", prompt_markdown=render_authored_markdown(persona)
-        )
+        await self._instances.save(persona, reason="admin_authoring")
         return persona
 
     async def start(self) -> None:

@@ -54,6 +54,7 @@ class TurnSummary(BaseModel):
     companion_id: str
     memory_realm_id: str | None
     genome_id: str | None
+    genome_hash: str | None
     trigger: str
     caller_kind: str | None
     runtime_caller_id: str | None
@@ -129,6 +130,7 @@ class TurnDetail(BaseModel):
     companion_id: str
     memory_realm_id: str | None
     genome_id: str | None
+    genome_hash: str | None
     trigger: str
     caller_kind: str | None
     runtime_caller_id: str | None
@@ -190,6 +192,7 @@ async def list_turns(
             companion_id=r["companion_id"],
             memory_realm_id=r["memory_realm_id"],
             genome_id=r["genome_id"],
+            genome_hash=r.get("genome_hash"),
             trigger=r["trigger"],
             caller_kind=r["caller_kind"],
             runtime_caller_id=r["runtime_caller_id"],
@@ -307,6 +310,7 @@ async def get_turn(turn_id: str, request: Request) -> TurnDetail:
         companion_id=row["companion_id"],
         memory_realm_id=row["memory_realm_id"],
         genome_id=row["genome_id"],
+        genome_hash=row.get("genome_hash"),
         trigger=row["trigger"],
         caller_kind=row["caller_kind"],
         runtime_caller_id=row["runtime_caller_id"],

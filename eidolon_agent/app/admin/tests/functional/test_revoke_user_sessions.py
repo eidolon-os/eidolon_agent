@@ -64,6 +64,9 @@ def _sign_device_actor_token(*, device_id: str, **kwargs):
         actor_kind="device",
         actor_id=device_id,
         device_id=device_id,
+        schema_version=kwargs.pop("schema_version", "eidolon.persona_genome.v1"),
+        genome_hash=kwargs.pop("genome_hash", "pgv1_revoke_test"),
+        compiler_version=kwargs.pop("compiler_version", "eidolon.persona_compiler.v1"),
         **kwargs,
     )
 
