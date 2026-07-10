@@ -164,6 +164,14 @@ class MemoryRoutingTable:
         async with self._lock:
             return sum(1 for route in self._routes.values() if route.enabled and route.reachable)
 
+    async def memory_space_ids(self) -> list[str]:
+        async with self._lock:
+            return [
+                memory_space_id
+                for memory_space_id, route in self._routes.items()
+                if route.enabled and route.reachable
+            ]
+
     async def nats_url(self) -> str:
         async with self._lock:
             return self._nats.url

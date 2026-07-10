@@ -119,6 +119,7 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
     assert charlie_route is None and charlie_reason == "memory_route_unreachable"
     assert ghost_route is None and ghost_reason == "no_memory_route"
     assert await routes.endpoint_count() == 1
+    assert await routes.memory_space_ids() == ["r_benchmark_default"]
     assert await routes.render_turn_subject("r_benchmark_default") == (
         "mem.turn.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
     )

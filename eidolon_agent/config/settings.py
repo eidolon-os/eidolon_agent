@@ -347,10 +347,10 @@ class Settings(BaseSettings):
     def _runtime_token_secret_from_env(self) -> Settings:
         env_secret = os.environ.get("PAIRING_JWT_SECRET", "").strip()
         if env_secret and not self.runtime_token.jwt_secret:
-            return self.model_copy(
-                update={
-                    "runtime_token": self.runtime_token.model_copy(update={"jwt_secret": env_secret})
-                }
+            object.__setattr__(
+                self,
+                "runtime_token",
+                self.runtime_token.model_copy(update={"jwt_secret": env_secret}),
             )
         return self
 
