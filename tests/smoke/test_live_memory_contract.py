@@ -45,19 +45,12 @@ async def test_live_memory_contract_mcp_tools_and_nats_publish() -> None:
             tool_names = await asyncio.wait_for(session.tool_names(), timeout=5.0)
         except MemoryUnavailableError as exc:
             pytest.skip(f"memory MCP route unavailable for {memory_space_id}: {exc}")
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except BaseException as exc:
-            pytest.skip(
-                "memory MCP route unavailable for "
-                f"{memory_space_id}: {type(exc).__name__}: {exc}"
-            )
         if tool_names is None:
             pytest.skip(f"memory MCP list_tools did not return capabilities for {memory_space_id}")
         required = {"eidolon_memory_recall_context", "eidolon_memory_search"}
         assert required.intersection(tool_names), sorted(tool_names)
     finally:
-        with suppress(BaseException):
+        with suppress(Exception):
             await pool.close_all()
 
     bus = NatsEventBus(effective_nats_url, creds_path=str(settings.nats.creds_path) if settings.nats.creds_path else None)

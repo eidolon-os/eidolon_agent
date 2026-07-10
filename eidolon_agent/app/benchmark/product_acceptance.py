@@ -74,20 +74,19 @@ async def run_product_acceptance_profile(
     sqlite_path.parent.mkdir(parents=True, exist_ok=True)
     secret = "product-acceptance-local-secret-32-bytes-minimum"
     cleanup_done = False
-
-    provisioned = await _initialize_via_admin_onboarding_api(
-        sqlite_path=sqlite_path,
-        owner_id=owner_id,
-        companion_id=companion_id,
-    )
-
     old_data_path = os.environ.get("EIDOLON_DATA_SQLITE_PATH")
     old_jwt_secret = os.environ.get("PAIRING_JWT_SECRET")
-    os.environ["EIDOLON_DATA_SQLITE_PATH"] = str(sqlite_path)
-    os.environ["PAIRING_JWT_SECRET"] = secret
 
     container = None
     try:
+        provisioned = await _initialize_via_admin_onboarding_api(
+            sqlite_path=sqlite_path,
+            owner_id=owner_id,
+            companion_id=companion_id,
+        )
+        os.environ["EIDOLON_DATA_SQLITE_PATH"] = str(sqlite_path)
+        os.environ["PAIRING_JWT_SECRET"] = secret
+
         settings = _profile_settings(work_dir)
         container = await build_application(settings=settings)
         await container.grpc_server.start()
@@ -248,9 +247,16 @@ def _import_admin_module(module_name: str):
     except ImportError:
         monorepo = Path(__file__).resolve().parents[4]
         admin_server = monorepo / "eidolon_admin" / "server"
+        inserted = False
         if admin_server.is_dir() and str(admin_server) not in sys.path:
             sys.path.insert(0, str(admin_server))
-        return importlib.import_module(module_name)
+            inserted = True
+        try:
+            return importlib.import_module(module_name)
+        finally:
+            if inserted:
+                with suppress(ValueError):
+                    sys.path.remove(str(admin_server))
 
 
 async def _run_admin_chat_test(

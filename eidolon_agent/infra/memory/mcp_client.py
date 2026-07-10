@@ -45,42 +45,48 @@ class McpUserSession:
             if self._session is not None:
                 return self._session
             try:
-                from mcp.client import streamable_http as streamable_http_mod
-                from mcp.client.session import ClientSession
-            except ImportError as exc:
-                raise MemoryUnavailableError("mcp client not installed") from exc
+                try:
+                    from mcp.client import streamable_http as streamable_http_mod
+                    from mcp.client.session import ClientSession
+                except ImportError as exc:
+                    raise MemoryUnavailableError("mcp client not installed") from exc
 
-            streamable_http_client = getattr(
-                streamable_http_mod,
-                "streamable_http_client",
-                None,
-            ) or getattr(streamable_http_mod, "streamablehttp_client", None)
-            if streamable_http_client is None:
-                raise MemoryUnavailableError("mcp streamable http client not available")
+                streamable_http_client = getattr(
+                    streamable_http_mod,
+                    "streamable_http_client",
+                    None,
+                ) or getattr(streamable_http_mod, "streamablehttp_client", None)
+                if streamable_http_client is None:
+                    raise MemoryUnavailableError("mcp streamable http client not available")
 
-            headers = {"Authorization": f"Bearer {self._token}"} if self._token else None
-            if "headers" in inspect.signature(streamable_http_client).parameters:
-                self._client_cm = streamable_http_client(self._url, headers=headers)
-            else:
-                self._http_client = httpx.AsyncClient(
-                    headers=headers,
-                    follow_redirects=True,
-                    trust_env=False,
-                )
-                self._client_cm = streamable_http_client(
-                    self._url,
-                    http_client=self._http_client,
-                )
-            read, write, _ = await self._client_cm.__aenter__()
-            self._session = ClientSession(read, write)
-            await self._session.__aenter__()
-            await self._session.initialize()
-            return self._session
+                headers = {"Authorization": f"Bearer {self._token}"} if self._token else None
+                if "headers" in inspect.signature(streamable_http_client).parameters:
+                    self._client_cm = streamable_http_client(self._url, headers=headers)
+                else:
+                    self._http_client = httpx.AsyncClient(
+                        headers=headers,
+                        follow_redirects=True,
+                        trust_env=False,
+                    )
+                    self._client_cm = streamable_http_client(
+                        self._url,
+                        http_client=self._http_client,
+                    )
+                read, write, _ = await self._client_cm.__aenter__()
+                self._session = ClientSession(read, write)
+                await self._session.__aenter__()
+                await self._session.initialize()
+                return self._session
+            except BaseException:
+                await self.close()
+                raise
 
     async def call_tool(self, name: str, arguments: dict) -> dict:
-        session = await self._ensure()
         try:
+            session = await self._ensure()
             result = await session.call_tool(name, arguments)
+        except MemoryUnavailableError:
+            raise
         except Exception as exc:
             raise MemoryUnavailableError(f"MCP call {name} failed: {exc}") from exc
         decoded = _decode_call_tool_result(result)
@@ -102,7 +108,9 @@ class McpUserSession:
         try:
             session = await self._ensure()
             result = await session.list_tools()
-        except Exception:
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException:
             return None
         names = frozenset(
             getattr(tool, "name", "")
@@ -120,24 +128,33 @@ class McpUserSession:
         return self._url == mcp_url and self._token == bearer_token
 
     async def close(self) -> None:
-        if self._session is not None:
+        session = self._session
+        client_cm = self._client_cm
+        http_client = self._http_client
+        self._session = None
+        self._client_cm = None
+        self._http_client = None
+        if session is not None:
             try:
-                await self._session.__aexit__(None, None, None)
-            except Exception:
+                await session.__aexit__(None, None, None)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except BaseException:
                 pass
-            self._session = None
-        if self._client_cm is not None:
+        if client_cm is not None:
             try:
-                await self._client_cm.__aexit__(None, None, None)
-            except Exception:
+                await client_cm.__aexit__(None, None, None)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except BaseException:
                 pass
-            self._client_cm = None
-        if self._http_client is not None:
+        if http_client is not None:
             try:
-                await self._http_client.aclose()
-            except Exception:
+                await http_client.aclose()
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except BaseException:
                 pass
-            self._http_client = None
         # Re-probe capabilities after a reconnect (server may have changed).
         self._tool_names = None
 

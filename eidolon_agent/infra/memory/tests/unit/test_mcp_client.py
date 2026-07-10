@@ -9,7 +9,9 @@ We don't hit any real MCP server. Tests cover:
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import asyncio
+import sys
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -215,6 +217,26 @@ def _make_session(call_tool_return, *, raise_on_call: bool = False) -> McpUserSe
     return sess
 
 
+def _install_fake_mcp(monkeypatch, *, client_session_cls, client_cm):
+    mcp_mod = ModuleType("mcp")
+    client_mod = ModuleType("mcp.client")
+    streamable_mod = ModuleType("mcp.client.streamable_http")
+    session_mod = ModuleType("mcp.client.session")
+
+    def streamable_http_client(url, headers=None):
+        del url, headers
+        return client_cm
+
+    streamable_mod.streamable_http_client = streamable_http_client
+    session_mod.ClientSession = client_session_cls
+    client_mod.streamable_http = streamable_mod
+    mcp_mod.client = client_mod
+    monkeypatch.setitem(sys.modules, "mcp", mcp_mod)
+    monkeypatch.setitem(sys.modules, "mcp.client", client_mod)
+    monkeypatch.setitem(sys.modules, "mcp.client.streamable_http", streamable_mod)
+    monkeypatch.setitem(sys.modules, "mcp.client.session", session_mod)
+
+
 async def test_call_tool_returns_dict_on_dict_decode() -> None:
     raw = SimpleNamespace(
         isError=False,
@@ -238,6 +260,93 @@ async def test_call_tool_wraps_scalar_decode_in_result_key() -> None:
     sess = _make_session(raw)
     out = await sess.call_tool("any", {})
     assert out == {"result": 42}
+
+
+async def test_tool_names_cleans_half_open_session_when_initialize_is_cancelled(monkeypatch) -> None:
+    class FakeClientContext:
+        exited = False
+
+        async def __aenter__(self):
+            return object(), object(), None
+
+        async def __aexit__(self, exc_type, exc, tb):
+            self.exited = True
+
+    sessions = []
+
+    class FakeClientSession:
+        def __init__(self, read, write):
+            del read, write
+            self.exited = False
+            sessions.append(self)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            self.exited = True
+
+        async def initialize(self):
+            raise asyncio.CancelledError("probe cancelled by mcp transport")
+
+    client_cm = FakeClientContext()
+    _install_fake_mcp(
+        monkeypatch,
+        client_session_cls=FakeClientSession,
+        client_cm=client_cm,
+    )
+    sess = McpUserSession("http://x/mcp")
+
+    assert await sess.tool_names() is None
+    assert client_cm.exited is True
+    assert sessions and sessions[0].exited is True
+    assert sess._session is None
+    assert sess._client_cm is None
+    assert sess._http_client is None
+
+
+async def test_call_tool_wraps_connect_failure_and_cleans_partial_session(monkeypatch) -> None:
+    class FakeClientContext:
+        exited = False
+
+        async def __aenter__(self):
+            return object(), object(), None
+
+        async def __aexit__(self, exc_type, exc, tb):
+            self.exited = True
+
+    sessions = []
+
+    class FakeClientSession:
+        def __init__(self, read, write):
+            del read, write
+            self.exited = False
+            sessions.append(self)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            self.exited = True
+
+        async def initialize(self):
+            raise RuntimeError("connect failed")
+
+    client_cm = FakeClientContext()
+    _install_fake_mcp(
+        monkeypatch,
+        client_session_cls=FakeClientSession,
+        client_cm=client_cm,
+    )
+    sess = McpUserSession("http://x/mcp")
+
+    with pytest.raises(MemoryUnavailableError, match="connect failed"):
+        await sess.call_tool("any", {})
+    assert client_cm.exited is True
+    assert sessions and sessions[0].exited is True
+    assert sess._session is None
+    assert sess._client_cm is None
+    assert sess._http_client is None
 
 
 # ---- capability negotiation ----------------------------------------------
