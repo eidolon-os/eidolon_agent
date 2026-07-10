@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import ClassVar
 
@@ -7,10 +8,12 @@ import pytest
 
 from eidolon_agent.app.benchmark import live_local_contract
 from eidolon_agent.app.benchmark.live_local_contract import (
+    ContractCheck,
+    ContractWorkspace,
     LiveLocalContractConfig,
     run_live_local_contract,
 )
-from eidolon_agent.core.errors import NatsUnavailableError
+from eidolon_agent.core.errors import MemoryUnavailableError, NatsUnavailableError
 
 pytestmark = pytest.mark.integration
 
@@ -102,6 +105,22 @@ class _FakePublisher:
         self.published.append(kwargs)
 
 
+class _StaticSessionPool:
+    def __init__(self, session) -> None:
+        self.session = session
+        self.drops = 0
+
+    async def session_for(self, memory_space_id: str):
+        assert memory_space_id == "r_contract"
+        return self.session
+
+    async def drop_session(self, memory_space_id: str, *, session=None) -> bool:
+        assert memory_space_id == "r_contract"
+        assert session is self.session
+        self.drops += 1
+        return True
+
+
 async def test_live_local_contract_memory_publish_and_readback(monkeypatch) -> None:
     async def fake_build_initial_memory_routes(
         *,
@@ -147,7 +166,113 @@ async def test_live_local_contract_memory_publish_and_readback(monkeypatch) -> N
     ]
     assert all(check.status == "passed" for check in report.checks)
     assert _FakePublisher.published
-    assert _FakePublisher.published[-1]["memory_realm_id"] == "r_contract"
+    published = _FakePublisher.published[-1]
+    assert published["memory_realm_id"] == "r_contract"
+    assert "Acquired" in published["owner_text"]
+    assert published["turn_id"] in published["owner_text"]
+    assert published["metadata"] == {
+        "source": "eidolon-agent-live-local-contract",
+        "purpose": "memory-contract-readback",
+    }
+
+
+async def test_live_local_contract_readback_retries_transient_timeout() -> None:
+    class TimeoutThenRecordSession:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def call_tool(self, name, arguments):
+            assert name == "eidolon_memory_get_by_source_turn"
+            self.calls += 1
+            if self.calls == 1:
+                raise asyncio.TimeoutError()
+            return {
+                "record": {
+                    "key": "drawer-timeout-retry",
+                    "metadata": {"source_turn_id": arguments["source_turn_id"]},
+                }
+            }
+
+    session = TimeoutThenRecordSession()
+    pool = _StaticSessionPool(session)
+    check = await live_local_contract._memory_readback_check(
+        pool=pool,
+        tool_names={"eidolon_memory_get_by_source_turn"},
+        memory_space_id="r_contract",
+        turn_id="turn-timeout-retry",
+        cfg=LiveLocalContractConfig(
+            memory_readback_timeout_s=0.1,
+            memory_readback_poll_s=0.001,
+            timeout_s=0.01,
+        ),
+    )
+
+    assert check.status == "passed"
+    assert session.calls == 2
+    assert pool.drops == 1
+    assert check.details["record_key"] == "drawer-timeout-retry"
+
+
+async def test_live_local_contract_readback_child_timeout_does_not_leak_cancel() -> None:
+    class HangingSession:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.cancelled = 0
+
+        async def call_tool(self, name, arguments):
+            del name, arguments
+            self.calls += 1
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                self.cancelled += 1
+                raise
+
+    session = HangingSession()
+    pool = _StaticSessionPool(session)
+    check = await live_local_contract._memory_readback_check(
+        pool=pool,
+        tool_names={"eidolon_memory_get_by_source_turn"},
+        memory_space_id="r_contract",
+        turn_id="turn-child-timeout",
+        cfg=LiveLocalContractConfig(
+            memory_readback_timeout_s=0.01,
+            memory_readback_poll_s=0.001,
+            timeout_s=0.001,
+        ),
+    )
+
+    assert check.status == "failed"
+    assert check.summary == "timed out waiting for memory readback"
+    assert check.details["last_error"].startswith("TimeoutError:")
+    assert session.calls >= 1
+    assert session.cancelled == session.calls
+    assert pool.drops == session.calls
+
+
+async def test_live_local_contract_readback_unavailable_uses_dependency_policy() -> None:
+    class UnavailableSession:
+        async def call_tool(self, name, arguments):
+            del name, arguments
+            raise MemoryUnavailableError("mcp warming")
+
+    check = await live_local_contract._memory_readback_check(
+        pool=_StaticSessionPool(UnavailableSession()),
+        tool_names={"eidolon_memory_get_by_source_turn"},
+        memory_space_id="r_contract",
+        turn_id="turn-unavailable",
+        cfg=LiveLocalContractConfig(
+            dependency_unavailable_status="skipped",
+            memory_readback_timeout_s=0.01,
+            memory_readback_poll_s=0.001,
+            timeout_s=0.001,
+        ),
+    )
+
+    assert check.status == "skipped"
+    assert check.required is True
+    assert check.summary == "timed out waiting for memory readback"
+    assert check.details["last_error"] == "mcp warming"
 
 
 async def test_live_local_contract_dependency_unavailable_can_skip(monkeypatch) -> None:
@@ -241,3 +366,81 @@ async def test_live_local_contract_nats_unavailable_uses_dependency_policy(
     assert by_name["memory_nats_publish"].status == "skipped"
     assert report.summary["skipped_required"] == ["memory_nats_publish"]
     assert report.passed is False
+
+
+async def test_live_local_contract_provisions_memory_route_and_cleans_up(
+    monkeypatch,
+) -> None:
+    events: list[tuple[str, str]] = []
+
+    async def fake_provision(cfg):
+        events.append(("provision", cfg.contract_owner_id))
+        return ContractCheck(
+            name="contract_owner_provision",
+            status="passed",
+            required=True,
+            summary="ok",
+            elapsed_ms=1.0,
+            details={},
+        ), ContractWorkspace(
+            owner_id="owner_contract",
+            companion_id="c_contract",
+            memory_realm_id="r_contract",
+            genome_id="g_contract",
+        )
+
+    async def fake_memory_checks(cfg, *, selected_memory_space_id=None):
+        events.append(("memory", selected_memory_space_id or ""))
+        return [
+            ContractCheck(
+                name="memory_discovery",
+                status="passed",
+                required=True,
+                summary="ok",
+                elapsed_ms=1.0,
+                details={"selected_memory_space_id": selected_memory_space_id},
+            )
+        ]
+
+    async def fake_cleanup(cfg, workspace):
+        del cfg
+        events.append(("cleanup", workspace.owner_id))
+        return ContractCheck(
+            name="contract_owner_cleanup",
+            status="passed",
+            required=True,
+            summary="ok",
+            elapsed_ms=1.0,
+            details={},
+        )
+
+    monkeypatch.setattr(
+        live_local_contract,
+        "_provision_contract_workspace",
+        fake_provision,
+    )
+    monkeypatch.setattr(live_local_contract, "_memory_contract_checks", fake_memory_checks)
+    monkeypatch.setattr(live_local_contract, "_cleanup_contract_workspace", fake_cleanup)
+
+    report = await run_live_local_contract(
+        LiveLocalContractConfig(
+            include_agent_http=False,
+            include_agent_admin=False,
+            include_admin_gateway=False,
+            include_memory=True,
+            provision_contract_owner=True,
+            contract_owner_id="owner_contract",
+        )
+    )
+
+    assert report.passed is True
+    assert events == [
+        ("provision", "owner_contract"),
+        ("memory", "r_contract"),
+        ("cleanup", "owner_contract"),
+    ]
+    assert [check.name for check in report.checks] == [
+        "contract_owner_provision",
+        "memory_discovery",
+        "contract_owner_cleanup",
+    ]
