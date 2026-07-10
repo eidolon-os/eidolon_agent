@@ -1,0 +1,754 @@
+"""Live-local contract harness for the canonical persona stack.
+
+The harness verifies public boundaries only:
+
+* Agent HTTP/admin endpoints over HTTP.
+* Admin gateway endpoints over HTTP.
+* Memory discovery, MCP tools, and NATS write/readback through Agent adapters.
+
+It intentionally does not import eidolon_memory internals or duplicate the
+admin dev-stack process manager.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+import time
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Literal
+from uuid import uuid4
+
+import httpx
+
+from eidolon_agent.config import load_settings
+from eidolon_agent.core.errors import MemoryUnavailableError, NatsUnavailableError
+from eidolon_agent.infra.events import NatsEventBus
+from eidolon_agent.infra.memory import (
+    McpClientPool,
+    MemoryNatsPublisher,
+    build_initial_memory_routes,
+)
+
+CheckStatus = Literal["passed", "failed", "skipped"]
+DependencyUnavailableStatus = Literal["failed", "skipped"]
+
+
+@dataclass(slots=True)
+class ContractCheck:
+    name: str
+    status: CheckStatus
+    required: bool
+    summary: str
+    elapsed_ms: float
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class LiveLocalContractReport:
+    schema_version: str
+    generated_at: str
+    mode: str
+    passed: bool
+    summary: dict[str, Any]
+    checks: list[ContractCheck]
+    elapsed_ms: float
+
+
+@dataclass(slots=True)
+class LiveLocalContractConfig:
+    mode: str = "live-local"
+    agent_http_base: str = "http://127.0.0.1:8180"
+    agent_admin_base: str = "http://127.0.0.1:8081"
+    admin_gateway_base: str | None = "http://127.0.0.1:9000"
+    include_agent_http: bool = True
+    include_agent_admin: bool = True
+    include_admin_gateway: bool = True
+    include_memory: bool = True
+    require_memory_readback: bool = True
+    dependency_unavailable_status: DependencyUnavailableStatus = "failed"
+    memory_space_id: str | None = None
+    timeout_s: float = 5.0
+    memory_readback_timeout_s: float = 30.0
+    memory_readback_poll_s: float = 0.5
+    run_product_acceptance: bool = False
+    product_acceptance_work_dir: Path = Path("/tmp/eidolon-product-acceptance")
+    product_acceptance_sqlite_path: Path | None = None
+
+    def __post_init__(self) -> None:
+        if self.dependency_unavailable_status not in {"failed", "skipped"}:
+            raise ValueError("dependency_unavailable_status must be 'failed' or 'skipped'")
+
+
+async def run_live_local_contract(
+    config: LiveLocalContractConfig | None = None,
+) -> LiveLocalContractReport:
+    cfg = config or LiveLocalContractConfig()
+    started = time.perf_counter()
+    checks: list[ContractCheck] = []
+
+    if cfg.include_agent_http:
+        checks.append(
+            await _http_json_check(
+                name="agent_http_readyz",
+                url=_join_url(cfg.agent_http_base, "/readyz"),
+                required=True,
+                timeout_s=cfg.timeout_s,
+                expected_status=200,
+                expected_json={"status": "ready"},
+                unavailable_status=cfg.dependency_unavailable_status,
+                hint="Start eidolon_agent or the admin dev stack.",
+            )
+        )
+    if cfg.include_agent_admin:
+        checks.append(
+            await _http_json_check(
+                name="agent_admin_openapi",
+                url=_join_url(cfg.agent_admin_base, "/api/openapi.json"),
+                required=True,
+                timeout_s=cfg.timeout_s,
+                expected_status=200,
+                expected_json_path=("info", "title"),
+                expected_json_value="eidolon-agent admin",
+                unavailable_status=cfg.dependency_unavailable_status,
+                hint="Start eidolon_agent admin HTTP on the configured admin port.",
+            )
+        )
+    if cfg.include_admin_gateway and cfg.admin_gateway_base:
+        checks.append(
+            await _http_json_check(
+                name="admin_gateway_services",
+                url=_join_url(cfg.admin_gateway_base, "/api/services"),
+                required=True,
+                timeout_s=cfg.timeout_s,
+                expected_status=200,
+                expected_json_key="services",
+                unavailable_status=cfg.dependency_unavailable_status,
+                hint="Start eidolon_admin with deploy/dev/run_all.sh start.",
+            )
+        )
+        checks.append(
+            await _http_json_check(
+                name="admin_gateway_system_health",
+                url=_join_url(cfg.admin_gateway_base, "/api/system/health"),
+                required=True,
+                timeout_s=max(cfg.timeout_s, 10.0),
+                expected_status=200,
+                expected_json_key="services",
+                unavailable_status=cfg.dependency_unavailable_status,
+                hint="Admin gateway is up but system health is unavailable.",
+            )
+        )
+
+    if cfg.include_memory:
+        checks.extend(await _memory_contract_checks(cfg))
+
+    if cfg.run_product_acceptance:
+        checks.append(await _product_acceptance_check(cfg))
+
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
+    required = [check for check in checks if check.required]
+    failed_required = [check for check in required if check.status == "failed"]
+    skipped_required = [check for check in required if check.status == "skipped"]
+    passed = not failed_required and not skipped_required
+    return LiveLocalContractReport(
+        schema_version="eidolon_agent.live_local_contract_report.v1",
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        mode=cfg.mode,
+        passed=passed,
+        summary={
+            "checks": len(checks),
+            "passed": sum(1 for check in checks if check.status == "passed"),
+            "failed": sum(1 for check in checks if check.status == "failed"),
+            "skipped": sum(1 for check in checks if check.status == "skipped"),
+            "required": len(required),
+            "failed_required": [check.name for check in failed_required],
+            "skipped_required": [check.name for check in skipped_required],
+        },
+        checks=checks,
+        elapsed_ms=elapsed_ms,
+    )
+
+
+async def _http_json_check(
+    *,
+    name: str,
+    url: str,
+    required: bool,
+    timeout_s: float,
+    expected_status: int,
+    unavailable_status: DependencyUnavailableStatus,
+    hint: str,
+    expected_json: dict[str, Any] | None = None,
+    expected_json_key: str | None = None,
+    expected_json_path: tuple[str, ...] | None = None,
+    expected_json_value: Any = None,
+) -> ContractCheck:
+    started = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(
+            timeout=timeout_s,
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
+            response = await client.get(url)
+    except Exception as exc:
+        return _check(
+            name=name,
+            status=unavailable_status,
+            required=required,
+            started=started,
+            summary=f"{type(exc).__name__}: {exc}",
+            details={"url": url, "hint": hint},
+        )
+
+    details: dict[str, Any] = {"url": url, "status_code": response.status_code}
+    if response.status_code != expected_status:
+        details["body_preview"] = response.text[:500]
+        return _check(
+            name=name,
+            status="failed",
+            required=required,
+            started=started,
+            summary=f"expected HTTP {expected_status}, got {response.status_code}",
+            details=details,
+        )
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        return _check(
+            name=name,
+            status="failed",
+            required=required,
+            started=started,
+            summary=f"response is not JSON: {exc}",
+            details=details,
+        )
+
+    if expected_json is not None and payload != expected_json:
+        details["payload"] = payload
+        return _check(
+            name=name,
+            status="failed",
+            required=required,
+            started=started,
+            summary="JSON payload mismatch",
+            details=details,
+        )
+    if expected_json_key is not None and expected_json_key not in payload:
+        details["payload_keys"] = sorted(payload) if isinstance(payload, dict) else []
+        return _check(
+            name=name,
+            status="failed",
+            required=required,
+            started=started,
+            summary=f"missing JSON key {expected_json_key!r}",
+            details=details,
+        )
+    if expected_json_path is not None:
+        actual = _get_path(payload, expected_json_path)
+        if actual != expected_json_value:
+            details["actual"] = actual
+            return _check(
+                name=name,
+                status="failed",
+                required=required,
+                started=started,
+                summary=f"expected {'.'.join(expected_json_path)}={expected_json_value!r}",
+                details=details,
+            )
+
+    return _check(
+        name=name,
+        status="passed",
+        required=required,
+        started=started,
+        summary="ok",
+        details=details,
+    )
+
+
+async def _memory_contract_checks(cfg: LiveLocalContractConfig) -> list[ContractCheck]:
+    checks: list[ContractCheck] = []
+    started = time.perf_counter()
+    try:
+        settings = load_settings()
+        routes, effective_nats_url, refresher = await build_initial_memory_routes(
+            memory=settings.memory,
+            nats=settings.nats,
+            log_initial_fetch_exception=False,
+        )
+        if refresher is not None:
+            await refresher.stop()
+        memory_space_ids = await routes.memory_space_ids()
+        source = await routes.source()
+    except Exception as exc:
+        return [
+            _check(
+                name="memory_discovery",
+                status=cfg.dependency_unavailable_status,
+                required=True,
+                started=started,
+                summary=f"{type(exc).__name__}: {exc}",
+                details={"hint": "Check eidolon_agent config and eidolon_memory discovery."},
+            )
+        ]
+
+    details = {
+        "source": source,
+        "effective_nats_url": effective_nats_url,
+        "memory_space_ids": memory_space_ids,
+    }
+    if not memory_space_ids:
+        return [
+            _check(
+                name="memory_discovery",
+                status=cfg.dependency_unavailable_status,
+                required=True,
+                started=started,
+                summary="no enabled reachable memory routes",
+                details=details,
+            )
+        ]
+
+    memory_space_id = (cfg.memory_space_id or "").strip() or memory_space_ids[0]
+    if memory_space_id not in memory_space_ids:
+        checks.append(
+            _check(
+                name="memory_discovery",
+                status="failed",
+                required=True,
+                started=started,
+                summary=f"requested memory space {memory_space_id!r} not discovered",
+                details=details,
+            )
+        )
+        return checks
+
+    checks.append(
+        _check(
+            name="memory_discovery",
+            status="passed",
+            required=True,
+            started=started,
+            summary="ok",
+            details={**details, "selected_memory_space_id": memory_space_id},
+        )
+    )
+
+    pool = McpClientPool(routes=routes)
+    bus = NatsEventBus(
+        effective_nats_url,
+        creds_path=str(settings.nats.creds_path) if settings.nats.creds_path else None,
+    )
+    try:
+        session, tool_names = await _probe_memory_tools(
+            pool=pool,
+            memory_space_id=memory_space_id,
+            timeout_s=cfg.timeout_s,
+            unavailable_status=cfg.dependency_unavailable_status,
+        )
+        checks.append(tool_names)
+        if session is None or tool_names.status != "passed":
+            return checks
+        advertised = set(tool_names.details.get("tool_names") or [])
+
+        checks.append(await _memory_status_check(session, memory_space_id, cfg))
+        publish_check, turn_id = await _memory_publish_check(
+            bus=bus,
+            routes=routes,
+            memory_space_id=memory_space_id,
+            cfg=cfg,
+        )
+        checks.append(publish_check)
+        if publish_check.status == "passed":
+            checks.append(
+                await _memory_readback_check(
+                    session=session,
+                    tool_names=advertised,
+                    memory_space_id=memory_space_id,
+                    turn_id=turn_id,
+                    cfg=cfg,
+                )
+            )
+        return checks
+    finally:
+        await pool.close_all()
+        await bus.close()
+
+
+async def _probe_memory_tools(
+    *,
+    pool: McpClientPool,
+    memory_space_id: str,
+    timeout_s: float,
+    unavailable_status: DependencyUnavailableStatus,
+) -> tuple[Any | None, ContractCheck]:
+    started = time.perf_counter()
+    try:
+        session = await pool.session_for(memory_space_id)
+        tool_names = await asyncio.wait_for(session.tool_names(), timeout=timeout_s)
+    except MemoryUnavailableError as exc:
+        return None, _check(
+            name="memory_mcp_tools",
+            status=unavailable_status,
+            required=True,
+            started=started,
+            summary=str(exc),
+            details={"memory_space_id": memory_space_id},
+        )
+    except Exception as exc:
+        return None, _check(
+            name="memory_mcp_tools",
+            status=unavailable_status,
+            required=True,
+            started=started,
+            summary=f"{type(exc).__name__}: {exc}",
+            details={"memory_space_id": memory_space_id},
+        )
+    if tool_names is None:
+        return session, _check(
+            name="memory_mcp_tools",
+            status=unavailable_status,
+            required=True,
+            started=started,
+            summary="MCP list_tools did not return capabilities",
+            details={"memory_space_id": memory_space_id},
+        )
+    advertised = sorted(tool_names)
+    required_any = {"eidolon_memory_recall_context", "eidolon_memory_search"}
+    missing_any = not required_any.intersection(tool_names)
+    missing = {"eidolon_memory_status"} - set(tool_names)
+    if missing_any or missing:
+        return session, _check(
+            name="memory_mcp_tools",
+            status="failed",
+            required=True,
+            started=started,
+            summary="required MCP tools are missing",
+            details={
+                "memory_space_id": memory_space_id,
+                "tool_names": advertised,
+                "missing": sorted(missing),
+                "required_any": sorted(required_any),
+                "missing_required_any": missing_any,
+            },
+        )
+    return session, _check(
+        name="memory_mcp_tools",
+        status="passed",
+        required=True,
+        started=started,
+        summary="ok",
+        details={"memory_space_id": memory_space_id, "tool_names": advertised},
+    )
+
+
+async def _memory_status_check(
+    session: Any,
+    memory_space_id: str,
+    cfg: LiveLocalContractConfig,
+) -> ContractCheck:
+    started = time.perf_counter()
+    try:
+        status = await asyncio.wait_for(
+            session.call_tool("eidolon_memory_status", {}),
+            timeout=cfg.timeout_s,
+        )
+    except MemoryUnavailableError as exc:
+        return _check(
+            name="memory_mcp_status",
+            status=cfg.dependency_unavailable_status,
+            required=True,
+            started=started,
+            summary=str(exc),
+            details={"memory_space_id": memory_space_id},
+        )
+    except Exception as exc:
+        return _check(
+            name="memory_mcp_status",
+            status="failed",
+            required=True,
+            started=started,
+            summary=f"{type(exc).__name__}: {exc}",
+            details={"memory_space_id": memory_space_id},
+        )
+    ready = bool(status.get("ready", True)) if isinstance(status, dict) else False
+    actual_space = str(status.get("memory_space_id") or "") if isinstance(status, dict) else ""
+    if not ready or (actual_space and actual_space != memory_space_id):
+        return _check(
+            name="memory_mcp_status",
+            status="failed",
+            required=True,
+            started=started,
+            summary="memory status is not ready or identity mismatched",
+            details={
+                "memory_space_id": memory_space_id,
+                "status": status,
+            },
+        )
+    return _check(
+        name="memory_mcp_status",
+        status="passed",
+        required=True,
+        started=started,
+        summary="ok",
+        details={"memory_space_id": memory_space_id, "status": status},
+    )
+
+
+async def _memory_publish_check(
+    *,
+    bus: NatsEventBus,
+    routes: Any,
+    memory_space_id: str,
+    cfg: LiveLocalContractConfig,
+) -> tuple[ContractCheck, str]:
+    started = time.perf_counter()
+    turn_id = f"live-local-contract-{uuid4().hex}"
+    publisher = MemoryNatsPublisher(event_bus=bus, routes=routes)
+    try:
+        await publisher.publish_turn(
+            owner_id="live-local-contract",
+            companion_id="live-local-contract",
+            memory_realm_id=memory_space_id,
+            device_id=None,
+            session_id="live-local-contract",
+            turn_id=turn_id,
+            owner_text=f"live local memory contract probe {turn_id}",
+            assistant_text="ack",
+            metadata={
+                "source": "eidolon-agent-live-local-contract",
+                "contract_only": True,
+            },
+        )
+    except NatsUnavailableError as exc:
+        return _check(
+            name="memory_nats_publish",
+            status=cfg.dependency_unavailable_status,
+            required=True,
+            started=started,
+            summary=str(exc),
+            details={"memory_space_id": memory_space_id, "turn_id": turn_id},
+        ), turn_id
+    except Exception as exc:
+        return _check(
+            name="memory_nats_publish",
+            status="failed",
+            required=True,
+            started=started,
+            summary=f"{type(exc).__name__}: {exc}",
+            details={"memory_space_id": memory_space_id, "turn_id": turn_id},
+        ), turn_id
+    return _check(
+        name="memory_nats_publish",
+        status="passed",
+        required=True,
+        started=started,
+        summary="ok",
+        details={"memory_space_id": memory_space_id, "turn_id": turn_id},
+    ), turn_id
+
+
+async def _memory_readback_check(
+    *,
+    session: Any,
+    tool_names: set[str],
+    memory_space_id: str,
+    turn_id: str,
+    cfg: LiveLocalContractConfig,
+) -> ContractCheck:
+    started = time.perf_counter()
+    required = cfg.require_memory_readback
+    if "eidolon_memory_get_by_source_turn" not in tool_names:
+        return _check(
+            name="memory_nats_readback",
+            status="failed" if required else "skipped",
+            required=required,
+            started=started,
+            summary="eidolon_memory_get_by_source_turn is not advertised",
+            details={"memory_space_id": memory_space_id, "turn_id": turn_id},
+        )
+
+    deadline = time.perf_counter() + cfg.memory_readback_timeout_s
+    last_payload: Any = None
+    while time.perf_counter() < deadline:
+        try:
+            payload = await asyncio.wait_for(
+                session.call_tool(
+                    "eidolon_memory_get_by_source_turn",
+                    {"source_turn_id": turn_id, "include_private": True},
+                ),
+                timeout=cfg.timeout_s,
+            )
+        except MemoryUnavailableError as exc:
+            return _check(
+                name="memory_nats_readback",
+                status=cfg.dependency_unavailable_status,
+                required=required,
+                started=started,
+                summary=str(exc),
+                details={"memory_space_id": memory_space_id, "turn_id": turn_id},
+            )
+        except Exception as exc:
+            return _check(
+                name="memory_nats_readback",
+                status="failed",
+                required=required,
+                started=started,
+                summary=f"{type(exc).__name__}: {exc}",
+                details={"memory_space_id": memory_space_id, "turn_id": turn_id},
+            )
+        last_payload = payload
+        record = payload.get("record") if isinstance(payload, dict) else None
+        if isinstance(record, dict):
+            return _check(
+                name="memory_nats_readback",
+                status="passed",
+                required=required,
+                started=started,
+                summary="ok",
+                details={
+                    "memory_space_id": memory_space_id,
+                    "turn_id": turn_id,
+                    "record_key": record.get("key") or record.get("id"),
+                },
+            )
+        await asyncio.sleep(cfg.memory_readback_poll_s)
+
+    return _check(
+        name="memory_nats_readback",
+        status="failed" if required else "skipped",
+        required=required,
+        started=started,
+        summary="timed out waiting for memory readback",
+        details={
+            "memory_space_id": memory_space_id,
+            "turn_id": turn_id,
+            "timeout_s": cfg.memory_readback_timeout_s,
+            "last_payload": last_payload,
+        },
+    )
+
+
+async def _product_acceptance_check(cfg: LiveLocalContractConfig) -> ContractCheck:
+    from eidolon_agent.app.benchmark.product_acceptance import (
+        ProductAcceptanceUnavailable,
+        run_product_acceptance_profile,
+    )
+
+    started = time.perf_counter()
+    try:
+        result = await run_product_acceptance_profile(
+            work_dir=cfg.product_acceptance_work_dir,
+            sqlite_path=cfg.product_acceptance_sqlite_path,
+        )
+    except ProductAcceptanceUnavailable as exc:
+        return _check(
+            name="product_acceptance",
+            status=cfg.dependency_unavailable_status,
+            required=True,
+            started=started,
+            summary=str(exc),
+        )
+    except Exception as exc:
+        return _check(
+            name="product_acceptance",
+            status="failed",
+            required=True,
+            started=started,
+            summary=f"{type(exc).__name__}: {exc}",
+        )
+    return _check(
+        name="product_acceptance",
+        status="passed" if result.passed else "failed",
+        required=True,
+        started=started,
+        summary="ok" if result.passed else "product acceptance failed",
+        details=asdict(result),
+    )
+
+
+def _check(
+    *,
+    name: str,
+    status: CheckStatus,
+    required: bool,
+    started: float,
+    summary: str,
+    details: dict[str, Any] | None = None,
+) -> ContractCheck:
+    return ContractCheck(
+        name=name,
+        status=status,
+        required=required,
+        summary=summary,
+        elapsed_ms=round((time.perf_counter() - started) * 1000, 3),
+        details=details or {},
+    )
+
+
+def _get_path(payload: Any, path: tuple[str, ...]) -> Any:
+    current = payload
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _join_url(base: str, path: str) -> str:
+    return base.rstrip("/") + "/" + path.lstrip("/")
+
+
+def report_to_dict(report: LiveLocalContractReport) -> dict[str, Any]:
+    return asdict(report)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="live-local-contract")
+    parser.add_argument("--agent-http", default="http://127.0.0.1:8180")
+    parser.add_argument("--agent-admin", default="http://127.0.0.1:8081")
+    parser.add_argument("--admin-gateway", default="http://127.0.0.1:9000")
+    parser.add_argument("--memory-space-id", default=os.getenv("EIDOLON_AGENT_LIVE_MEMORY_SPACE_ID", ""))
+    parser.add_argument("--timeout-s", type=float, default=5.0)
+    parser.add_argument("--memory-readback-timeout-s", type=float, default=30.0)
+    parser.add_argument("--no-agent", action="store_true")
+    parser.add_argument("--no-admin-gateway", action="store_true")
+    parser.add_argument("--no-memory", action="store_true")
+    parser.add_argument("--no-memory-readback", action="store_true")
+    parser.add_argument("--product-acceptance", action="store_true")
+    parser.add_argument("--product-acceptance-work-dir", type=Path, default=Path("/tmp/eidolon-product-acceptance"))
+    parser.add_argument("--sqlite-path", type=Path, default=None)
+    args = parser.parse_args(argv)
+
+    report = asyncio.run(
+        run_live_local_contract(
+            LiveLocalContractConfig(
+                agent_http_base=args.agent_http,
+                agent_admin_base=args.agent_admin,
+                admin_gateway_base=args.admin_gateway,
+                include_agent_http=not args.no_agent,
+                include_agent_admin=not args.no_agent,
+                include_admin_gateway=not args.no_admin_gateway,
+                include_memory=not args.no_memory,
+                require_memory_readback=not args.no_memory_readback,
+                memory_space_id=args.memory_space_id or None,
+                timeout_s=args.timeout_s,
+                memory_readback_timeout_s=args.memory_readback_timeout_s,
+                run_product_acceptance=args.product_acceptance,
+                product_acceptance_work_dir=args.product_acceptance_work_dir,
+                product_acceptance_sqlite_path=args.sqlite_path,
+            )
+        )
+    )
+    print(json.dumps(report_to_dict(report), ensure_ascii=False, indent=2, default=str))
+    return 0 if report.passed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

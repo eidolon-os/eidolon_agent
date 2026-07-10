@@ -27,6 +27,36 @@ Live replay reports intentionally avoid persisted prompt text. They use gRPC
 event kinds, assistant previews, admin observability summaries, and latency
 metadata so reports stay useful without becoming prompt dumps.
 
+## Live Local Contract Harness
+
+Use the contract harness before live replay when you want to verify the local
+stack boundary is actually reachable. It checks only public contracts: Agent
+HTTP/admin endpoints, Admin gateway HTTP endpoints, Memory discovery, advertised
+MCP tools, NATS turn publish, and optional Memory readback by source turn id.
+It does not import `eidolon_memory` internals and does not start or own the dev
+stack processes.
+
+```bash
+./.venv/bin/python -m eidolon_agent.app.benchmark.live_local_contract
+```
+
+With no services running, the command must fail with a JSON diagnostic report.
+That is the expected readiness signal, not a flaky pass. For the optional live
+Memory smoke, keep PR behavior deterministic and opt in explicitly:
+
+```bash
+EIDOLON_AGENT_LIVE_MEMORY_CONTRACT=1 \
+  ./.venv/bin/python -m pytest -q tests/smoke/test_live_memory_contract.py -rs
+
+EIDOLON_AGENT_LIVE_MEMORY_CONTRACT=1 \
+EIDOLON_AGENT_LIVE_MEMORY_READBACK=1 \
+  ./.venv/bin/python -m pytest -q tests/smoke/test_live_memory_contract.py -rs
+```
+
+The smoke profile reports unavailable live dependencies as `skipped`; the
+harness report still marks those required checks as skipped so a real contract
+run never pretends the stack passed.
+
 ## Live Benchmark User
 
 Live benchmark scripts default to an isolated identity:

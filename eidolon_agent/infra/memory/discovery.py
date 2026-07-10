@@ -290,6 +290,7 @@ async def build_initial_memory_routes(
     *,
     memory: MemorySettings,
     nats: NatsSettings,
+    log_initial_fetch_exception: bool = True,
 ) -> tuple[MemoryRoutingTable, str, MemoryDiscoveryRefresher | None]:
     """Build routes, preferring discovery and falling back to static endpoints."""
     routes = MemoryRoutingTable.from_static(endpoints=memory.endpoints, nats=nats)
@@ -308,7 +309,10 @@ async def build_initial_memory_routes(
         await routes.replace_from_discovery(discovery)
         effective_nats_url = discovery.nats.url
     except Exception:
-        _log.exception("memory discovery initial fetch failed; using static endpoints")
+        if log_initial_fetch_exception:
+            _log.exception("memory discovery initial fetch failed; using static endpoints")
+        else:
+            _log.debug("memory discovery initial fetch failed; using static endpoints")
 
     refresher = MemoryDiscoveryRefresher(
         client=client,

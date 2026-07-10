@@ -19,6 +19,10 @@ import httpx
 from eidolon_data import DataSettings, DataStore
 from fastapi import FastAPI
 
+# Product acceptance is a local deterministic profile; importing the runtime
+# should not attempt to refresh LiteLLM's remote cost map.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 from eidolon_agent.app.runtime.bootstrap import build_application
 from eidolon_agent.config.settings import (
     BodyControlSettings,
@@ -267,12 +271,13 @@ async def _run_admin_chat_test(
     text: str,
 ) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=admin_app),
-        base_url="http://agent-admin-asgi",
-        timeout=20.0,
-    ) as client:
-        async with client.stream(
+    async with (
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=admin_app),
+            base_url="http://agent-admin-asgi",
+            timeout=20.0,
+        ) as client,
+        client.stream(
             "POST",
             "/api/admin/chat/test",
             json={
@@ -281,22 +286,23 @@ async def _run_admin_chat_test(
                 "text": text,
                 "persist_memory": True,
             },
-        ) as response:
-            response.raise_for_status()
-            block: list[str] = []
-            async for line in response.aiter_lines():
-                if line:
-                    block.append(line)
-                    continue
-                event = _decode_sse_block(block)
-                block = []
-                if event:
-                    data = event.get("data")
-                    if isinstance(data, dict):
-                        events.append(data)
+        ) as response,
+    ):
+        response.raise_for_status()
+        block: list[str] = []
+        async for line in response.aiter_lines():
+            if line:
+                block.append(line)
+                continue
             event = _decode_sse_block(block)
-            if event and isinstance(event.get("data"), dict):
-                events.append(event["data"])
+            block = []
+            if event:
+                data = event.get("data")
+                if isinstance(data, dict):
+                    events.append(data)
+        event = _decode_sse_block(block)
+        if event and isinstance(event.get("data"), dict):
+            events.append(event["data"])
     return events
 
 

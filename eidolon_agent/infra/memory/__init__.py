@@ -5,6 +5,18 @@ Writes go through NATS JetStream on ``eidolon.memory.turn.<memory_space_token>``
 Explicit KG mutations go through ``eidolon.memory.cmd.<memory_space_token>``.
 """
 
+from eidolon_agent.infra.memory.discovery import (
+    MemoryRoutingTable,
+    build_initial_memory_routes,
+)
+from eidolon_agent.infra.memory.mcp_client import McpClientPool
+from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
 from eidolon_agent.infra.memory.port_adapter import EidolonMemoryPort
 
-__all__ = ["EidolonMemoryPort"]
+__all__ = [
+    "EidolonMemoryPort",
+    "McpClientPool",
+    "MemoryNatsPublisher",
+    "MemoryRoutingTable",
+    "build_initial_memory_routes",
+]
