@@ -21,7 +21,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Protocol
 
-from eidolon_agent.core.types.memory import MemoryQueryPlan
+from eidolon_agent.core.types.memory import MemoryHit, MemoryQueryPlan
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnInput
 from eidolon_agent.domain.context.types import (
@@ -109,10 +109,11 @@ class ContextCompiler:
         compile_t0 = time.monotonic()
         persona_task = _timed(
             "persona",
-            self._personas.compile_prompt(
+            self._personas.realize_context(
                 owner_id=ti.caller.owner_id,
                 companion_id=companion_id,
                 genome_id=genome_id,
+                genome_hash=ti.caller.genome_hash,
                 user_text=ti.text or "",
                 realtime=_realtime_dict(ti.realtime),
                 dry_run_memory=[],
@@ -182,6 +183,44 @@ class ContextCompiler:
         # to surface configuration errors instead of silently degrading.
         if isinstance(persona, BaseException):
             raise persona
+
+        memory_text: str | None = None
+        memory_degraded = False
+        memory_degraded_reason: str | None = None
+        memory_hit_ids: list[str] = []
+        memory_hits: list[MemoryHit] = []
+        memory_kg_triple_ids: list[str] = []
+        if isinstance(memory_payload, BaseException):
+            _log.warning("memory recall raised: %s", memory_payload)
+            memory_degraded = True
+            memory_degraded_reason = _exception_degraded_reason(memory_payload)
+        elif memory_payload:
+            (
+                memory_text,
+                memory_degraded,
+                memory_hit_ids,
+                memory_degraded_reason,
+                memory_kg_triple_ids,
+                memory_hits,
+            ) = memory_payload
+
+        apply_memory_evidence = getattr(
+            self._personas, "apply_memory_evidence", None
+        )
+        if memory_hits and callable(apply_memory_evidence):
+            persona = await apply_memory_evidence(
+                persona=persona,
+                hits=memory_hits,
+                realtime=_realtime_dict(ti.realtime),
+                modality=(
+                    "voice"
+                    if ti.caller.caller_kind.value == "livekit_voice"
+                    else "text"
+                ),
+            )
+            ti.metadata["persona_evidence_refs"] = [
+                item.model_dump(mode="json") for item in persona.evidence_refs
+            ]
 
         segments: list[ContextSegment] = []
         system_parts_by_segment: dict[int, str] = {}
@@ -276,24 +315,6 @@ class ContextCompiler:
                 "It is not a pending task queue and must not trigger actions by itself.\n"
                 f"{cleaned_summary}"
             )
-
-        memory_text: str | None = None
-        memory_degraded = False
-        memory_degraded_reason: str | None = None
-        memory_hit_ids: list[str] = []
-        memory_kg_triple_ids: list[str] = []
-        if isinstance(memory_payload, BaseException):
-            _log.warning("memory recall raised: %s", memory_payload)
-            memory_degraded = True
-            memory_degraded_reason = _exception_degraded_reason(memory_payload)
-        elif memory_payload:
-            (
-                memory_text,
-                memory_degraded,
-                memory_hit_ids,
-                memory_degraded_reason,
-                memory_kg_triple_ids,
-            ) = memory_payload
 
         if memory_degraded:
             degraded_sources.append("memory")
@@ -621,7 +642,14 @@ class ContextCompiler:
 
     async def _memory_recall(
         self, ti: TurnInput, *, timeout_s: float
-    ) -> tuple[str | None, bool, list[str], str | None, list[str]] | None:
+    ) -> tuple[
+        str | None,
+        bool,
+        list[str],
+        str | None,
+        list[str],
+        list[MemoryHit],
+    ] | None:
         """Memory recall branch for the parallel ``gather`` above.
 
         Three return shapes:
@@ -661,6 +689,7 @@ class ContextCompiler:
             deadline = asyncio.get_running_loop().time() + timeout_s
             contexts: list[str] = []
             hit_ids: list[str] = []
+            hits: list[MemoryHit] = []
             kg_triples: list[dict] = []
             degraded_reason: str | None = None
             any_success = False
@@ -686,6 +715,7 @@ class ContextCompiler:
                     hit_id = getattr(hit, "id", "")
                     if hit_id and hit_id not in hit_ids:
                         hit_ids.append(hit_id)
+                        hits.append(hit)
                 for triple in recall.kg_triples or []:
                     if isinstance(triple, dict):
                         triple_id = str(triple.get("id") or "")
@@ -707,6 +737,7 @@ class ContextCompiler:
                 hit_ids,
                 degraded_reason if _degraded else None,
                 _kg_triple_ids(kg_triples),
+                hits,
             )
         except Exception as exc:
             _log.exception(
@@ -719,6 +750,7 @@ class ContextCompiler:
                 True,
                 [],
                 _exception_degraded_reason(exc),
+                [],
                 [],
             )
 

@@ -223,7 +223,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                             genome_id=inst.genome_id,
                             schema_version=identity.schema_version,
                             genome_hash=identity.genome_hash,
-                            compiler_version=identity.compiler_version,
+                            realizer_version=identity.realizer_version,
                         ),
                         caller_kind=caller_kind,
                         trace_id=trace_id,

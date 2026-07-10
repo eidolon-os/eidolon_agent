@@ -6,7 +6,7 @@ This is the only place that knows the concrete dependency graph. Steps:
 2.  build DI container
 3.  connect SQLite, NATS (+ KV buckets ensure)
 4.  probe memory MCP endpoints
-5.  Personas registry + per-user instance store
+5.  Canonical persona genome store
 6.  Cross-cutting services (history, signals, guardrails, triage)
 7.  Tools + LLM router + dispatch
 8.  Runtime token verifier
@@ -34,7 +34,8 @@ from eidolon_agent.app.transport.http import build_http_app
 from eidolon_agent.config.settings import Settings, load_settings
 from eidolon_agent.core.types.tool import Permission
 from eidolon_agent.domain.agent.companion import CompanionAgent
-from eidolon_agent.domain.agent.registry import AgentRegistry, AgentTemplate
+from eidolon_agent.domain.agent.companion_config import CompanionConfigResolver
+from eidolon_agent.domain.agent.registry import AgentRegistry
 from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.agent.turn import ToolLatencyPolicy, TurnEngine
 from eidolon_agent.domain.body_control import (
@@ -48,15 +49,10 @@ from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, Outpu
 from eidolon_agent.domain.harness import HarnessBudget, RealtimeAgentHarness
 from eidolon_agent.domain.history import HistoryFanout, HistoryManager
 from eidolon_agent.domain.long_tasks import LongTaskResultSummarizer
-from eidolon_agent.domain.personas import (
-    PersonasService,
-    PersonaTemplateRegistry,
-    PersonaVoice,
-    YamlCompanionPersonaStore,
-)
-from eidolon_agent.domain.personas.ports import PersonaEventPort
+from eidolon_agent.domain.personas import PersonasService, PersonaVoice
 from eidolon_agent.domain.signals import SignalBus
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
+from eidolon_agent.domain.tools.body_capability_provider import BodyCapabilityToolProvider
 from eidolon_agent.domain.tools.builtin import (
     ControlBodyDeviceTool,
     EmitEventTool,
@@ -77,17 +73,13 @@ from eidolon_agent.infra.llm.providers.fake import FakeLLM
 from eidolon_agent.infra.long_tasks import MementosHttpClient, MementosLongTaskWorker
 from eidolon_agent.infra.long_tasks.mementos import MementosWorkerConfig
 from eidolon_agent.infra.memory import EidolonMemoryPort
-from eidolon_agent.infra.memory.null_port import NullMemoryPort
 from eidolon_agent.infra.memory.discovery import build_initial_memory_routes
 from eidolon_agent.infra.memory.mcp_client import McpClientPool
 from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
+from eidolon_agent.infra.memory.null_port import NullMemoryPort
 from eidolon_agent.infra.observability import configure_logging
 from eidolon_agent.infra.persistence.eidolon_data_persona import (
-    EidolonDataCustomTemplateStore,
-    EidolonDataEvolutionHistoryStore,
-    EidolonDataPersonaEvolutionProposalStore,
-    EidolonDataCompanionPersonaStore,
-    EidolonDataPersonaObservationStore,
+    EidolonDataPersonaGenomeStore,
 )
 from eidolon_agent.infra.persistence.eidolon_data_runtime import (
     EidolonDataLongTaskStore,
@@ -146,8 +138,15 @@ async def build_application(
             effective_nats_url,
             creds_path=str(settings.nats.creds_path) if settings.nats.creds_path else None,
         )
-        await nats_bus.connect()
-        await ensure_buckets(nats_bus, settings.nats.kv_buckets)
+        try:
+            await nats_bus.connect()
+            await ensure_buckets(nats_bus, settings.nats.kv_buckets)
+        except Exception as exc:
+            raise RuntimeError(
+                f"eidolon-agent could not connect to NATS at {effective_nats_url!r} "
+                f"({type(exc).__name__}: {exc}). Start NATS (JetStream) or run with "
+                f"runtime.standalone=true for the in-process profile."
+            ) from exc
         container.event_bus = nats_bus
         container.kv_buckets = {
             name: NatsKVStore(nats_bus, name) for name in settings.nats.kv_buckets
@@ -166,48 +165,13 @@ async def build_application(
             container.extras["memory_discovery_refresher"] = memory_refresher
     revocation_kv = container.kv_buckets.get("DEVICE_REVOCATIONS")
 
-    # 5 + 6. Personas templates + per-user instance copies ---------------------
-    # Templates have two backing stores: builtin yaml files (read-only,
-    # ship with the agent) and operator-mutable presets in eidolon_data.
-    # The registry merges them at lookup time.
-    custom_template_store = EidolonDataCustomTemplateStore(data_store)
-    tpl_reg = PersonaTemplateRegistry(
-        Path(settings.persona.templates_dir),
-        custom_source=custom_template_store,
-    )
-    await tpl_reg.load_all()
-    container.custom_template_store = custom_template_store
-    container.persona_template_registry = tpl_reg
-    # Production wiring: eidolon_data-backed persona genomes. The legacy
-    # YamlCompanionPersonaStore remains available for diagnostic / forensic
-    # scenarios.
-    if settings.persona.storage == "yaml":
-        instance_store: object = YamlCompanionPersonaStore(Path(settings.persona.instances_dir))
-    else:
-        instance_store = EidolonDataCompanionPersonaStore(
-            data_store,
-            cache_kv=container.kv_buckets.get("EIDOLON_CACHE"),
-        )
-    # One adapter satisfies both PersonaAuditPort (write) and
-    # PersonaEvolutionRepository (read) so worker writes audit rows AND admin
-    # can paginate them. NullPersonaAuditPort is no longer used in production.
-    evolution_history = EidolonDataEvolutionHistoryStore(data_store)
-    persona_observations = EidolonDataPersonaObservationStore(data_store)
-    persona_proposals = EidolonDataPersonaEvolutionProposalStore(data_store)
-    personas_service = PersonasService(
-        registry=tpl_reg,
-        instances=instance_store,
-        llm_port=None,
-        event_port=_PersonasEventAdapter(container.event_bus),
-        audit_port=evolution_history,
-        evolution_repo=evolution_history,
-        observation_repo=persona_observations,
-        proposal_repo=persona_proposals,
-    )
+    # 5 + 6. Persona snapshots -------------------------------------------------
+    # The database is the sole persona source of truth. Runtime sessions pin an
+    # immutable genome id/hash and never select a template or fallback persona.
+    persona_store = EidolonDataPersonaGenomeStore(data_store)
+    personas_service = PersonasService(store=persona_store)
     await personas_service.start()
-    container.persona_instance_store = instance_store
-    container.persona_observation_store = persona_observations
-    container.persona_proposal_store = persona_proposals
+    container.persona_genome_store = persona_store
     container.personas_service = personas_service
 
     # 7. Cross-cutting services -----------------------------------------------
@@ -311,6 +275,15 @@ async def build_application(
     )
     container.tool_registry = tool_registry
     container.tool_dispatcher = tool_dispatcher
+    # Per-companion operational config (model routing / tool allow-deny / policy),
+    # read from companions.runtime_config_json, resolved per-turn off a TTL cache.
+    container.extras["companion_config_resolver"] = CompanionConfigResolver(data_store)
+    # Device-declared capabilities → per-companion synthetic tools (reads the
+    # 3s-TTL body device store; None body_control degrades to no capability tools).
+    container.extras["body_capability_tool_provider"] = BodyCapabilityToolProvider(
+        container.extras.get("body_control"),
+        budget_tokens=settings.turn.tool_schema_budget_tokens,
+    )
 
     # 8. Runtime token verification ------------------------------------------
     jwt_secret = settings.runtime_token.jwt_secret
@@ -332,20 +305,7 @@ async def build_application(
         )
         return CompanionAgent(companion_id=inst.companion_id, turn_engine=engine)
 
-    templates = list(tpl_reg.list_all())
-    default_genome_id = templates[0].metadata.template_id if templates else ""
-    agent_registry = AgentRegistry(
-        instance_factory=_build_companion,
-        default_genome_id=default_genome_id,
-    )
-    for tpl in templates:
-        agent_registry.register_template(
-            AgentTemplate(
-                genome_id=tpl.metadata.template_id,
-                name=tpl.metadata.name,
-                description=tpl.metadata.description,
-            )
-        )
+    agent_registry = AgentRegistry(instance_factory=_build_companion)
     container.agent_registry = agent_registry
 
     # 15. Transport servers ---------------------------------------------------
@@ -372,8 +332,6 @@ async def build_application(
         settings=settings,
         agent_registry=agent_registry,
         personas_service=personas_service,
-        custom_template_store=custom_template_store,
-        persona_template_registry=tpl_reg,
         # Phase 33.B1: admin /users/{id}/revoke-sessions writes here;
         # same instance the verifier reads. Same bucket, two consumers.
         revocation_kv=revocation_kv,
@@ -385,8 +343,7 @@ async def build_application(
     container.admin_app = admin_app
 
     _log.info(
-        "bootstrap done: %d templates, %d kv buckets, %d memory endpoints",
-        len(tpl_reg.list_all()),
+        "bootstrap done: canonical persona store, %d kv buckets, %d memory endpoints",
         len(container.kv_buckets),
         len(settings.memory.endpoints),
     )
@@ -480,13 +437,15 @@ def _build_turn_engine(
         crisis=container.crisis_handler,
         event_bus=container.event_bus,
         personas_service=container.personas_service,
-        persona_template_id=genome_id,
+        genome_id=genome_id,
         memory_port=container.memory_port,
         max_tool_iters=container.settings.turn.max_tool_iters,
         memory_write_mode=container.settings.turn.memory_write_mode,
         tool_schema_strict=container.settings.turn.tool_schema_strict,
         require_idempotency_for_side_effect_tools=container.settings.turn.require_idempotency_for_side_effect_tools,
         taboos_provider=lambda: tuple(),
+        companion_config_resolver=container.extras.get("companion_config_resolver"),
+        body_capability_provider=container.extras.get("body_capability_tool_provider"),
         turn_persister=build_eidolon_data_turn_persister(
             container.data_store,
             model_id_provider=lambda: getattr(container.llm_router, "model_id", None),
@@ -507,37 +466,3 @@ def _generate_persisted_secret(path: Path) -> str:
     path.write_text(secret, encoding="utf-8")
     path.chmod(0o600)
     return secret
-
-
-class _PersonasEventAdapter(PersonaEventPort):
-    def __init__(self, event_bus) -> None:
-        self._bus = event_bus
-
-    async def publish_persona_updated(self, instance_id: str, payload: dict) -> None:
-        if self._bus is None:
-            return
-        from eidolon_agent.core.types.event import Event
-        from eidolon_agent.core.types.topics import Topics
-
-        await self._bus.publish(
-            Event(
-                subject=Topics.persona_overlay_updated(instance_id),
-                payload=payload,
-                source="personas.service",
-            )
-        )
-
-    async def publish_evolution_applied(self, instance_id: str, payload: dict) -> None:
-        if self._bus is None:
-            return
-        from eidolon_agent.core.types.event import Event
-        from eidolon_agent.core.types.topics import Topics
-
-        await self._bus.publish(
-            Event(
-                subject=Topics.evolution_applied(instance_id),
-                payload=payload,
-                source="personas.service",
-            ),
-            persistent=True,
-        )

@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 
 import pytest
+from eidolon_sdk.biz.persona import (
+    PERSONA_REALIZER,
+    build_default_persona_genome,
+    persona_genome_hash,
+)
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
 from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.domain.history import HistoryFanout, HistoryManager
-from eidolon_agent.domain.personas import (
-    PersonasService,
-    PersonaTemplateRegistry,
-    YamlCompanionPersonaStore,
-)
+from eidolon_agent.domain.personas import PersonasService, StoredPersonaGenome
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import EmitEventTool, SubmitLongTaskTool
 from eidolon_agent.infra.events import InMemoryEventBus, InMemoryKVStore
@@ -48,23 +48,13 @@ async def kv():
 
 
 @pytest.fixture
-async def canonical_template_registry():
-    reg = PersonaTemplateRegistry(Path("eidolon_agent/domain/personas/templates"))
-    await reg.load_all()
-    return reg
+def persona_genome_store():
+    return _InMemoryPersonaGenomeStore()
 
 
 @pytest.fixture
-def persona_instance_store(tmp_path):
-    return YamlCompanionPersonaStore(tmp_path / "instances")
-
-
-@pytest.fixture
-async def personas_service(canonical_template_registry, persona_instance_store):
-    return PersonasService(
-        registry=canonical_template_registry,
-        instances=persona_instance_store,
-    )
+async def personas_service(persona_genome_store):
+    return PersonasService(store=persona_genome_store)
 
 
 @pytest.fixture
@@ -105,7 +95,7 @@ async def turn_engine_factory(personas_service, event_bus):
             tool_dispatcher = ToolDispatcher(tools)
 
         def loc(_owner, _companion, _conv):
-            return ("inst-test", "caretaker_jiezhi")
+            return ("companion-test", "genome-test")
 
         compiler = ContextCompiler(
             personas_service=personas_service,
@@ -128,7 +118,7 @@ async def turn_engine_factory(personas_service, event_bus):
             crisis=CrisisHandler(event_bus=event_bus),
             event_bus=event_bus,
             personas_service=personas_service,
-            persona_template_id="caretaker_jiezhi",
+            genome_id="genome-test",
             memory_port=memory_port,
             turn_persister=(
                 build_eidolon_data_turn_persister(
@@ -157,3 +147,44 @@ class _ImmediateLongTaskSubmitter:
         self.records.append(record)
         if self.store is not None:
             await self.store.accept(record)
+
+
+class _InMemoryPersonaGenomeStore:
+    def __init__(self) -> None:
+        genome = build_default_persona_genome(name="Test Companion")
+        self.current = StoredPersonaGenome(
+            owner_id="alice",
+            companion_id="companion-test",
+            genome_id="genome-test",
+            genome_hash=persona_genome_hash(genome),
+            realizer_version=PERSONA_REALIZER,
+            version=1,
+            genome=genome,
+        )
+        self.observations = []
+
+    async def load_current(self, owner_id, companion_id):
+        if (owner_id, companion_id) != (self.current.owner_id, self.current.companion_id):
+            raise LookupError("persona not found")
+        return self.current
+
+    async def load_pinned(self, owner_id, companion_id, genome_id, genome_hash):
+        current = await self.load_current(owner_id, companion_id)
+        if (genome_id, genome_hash) != (current.genome_id, current.genome_hash):
+            raise LookupError("persona pin not found")
+        return current
+
+    async def record_observation(self, event):
+        self.observations.append(event)
+
+    async def create_evolution_proposal(self, proposal):
+        raise NotImplementedError
+
+    async def approve_evolution(self, **kwargs):
+        raise NotImplementedError
+
+    async def reject_evolution(self, **kwargs):
+        raise NotImplementedError
+
+    async def rollback(self, **kwargs):
+        raise NotImplementedError

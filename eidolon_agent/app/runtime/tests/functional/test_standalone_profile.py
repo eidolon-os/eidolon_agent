@@ -8,6 +8,7 @@ stream + trace) with zero external dependencies.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dataclasses import replace
 
 import pytest
 
@@ -35,6 +36,16 @@ async def _standalone(tmp_path, monkeypatch):
         },
     )
     container = await build_application(settings=settings)
+    await container.data_store.owner_service.create_owner(
+        owner_id="alice",
+        display_name="Alice",
+    )
+    container.extras["standalone_workspace"] = (
+        await container.data_store.workspace_provisioning.provision_workspace(
+            owner_id="alice",
+            companion_display_name="Test Companion",
+        )
+    )
     try:
         yield container
     finally:
@@ -46,13 +57,25 @@ async def _standalone(tmp_path, monkeypatch):
 
 
 async def _run_turn(container, text: str):
-    genome_id = container.agent_registry._default_genome_id  # type: ignore[attr-defined]
+    workspace = container.extras["standalone_workspace"]
+    genome = workspace.persona_genome
     inst = await container.agent_registry.resolve_for_caller(
         owner_id="alice",
-        companion_id="companion-standalone",
-        genome_id=genome_id,
+        companion_id=workspace.companion.companion_id,
+        genome_id=genome.genome_id,
     )
-    return [ev async for ev in inst.agent.run_turn(make_turn_input(text))]
+    ti = make_turn_input(text)
+    identity = replace(
+        ti.caller.identity,
+        companion_id=workspace.companion.companion_id,
+        memory_realm_id=workspace.memory_realm.realm_id,
+        genome_id=genome.genome_id,
+        schema_version=genome.schema_version,
+        genome_hash=genome.genome_hash,
+        realizer_version=genome.realizer_version,
+    )
+    ti = replace(ti, caller=replace(ti.caller, identity=identity))
+    return [ev async for ev in inst.agent.run_turn(ti)]
 
 
 async def test_standalone_builds_with_inprocess_fakes(tmp_path, monkeypatch) -> None:

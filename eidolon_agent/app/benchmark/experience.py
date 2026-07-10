@@ -39,7 +39,7 @@ SCHEMA_VERSION = "eidolon_agent.experience_replay_report.v1"
 _REPLAY_TENANT_ID = "replay"
 _REPLAY_USER_ID = "alice"
 _REPLAY_AGENT_INSTANCE_ID = "inst-test"
-_REPLAY_PERSONA_ID = "caretaker_jiezhi"
+_REPLAY_PERSONA_ID = "genome-replay"
 
 
 @dataclass(slots=True)
@@ -314,7 +314,7 @@ class _ReplayHarness:
         registry.register(EmitEventTool(event_bus=self.event_bus))
         compiler = ContextCompiler(
             personas_service=_ReplayPersonas(),
-            instance_locator=lambda _t, _u, _c: ("inst-test", "caretaker_jiezhi"),
+            instance_locator=lambda _t, _u, _c: ("companion-replay", _REPLAY_PERSONA_ID),
             history_manager=self.history,
             memory_port=self.memory,
             context_budget_tokens=(self.scenario.get("context") or {}).get("budget_tokens"),
@@ -334,7 +334,7 @@ class _ReplayHarness:
             crisis=CrisisHandler(event_bus=self.event_bus),
             event_bus=self.event_bus,
             personas_service=_ReplayPersonas(),
-            persona_template_id=_REPLAY_PERSONA_ID,
+            genome_id=_REPLAY_PERSONA_ID,
             memory_port=self.memory,
             turn_persister=self._capture_turn,
             background_tasks=self.background_tasks,
@@ -348,7 +348,7 @@ class _ReplayHarness:
 
 
 class _ReplayPersonas:
-    async def compile_prompt(self, **_: Any) -> SimpleNamespace:
+    async def realize_context(self, **_: Any) -> SimpleNamespace:
         return SimpleNamespace(
             system_prompt="[PERSONA]\n你是一个稳定、诚实、尊重隐私的智能陪伴体。",
             debug_trace=(),

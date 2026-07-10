@@ -28,7 +28,7 @@ class _StubPersonas:
         self._prompt = prompt
         self.calls: list[dict] = []
 
-    async def compile_prompt(self, **kwargs):
+    async def realize_context(self, **kwargs):
         self.calls.append(kwargs)
         return SimpleNamespace(system_prompt=self._prompt, debug_trace=())
 

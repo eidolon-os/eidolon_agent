@@ -16,6 +16,7 @@ from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
 from eidolon_agent.core.types.memory import MemoryRecallResult
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEventKind
+from eidolon_agent.domain.agent.companion_config import CompanionRuntimeConfig
 from eidolon_agent.domain.history import HistoryManager
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import EmitEventTool, GetWeatherTool
@@ -229,7 +230,10 @@ async def test_compiled_prompt_contains_tool_policy(turn_engine_factory) -> None
 
 async def test_builtin_tool_schemas_describe_usage_boundaries(turn_engine_factory) -> None:
     engine = turn_engine_factory()
-    schemas = {schema.name: schema for schema in engine._tool_schemas()}
+    visible, _dynamic = await engine._tool_schemas(
+        make_turn_input(), CompanionRuntimeConfig()
+    )
+    schemas = {schema.name: schema for schema in visible}
 
     assert "delegate_to_coworker" in schemas
     assert "emit_event" not in schemas

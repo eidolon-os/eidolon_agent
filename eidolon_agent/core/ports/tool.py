@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from eidolon_agent.core.types.identity import CallerContext
@@ -21,6 +22,12 @@ class ToolInvocationContext:
     companion_id: str | None = None
     memory_realm_id: str | None = None
     dry_run: bool = False
+    # Per-turn dynamic tools (e.g. device-capability tools) resolved by name
+    # before the global registry. Keys are tool names.
+    extra_tools: Mapping[str, ToolPort] | None = None
+    # Tools denied for this companion (runtime_config_json). Enforced at dispatch
+    # so a hallucinated denied name cannot actuate a real registered tool.
+    denied_tools: frozenset[str] = field(default_factory=frozenset)
 
 
 @runtime_checkable

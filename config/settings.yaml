@@ -33,15 +33,11 @@ body_control:
   hub_base_url: http://127.0.0.1:8082
   timeout_s: 5.0
   cache_ttl_s: 3.0
-persona:
-  templates_dir: eidolon_agent/domain/personas/templates
-  instances_dir: ~/eidolon/personas/instances
-  auto_evolution_enabled: true
 observability:
   log_level: DEBUG
   log_json: true
   log_dir: ~/eidolon/logs/agent
-pairing:
+runtime_token:
   jwt_secret: PAIRING_JWT_SECRET
   jwt_algorithm: HS256
 runtime:

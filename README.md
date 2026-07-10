@@ -213,7 +213,7 @@ TurnEngine.run(ti)   ← 以下为热路径，逐步 yield TurnEvent
    ├─ 3. yield STATE(thinking)
    │
    ├─ 4. ContextCompiler.compile(ti)            [≤ 250ms 含 memory recall]
-   │     ├─ PersonasService.compile_prompt(dry_run_memory=[])   ← 跳过 personas 内部 recall
+   │     ├─ PersonasService.realize_context(dry_run_memory=[])   ← 跳过 personas 内部 recall
    │     ├─ MemoryPort.recall_context(timeout=200ms)            ← best-effort，失败降级
    │     ├─ HistoryManager.recent_window(N=20)                  ← in-mem
    │     └─ realtime digest from ti.realtime
@@ -255,22 +255,16 @@ NATS 是核心总线。**进程内** fire-and-forget 直接 `asyncio.create_task
 |---|---|---|---|
 | 内部生命周期 | `agent.turn.completed.<conv_id>` | turn 完成通知 | 否 |
 | 内部生命周期 | `agent.fsm.changed.<session_id>` | FSM 状态变化 | 否 |
-| 人格 | `agent.persona.template.reloaded.<tpl>` | 模板热重载 | 否 |
-| 人格 | `agent.persona.overlay.updated.<inst>` | 实例 overlay 更新 | 否 |
-| 人格 | `agent.evolution.proposed.<inst>` | 演化提案 | **是** |
-| 人格 | `agent.evolution.applied.<inst>` | 演化已应用 | **是** |
-| 人格 | `agent.evolution.rolled_back.<inst>` | 演化回滚 | **是** |
 | 信号 | `agent.signal.<modality>.<session>` | 实时信号入队 | 否 |
 | 系统 | `agent.system.config.updated` | 配置变更广播 | 否 |
 | 系统 | `agent.pairing.revoked` | 设备 token 吊销 | 否 |
-| **外部出站** | `agent.memory.conversation.turn.<user>` | turn 完成 → memory 服务 | **是** |
-| **外部出站** | `agent.memory.cmd.<user>` | KG 写命令 → memory 服务 | **是** |
+| **外部出站** | `eidolon.memory.turn.<space_token>` | turn 完成 → memory 服务 | **是** |
+| **外部出站** | `eidolon.memory.cmd.<space_token>` | Memory 写命令 | **是** |
 | **外部出站** | `agent.emotion.turn.<user>` | turn 完成 → emotion 服务 | **是** |
-| **外部入站** | `agent.memory.event.*` | memory 服务推送（promise_due 等） | **是** |
-| **外部入站** | `agent.persona.evolution.proposed.*` | emotion 服务提出的演化 | **是** |
+| **外部入站** | `eidolon.memory.event.*` | memory 服务推送（promise_due 等） | **是** |
 长任务不再使用 NATS subject；`delegate_to_coworker` 写入 SQLite receipt 后进入本地内存队列，由 mementos worker 通过 HTTP 执行。`submit_long_task` 仅保留为兼容旧调用的隐藏别名。
 
-JetStream 持久化前缀：`agent.memory.*` / `agent.emotion.*` / `agent.evolution.*`。`is_persistent(subject)` 自动判定。
+人格演化不走 NATS worker；typed proposal、approve/reject、commit/rollback 与 genome 指针变更统一由 `eidolon_data` 事务持久化。JetStream 持久化前缀为 `eidolon.memory.*` / `agent.emotion.*`。
 
 ### KV Buckets
 
@@ -300,7 +294,7 @@ JetStream 持久化前缀：`agent.memory.*` / `agent.emotion.*` / `agent.evolut
 - **运行时状态**（mood/energy/attention）不写 YAML，长在内存里 + 周期 snapshot。
 - **演化护栏**：identity_core 不可演化；knob 有 min/max + step_limit + cooldown。
 
-热路径只用 3 个公开方法：`compile_prompt / submit_signal / submit_interaction`。其余是 admin 路由调用。
+热路径只用 3 个公开方法：`realize_context / submit_signal / submit_interaction`。其余是 admin 路由调用。
 
 ---
 
@@ -319,7 +313,7 @@ service EidolonAgent {
 ```
 
 `AuthInterceptor` 在每个 RPC 上校验 `Bearer <runtime_token>`（JWT，HS256）。Token 必须携带
-`RuntimeIdentity(schema_version, owner_id, companion_id, device_id, memory_realm_id, genome_id, genome_hash, compiler_version)`。
+`RuntimeIdentity(schema_version, owner_id, companion_id, device_id, memory_realm_id, genome_id, genome_hash, realizer_version)`。
 
 Agent 是 companion runtime，不负责 owner 注册、device pairing、或 companion 选择。外部调用方
 必须在进入 Agent 前完成 device -> companion 绑定，并重新签发包含具体 companion/genome/realm 的

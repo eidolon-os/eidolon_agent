@@ -183,7 +183,7 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                         "genome_id": ti.caller.genome_id,
                         "genome_hash": ti.caller.genome_hash,
                         "schema_version": ti.caller.schema_version,
-                        "compiler_version": ti.caller.compiler_version,
+                        "realizer_version": ti.caller.realizer_version,
                         "session_id": ti.session_id,
                     },
                 },
@@ -816,7 +816,7 @@ def _turn_metadata_json(ti: TurnInput, triage_kind: TriageKind, timings: dict) -
         "genome_id": ti.caller.genome_id,
         "genome_hash": ti.caller.genome_hash,
         "schema_version": ti.caller.schema_version,
-        "compiler_version": ti.caller.compiler_version,
+        "realizer_version": ti.caller.realizer_version,
         "session_id": ti.session_id,
         "caller_kind": ti.caller.caller_kind.value,
         "device_id": ti.caller.device_id,
@@ -986,7 +986,7 @@ def _turn_row_to_admin_dict(turn: TurnRow, conversation: ConversationRow) -> dic
         "genome_id": conversation_meta.get("genome_id") or metadata.get("genome_id"),
         "genome_hash": conversation_meta.get("genome_hash") or metadata.get("genome_hash"),
         "schema_version": conversation_meta.get("schema_version") or metadata.get("schema_version"),
-        "compiler_version": conversation_meta.get("compiler_version") or metadata.get("compiler_version"),
+        "realizer_version": conversation_meta.get("realizer_version") or metadata.get("realizer_version"),
         "conversation_title": conversation.title,
     }
 

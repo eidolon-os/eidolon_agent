@@ -24,26 +24,6 @@ class Topics:
         return f"agent.fsm.changed.{session_id}"
 
     @staticmethod
-    def persona_template_reloaded(template_id: str) -> str:
-        return f"agent.persona.template.reloaded.{template_id}"
-
-    @staticmethod
-    def persona_overlay_updated(instance_id: str) -> str:
-        return f"agent.persona.overlay.updated.{instance_id}"
-
-    @staticmethod
-    def evolution_proposed(instance_id: str) -> str:
-        return f"agent.evolution.proposed.{instance_id}"
-
-    @staticmethod
-    def evolution_applied(instance_id: str) -> str:
-        return f"agent.evolution.applied.{instance_id}"
-
-    @staticmethod
-    def evolution_rolled_back(instance_id: str) -> str:
-        return f"agent.evolution.rolled_back.{instance_id}"
-
-    @staticmethod
     def proactive_triggered(instance_id: str) -> str:
         return f"agent.proactive.triggered.{instance_id}"
 
@@ -91,15 +71,10 @@ class Topics:
     def memory_event_pattern() -> str:
         return "eidolon.memory.event.*"
 
-    @staticmethod
-    def emotion_proposed_pattern() -> str:
-        return "agent.persona.evolution.proposed.*"
-
 # JetStream-persistent subjects (these go through JetStream, others are core NATS).
 PERSISTENT_PREFIXES = (
     "eidolon.memory.",
     "agent.emotion.",
-    "agent.evolution.",
 )
 
 

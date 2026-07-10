@@ -13,7 +13,7 @@ from typing import Any
 
 import grpc
 import httpx
-from eidolon_sdk.biz.persona import PERSONA_COMPILER_VERSION, PERSONA_GENOME_SCHEMA_VERSION
+from eidolon_sdk.biz.persona import PERSONA_GENOME_SCHEMA, PERSONA_REALIZER
 from eidolon_sdk.biz.runtime import resolve_shared_secret, sign_runtime_token
 
 from eidolon_agent.app.transport.grpc.codec import struct_to_dict
@@ -109,9 +109,9 @@ async def issue_runtime_token(
         companion_id=companion_id,
         memory_realm_id=memory_realm_id,
         genome_id=template_id,
-        schema_version=PERSONA_GENOME_SCHEMA_VERSION,
+        schema_version=PERSONA_GENOME_SCHEMA,
         genome_hash=f"benchmark_{template_id}",
-        compiler_version=PERSONA_COMPILER_VERSION,
+        realizer_version=PERSONA_REALIZER,
         scopes=["benchmark"],
         ttl_seconds=ttl_seconds,
     )

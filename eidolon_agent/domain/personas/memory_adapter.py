@@ -1,79 +1,62 @@
-"""Persona-specific memory consumption rules."""
+"""Adapt recalled evidence according to a canonical persona genome."""
 
 from __future__ import annotations
 
-from collections import defaultdict
+from eidolon_sdk.biz.persona import PersonaEvidenceRef, PersonaGenome
 
 from eidolon_agent.core.types.memory import MemoryHit
-from eidolon_agent.domain.personas.types import AdaptedMemoryContext, CompanionPersona
+from eidolon_agent.domain.personas.types import AdaptedMemoryContext
 
 
 class PersonaMemoryAdapter:
     def adapt(
         self,
         *,
-        instance: CompanionPersona,
+        genome: PersonaGenome,
         formatted_context: str,
         hits: list[MemoryHit],
         degraded: bool = False,
     ) -> AdaptedMemoryContext:
-        policies = {
-            policy.relation_type: policy for policy in instance.memory_adapter.graph_relation_policies
-        }
-        instructions: list[str] = []
-        triggered_events: list[str] = []
-        adjustments: defaultdict[str, float] = defaultdict(float)
+        recall_policy = genome.memory_policy.recall_policy
+        if recall_policy.get("use_memory_as_evidence") is False:
+            return AdaptedMemoryContext(degraded=degraded)
 
+        instructions: list[str] = []
         for hit in hits:
             relation_type = _relation_type(hit)
-            if relation_type is None:
-                continue
-            policy = policies.get(relation_type)
-            if policy is None:
-                continue
-            instructions.append(policy.reaction_style)
-            triggered_events.extend(policy.persistent_events)
-            for knob, delta in policy.transient_knob_adjustments.items():
-                adjustments[knob] += delta
+            policy = genome.memory_policy.relation_policies.get(relation_type or "")
+            if isinstance(policy, dict):
+                reaction = policy.get("reaction_style") or policy.get("guidance")
+                if isinstance(reaction, str) and reaction.strip():
+                    instructions.append(reaction.strip())
 
-        if formatted_context and instance.memory_adapter.retrieved_fact_handling.emotion_resonance > 0:
-            emotion_instructions = _emotion_instructions(
-                hits,
-                resonance=instance.memory_adapter.retrieved_fact_handling.emotion_resonance,
+        evidence_refs = tuple(
+            PersonaEvidenceRef(
+                kind="memory_fragment",
+                ref_id=hit.id,
+                summary=hit.content[:300],
+                confidence=max(0.0, min(1.0, hit.similarity)),
             )
-            instructions.extend(emotion_instructions)
-
+            for hit in hits
+        )
         return AdaptedMemoryContext(
             content=formatted_context,
             instructions=tuple(dict.fromkeys(instructions)),
-            transient_knob_adjustments=dict(adjustments),
-            triggered_events=tuple(dict.fromkeys(triggered_events)),
+            evidence_refs=evidence_refs,
             degraded=degraded,
         )
 
 
 def _relation_type(hit: MemoryHit) -> str | None:
-    meta = hit.metadata or {}
-    relation_type = meta.get("relation_type")
-    if relation_type:
-        return str(relation_type)
-    relation = meta.get("relation")
+    metadata = hit.metadata or {}
+    if value := metadata.get("relation_type"):
+        return str(value)
+    relation = metadata.get("relation")
     if isinstance(relation, dict) and relation.get("type"):
         return str(relation["type"])
-    predicate = meta.get("predicate")
-    if predicate:
-        return str(predicate)
+    if value := metadata.get("predicate"):
+        return str(value)
     return None
 
 
-def _emotion_instructions(hits: list[MemoryHit], *, resonance: float) -> list[str]:
-    out: list[str] = []
-    for hit in hits:
-        emotion = (hit.metadata or {}).get("emotion")
-        if not emotion:
-            continue
-        out.append(
-            f"召回的记忆带有 {emotion} 情绪标签；以 {resonance:.2f} 的共鸣强度回应，先照顾情绪再处理事实。"
-        )
-    return out
-
+__all__ = ["PersonaMemoryAdapter"]

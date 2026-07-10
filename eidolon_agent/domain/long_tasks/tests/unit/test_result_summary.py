@@ -67,7 +67,6 @@ async def test_summary_prompt_carries_persona_voice_when_present() -> None:
     card = PersonaCard(
         name="洁枝",
         archetype="温柔照护者",
-        pronouns="我/你",
         style_hints=("语气温柔",),
     )
     summarizer = LongTaskResultSummarizer(llm, persona_voice=_StubPersonaVoice(card))

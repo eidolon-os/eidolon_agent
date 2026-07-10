@@ -67,12 +67,6 @@ body_control:
   timeout_s: 5.0
   cache_ttl_s: 3.0
 
-persona:
-  templates_dir: eidolon_agent/domain/personas/templates
-  instances_dir: ~/eidolon/personas/instances
-  storage: sqlite
-  auto_evolution_enabled: true
-
 observability:
   log_level: INFO
   log_json: true

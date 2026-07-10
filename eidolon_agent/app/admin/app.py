@@ -16,7 +16,6 @@ from eidolon_agent.app.admin.routers import (
     chat_test,
     conversations,
     devices,
-    genome_authoring,
     long_tasks,
     reports,
 )
@@ -28,8 +27,6 @@ def build_admin_app(
     settings: Settings,
     agent_registry,
     personas_service=None,
-    custom_template_store=None,
-    persona_template_registry=None,
     revocation_kv=None,
     data_store=None,
     memory_routes=None,
@@ -57,11 +54,6 @@ def build_admin_app(
     # revocation keys. Verifier reads via its own ``revocation_kv``
     # already configured at bootstrap (same instance).
     app.state.revocation_kv = revocation_kv
-    # Phase 29.D — custom template CRUD. These two are coupled (router
-    # mutates the store, then calls registry.refresh_custom() so the
-    # in-memory cache stays consistent).
-    app.state.custom_template_store = custom_template_store
-    app.state.persona_template_registry = persona_template_registry
     app.state.data_store = data_store
     app.state.memory_routes = memory_routes
     app.state.memory_discovery_refresher = memory_discovery_refresher
@@ -73,6 +65,4 @@ def build_admin_app(
     )
     app.include_router(long_tasks.router, prefix="/api/admin", tags=["long-tasks"])
     app.include_router(reports.router, prefix="/api/admin", tags=["reports"])
-    app.include_router(genome_authoring.router, prefix="/api/admin", tags=["genome-authoring"])
-
     return app

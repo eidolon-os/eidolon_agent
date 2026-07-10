@@ -35,7 +35,7 @@ from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
 from eidolon_agent.core.errors import GuardrailBlockedError, TurnCancelledError
 from eidolon_agent.core.ports.llm import LLMPort
-from eidolon_agent.core.ports.tool import ToolInvocationContext
+from eidolon_agent.core.ports.tool import ToolInvocationContext, ToolPort
 from eidolon_agent.core.types import (
     ChatMessage,
     DevelopmentGuardTrace,
@@ -60,6 +60,10 @@ from eidolon_agent.core.types.turn import (
     TurnInput,
     TurnStatus,
 )
+from eidolon_agent.domain.agent.companion_config import (
+    CompanionConfigResolver,
+    CompanionRuntimeConfig,
+)
 from eidolon_agent.domain.agent.control_intent import ControlIntentClassifier
 from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.context.compiler import ContextCompiler
@@ -69,12 +73,13 @@ from eidolon_agent.domain.guardrails.output_filter import OutputGuardrail
 from eidolon_agent.domain.harness import RealtimeAgentHarness
 from eidolon_agent.domain.history.fanout import HistoryFanout
 from eidolon_agent.domain.history.manager import HistoryManager
-from eidolon_agent.domain.personas.types import PersonaInteractionEvent
 from eidolon_agent.domain.runtime_policy import TurnRuntimePolicy
+from eidolon_agent.domain.tools.body_capability_provider import BodyCapabilityToolProvider
 from eidolon_agent.domain.tools.builtin.submit_long_task import (
     DELEGATE_TO_COWORKER_TOOL,
 )
 from eidolon_agent.domain.tools.dispatcher import ToolDispatcher
+from eidolon_agent.domain.tools.visibility import ToolVisibilityPolicy
 
 _log = logging.getLogger(__name__)
 _MAX_FAILURES_PER_TOOL_PER_TURN = 1
@@ -112,7 +117,7 @@ class TurnEngine:
         control_classifier: ControlIntentClassifier | None = None,
         event_bus=None,
         personas_service=None,
-        persona_template_id: str | None = None,
+        genome_id: str | None = None,
         memory_port=None,
         max_tool_iters: int = 4,
         memory_write_mode: str = "enabled",
@@ -123,6 +128,8 @@ class TurnEngine:
         harness: RealtimeAgentHarness | None = None,
         background_tasks: BackgroundTaskRunner | None = None,
         tool_latency_policy: ToolLatencyPolicy | None = None,
+        companion_config_resolver: CompanionConfigResolver | None = None,
+        body_capability_provider: BodyCapabilityToolProvider | None = None,
     ) -> None:
         self._compiler = compiler
         self._llm = llm
@@ -136,7 +143,7 @@ class TurnEngine:
         self._control = control_classifier or ControlIntentClassifier()
         self._bus = event_bus
         self._personas = personas_service
-        self._persona_template_id = persona_template_id
+        self._genome_id = genome_id
         self._memory = memory_port
         self._max_tool_iters = max_tool_iters
         self._memory_write_mode = _normalize_guard_mode(memory_write_mode)
@@ -147,6 +154,8 @@ class TurnEngine:
         self._harness = harness or RealtimeAgentHarness()
         self._background = background_tasks or BackgroundTaskRunner()
         self._tool_latency_policy = tool_latency_policy or ToolLatencyPolicy()
+        self._companion_config = companion_config_resolver
+        self._body_capability_provider = body_capability_provider
 
     async def run(self, ti: TurnInput) -> AsyncIterator[TurnEvent]:
         """Run a single Turn. Yields TurnEvents until DONE or ERROR."""
@@ -289,8 +298,13 @@ class TurnEngine:
             messages = await self._compiler.compile(ti)
             ts_compile_ms = int((time.monotonic() - t0) * 1000)
 
+            # ---- Per-companion runtime config (model / tools / policy) -----
+            # Same code, differentiated per companion: model routing + tool
+            # allow/deny + policy toggles come from companions.runtime_config_json.
+            cfg = await self._resolve_companion_config(ti)
+
             # ---- LLM stream (with tool loop) -------------------------------
-            tools = self._tool_schemas()
+            tools, extra_tools = await self._tool_schemas(ti, cfg)
             tool_budget = self._harness.tool_schema_budget(tools)
             ti.metadata.setdefault("development_guards", {})[
                 "tool_schema_budget"
@@ -311,7 +325,13 @@ class TurnEngine:
             while True:
                 tool_calls: list[ToolCall] = []
                 finish_reason: LLMFinishReason | None = None
-                async for delta in self._llm.stream(messages, tools=tools, request_id=ti.turn_id):
+                async for delta in self._llm.stream(
+                    messages,
+                    tools=tools,
+                    model=cfg.model,
+                    temperature=cfg.temperature,
+                    request_id=ti.turn_id,
+                ):
                     if delta.text_delta:
                         if first_delta_ms is None:
                             first_delta_ms = int((time.monotonic() - t0) * 1000)
@@ -402,6 +422,8 @@ class TurnEngine:
                                     user_text=ti.text or "",
                                     companion_id=ti.caller.companion_id,
                                     memory_realm_id=ti.caller.memory_realm_id,
+                                    extra_tools=extra_tools,
+                                    denied_tools=cfg.tool_deny,
                                 ),
                             ),
                             name=f"turn-{ti.turn_id}-tool-dispatch",
@@ -665,7 +687,7 @@ class TurnEngine:
                     tool_trace=tool_trace,
                     persona=PersonaTrace(
                         companion_id=ti.caller.companion_id,
-                        genome_id=self._persona_template_id,
+                        genome_id=self._genome_id,
                     ),
                     privacy=runtime_policy.privacy,
                     proactive_reason=ti.metadata.get("proactive_reason"),
@@ -756,8 +778,44 @@ class TurnEngine:
 
     # ---- helpers -------------------------------------------------------------
 
-    def _tool_schemas(self) -> list:
-        return self._harness.visible_tool_schemas(self._tools.list_schemas())
+    async def _resolve_companion_config(self, ti: TurnInput) -> CompanionRuntimeConfig:
+        """Resolve this companion's operational config; never break a turn."""
+        if self._companion_config is None:
+            return CompanionRuntimeConfig()
+        try:
+            return await self._companion_config.resolve(ti.caller.companion_id)
+        except Exception as exc:
+            _log.warning("companion config resolve failed: %s", exc)
+            return CompanionRuntimeConfig()
+
+    async def _tool_schemas(
+        self, ti: TurnInput, cfg: CompanionRuntimeConfig
+    ) -> tuple[list, dict[str, ToolPort]]:
+        """Per-turn, caller-aware tool assembly (the F1/F2 junction).
+
+        Filters the global static tools by this companion's allow/deny policy,
+        then appends per-device capability tools synthesized from the caller's
+        bound devices. Returns the LLM-visible schema list plus an overlay of
+        dynamic tool ports resolved by name at dispatch. The harness makes the
+        final hidden-name cut.
+        """
+        schemas = ToolVisibilityPolicy.filter(
+            self._tools.list_schemas(),
+            allow=cfg.tool_allow,
+            deny=cfg.tool_deny,
+        )
+        extra_tools: dict[str, ToolPort] = {}
+        if cfg.allow_body_control and self._body_capability_provider is not None:
+            cap_schemas, cap_ports = await self._body_capability_provider.assemble(ti.caller)
+            # deny applies to synthetic tools too: drop from BOTH schemas and overlay
+            # so a denied capability can neither be seen nor actuated.
+            if cfg.tool_deny:
+                cap_schemas = [s for s in cap_schemas if s.name not in cfg.tool_deny]
+                cap_ports = {n: p for n, p in cap_ports.items() if n not in cfg.tool_deny}
+            schemas = schemas + cap_schemas
+            extra_tools.update(cap_ports)
+        visible = self._harness.visible_tool_schemas(schemas)
+        return visible, extra_tools
 
     async def _persist_turn(
         self,
@@ -886,21 +944,12 @@ class TurnEngine:
                     "memory_policy_version": write_trace["policy_version"],
                     "source_component": "turn_engine",
                     "conversation_id": ti.conversation_id,
-                    "persona_template_id": self._persona_template_id,
+                    "genome_id": self._genome_id,
                     "privacy_mode": policy.privacy.mode,
                 },
             )
         except Exception:
             _log.exception("post-turn: fanout failed")
-        try:
-            await self._submit_persona_interaction(
-                ti=ti,
-                kind="turn_completed",
-                user_text=ti.text or "",
-                assistant_text=assistant_text,
-            )
-        except Exception:
-            _log.exception("post-turn: persona interaction failed")
 
     async def _persist_messages(
         self,
@@ -933,31 +982,6 @@ class TurnEngine:
                     metadata={"is_private": is_private} if is_private else {},
                 ),
             )
-
-    async def _submit_persona_interaction(
-        self,
-        *,
-        ti: TurnInput,
-        kind: str,
-        user_text: str,
-        assistant_text: str,
-    ) -> None:
-        if self._personas is None:
-            return
-        try:
-            await self._personas.submit_interaction(
-                PersonaInteractionEvent(
-                    owner_id=ti.caller.owner_id,
-                    companion_id=ti.caller.companion_id,
-                    genome_id=self._persona_template_id,
-                    kind=kind,
-                    user_text=user_text,
-                    assistant_text=assistant_text,
-                )
-            )
-        except Exception:
-            _log.exception("submit persona interaction failed")
-
 
 class _SeqGen:
     __slots__ = ("_n",)

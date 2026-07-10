@@ -22,17 +22,8 @@ class Container:
     session_factory: object | None = None
     data_store: object | None = None
 
-    persona_instance_store: object | None = None
-    persona_observation_store: object | None = None
-    persona_proposal_store: object | None = None
+    persona_genome_store: object | None = None
     personas_service: object | None = None
-    # Phase 29.D: operator-authored custom templates (SQL-backed). Distinct
-    # from ``personas_service`` which composes the registry + instance store.
-    custom_template_store: object | None = None
-    # The PersonaTemplateRegistry itself — admin's custom-template routes
-    # call ``refresh_custom()`` on it after mutating the SQL store so the
-    # in-memory cache stays consistent.
-    persona_template_registry: object | None = None
 
     history_manager: object | None = None
     history_fanout: object | None = None

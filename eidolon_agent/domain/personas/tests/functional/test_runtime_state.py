@@ -23,7 +23,7 @@ async def test_runtime_state_updates_and_prompts():
     assert state.mood.joy == 0.7
     assert "心情不错" in state.to_prompt_hint()
     assert "状态饱满" in state.to_prompt_hint()
-    assert "注意力在用户身上" in state.to_prompt_hint()
+    assert "注意力在 owner 身上" in state.to_prompt_hint()
 
 
 @pytest.mark.asyncio
@@ -37,20 +37,3 @@ async def test_runtime_state_decays():
     state = await store.snapshot(companion_id="i")
     assert state.mood.joy < 1.0
     assert state.mood.intensity < 1.0
-
-
-@pytest.mark.asyncio
-async def test_runtime_state_not_written_to_instance_yaml(personas_service, persona_instance_store):
-    await personas_service.create_instance(
-        owner_id="u",
-        companion_id="i-runtime",
-        template_id="caretaker_jiezhi",
-    )
-    await personas_service.update_runtime_state(
-        companion_id="i-runtime",
-        emotion="sad",
-        emotion_delta=0.8,
-    )
-    loaded = await persona_instance_store.load("u", "i-runtime")
-    assert not hasattr(loaded, "runtime_state")
-

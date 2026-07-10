@@ -23,7 +23,7 @@ _DELAY = 0.1  # 100 ms per branch
 
 
 class _SlowPersonas:
-    async def compile_prompt(self, **_kwargs):
+    async def realize_context(self, **_kwargs):
         await asyncio.sleep(_DELAY)
         return SimpleNamespace(system_prompt="[PERSONA]\nhi", debug_trace=())
 
@@ -113,7 +113,7 @@ async def test_persona_failure_propagates() -> None:
     """Persona is mandatory — a failure must surface, not silently degrade."""
 
     class _BoomPersonas:
-        async def compile_prompt(self, **_):
+        async def realize_context(self, **_):
             raise RuntimeError("persona config broken")
 
     compiler = ContextCompiler(

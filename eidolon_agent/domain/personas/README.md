@@ -1,115 +1,52 @@
-# Personas
+# Persona Runtime
 
-`eidolon_agent.domain.personas` is the persona subsystem: templates,
-per-companion instance copies, runtime state, prompt compilation, memory
-adaptation, signal interpretation, and asynchronous evolution.
+The Agent has one persona domain: immutable semantic `PersonaGenome` snapshots
+defined by `eidolon_sdk` and stored by `eidolon_data`.
 
-## Boundary
+## Runtime boundary
 
-Use `PersonasService` as the public facade. Application code should not reach
-into the registry, instance store, compiler, runtime state, memory adapter, or
-evolution worker directly.
+`PersonasService` is the public facade. Production wiring provides one
+`EidolonDataPersonaGenomeStore`; there is no template registry, YAML instance,
+behavioral-knob model, compiler DSL, or fallback persona.
 
-Templates are immutable base genomes. When a companion binds a template,
-personas creates a full `PersonaInstance` copy. Future evolution changes only
-that instance copy. Short-lived mood, energy, and attention live in runtime
-state and are not written into instance YAML.
+A runtime identity must pin both `genome_id` and `genome_hash`. New sessions
+resolve the companion's current committed snapshot. Existing sessions continue
+to load their pinned snapshot after a later evolution commit.
 
-## Runtime Data
+## Realization
 
-Code and bundled templates live under:
+`PersonaRealizer` organizes the genome's semantic constitution, character,
+relationship, and authored expression into model context. It consumes the
+whole snapshot; it does not map numeric traits to hard-coded prompt fragments.
+Unknown traits remain stored and do not need Agent support to survive a round
+trip.
 
-```text
-eidolon_agent/domain/personas/
-├── templates/        # bundled genome YAMLs (read-only)
-└── …                 # service.py, registry.py, instance_store.py, …
-```
+`ContextCompiler` owns Memory recall. Recalled `MemoryHit` records remain
+evidence, are routed by `memory_realm_id`, and may add genome-owned relationship
+guidance through `PersonaMemoryAdapter`. Memory never mutates a genome.
 
-User instance data defaults to:
+## Evolution
 
-```text
-~/eidolon/personas/instances/<owner>/<owner>/<companion_id>.yaml
-```
+Long-term changes use typed SDK events and complete candidate snapshots:
 
-The runtime path is configurable via `settings.persona.instances_dir`.
+1. `persona.observation.created` records evidence.
+2. `persona.evolution.proposed` stores a proposed immutable genome.
+3. Approval writes `persona.evolution.approved`, commits the snapshot, and
+   updates `companions.current_genome_id` in one transaction.
+4. Rejection leaves the current pointer unchanged.
+5. Rollback selects an earlier committed snapshot and writes an audit event.
 
-## Public API — what callers actually use
+Agent validation prevents memory-driven constitution rewrites, trait removal,
+oversized deltas, and invalid relationship-stage jumps.
 
-The hot path (TurnEngine, gRPC servicer) only needs three methods:
+## Runtime state
 
-- `compile_prompt` — assemble the persona prompt for a Turn
-- `submit_signal` — push a realtime signal digest into the runtime state
-- `submit_interaction` — queue a turn interaction event for the async
-  evolution worker
+Mood, energy, and attention are short-lived in-memory state. They may affect a
+turn's volatile context but are never persisted into `genome_json`.
 
-The remaining methods are admin / inspection surfaces consumed by the admin
-HTTP routers and tests:
+## Verification
 
-- `list_templates`, `get_template`
-- `create_instance`, `get_instance`, `get_snapshot`
-- `update_runtime_state`
-- `evolve`, `evolve_now`, `drain_evolution_queue`
-- `mock_memory_trigger`
-
-(`propose_proactive` was removed in the simplification refactor; the proactive
-engine itself is gone — proactive triggers will come back via a NATS-driven
-worker when product needs them.)
-
-`compile_prompt` is memory-passive. It adapts explicitly supplied
-`dry_run_memory` hits through `PersonaMemoryAdapter`, then compiles the current
-knobs and runtime state into LLM-facing instructions. Runtime recall is owned
-by `ContextCompiler`, because only that layer has the full
-`RuntimeIdentity(schema_version, owner_id, companion_id, device_id, memory_realm_id, genome_id, genome_hash, compiler_version)`.
-
-## Ports
-
-Personas depends on external infrastructure only through ports declared in
-`personas/ports.py`:
-
-- `PersonaLLMPort` — optional, for evolution-time summarisation
-- `PersonaEventPort` — publish `persona.overlay.updated` / `evolution.applied`
-  events
-- `PersonaAuditPort` — append-only audit of applied evolution rules
-- `PersonaEvolutionRepository` — SQLite history (implemented by
-  `infra/persistence/SqlEvolutionHistoryRepository`)
-
-Production wires these ports through `app/runtime/bootstrap.py`. Tests use
-mocks or null ports.
-
-## Automatic Evolution
-
-Interaction-driven evolution is asynchronous, guarded, and isolated from the
-turn pipeline:
-
-- A separate worker (`PersonaEvolutionWorker`) consumes `PersonaInteractionEvent`
-  via an internal queue.
-- `identity_core` knobs are not evolvable.
-- Knobs are clamped to their `min` and `max`.
-- A rule cannot move a knob by more than its `step_limit`.
-- Rule cooldowns prevent repeated rapid drift.
-- Applied changes are returned as `PersonaEvolutionResult`, audited, and
-  persisted via the repository port.
-- Runtime state changes are fast in-memory updates; long-term knob changes
-  go through the worker so the turn pipeline never blocks on persistence.
-
-## Runtime State
-
-Personas owns short-lived mood, energy, and attention. Other modules submit
-turn interactions or realtime signal digests; they do not mutate state
-directly. There is no LLM-callable mood / persona-state mutation tool.
-
-## Mock Memory Trigger
-
-`mock_memory_trigger` lets the admin endpoint preview how the persona's
-memory policies react to synthetic `MemoryHit` records. It can run as dry-run
-or actually apply triggered evolution rules.
-
-## Tests
-
-Module-local tests live alongside the code:
-
-```bash
-.venv/bin/pytest eidolon_agent/domain/personas/tests/   # personas only
-.venv/bin/pytest -m functional                           # all functional tests
-.venv/bin/pytest                                         # full suite (222 tests)
-```
+The deterministic product-logic E2E is
+`tests/e2e/test_persona_memory_e2e.py`. The reusable performance and regression
+suite is `python -m eidolon_agent.app.benchmark.persona_memory`; its artifacts
+are written under `benchmarks/runs/persona_memory/` for Admin discovery.

@@ -51,7 +51,7 @@ async def _seed_turn(
     """Write the same shape the real chat path emits."""
     del seq
     companion_id = companion_id or f"{owner_id}-test"
-    genome_id = f"g_{owner_id}_default_v1"
+    genome_id = f"g_{owner_id}_default"
     realm_id = f"r_{owner_id}_default"
     device_id = f"device-{owner_id}"
     if await store.companions.get(companion_id) is None:

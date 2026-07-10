@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from dataclasses import replace
 
 import pytest
 
@@ -40,6 +41,30 @@ async def test_unknown_tool_returns_tool_not_found(caller_ctx) -> None:
     assert len(results) == 1
     assert results[0].ok is False
     assert results[0].error_code == "tool_not_found"
+
+
+async def test_extra_tools_overlay_resolves_before_registry(stub_tool_factory, caller_ctx) -> None:
+    # A per-turn dynamic tool (not in the registry) dispatches via the overlay.
+    overlay = stub_tool_factory("body__dev__display_update")
+    ctx = replace(caller_ctx, extra_tools={"body__dev__display_update": overlay})
+    disp = ToolDispatcher(ToolRegistry())  # empty registry
+    results = await disp.dispatch_batch([_call("body__dev__display_update")], ctx=ctx)
+    assert len(results) == 1 and results[0].ok is True
+    assert len(overlay.calls) == 1  # the overlay tool ran
+
+
+async def test_denied_tool_is_not_dispatched(stub_tool_factory, caller_ctx) -> None:
+    # A denied tool must not actuate even though it is a real registered tool.
+    real = stub_tool_factory("reboot", side_effect=True)
+    reg = ToolRegistry()
+    reg.register(real)
+    ctx = replace(caller_ctx, denied_tools=frozenset({"reboot"}))
+    disp = ToolDispatcher(reg)
+    results = await disp.dispatch_batch([_call("reboot")], ctx=ctx)
+    assert len(results) == 1
+    assert results[0].ok is False
+    assert results[0].error_code == "tool_not_found"
+    assert real.calls == []  # never invoked
 
 
 async def test_dispatch_returns_results_in_input_order(stub_tool_factory, caller_ctx) -> None:

@@ -32,6 +32,9 @@ class _StubIdentity:
     memory_realm_id: str = "realm-1"
     genome_id: str = "genome-1"
     device_id: str | None = "dev-1"
+    schema_version: str = "eidolon.persona_genome"
+    genome_hash: str = "pg_stub"
+    realizer_version: str = "eidolon.persona_realizer"
 
 
 def _make_context() -> MagicMock:

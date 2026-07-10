@@ -35,7 +35,6 @@ _log = logging.getLogger(__name__)
 # Streams we own. Each captures one logical class of persistent events.
 _OWNED_STREAMS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("EIDOLON_EMOTION_OUT", ("agent.emotion.>",)),
-    ("EIDOLON_EVOLUTION", ("agent.evolution.>",)),
 )
 
 

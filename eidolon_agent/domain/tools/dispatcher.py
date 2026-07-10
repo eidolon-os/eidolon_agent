@@ -100,7 +100,7 @@ class ToolDispatcher:
 
         for idx, call in enumerate(calls):
             try:
-                tool = self._registry.get(call.name)
+                tool = self._resolve_tool(call.name, ctx)
             except Exception:
                 await flush_readonly()
                 results[idx] = await self._dispatch_one(call, ctx=ctx)
@@ -115,11 +115,20 @@ class ToolDispatcher:
 
     # ---- Internals -----------------------------------------------------------
 
+    def _resolve_tool(self, name: str, ctx: ToolInvocationContext):
+        """Resolve a tool for this turn: enforce deny, then per-turn overlay, then registry."""
+        if name in ctx.denied_tools:
+            raise KeyError(f"tool denied for companion: {name}")
+        extra = ctx.extra_tools
+        if extra is not None and name in extra:
+            return extra[name]
+        return self._registry.get(name)
+
     async def _dispatch_one(
         self, call: ToolCall, *, ctx: ToolInvocationContext
     ) -> ToolResult:
         try:
-            tool = self._registry.get(call.name)
+            tool = self._resolve_tool(call.name, ctx)
         except Exception as exc:
             return ToolResult(
                 call_id=call.id,

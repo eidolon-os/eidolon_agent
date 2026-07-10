@@ -7,6 +7,7 @@ import asyncio
 import pytest
 
 from eidolon_agent.core.types.messages import MessageRole
+from eidolon_agent.domain.agent.companion_config import CompanionRuntimeConfig
 from eidolon_agent.infra.llm.providers.fake import FakeLLM
 from tests.helpers import make_turn_input
 
@@ -65,19 +66,21 @@ async def test_speculative_turn_streams_but_does_not_persist(turn_engine_factory
 
 
 @pytest.mark.asyncio
-async def test_turn_submits_persona_interaction(turn_engine_factory, personas_service):
+async def test_ordinary_turn_does_not_create_evolution_observation(
+    turn_engine_factory, persona_genome_store
+):
     engine = turn_engine_factory()
     _events = [ev async for ev in engine.run(make_turn_input("你好"))]
-    # _post_turn runs as a fire-and-forget task after DONE is yielded.
     await engine._background.drain(timeout_s=1)
-    await personas_service._worker.drain_once()
-    runtime_state = await personas_service._runtime.snapshot(companion_id="companion-test")
-    assert "注意力在用户身上" in runtime_state.to_prompt_hint()
+    assert persona_genome_store.observations == []
 
 
-def test_persona_state_is_not_exposed_as_tool(turn_engine_factory):
+async def test_persona_state_is_not_exposed_as_tool(turn_engine_factory):
     engine = turn_engine_factory()
-    tool_names = {schema.name for schema in engine._tool_schemas()}
+    schemas, _extra = await engine._tool_schemas(
+        make_turn_input("你好"), CompanionRuntimeConfig()
+    )
+    tool_names = {schema.name for schema in schemas}
     assert "set_mood" not in tool_names
     assert "set_persona_state" not in tool_names
 

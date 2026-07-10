@@ -48,6 +48,7 @@ from eidolon_sdk.biz.runtime import (
     owner_revocation_keys,
     sign_runtime_token,
 )
+from eidolon_sdk.biz.persona import build_default_persona_genome, persona_genome_to_json
 from fastapi import FastAPI
 from sqlalchemy import func, select
 
@@ -64,9 +65,9 @@ def _sign_device_actor_token(*, device_id: str, **kwargs):
         actor_kind="device",
         actor_id=device_id,
         device_id=device_id,
-        schema_version=kwargs.pop("schema_version", "eidolon.persona_genome.v1"),
-        genome_hash=kwargs.pop("genome_hash", "pgv1_revoke_test"),
-        compiler_version=kwargs.pop("compiler_version", "eidolon.persona_compiler.v1"),
+        schema_version=kwargs.pop("schema_version", "eidolon.persona_genome"),
+        genome_hash=kwargs.pop("genome_hash", "pg_revoke_test"),
+        realizer_version=kwargs.pop("realizer_version", "eidolon.persona_realizer"),
         **kwargs,
     )
 
@@ -145,7 +146,9 @@ async def test_delete_owner_data_prefers_eidolon_data_store(tmp_path) -> None:
             genome_id="genome-a",
             companion_id="companion-a",
             version=1,
-            genome_json={"persona_instance": {"instance_id": "companion-a"}},
+                genome_json=persona_genome_to_json(
+                    build_default_persona_genome(name="companion-a")
+                ),
         )
         await store.companions.set_current_genome("companion-a", "genome-a")
         await store.devices.create_device(
@@ -190,7 +193,7 @@ async def test_delete_owner_data_prefers_eidolon_data_store(tmp_path) -> None:
             owner_id="alice",
             subject_type="persona",
             subject_id="companion-a",
-            event_type="persona.evolution.applied",
+            event_type="persona.genome.committed",
         )
 
         app = _build_test_app(kv)

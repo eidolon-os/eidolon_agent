@@ -64,7 +64,7 @@ class Identity:
     genome_id: str
     schema_version: str = ""
     genome_hash: str = ""
-    compiler_version: str = ""
+    realizer_version: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,8 +112,8 @@ class CallerContext:
         return self.identity.schema_version
 
     @property
-    def compiler_version(self) -> str:
-        return self.identity.compiler_version
+    def realizer_version(self) -> str:
+        return self.identity.realizer_version
 
 
 def derive_runtime_caller_id(
