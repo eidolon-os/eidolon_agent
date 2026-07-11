@@ -23,6 +23,56 @@ def test_live_local_contract_rejects_passing_dependency_policy() -> None:
         LiveLocalContractConfig(dependency_unavailable_status="passed")  # type: ignore[arg-type]
 
 
+async def test_http_json_check_retries_transient_connect_failure(monkeypatch) -> None:
+    real_sleep = asyncio.sleep
+
+    async def fast_sleep(_delay: float) -> None:
+        await real_sleep(0)
+
+    class _Response:
+        status_code = 200
+        text = '{"status":"ready"}'
+
+        def json(self):
+            return {"status": "ready"}
+
+    class _FlakyClient:
+        attempts = 0
+
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def get(self, url: str):
+            assert url == "http://127.0.0.1:8180/readyz"
+            _FlakyClient.attempts += 1
+            if _FlakyClient.attempts == 1:
+                raise OSError("connection refused")
+            return _Response()
+
+    monkeypatch.setattr(live_local_contract.asyncio, "sleep", fast_sleep)
+    monkeypatch.setattr(live_local_contract.httpx, "AsyncClient", _FlakyClient)
+
+    check = await live_local_contract._http_json_check(
+        name="agent_http_readyz",
+        url="http://127.0.0.1:8180/readyz",
+        required=True,
+        timeout_s=0.1,
+        expected_status=200,
+        expected_json={"status": "ready"},
+        unavailable_status="failed",
+        hint="start agent",
+    )
+
+    assert check.status == "passed"
+    assert check.details["attempts"] == 2
+
+
 class _FakeRoutes:
     async def memory_space_ids(self) -> list[str]:
         return ["r_contract"]
@@ -211,6 +261,65 @@ async def test_live_local_contract_readback_retries_transient_timeout() -> None:
     assert session.calls == 2
     assert pool.drops == 1
     assert check.details["record_key"] == "drawer-timeout-retry"
+
+
+async def test_live_local_contract_readback_retries_cancelled_mcp_call() -> None:
+    class CancelThenRecordSession:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def call_tool(self, name, arguments):
+            assert name == "eidolon_memory_get_by_source_turn"
+            self.calls += 1
+            if self.calls == 1:
+                raise asyncio.CancelledError("cancel scope closed")
+            return {
+                "record": {
+                    "key": "drawer-cancel-retry",
+                    "metadata": {"source_turn_id": arguments["source_turn_id"]},
+                }
+            }
+
+    session = CancelThenRecordSession()
+    pool = _StaticSessionPool(session)
+    check = await live_local_contract._memory_readback_check(
+        pool=pool,
+        tool_names={"eidolon_memory_get_by_source_turn"},
+        memory_space_id="r_contract",
+        turn_id="turn-cancel-retry",
+        cfg=LiveLocalContractConfig(
+            memory_readback_timeout_s=0.1,
+            memory_readback_poll_s=0.001,
+            timeout_s=0.01,
+        ),
+    )
+
+    assert check.status == "passed"
+    assert session.calls == 2
+    assert pool.drops == 1
+    assert check.details["record_key"] == "drawer-cancel-retry"
+
+
+async def test_call_mcp_tool_wait_cancellation_is_timeout(monkeypatch) -> None:
+    class SlowSession:
+        async def call_tool(self, name, arguments):
+            del name, arguments
+            await asyncio.sleep(60)
+            return {"record": {"key": "late"}}
+
+    async def cancelled_wait(tasks, timeout):
+        del tasks, timeout
+        raise asyncio.CancelledError("cancel scope closed")
+
+    monkeypatch.setattr(live_local_contract.asyncio, "wait", cancelled_wait)
+
+    with pytest.raises(asyncio.TimeoutError):
+        await live_local_contract._call_mcp_tool_with_timeout(
+            SlowSession(),
+            "eidolon_memory_get_by_source_turn",
+            {"source_turn_id": "turn-cancel-wait"},
+            timeout_s=0.01,
+        )
 
 
 async def test_live_local_contract_readback_child_timeout_does_not_leak_cancel() -> None:
@@ -402,6 +511,18 @@ async def test_live_local_contract_provisions_memory_route_and_cleans_up(
             )
         ]
 
+    async def fake_reconcile(cfg, workspace):
+        del cfg
+        events.append(("reconcile", workspace.memory_realm_id))
+        return ContractCheck(
+            name="memory_supervisor_reconcile",
+            status="passed",
+            required=True,
+            summary="ok",
+            elapsed_ms=1.0,
+            details={},
+        )
+
     async def fake_cleanup(cfg, workspace):
         del cfg
         events.append(("cleanup", workspace.owner_id))
@@ -418,6 +539,11 @@ async def test_live_local_contract_provisions_memory_route_and_cleans_up(
         live_local_contract,
         "_provision_contract_workspace",
         fake_provision,
+    )
+    monkeypatch.setattr(
+        live_local_contract,
+        "_memory_supervisor_reconcile_check",
+        fake_reconcile,
     )
     monkeypatch.setattr(live_local_contract, "_memory_contract_checks", fake_memory_checks)
     monkeypatch.setattr(live_local_contract, "_cleanup_contract_workspace", fake_cleanup)
@@ -436,11 +562,13 @@ async def test_live_local_contract_provisions_memory_route_and_cleans_up(
     assert report.passed is True
     assert events == [
         ("provision", "owner_contract"),
+        ("reconcile", "r_contract"),
         ("memory", "r_contract"),
         ("cleanup", "owner_contract"),
     ]
     assert [check.name for check in report.checks] == [
         "contract_owner_provision",
+        "memory_supervisor_reconcile",
         "memory_discovery",
         "contract_owner_cleanup",
     ]

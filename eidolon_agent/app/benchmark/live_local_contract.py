@@ -36,6 +36,7 @@ from eidolon_agent.infra.memory import (
 
 CheckStatus = Literal["passed", "failed", "skipped"]
 DependencyUnavailableStatus = Literal["failed", "skipped"]
+DEFAULT_MEMORY_SUPERVISOR_RECONCILE_TIMEOUT_S = 120.0
 
 
 @dataclass(slots=True)
@@ -86,6 +87,8 @@ class LiveLocalContractConfig:
     memory_readback_poll_s: float = 0.5
     provision_contract_owner: bool = False
     cleanup_contract_owner: bool = True
+    reconcile_memory_supervisor: bool = True
+    memory_supervisor_reconcile_timeout_s: float = DEFAULT_MEMORY_SUPERVISOR_RECONCILE_TIMEOUT_S
     contract_owner_id: str = field(default_factory=lambda: f"owner_live_contract_{uuid4().hex[:8]}")
     contract_companion_id: str | None = None
     run_product_acceptance: bool = False
@@ -166,6 +169,8 @@ async def run_live_local_contract(
             checks.append(provision_check)
             if workspace is None:
                 return _build_report(cfg=cfg, checks=checks, started=started)
+            if cfg.include_memory and cfg.reconcile_memory_supervisor:
+                checks.append(await _memory_supervisor_reconcile_check(cfg, workspace))
 
         if cfg.include_memory:
             selected_memory_space_id = (
@@ -233,24 +238,36 @@ async def _http_json_check(
     expected_json_value: Any = None,
 ) -> ContractCheck:
     started = time.perf_counter()
-    try:
-        async with httpx.AsyncClient(
-            timeout=timeout_s,
-            follow_redirects=True,
-            trust_env=False,
-        ) as client:
-            response = await client.get(url)
-    except Exception as exc:
-        return _check(
-            name=name,
-            status=unavailable_status,
-            required=required,
-            started=started,
-            summary=f"{type(exc).__name__}: {exc}",
-            details={"url": url, "hint": hint},
-        )
+    deadline = started + max(timeout_s, 0.001)
+    attempts = 0
+    while True:
+        attempts += 1
+        remaining_s = max(0.001, deadline - time.perf_counter())
+        try:
+            async with httpx.AsyncClient(
+                timeout=remaining_s,
+                follow_redirects=True,
+                trust_env=False,
+            ) as client:
+                response = await client.get(url)
+            break
+        except Exception as exc:
+            if time.perf_counter() >= deadline:
+                return _check(
+                    name=name,
+                    status=unavailable_status,
+                    required=required,
+                    started=started,
+                    summary=f"{type(exc).__name__}: {exc}",
+                    details={"url": url, "hint": hint, "attempts": attempts},
+                )
+            await asyncio.sleep(min(0.25, max(0.0, deadline - time.perf_counter())))
 
-    details: dict[str, Any] = {"url": url, "status_code": response.status_code}
+    details: dict[str, Any] = {
+        "url": url,
+        "status_code": response.status_code,
+        "attempts": attempts,
+    }
     if response.status_code != expected_status:
         details["body_preview"] = response.text[:500]
         return _check(
@@ -562,6 +579,83 @@ async def _provision_contract_workspace(
             "genome_id": genome_id,
         },
     ), workspace
+
+
+async def _memory_supervisor_reconcile_check(
+    cfg: LiveLocalContractConfig,
+    workspace: ContractWorkspace,
+) -> ContractCheck:
+    started = time.perf_counter()
+    if not cfg.admin_gateway_base:
+        return _check(
+            name="memory_supervisor_reconcile",
+            status="failed",
+            required=True,
+            started=started,
+            summary="admin_gateway_base is required for memory supervisor reconcile",
+            details={"memory_realm_id": workspace.memory_realm_id},
+        )
+    url = _join_url(cfg.admin_gateway_base, "/api/memory/supervisor/reconcile")
+    try:
+        async with httpx.AsyncClient(
+            timeout=max(cfg.timeout_s, cfg.memory_supervisor_reconcile_timeout_s),
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
+            response = await client.post(url)
+    except Exception as exc:
+        return _check(
+            name="memory_supervisor_reconcile",
+            status=cfg.dependency_unavailable_status,
+            required=True,
+            started=started,
+            summary=f"{type(exc).__name__}: {exc}",
+            details={"url": url, "memory_realm_id": workspace.memory_realm_id},
+        )
+
+    details: dict[str, Any] = {
+        "url": url,
+        "status_code": response.status_code,
+        "memory_realm_id": workspace.memory_realm_id,
+    }
+    if response.status_code >= 400:
+        details["body_preview"] = response.text[:500]
+        return _check(
+            name="memory_supervisor_reconcile",
+            status="failed",
+            required=True,
+            started=started,
+            summary=f"expected HTTP <400, got {response.status_code}",
+            details=details,
+        )
+    try:
+        body = response.json()
+    except ValueError as exc:
+        return _check(
+            name="memory_supervisor_reconcile",
+            status="failed",
+            required=True,
+            started=started,
+            summary=f"response is not JSON: {exc}",
+            details=details,
+        )
+    if body.get("ok") is not True:
+        return _check(
+            name="memory_supervisor_reconcile",
+            status="failed",
+            required=True,
+            started=started,
+            summary="memory supervisor reconcile did not return ok=true",
+            details={**details, "body": body},
+        )
+    return _check(
+        name="memory_supervisor_reconcile",
+        status="passed",
+        required=True,
+        started=started,
+        summary="ok",
+        details=details,
+    )
 
 
 async def _cleanup_contract_workspace(
@@ -936,9 +1030,20 @@ async def _call_mcp_tool_with_timeout(
     timeout_s: float,
 ) -> dict[str, Any]:
     task = asyncio.create_task(session.call_tool(name, arguments))
-    done, _ = await asyncio.wait({task}, timeout=timeout_s)
+    try:
+        done, _ = await asyncio.wait({task}, timeout=timeout_s)
+    except asyncio.CancelledError as exc:
+        task.cancel()
+        try:
+            await task
+        except BaseException:
+            pass
+        raise asyncio.TimeoutError(f"MCP call cancelled before completion: {exc}") from exc
     if task in done:
-        return task.result()
+        try:
+            return task.result()
+        except asyncio.CancelledError as exc:
+            raise asyncio.TimeoutError(f"MCP call cancelled before completion: {exc}") from exc
 
     task.cancel()
     try:
@@ -1051,6 +1156,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-memory", action="store_true")
     parser.add_argument("--no-memory-readback", action="store_true")
     parser.add_argument("--provision-contract-owner", action="store_true")
+    parser.add_argument("--no-memory-supervisor-reconcile", action="store_true")
+    parser.add_argument(
+        "--memory-supervisor-reconcile-timeout-s",
+        type=float,
+        default=DEFAULT_MEMORY_SUPERVISOR_RECONCILE_TIMEOUT_S,
+    )
     parser.add_argument("--keep-contract-owner", action="store_true")
     parser.add_argument("--contract-owner-id", default="")
     parser.add_argument("--contract-companion-id", default="")
@@ -1076,6 +1187,8 @@ def main(argv: list[str] | None = None) -> int:
                 memory_readback_timeout_s=args.memory_readback_timeout_s,
                 provision_contract_owner=args.provision_contract_owner,
                 cleanup_contract_owner=not args.keep_contract_owner,
+                reconcile_memory_supervisor=not args.no_memory_supervisor_reconcile,
+                memory_supervisor_reconcile_timeout_s=args.memory_supervisor_reconcile_timeout_s,
                 contract_owner_id=args.contract_owner_id or f"owner_live_contract_{uuid4().hex[:8]}",
                 contract_companion_id=args.contract_companion_id or None,
                 run_product_acceptance=args.product_acceptance,
