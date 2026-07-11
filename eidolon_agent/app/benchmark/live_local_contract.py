@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 from uuid import uuid4
 
 import httpx
@@ -673,6 +674,10 @@ async def _cleanup_contract_workspace(
             details={"owner_id": workspace.owner_id},
         )
     url = _join_url(cfg.admin_gateway_base, f"/api/owners/{workspace.owner_id}")
+    orphan_url = _join_url(
+        cfg.admin_gateway_base,
+        f"/api/memory/realms/{quote(workspace.memory_realm_id, safe='')}/orphan",
+    )
     try:
         async with httpx.AsyncClient(
             timeout=max(cfg.timeout_s, 30.0),
@@ -683,6 +688,12 @@ async def _cleanup_contract_workspace(
                 url,
                 params={"confirm_owner_id": workspace.owner_id, "purge_memory": "true"},
             )
+            orphan_response = None
+            if response.status_code < 400 or response.status_code == 404:
+                orphan_response = await client.delete(
+                    orphan_url,
+                    params={"purge_palace": "true"},
+                )
     except Exception as exc:
         return _check(
             name="contract_owner_cleanup",
@@ -702,7 +713,25 @@ async def _cleanup_contract_workspace(
         "owner_id": workspace.owner_id,
         "memory_realm_id": workspace.memory_realm_id,
     }
+    if orphan_response is not None:
+        details["memory_orphan_cleanup"] = {
+            "url": orphan_url,
+            "status_code": orphan_response.status_code,
+        }
     if response.status_code == 404:
+        if orphan_response is not None and orphan_response.status_code >= 400:
+            details["memory_orphan_cleanup"]["body_preview"] = orphan_response.text[:500]
+            return _check(
+                name="contract_owner_cleanup",
+                status="failed",
+                required=True,
+                started=started,
+                summary=(
+                    "owner already absent but memory orphan cleanup failed "
+                    f"with HTTP {orphan_response.status_code}"
+                ),
+                details=details,
+            )
         return _check(
             name="contract_owner_cleanup",
             status="passed",
@@ -721,10 +750,33 @@ async def _cleanup_contract_workspace(
             summary=f"expected HTTP <400, got {response.status_code}",
             details=details,
         )
+    if orphan_response is None:
+        return _check(
+            name="contract_owner_cleanup",
+            status="failed",
+            required=True,
+            started=started,
+            summary="memory orphan cleanup was not attempted",
+            details=details,
+        )
+    if orphan_response.status_code >= 400:
+        details["memory_orphan_cleanup"]["body_preview"] = orphan_response.text[:500]
+        return _check(
+            name="contract_owner_cleanup",
+            status="failed",
+            required=True,
+            started=started,
+            summary=f"memory orphan cleanup failed with HTTP {orphan_response.status_code}",
+            details=details,
+        )
     try:
         body = response.json()
     except ValueError:
         body = {}
+    try:
+        orphan_body = orphan_response.json()
+    except ValueError:
+        orphan_body = {}
     counts = body.get("counts") if isinstance(body, dict) else None
     return _check(
         name="contract_owner_cleanup",
@@ -732,7 +784,7 @@ async def _cleanup_contract_workspace(
         required=True,
         started=started,
         summary="ok",
-        details={**details, "counts": counts},
+        details={**details, "counts": counts, "memory_orphan_cleanup_body": orphan_body},
     )
 
 

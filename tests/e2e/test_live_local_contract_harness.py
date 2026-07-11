@@ -73,6 +73,64 @@ async def test_http_json_check_retries_transient_connect_failure(monkeypatch) ->
     assert check.details["attempts"] == 2
 
 
+async def test_cleanup_contract_workspace_deletes_owner_then_memory_orphan(
+    monkeypatch,
+) -> None:
+    class _Response:
+        def __init__(self, status_code: int, body: dict) -> None:
+            self.status_code = status_code
+            self._body = body
+            self.text = str(body)
+
+        def json(self):
+            return self._body
+
+    class _Client:
+        calls: ClassVar[list[tuple[str, dict]]] = []
+        responses: ClassVar[list[_Response]] = [
+            _Response(200, {"counts": {"owners": 1}}),
+            _Response(200, {"orphaned": True, "palace_deleted": True}),
+        ]
+
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def delete(self, url: str, *, params: dict):
+            self.calls.append((url, dict(params)))
+            return self.responses.pop(0)
+
+    monkeypatch.setattr(live_local_contract.httpx, "AsyncClient", _Client)
+
+    check = await live_local_contract._cleanup_contract_workspace(
+        LiveLocalContractConfig(admin_gateway_base="http://127.0.0.1:9000"),
+        ContractWorkspace(
+            owner_id="owner_contract",
+            companion_id="companion_contract",
+            memory_realm_id="r:owner:contract",
+        ),
+    )
+
+    assert check.status == "passed"
+    assert _Client.calls == [
+        (
+            "http://127.0.0.1:9000/api/owners/owner_contract",
+            {"confirm_owner_id": "owner_contract", "purge_memory": "true"},
+        ),
+        (
+            "http://127.0.0.1:9000/api/memory/realms/r%3Aowner%3Acontract/orphan",
+            {"purge_palace": "true"},
+        ),
+    ]
+    assert check.details["memory_orphan_cleanup"]["status_code"] == 200
+    assert check.details["memory_orphan_cleanup_body"]["palace_deleted"] is True
+
+
 class _FakeRoutes:
     async def memory_space_ids(self) -> list[str]:
         return ["r_contract"]
