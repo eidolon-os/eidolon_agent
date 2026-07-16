@@ -235,15 +235,19 @@ class EidolonMemoryPort:
         predicate: str,
         object_: str,
         *,
+        source_event_id: str,
+        tool_call_id: str,
         confidence: float = 0.9,
-    ) -> None:
-        await self._pub.publish_kg_add(
+    ) -> str:
+        return await self._pub.publish_structured_intent(
             owner_id=owner_id,
             companion_id=companion_id,
             memory_realm_id=memory_realm_id,
             subject=subject,
             predicate=predicate,
             object_=object_,
+            source_event_id=source_event_id,
+            tool_call_id=tool_call_id,
             confidence=confidence,
         )
 
@@ -256,16 +260,20 @@ class EidolonMemoryPort:
         session_id: str | None,
         text: str,
         *,
+        source_event_id: str,
+        tool_call_id: str,
         confidence: float = 0.99,
         tags: list[str] | None = None,
-    ) -> None:
-        await self._pub.publish_confirmed_fact(
+    ) -> str:
+        return await self._pub.publish_verbatim_intent(
             owner_id=owner_id,
             companion_id=companion_id,
             memory_realm_id=memory_realm_id,
             device_id=device_id,
             session_id=session_id,
             text=text,
+            source_event_id=source_event_id,
+            tool_call_id=tool_call_id,
             confidence=confidence,
             tags=tags,
         )

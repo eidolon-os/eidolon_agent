@@ -35,8 +35,12 @@ def _port(*, session_call=None, session_close=None, pub_methods=None):
     if pub_methods is None:
         pub_methods = {}
     pub.publish_turn = pub_methods.get("publish_turn", AsyncMock())
-    pub.publish_kg_add = pub_methods.get("publish_kg_add", AsyncMock())
-    pub.publish_confirmed_fact = pub_methods.get("publish_confirmed_fact", AsyncMock())
+    pub.publish_structured_intent = pub_methods.get(
+        "publish_structured_intent", AsyncMock()
+    )
+    pub.publish_verbatim_intent = pub_methods.get(
+        "publish_verbatim_intent", AsyncMock()
+    )
 
     return EidolonMemoryPort(pool=pool, publisher=pub), session, pool, pub
 
@@ -358,40 +362,52 @@ async def test_write_turn_delegates_to_publisher() -> None:
 
 async def test_assert_fact_delegates_to_publisher() -> None:
     port, _, _, pub = _port()
-    await port.assert_fact(
+    pub.publish_structured_intent.return_value = "request-structured"
+    request_id = await port.assert_fact(
         "owner-1", "companion-1", "realm-1", "Alice", "lives_in", "Beijing",
+        source_event_id="turn-1",
+        tool_call_id="call-1",
         confidence=0.75,
     )
-    pub.publish_kg_add.assert_awaited_once_with(
+    pub.publish_structured_intent.assert_awaited_once_with(
         owner_id="owner-1",
         companion_id="companion-1",
         memory_realm_id="realm-1",
         subject="Alice",
         predicate="lives_in",
         object_="Beijing",
+        source_event_id="turn-1",
+        tool_call_id="call-1",
         confidence=0.75,
     )
+    assert request_id == "request-structured"
 
 
 async def test_write_confirmed_fact_delegates_to_publisher() -> None:
     port, _, _, pub = _port()
-    await port.write_confirmed_fact(
+    pub.publish_verbatim_intent.return_value = "request-verbatim"
+    request_id = await port.write_confirmed_fact(
         "owner-1",
         "companion-1",
         "realm-1",
         "device-1",
         "s1",
         "用户 最终验证时间 2026-06-28 20:00",
+        source_event_id="turn-1",
+        tool_call_id="call-1",
         confidence=0.95,
         tags=["kg_fallback"],
     )
-    pub.publish_confirmed_fact.assert_awaited_once_with(
+    assert request_id == "request-verbatim"
+    pub.publish_verbatim_intent.assert_awaited_once_with(
         owner_id="owner-1",
         companion_id="companion-1",
         memory_realm_id="realm-1",
         device_id="device-1",
         session_id="s1",
         text="用户 最终验证时间 2026-06-28 20:00",
+        source_event_id="turn-1",
+        tool_call_id="call-1",
         confidence=0.95,
         tags=["kg_fallback"],
     )

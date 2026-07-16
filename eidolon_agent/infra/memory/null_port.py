@@ -65,8 +65,8 @@ class NullMemoryPort:
         assistant_text: str,
         *,
         metadata: dict | None = None,
-    ) -> None:
-        return None
+    ) -> str:
+        return ""
 
     async def assert_fact(
         self,
@@ -77,9 +77,11 @@ class NullMemoryPort:
         predicate: str,
         object_: str,
         *,
+        source_event_id: str,
+        tool_call_id: str,
         confidence: float = 0.9,
-    ) -> None:
-        return None
+    ) -> str:
+        return ""
 
     async def write_confirmed_fact(
         self,
@@ -90,6 +92,8 @@ class NullMemoryPort:
         session_id: str | None,
         text: str,
         *,
+        source_event_id: str,
+        tool_call_id: str,
         confidence: float = 0.99,
         tags: list[str] | None = None,
     ) -> None:

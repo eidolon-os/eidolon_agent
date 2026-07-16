@@ -185,21 +185,25 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
         owner_text="hi",
         assistant_text="hello",
     )
-    await pub.publish_kg_add(
+    await pub.publish_structured_intent(
         owner_id="benchmark",
         companion_id="test",
         memory_realm_id="r_benchmark_default",
         subject="self",
         predicate="likes",
         object_="oolong",
+        source_event_id="t1",
+        tool_call_id="call-structured",
     )
-    await pub.publish_confirmed_fact(
+    await pub.publish_verbatim_intent(
         owner_id="benchmark",
         companion_id="test",
         memory_realm_id="r_benchmark_default",
         device_id="admin-console",
         session_id="s1",
         text="用户 最终验证时间 2026-06-28 20:00",
+        source_event_id="t1",
+        tool_call_id="call-verbatim",
         confidence=0.95,
         tags=["kg_fallback"],
     )
@@ -218,20 +222,28 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
     assert cmd_persistent is True
     assert cmd_event.subject == "cmds.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
     cmd_payload = unwrap_memory_payload(cmd_event.payload)
-    assert cmd_payload["kind"] == "kg_add_triple"
+    assert cmd_payload["kind"] == "memory_intent"
     assert cmd_payload["issuer"] == "agent"
     assert cmd_payload["request_id"]
     assert "command" not in cmd_payload
+    assert cmd_payload["intent"]["source_event_id"] == "t1"
+    assert cmd_payload["intent"]["tool_call_id"] == "call-structured"
+    assert cmd_payload["intent"]["subject"] == "self"
+    assert cmd_payload["intent"]["predicate"] == "likes"
+    assert cmd_payload["intent"]["object"] == "oolong"
     assert confirmed_persistent is True
     assert confirmed_event.subject == "cmds.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
     confirmed_payload = unwrap_memory_payload(confirmed_event.payload)
-    assert confirmed_payload["kind"] == "user_confirm_fact"
+    assert confirmed_payload["kind"] == "memory_intent"
     assert confirmed_payload["issuer"] == "agent"
-    assert confirmed_payload["text"] == "用户 最终验证时间 2026-06-28 20:00"
-    assert confirmed_payload["source_device_id"] == "admin-console"
-    assert confirmed_payload["source_instance_id"] == "test"
-    assert confirmed_payload["session_id"] == "s1"
-    assert confirmed_payload["tags"] == ["kg_fallback"]
+    intent = confirmed_payload["intent"]
+    assert intent["raw_claim"] == "用户 最终验证时间 2026-06-28 20:00"
+    assert intent["source_event_id"] == "t1"
+    assert intent["tool_call_id"] == "call-verbatim"
+    assert intent["attributes"]["source_device_id"] == "admin-console"
+    assert intent["attributes"]["source_instance_id"] == "test"
+    assert intent["attributes"]["session_id"] == "s1"
+    assert intent["attributes"]["tags"] == ["kg_fallback"]
 
 
 def test_mcp_decode_prefers_structured_content_and_unwraps_fastmcp_result():

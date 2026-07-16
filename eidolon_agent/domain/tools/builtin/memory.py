@@ -139,13 +139,15 @@ class MemoryAssertFactTool:
         if predicate is None:
             text = _confirmed_fact_text(subject, raw_predicate, object_)
             confirmed_confidence = max(confidence, 0.9)
-            await self._memory.write_confirmed_fact(
+            request_id = await self._memory.write_confirmed_fact(
                 ctx.caller.owner_id,
                 ctx.caller.companion_id,
                 ctx.caller.memory_realm_id,
                 ctx.caller.device_id,
                 ctx.session_id,
                 text,
+                source_event_id=ctx.turn_id,
+                tool_call_id=call.id,
                 confidence=confirmed_confidence,
                 tags=["memory_assert_fact", "kg_fallback"],
             )
@@ -154,20 +156,23 @@ class MemoryAssertFactTool:
                 name=self.schema.name,
                 ok=True,
                 content={
-                    "stored": True,
+                    "status": "accepted",
+                    "request_id": request_id,
                     "kind": "confirmed_fact",
                     "text": text,
                     "predicate": raw_predicate,
                     "confidence": confirmed_confidence,
                 },
             )
-        await self._memory.assert_fact(
+        request_id = await self._memory.assert_fact(
             ctx.caller.owner_id,
             ctx.caller.companion_id,
             ctx.caller.memory_realm_id,
             subject,
             predicate,
             object_,
+            source_event_id=ctx.turn_id,
+            tool_call_id=call.id,
             confidence=confidence,
         )
         return ToolResult(
@@ -175,7 +180,8 @@ class MemoryAssertFactTool:
             name=self.schema.name,
             ok=True,
             content={
-                "stored": True,
+                "status": "accepted",
+                "request_id": request_id,
                 "subject": subject,
                 "predicate": predicate,
                 "object": object_,

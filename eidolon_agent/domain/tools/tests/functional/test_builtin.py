@@ -143,8 +143,20 @@ async def test_memory_tools_use_memory_port(caller_ctx) -> None:
     assert memory.search_calls[0]["memory_realm_id"] == "realm-1"
     assert memory.search_calls[0]["device_id"] == "device-1"
     assert asserted.ok
+    assert asserted.content["status"] == "accepted"
+    assert asserted.content["request_id"] == "request-1"
     assert memory.asserted == [
-        ("owner-1", "companion-1", "realm-1", "user", "works_at", "乌龙茶", 0.8)
+        (
+            "owner-1",
+            "companion-1",
+            "realm-1",
+            "user",
+            "works_at",
+            "乌龙茶",
+            "turn-1",
+            "c",
+            0.8,
+        )
     ]
     assert forgotten.ok
     assert forgotten.content["status"] == "applied"
@@ -248,6 +260,8 @@ async def test_memory_assert_fact_falls_back_to_confirmed_fact_for_unknown_predi
     )
 
     assert res.ok is True
+    assert res.content["status"] == "accepted"
+    assert res.content["request_id"] == "request-1"
     assert res.content["kind"] == "confirmed_fact"
     assert res.content["text"] == "user 神秘关系 x"
     assert memory.asserted == []
@@ -259,6 +273,8 @@ async def test_memory_assert_fact_falls_back_to_confirmed_fact_for_unknown_predi
             "device-1",
             None,
             "user 神秘关系 x",
+            "turn-1",
+            "c",
             0.9,
             ["memory_assert_fact", "kg_fallback"],
         )
@@ -364,11 +380,24 @@ class _FakeMemoryPort:
         predicate,
         object_,
         *,
+        source_event_id,
+        tool_call_id,
         confidence=0.9,
-    ) -> None:
+    ) -> str:
         self.asserted.append(
-            (owner_id, companion_id, memory_realm_id, subject, predicate, object_, confidence)
+            (
+                owner_id,
+                companion_id,
+                memory_realm_id,
+                subject,
+                predicate,
+                object_,
+                source_event_id,
+                tool_call_id,
+                confidence,
+            )
         )
+        return "request-1"
 
     async def write_confirmed_fact(
         self,
@@ -379,9 +408,11 @@ class _FakeMemoryPort:
         session_id,
         text,
         *,
+        source_event_id,
+        tool_call_id,
         confidence=0.99,
         tags=None,
-    ) -> None:
+    ) -> str:
         self.confirmed_facts.append(
             (
                 owner_id,
@@ -390,10 +421,13 @@ class _FakeMemoryPort:
                 device_id,
                 session_id,
                 text,
+                source_event_id,
+                tool_call_id,
                 confidence,
                 list(tags or []),
             )
         )
+        return "request-1"
 
     async def preview_forget(
         self,

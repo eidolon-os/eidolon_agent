@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timezone
-from uuid import uuid4
 
 from eidolon_sdk.memory import (
     ConversationTurnPayload,
-    KgAddTripleCommand,
-    UserConfirmedFactCommand,
+    MemoryIntent,
+    MemoryIntentCommand,
     conversation_turn_subject,
     envelope_memory_payload,
     memory_command_subject,
@@ -75,7 +75,7 @@ class MemoryNatsPublisher:
             persistent=True,
         )
 
-    async def publish_kg_add(
+    async def publish_structured_intent(
         self,
         *,
         owner_id: str | None,
@@ -84,45 +84,56 @@ class MemoryNatsPublisher:
         subject: str,
         predicate: str,
         object_: str,
+        source_event_id: str,
+        tool_call_id: str,
         confidence: float = 0.9,
-        valid_from: datetime | None = None,
-        valid_to: datetime | None = None,
-    ) -> None:
+    ) -> str:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        request_id = uuid4().hex
         memory_space_id = build_memory_space_id(memory_realm_id=memory_realm_id)
-        payload = KgAddTripleCommand(
+        intent_type, wing, memory_type = _structured_intent_classification(predicate)
+        intent_id = _explicit_intent_id(
+            memory_space_id,
+            source_event_id,
+            tool_call_id,
+            f"{subject}\x1f{predicate}\x1f{object_}",
+        )
+        request_id = intent_id.removeprefix("intent:")
+        intent = MemoryIntent(
+            intent_id=intent_id,
+            memory_space_id=memory_space_id,
+            source_event_id=source_event_id,
+            authority="explicit_user",
+            intent_type=intent_type,
+            raw_claim=f"{subject} {predicate} {object_}",
+            operation_hint="confirm",
+            subject=subject,
+            predicate=predicate,
+            object=object_,
+            occurred_at=now,
+            tool_call_id=tool_call_id,
+            confidence=confidence,
+            attributes={
+                "wing": wing,
+                "memory_type": memory_type,
+                "importance": 5,
+                "tags": ["memory_assert_fact", "structured"],
+                "source_instance_id": companion_id or "",
+            },
+        )
+        payload = MemoryIntentCommand(
             request_id=request_id,
             memory_space_id=memory_space_id,
             issued_at=now,
             issuer="agent",
-            subject=subject,
-            predicate=predicate,
-            object=object_,
-            confidence=confidence,
-            valid_from=valid_from.isoformat() if valid_from else None,
-            valid_to=valid_to.isoformat() if valid_to else None,
-            source_drawer_id=f"req:{request_id}",
-            adapter_name="agent",
+            intent=intent,
         )
-        nats_subject = (
-            await self._routes.render_cmd_subject(memory_space_id)
-            if self._routes is not None
-            else memory_command_subject(memory_space_id)
-        )
-        await self._bus.publish(
-            Event(
-                subject=nats_subject,
-                payload=envelope_memory_payload(payload, trace_id=request_id).model_dump(
-                    mode="json"
-                ),
-                source="memory.nats_pub",
-                metadata={"msg_id": request_id},
-            ),
-            persistent=True,
+        return await self._publish_intent(
+            payload,
+            memory_space_id=memory_space_id,
+            source_event_id=source_event_id,
         )
 
-    async def publish_confirmed_fact(
+    async def publish_verbatim_intent(
         self,
         *,
         owner_id: str | None,
@@ -131,29 +142,63 @@ class MemoryNatsPublisher:
         device_id: str | None,
         session_id: str | None,
         text: str,
+        source_event_id: str,
+        tool_call_id: str,
         confidence: float = 0.99,
         tags: list[str] | None = None,
-    ) -> None:
+    ) -> str:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        request_id = uuid4().hex
         memory_space_id = build_memory_space_id(memory_realm_id=memory_realm_id)
-        payload = UserConfirmedFactCommand(
+        intent_id = _explicit_intent_id(
+            memory_space_id,
+            source_event_id,
+            tool_call_id,
+            text,
+        )
+        request_id = intent_id.removeprefix("intent:")
+        intent = MemoryIntent(
+            intent_id=intent_id,
+            memory_space_id=memory_space_id,
+            source_event_id=source_event_id,
+            authority="explicit_user",
+            intent_type="fact",
+            raw_claim=text,
+            operation_hint="confirm",
+            occurred_at=now,
+            tool_call_id=tool_call_id,
+            confidence=confidence,
+            attributes={
+                "wing": "Wing_Profile",
+                "memory_type": "profile",
+                "importance": 5,
+                "tags": list(tags or []),
+                "scope": "persona",
+                "visibility": "all_devices",
+                "source_device_id": device_id or "",
+                "source_instance_id": companion_id or "",
+                "session_id": session_id or "",
+            },
+        )
+        payload = MemoryIntentCommand(
             request_id=request_id,
             memory_space_id=memory_space_id,
             issued_at=now,
             issuer="agent",
-            text=text,
-            wing="Wing_Profile",
-            memory_type="profile",
-            importance=5,
-            confidence=confidence,
-            tags=list(tags or []),
-            scope="persona",
-            visibility="all_devices",
-            source_device_id=device_id or "",
-            source_instance_id=companion_id or "",
-            session_id=session_id or "",
+            intent=intent,
         )
+        return await self._publish_intent(
+            payload,
+            memory_space_id=memory_space_id,
+            source_event_id=source_event_id,
+        )
+
+    async def _publish_intent(
+        self,
+        payload: MemoryIntentCommand,
+        *,
+        memory_space_id: str,
+        source_event_id: str,
+    ) -> str:
         nats_subject = (
             await self._routes.render_cmd_subject(memory_space_id)
             if self._routes is not None
@@ -162,11 +207,32 @@ class MemoryNatsPublisher:
         await self._bus.publish(
             Event(
                 subject=nats_subject,
-                payload=envelope_memory_payload(payload, trace_id=request_id).model_dump(
-                    mode="json"
-                ),
+                payload=envelope_memory_payload(
+                    payload, trace_id=source_event_id
+                ).model_dump(mode="json"),
                 source="memory.nats_pub",
-                metadata={"msg_id": request_id},
+                metadata={"msg_id": payload.request_id},
             ),
             persistent=True,
         )
+        return payload.request_id
+
+
+def _explicit_intent_id(
+    memory_space_id: str,
+    source_event_id: str,
+    tool_call_id: str,
+    claim: str,
+) -> str:
+    raw = "\x1f".join((memory_space_id, source_event_id, tool_call_id, claim))
+    return f"intent:{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:32]}"
+
+
+def _structured_intent_classification(predicate: str) -> tuple[str, str, str]:
+    if predicate in {"likes", "dislikes", "prefers"}:
+        return "preference", "Wing_Life", "preference"
+    if predicate in {"promised", "committed_to", "planned_to"}:
+        return "commitment", "Wing_Future", "commitment"
+    if predicate in {"attended", "experienced", "achieved"}:
+        return "episode", "Wing_Life", "event"
+    return "fact", "Wing_Profile", "profile"

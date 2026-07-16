@@ -76,9 +76,11 @@ class MemoryPort(Protocol):
         predicate: str,
         object_: str,
         *,
+        source_event_id: str,
+        tool_call_id: str,
         confidence: float = 0.9,
-    ) -> None:
-        """Publish an explicit KG triple write command."""
+    ) -> str:
+        """Publish one explicit structured intent and return its request id."""
         ...
 
     async def write_confirmed_fact(
@@ -90,10 +92,12 @@ class MemoryPort(Protocol):
         session_id: str | None,
         text: str,
         *,
+        source_event_id: str,
+        tool_call_id: str,
         confidence: float = 0.99,
         tags: list[str] | None = None,
-    ) -> None:
-        """Publish a verbatim user-confirmed fact when KG shape is unsuitable."""
+    ) -> str:
+        """Publish a verbatim explicit intent and return its request id."""
         ...
 
     async def preview_forget(
