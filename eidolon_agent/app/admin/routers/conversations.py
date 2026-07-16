@@ -48,6 +48,7 @@ class TurnSummary(BaseModel):
     """List-row shape. Cheap columns only — no message bodies here."""
 
     turn_id: str
+    trace_id: str | None = None
     conversation_id: str
     seq: int
     owner_id: str
@@ -186,6 +187,7 @@ async def list_turns(
     turns = [
         TurnSummary(
             turn_id=r["id"],
+            trace_id=r.get("trace_id"),
             conversation_id=r["conversation_id"],
             seq=r["seq"],
             owner_id=r["owner_id"],
