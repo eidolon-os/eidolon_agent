@@ -127,7 +127,8 @@ async def test_forget_intent_returns_action_marker(turn_engine_factory):
     engine = turn_engine_factory()
     events = [ev async for ev in engine.run(make_turn_input("请忘记我刚才说的"))]
     done = [e for e in events if e.kind.value == "done"]
-    assert done and done[0].data.get("action") == "memory_forget"
+    assert done and done[0].data.get("action") == "memory_forget_preview"
+    assert done[0].data.get("memory_status") == "unavailable"
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,8 @@ from collections.abc import Awaitable, Callable
 from typing import Protocol, runtime_checkable
 
 from eidolon_agent.core.types.memory import (
+    MemoryForgetOutcome,
+    MemoryForgetPreview,
     MemoryHit,
     MemoryQueryPlan,
     MemoryRecallResult,
@@ -94,7 +96,7 @@ class MemoryPort(Protocol):
         """Publish a verbatim user-confirmed fact when KG shape is unsuitable."""
         ...
 
-    async def forget(
+    async def preview_forget(
         self,
         owner_id: str | None,
         companion_id: str | None,
@@ -102,9 +104,24 @@ class MemoryPort(Protocol):
         device_id: str | None,
         query: str,
         *,
+        action: str = "archive",
         session_id: str | None = None,
-    ) -> int:
-        """Delete memories matching ``query``. Returns count removed."""
+    ) -> MemoryForgetPreview:
+        """Resolve a topic to exact memory IDs without mutating memory."""
+        ...
+
+    async def confirm_forget(
+        self,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        device_id: str | None,
+        confirmation_token: str,
+        *,
+        session_id: str | None = None,
+        wait_applied_seconds: float = 2.0,
+    ) -> MemoryForgetOutcome:
+        """Submit one preview-bound exact-ID privacy command."""
         ...
 
     async def health(self) -> bool:

@@ -9,6 +9,9 @@ from datetime import datetime, timezone
 from eidolon_agent.core.errors import MemoryUnavailableError
 from eidolon_agent.core.types.identity import build_memory_actor_context
 from eidolon_agent.core.types.memory import (
+    MemoryForgetCandidate,
+    MemoryForgetOutcome,
+    MemoryForgetPreview,
     MemoryHit,
     MemoryKind,
     MemoryQueryPlan,
@@ -267,7 +270,7 @@ class EidolonMemoryPort:
             tags=tags,
         )
 
-    async def forget(
+    async def preview_forget(
         self,
         owner_id: str | None,
         companion_id: str | None,
@@ -275,13 +278,10 @@ class EidolonMemoryPort:
         device_id: str | None,
         query: str,
         *,
+        action: str = "archive",
         session_id: str | None = None,
-    ) -> int:
-        # ``eidolon_memory_forget`` is an optional MCP capability (present only
-        # in newer memory versions). Negotiate first: if the server does not
-        # advertise it, skip cleanly with no error round-trip. If capability is
-        # unknown (probe failed), fall through and attempt — the try/except
-        # still catches an absent tool, so this never regresses.
+    ) -> MemoryForgetPreview:
+        resolved_action = "delete" if action == "delete" else "archive"
         ctx = build_memory_actor_context(
             owner_id=owner_id,
             companion_id=companion_id,
@@ -289,25 +289,117 @@ class EidolonMemoryPort:
             device_id=device_id,
             session_id=session_id,
         )
-        session = await self._pool.session_for(ctx.memory_space_id)
-        if not await session.supports("eidolon_memory_forget"):
-            _log.info(
-                "memory forget capability absent for memory_space=%s; skipping",
-                ctx.memory_space_id,
-            )
-            return 0
         try:
+            session = await self._pool.session_for(ctx.memory_space_id)
+            if not await session.supports("eidolon_memory_forget_preview"):
+                _log.info(
+                    "memory forget preview absent for memory_space=%s",
+                    ctx.memory_space_id,
+                )
+                return MemoryForgetPreview(
+                    status="unavailable",
+                    target=query,
+                    action=resolved_action,
+                    error="forget preview capability unavailable",
+                )
             result = await session.call_tool(
-                "eidolon_memory_forget",
-                {"query": query, "context": ctx.model_dump(mode="json")},
+                "eidolon_memory_forget_preview",
+                {"target": query, "action": resolved_action},
             )
-            return int(result.get("removed", 0))
-        except Exception:
+            status = str(result.get("status") or "failed")
+            if status not in {"preview", "not_found", "too_broad"}:
+                status = "failed"
+            candidates = [
+                MemoryForgetCandidate(
+                    id=str(
+                        item.get("drawer_id") or item.get("id") or item.get("key") or ""
+                    ),
+                    content=str(
+                        item.get("text") or item.get("content") or item.get("value") or ""
+                    ),
+                    score=float(item.get("score") or 0.0),
+                )
+                for item in (result.get("candidates") or [])
+                if isinstance(item, dict)
+            ]
+            return MemoryForgetPreview(
+                status=status,
+                target=str(result.get("target") or query),
+                action=resolved_action,
+                candidates=candidates,
+                requires_explicit_confirmation=bool(
+                    result.get("requires_explicit_confirmation")
+                ),
+                confirmation_token=str(result.get("confirmation_token") or ""),
+                expires_at=str(result.get("expires_at") or ""),
+                error=str(result.get("error") or ""),
+            )
+        except Exception as exc:
             _log.warning(
-                "memory forget unsupported or failed for memory_space=%s",
+                "memory forget preview failed for memory_space=%s",
                 ctx.memory_space_id,
             )
-            return 0
+            return MemoryForgetPreview(
+                status="failed",
+                target=query,
+                action=resolved_action,
+                error=str(exc),
+            )
+
+    async def confirm_forget(
+        self,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        device_id: str | None,
+        confirmation_token: str,
+        *,
+        session_id: str | None = None,
+        wait_applied_seconds: float = 2.0,
+    ) -> MemoryForgetOutcome:
+        ctx = build_memory_actor_context(
+            owner_id=owner_id,
+            companion_id=companion_id,
+            memory_realm_id=memory_realm_id,
+            device_id=device_id,
+            session_id=session_id,
+        )
+        try:
+            session = await self._pool.session_for(ctx.memory_space_id)
+            if not await session.supports("eidolon_memory_forget_confirm"):
+                return MemoryForgetOutcome(
+                    status="unavailable",
+                    action="archive",
+                    error="forget confirm capability unavailable",
+                )
+            result = await session.call_tool(
+                "eidolon_memory_forget_confirm",
+                {
+                    "confirmation_token": confirmation_token,
+                    "wait_applied_seconds": wait_applied_seconds,
+                },
+            )
+        except Exception as exc:
+            _log.warning(
+                "memory forget confirm failed for memory_space=%s",
+                ctx.memory_space_id,
+            )
+            return MemoryForgetOutcome(
+                status="failed",
+                action="archive",
+                error=str(exc),
+            )
+        status = str(result.get("status") or "failed")
+        if status not in {"accepted", "applied", "failed"}:
+            status = "failed"
+        action = "delete" if result.get("action") == "delete" else "archive"
+        return MemoryForgetOutcome(
+            status=status,
+            action=action,
+            request_id=str(result.get("request_id") or ""),
+            drawer_ids=[str(item) for item in (result.get("drawer_ids") or [])],
+            error=str(result.get("error") or ""),
+        )
 
     async def health(self) -> bool:
         return await self._pool.health()

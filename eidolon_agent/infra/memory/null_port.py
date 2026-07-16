@@ -9,6 +9,8 @@ protocol so the brain can run end to end with no memory service.
 from __future__ import annotations
 
 from eidolon_agent.core.types.memory import (
+    MemoryForgetOutcome,
+    MemoryForgetPreview,
     MemoryHit,
     MemoryQueryPlan,
     MemoryRecallResult,
@@ -93,7 +95,7 @@ class NullMemoryPort:
     ) -> None:
         return None
 
-    async def forget(
+    async def preview_forget(
         self,
         owner_id: str | None,
         companion_id: str | None,
@@ -101,9 +103,35 @@ class NullMemoryPort:
         device_id: str | None,
         query: str,
         *,
+        action: str = "archive",
         session_id: str | None = None,
-    ) -> int:
-        return 0
+    ) -> MemoryForgetPreview:
+        del owner_id, companion_id, memory_realm_id, device_id, session_id
+        return MemoryForgetPreview(
+            status="unavailable",
+            target=query,
+            action="delete" if action == "delete" else "archive",
+            error=_DEGRADED_REASON,
+        )
+
+    async def confirm_forget(
+        self,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        device_id: str | None,
+        confirmation_token: str,
+        *,
+        session_id: str | None = None,
+        wait_applied_seconds: float = 2.0,
+    ) -> MemoryForgetOutcome:
+        del owner_id, companion_id, memory_realm_id, device_id, session_id
+        del confirmation_token, wait_applied_seconds
+        return MemoryForgetOutcome(
+            status="unavailable",
+            action="archive",
+            error=_DEGRADED_REASON,
+        )
 
     async def health(self) -> bool:
         return True

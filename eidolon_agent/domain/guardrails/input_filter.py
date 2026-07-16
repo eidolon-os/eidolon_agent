@@ -33,7 +33,8 @@ _CRISIS_KEYWORDS = (
 )
 _FORGET_PATTERNS = (
     "忘掉这个", "忘记这件事", "别记住", "请忘记",
-    "forget that", "forget this",
+    "删除这段记忆", "删除关于", "删掉这段记忆",
+    "forget that", "forget this", "delete this memory",
 )
 _ROLE_OVERRIDE = (
     "ignore previous instructions",

@@ -25,7 +25,12 @@ from eidolon_sdk.memory import conversation_turn_subject
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
-from eidolon_agent.core.types.memory import MemoryRecallResult
+from eidolon_agent.core.types.memory import (
+    MemoryForgetCandidate,
+    MemoryForgetOutcome,
+    MemoryForgetPreview,
+    MemoryRecallResult,
+)
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEventKind, TurnInput, TurnTrigger
 from eidolon_agent.domain.agent import TaskClassifier, TurnEngine
@@ -399,7 +404,7 @@ class _ReplayMemory:
             degraded=self.degraded,
         )
 
-    async def forget(
+    async def preview_forget(
         self,
         owner_id: str | None,
         companion_id: str | None,
@@ -407,8 +412,9 @@ class _ReplayMemory:
         device_id: str | None,
         query: str,
         *,
+        action: str = "archive",
         session_id: str | None = None,
-    ) -> int:
+    ) -> MemoryForgetPreview:
         self.forget_calls.append(
             {
                 "owner_id": owner_id,
@@ -416,12 +422,28 @@ class _ReplayMemory:
                 "memory_realm_id": memory_realm_id,
                 "device_id": device_id,
                 "query": query,
+                "action": action,
                 "session_id": session_id,
             }
         )
-        removed = 1 if self.context else 0
+        if not self.context:
+            return MemoryForgetPreview(status="not_found", target=query, action="archive")
+        return MemoryForgetPreview(
+            status="preview",
+            target=query,
+            action="delete" if action == "delete" else "archive",
+            candidates=[MemoryForgetCandidate("drawer-1", self.context, 1.0)],
+            confirmation_token="token-1",
+        )
+
+    async def confirm_forget(self, *args: Any, **kwargs: Any) -> MemoryForgetOutcome:
         self.context = ""
-        return removed
+        return MemoryForgetOutcome(
+            status="applied",
+            action="archive",
+            request_id="request-1",
+            drawer_ids=["drawer-1"],
+        )
 
 
 def load_replay_scenarios(paths: Iterable[Path]) -> list[dict[str, Any]]:

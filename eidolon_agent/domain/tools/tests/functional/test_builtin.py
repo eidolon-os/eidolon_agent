@@ -7,7 +7,13 @@ import asyncio
 import pytest
 from eidolon_sdk.biz.body import BodyCapability, BodyCommandResult, BodyDevice
 
-from eidolon_agent.core.types.memory import MemoryHit, MemoryKind
+from eidolon_agent.core.types.memory import (
+    MemoryForgetCandidate,
+    MemoryForgetOutcome,
+    MemoryForgetPreview,
+    MemoryHit,
+    MemoryKind,
+)
 from eidolon_agent.core.types.tool import ToolCall
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import (
@@ -141,7 +147,9 @@ async def test_memory_tools_use_memory_port(caller_ctx) -> None:
         ("owner-1", "companion-1", "realm-1", "user", "works_at", "乌龙茶", 0.8)
     ]
     assert forgotten.ok
-    assert forgotten.content["removed"] == 3
+    assert forgotten.content["status"] == "applied"
+    assert forgotten.content["request_id"] == "request-1"
+    assert forgotten.content["affected"] == 1
     assert memory.forgotten == [
         (
             "owner-1",
@@ -149,6 +157,7 @@ async def test_memory_tools_use_memory_port(caller_ctx) -> None:
             "realm-1",
             "device-1",
             "乌龙茶",
+            "archive",
             "default",
         )
     ]
@@ -386,7 +395,7 @@ class _FakeMemoryPort:
             )
         )
 
-    async def forget(
+    async def preview_forget(
         self,
         owner_id,
         companion_id,
@@ -394,9 +403,34 @@ class _FakeMemoryPort:
         device_id,
         query,
         *,
+        action="archive",
         session_id="default",
-    ) -> int:
+    ) -> MemoryForgetPreview:
         self.forgotten.append(
-            (owner_id, companion_id, memory_realm_id, device_id, query, session_id)
+            (owner_id, companion_id, memory_realm_id, device_id, query, action, session_id)
         )
-        return 3
+        return MemoryForgetPreview(
+            status="preview",
+            target=query,
+            action="archive",
+            candidates=[MemoryForgetCandidate("drawer-1", query, 1.0)],
+            confirmation_token="token-1",
+        )
+
+    async def confirm_forget(
+        self,
+        owner_id,
+        companion_id,
+        memory_realm_id,
+        device_id,
+        confirmation_token,
+        *,
+        session_id="default",
+        wait_applied_seconds=2.0,
+    ) -> MemoryForgetOutcome:
+        return MemoryForgetOutcome(
+            status="applied",
+            action="archive",
+            request_id="request-1",
+            drawer_ids=["drawer-1"],
+        )

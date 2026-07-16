@@ -13,7 +13,12 @@ from eidolon_sdk.memory import conversation_turn_subject, unwrap_memory_payload
 from sqlalchemy import select
 
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
-from eidolon_agent.core.types.memory import MemoryRecallResult
+from eidolon_agent.core.types.memory import (
+    MemoryForgetCandidate,
+    MemoryForgetOutcome,
+    MemoryForgetPreview,
+    MemoryRecallResult,
+)
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEventKind
 from eidolon_agent.domain.agent.companion_config import CompanionRuntimeConfig
@@ -360,7 +365,7 @@ async def test_forget_intent_calls_memory_port(turn_engine_factory) -> None:
         def __init__(self):
             self.calls = []
 
-        async def forget(
+        async def preview_forget(
             self,
             owner_id: str,
             companion_id: str,
@@ -368,12 +373,35 @@ async def test_forget_intent_calls_memory_port(turn_engine_factory) -> None:
             device_id: str | None,
             query: str,
             *,
+            action: str = "archive",
             session_id: str = "default",
-        ) -> int:
+        ) -> MemoryForgetPreview:
             self.calls.append(
-                (owner_id, companion_id, memory_realm_id, device_id, query, session_id)
+                (
+                    owner_id,
+                    companion_id,
+                    memory_realm_id,
+                    device_id,
+                    query,
+                    action,
+                    session_id,
+                )
             )
-            return 3
+            return MemoryForgetPreview(
+                status="preview",
+                target=query,
+                action="archive",
+                candidates=[MemoryForgetCandidate("drawer-1", query, 1.0)],
+                confirmation_token="token-1",
+            )
+
+        async def confirm_forget(self, *args, **kwargs) -> MemoryForgetOutcome:
+            return MemoryForgetOutcome(
+                status="applied",
+                action="archive",
+                request_id="request-1",
+                drawer_ids=["drawer-1"],
+            )
 
     memory = _Memory()
     engine = turn_engine_factory(memory_port=memory)
@@ -381,8 +409,9 @@ async def test_forget_intent_calls_memory_port(turn_engine_factory) -> None:
     events = [ev async for ev in engine.run(make_turn_input("请忘记这件事"))]
 
     done = next(ev for ev in events if ev.kind is TurnEventKind.DONE)
-    assert done.data["action"] == "memory_forget"
-    assert done.data["removed"] == 3
+    assert done.data["action"] == "memory_forget_preview"
+    assert done.data["memory_status"] == "applied"
+    assert done.data["request_id"] == "request-1"
     assert memory.calls == [
         (
             "alice",
@@ -390,9 +419,107 @@ async def test_forget_intent_calls_memory_port(turn_engine_factory) -> None:
             "realm-test",
             "device-test",
             "请忘记这件事",
+            "archive",
             "s1",
         )
     ]
+
+
+async def test_ambiguous_delete_requires_second_turn_and_terminal_status(
+    turn_engine_factory,
+) -> None:
+    class _DeleteMemory:
+        def __init__(self) -> None:
+            self.confirm_calls = 0
+
+        async def preview_forget(self, *args, **kwargs) -> MemoryForgetPreview:
+            return MemoryForgetPreview(
+                status="preview",
+                target="常州",
+                action="delete",
+                candidates=[
+                    MemoryForgetCandidate("drawer-1", "在常州工作", 1.0),
+                    MemoryForgetCandidate("drawer-2", "去常州旅行", 0.8),
+                ],
+                requires_explicit_confirmation=True,
+                confirmation_token="signed-token",
+            )
+
+        async def confirm_forget(self, *args, **kwargs) -> MemoryForgetOutcome:
+            self.confirm_calls += 1
+            return MemoryForgetOutcome(
+                status="applied",
+                action="delete",
+                request_id="delete-request-1",
+                drawer_ids=["drawer-1", "drawer-2"],
+            )
+
+    memory = _DeleteMemory()
+    engine = turn_engine_factory(memory_port=memory)
+    preview_turn = replace(
+        make_turn_input("请删除关于常州的记忆"),
+        turn_id="forget-preview",
+    )
+
+    preview_events = [ev async for ev in engine.run(preview_turn)]
+    preview_done = preview_events[-1]
+    preview_text = "".join(
+        ev.data.get("text", "")
+        for ev in preview_events
+        if ev.kind is TurnEventKind.DELTA
+    )
+    assert preview_done.data["memory_status"] == "confirmation_required"
+    assert preview_done.data["candidate_count"] == 2
+    assert "确认删除" in preview_text
+    assert "已删除" not in preview_text
+    assert memory.confirm_calls == 0
+
+    confirm_turn = replace(make_turn_input("确认删除"), turn_id="forget-confirm")
+    confirm_events = [ev async for ev in engine.run(confirm_turn)]
+    confirm_done = confirm_events[-1]
+    confirm_text = "".join(
+        ev.data.get("text", "")
+        for ev in confirm_events
+        if ev.kind is TurnEventKind.DELTA
+    )
+    assert confirm_done.data["action"] == "memory_forget_confirm"
+    assert confirm_done.data["memory_status"] == "applied"
+    assert confirm_done.data["request_id"] == "delete-request-1"
+    assert "已删除" in confirm_text
+    assert memory.confirm_calls == 1
+
+
+async def test_accepted_forget_never_claims_terminal_completion(
+    turn_engine_factory,
+) -> None:
+    class _AcceptedMemory:
+        async def preview_forget(self, *args, **kwargs) -> MemoryForgetPreview:
+            return MemoryForgetPreview(
+                status="preview",
+                target="小满",
+                action="archive",
+                candidates=[MemoryForgetCandidate("drawer-1", "称呼小满", 1.0)],
+                confirmation_token="signed-token",
+            )
+
+        async def confirm_forget(self, *args, **kwargs) -> MemoryForgetOutcome:
+            return MemoryForgetOutcome(
+                status="accepted",
+                action="archive",
+                request_id="archive-request-1",
+                drawer_ids=["drawer-1"],
+            )
+
+    engine = turn_engine_factory(memory_port=_AcceptedMemory())
+    events = [ev async for ev in engine.run(make_turn_input("请忘记叫我小满"))]
+    text = "".join(
+        ev.data.get("text", "") for ev in events if ev.kind is TurnEventKind.DELTA
+    )
+
+    assert events[-1].data["memory_status"] == "accepted"
+    assert events[-1].data["request_id"] == "archive-request-1"
+    assert "仍在处理中" in text
+    assert "已经归档" not in text
 
 
 async def test_memory_replay_remembers_call_name_preference(
@@ -502,7 +629,8 @@ async def test_memory_replay_forget_removes_recalled_context(turn_engine_factory
 
     events = [ev async for ev in engine.run(forget)]
 
-    assert events[-1].data["action"] == "memory_forget"
+    assert events[-1].data["action"] == "memory_forget_preview"
+    assert events[-1].data["memory_status"] == "applied"
     assert memory.context == ""
 
     llm = _CapturingLLM()
@@ -685,7 +813,7 @@ class _ReplayMemory:
     async def recall_context(self, **_):
         return MemoryRecallResult(context=self.context)
 
-    async def forget(
+    async def preview_forget(
         self,
         owner_id: str,
         companion_id: str,
@@ -693,14 +821,30 @@ class _ReplayMemory:
         device_id: str | None,
         query: str,
         *,
+        action: str = "archive",
         session_id: str = "default",
-    ) -> int:
+    ) -> MemoryForgetPreview:
         self.forget_calls.append(
-            (owner_id, companion_id, memory_realm_id, device_id, query, session_id)
+            (owner_id, companion_id, memory_realm_id, device_id, query, action, session_id)
         )
-        removed = 1 if self.context else 0
+        if not self.context:
+            return MemoryForgetPreview(status="not_found", target=query, action="archive")
+        return MemoryForgetPreview(
+            status="preview",
+            target=query,
+            action="delete" if action == "delete" else "archive",
+            candidates=[MemoryForgetCandidate("drawer-1", self.context, 1.0)],
+            confirmation_token="token-1",
+        )
+
+    async def confirm_forget(self, *args, **kwargs) -> MemoryForgetOutcome:
         self.context = ""
-        return removed
+        return MemoryForgetOutcome(
+            status="applied",
+            action="archive",
+            request_id="request-1",
+            drawer_ids=["drawer-1"],
+        )
 
 
 async def _drain_background_tasks() -> None:

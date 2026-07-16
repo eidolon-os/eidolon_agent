@@ -397,36 +397,81 @@ async def test_write_confirmed_fact_delegates_to_publisher() -> None:
     )
 
 
-async def test_forget_returns_removed_count() -> None:
-    call = AsyncMock(return_value={"removed": 3})
+async def test_forget_preview_returns_exact_candidates_without_mutation() -> None:
+    call = AsyncMock(return_value={
+        "status": "preview",
+        "target": "old chat",
+        "action": "delete",
+        "candidates": [
+            {"drawer_id": "drawer-1", "text": "old chat", "score": 1.0}
+        ],
+        "requires_explicit_confirmation": False,
+        "confirmation_token": "token-1",
+        "expires_at": "2026-07-16T12:00:00Z",
+    })
     port, *_ = _port(session_call=call)
-    removed = await port.forget(
-        "owner-1", "companion-1", "realm-1", "device-1", "old chat", session_id="s1"
+    preview = await port.preview_forget(
+        "owner-1",
+        "companion-1",
+        "realm-1",
+        "device-1",
+        "old chat",
+        action="delete",
+        session_id="s1",
     )
-    assert removed == 3
+    assert preview.status == "preview"
+    assert preview.candidates[0].id == "drawer-1"
+    assert preview.confirmation_token == "token-1"
     name, args = call.await_args.args
-    assert name == "eidolon_memory_forget"
-    assert args["query"] == "old chat"
-    assert args["context"]["memory_space_id"] == "realm-1"
-    assert args["context"]["owner_id"] == "owner-1"
-    assert args["context"]["companion_id"] == "companion-1"
-    assert args["context"]["device_id"] == "device-1"
+    assert name == "eidolon_memory_forget_preview"
+    assert args == {"target": "old chat", "action": "delete"}
 
 
-async def test_forget_returns_zero_when_unsupported() -> None:
+async def test_forget_preview_reports_failure_without_claiming_success() -> None:
     call = AsyncMock(side_effect=RuntimeError("no such tool"))
     port, *_ = _port(session_call=call)
-    assert await port.forget("owner-1", "companion-1", "realm-1", "device-1", "x") == 0
+    preview = await port.preview_forget(
+        "owner-1", "companion-1", "realm-1", "device-1", "x"
+    )
+    assert preview.status == "failed"
 
 
-async def test_forget_skips_call_when_capability_absent() -> None:
-    # Capability negotiation: server does not advertise forget -> no round-trip.
+async def test_forget_preview_skips_call_when_capability_absent() -> None:
     call = AsyncMock(return_value={"removed": 5})
     port, session, *_ = _port(session_call=call)
     session.supports = AsyncMock(return_value=False)
-    removed = await port.forget("owner-1", "companion-1", "realm-1", "device-1", "x")
-    assert removed == 0
-    call.assert_not_awaited()  # negotiated away, not attempted-and-failed
+    preview = await port.preview_forget(
+        "owner-1", "companion-1", "realm-1", "device-1", "x"
+    )
+    assert preview.status == "unavailable"
+    call.assert_not_awaited()
+
+
+async def test_forget_confirm_preserves_request_and_terminal_status() -> None:
+    call = AsyncMock(return_value={
+        "status": "applied",
+        "request_id": "request-1",
+        "action": "delete",
+        "drawer_ids": ["drawer-1"],
+    })
+    port, *_ = _port(session_call=call)
+
+    outcome = await port.confirm_forget(
+        "owner-1",
+        "companion-1",
+        "realm-1",
+        "device-1",
+        "token-1",
+        wait_applied_seconds=3.0,
+    )
+
+    assert outcome.status == "applied"
+    assert outcome.request_id == "request-1"
+    assert outcome.drawer_ids == ["drawer-1"]
+    name, args = call.await_args.args
+    assert name == "eidolon_memory_forget_confirm"
+    assert args["confirmation_token"] == "token-1"
+    assert args["wait_applied_seconds"] == 3.0
 
 
 # ---- health / close -------------------------------------------------------

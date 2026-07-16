@@ -83,6 +83,7 @@ from eidolon_agent.domain.tools.visibility import ToolVisibilityPolicy
 
 _log = logging.getLogger(__name__)
 _MAX_FAILURES_PER_TOOL_PER_TURN = 1
+_MAX_PENDING_FORGETS = 1000
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,12 +95,22 @@ class ToolLatencyPolicy:
     slow_hint_role: str = DeltaRole.SLOW_TOOL_HINT.value
 
 
+@dataclass(frozen=True, slots=True)
+class _PendingForget:
+    query: str
+    confirmation_token: str
+    candidate_count: int
+    expires_at_monotonic: float
+
+
 class TurnEngine:
     """Per-instance Turn runner.
 
     One engine instance per AgentInstance (so tools/history are scoped).
-    Multiple concurrent Turns are supported but the engine is stateless beyond
-    its injected collaborators — concurrency is handled by the asyncio runtime.
+    Multiple concurrent Turns are supported. The only local cross-turn state is
+    a bounded-by-conversation, ten-minute privacy confirmation token; it is not
+    memory truth, is claimed before mutation, and may safely disappear on
+    restart (the user previews again).
     """
 
     def __init__(
@@ -156,6 +167,138 @@ class TurnEngine:
         self._tool_latency_policy = tool_latency_policy or ToolLatencyPolicy()
         self._companion_config = companion_config_resolver
         self._body_capability_provider = body_capability_provider
+        # Ephemeral UX state only: the memory service token remains the signed
+        # authority. A restart merely requires the user to preview again.
+        self._pending_forgets: dict[str, _PendingForget] = {}
+
+    def _prune_pending_forgets(self) -> None:
+        now = time.monotonic()
+        for conversation_id, pending in list(self._pending_forgets.items()):
+            if pending.expires_at_monotonic <= now:
+                self._pending_forgets.pop(conversation_id, None)
+        overflow = len(self._pending_forgets) - _MAX_PENDING_FORGETS
+        if overflow > 0:
+            oldest = sorted(
+                self._pending_forgets,
+                key=lambda key: self._pending_forgets[key].expires_at_monotonic,
+            )
+            for conversation_id in oldest[:overflow]:
+                self._pending_forgets.pop(conversation_id, None)
+
+    async def _preview_forget(self, ti: TurnInput) -> tuple[str, dict]:
+        if self._memory is None:
+            return (
+                "记忆服务现在不可用，我没有执行归档或删除。",
+                {"memory_status": "unavailable", "request_id": "", "candidate_count": 0},
+            )
+        query = ti.text or ""
+        action = "delete" if _requests_physical_delete(query) else "archive"
+        try:
+            preview = await self._memory.preview_forget(
+                ti.caller.owner_id,
+                ti.caller.companion_id,
+                ti.caller.memory_realm_id,
+                ti.caller.device_id,
+                query,
+                action=action,
+                session_id=ti.session_id or "default",
+            )
+        except Exception:
+            _log.exception("memory forget preview failed")
+            return (
+                "我没能完成记忆查询，因此没有执行归档或删除。",
+                {"memory_status": "failed", "request_id": "", "candidate_count": 0},
+            )
+        candidate_count = len(preview.candidates)
+        base = {
+            "memory_status": preview.status,
+            "request_id": "",
+            "candidate_count": candidate_count,
+            "forget_action": preview.action,
+        }
+        if preview.status == "not_found":
+            return "我没有找到匹配的长期记忆，没有执行任何修改。", base
+        if preview.status == "too_broad":
+            return "这个范围太宽，我没有执行修改。请说得更具体一些。", base
+        if preview.status in {"unavailable", "failed"}:
+            return "记忆查询没有成功，我没有执行归档或删除。", base
+        if not preview.confirmation_token:
+            return "记忆预览缺少有效确认凭证，我没有执行修改。", {
+                **base,
+                "memory_status": "failed",
+            }
+        if preview.action == "delete" and preview.requires_explicit_confirmation:
+            self._pending_forgets[ti.conversation_id] = _PendingForget(
+                query=query,
+                confirmation_token=preview.confirmation_token,
+                candidate_count=candidate_count,
+                expires_at_monotonic=time.monotonic() + 600.0,
+            )
+            self._prune_pending_forgets()
+            return (
+                f"我找到了 {candidate_count} 条相关记忆。删除后无法恢复，"
+                "请回复“确认删除”或“取消”。",
+                {**base, "memory_status": "confirmation_required"},
+            )
+        pending = _PendingForget(
+            query=query,
+            confirmation_token=preview.confirmation_token,
+            candidate_count=candidate_count,
+            expires_at_monotonic=time.monotonic() + 600.0,
+        )
+        return await self._confirm_forget(ti, pending)
+
+    async def _confirm_forget(
+        self,
+        ti: TurnInput,
+        pending: _PendingForget,
+    ) -> tuple[str, dict]:
+        if self._memory is None:
+            return (
+                "记忆服务现在不可用，我没有执行修改。",
+                {"memory_status": "unavailable", "request_id": "", "candidate_count": 0},
+            )
+        try:
+            outcome = await self._memory.confirm_forget(
+                ti.caller.owner_id,
+                ti.caller.companion_id,
+                ti.caller.memory_realm_id,
+                ti.caller.device_id,
+                pending.confirmation_token,
+                session_id=ti.session_id or "default",
+                wait_applied_seconds=2.0,
+            )
+        except Exception:
+            _log.exception("memory forget confirmation failed")
+            return (
+                "操作没有成功，我没有把它说成已经完成。",
+                {
+                    "memory_status": "failed",
+                    "request_id": "",
+                    "candidate_count": pending.candidate_count,
+                },
+            )
+        data = {
+            "memory_status": outcome.status,
+            "request_id": outcome.request_id,
+            "candidate_count": pending.candidate_count,
+            "forget_action": outcome.action,
+        }
+        if outcome.status == "applied":
+            try:
+                await self._history.forget_matching(
+                    conversation_id=ti.conversation_id,
+                    query=pending.query,
+                )
+            except Exception:
+                _log.exception("local history forget failed")
+            if outcome.action == "delete":
+                return "已删除你确认的相关记忆。", data
+            return "相关记忆已经归档，之后不会再用于长期回忆。", data
+        if outcome.status == "accepted":
+            operation = "删除" if outcome.action == "delete" else "归档"
+            return f"{operation}请求已经提交，仍在处理中。", data
+        return "操作没有成功，我没有修改这些记忆。", data
 
     async def run(self, ti: TurnInput) -> AsyncIterator[TurnEvent]:
         """Run a single Turn. Yields TurnEvents until DONE or ERROR."""
@@ -226,29 +369,11 @@ class TurnEngine:
                 yield TurnEvent.delta(ti.turn_id, seq.next(), refuse, time.time())
                 yield TurnEvent.done(ti.turn_id, seq.next(), TurnStatus.OK, time.time())
                 return
-            if verdict.action is SafetyAction.FORGET:
-                # Tool-direct branch: forget memory (caller-side action; we ack here).
-                removed = 0
-                if self._memory is not None:
-                    try:
-                        removed = await self._memory.forget(
-                            ti.caller.owner_id,
-                            ti.caller.companion_id,
-                            ti.caller.memory_realm_id,
-                            ti.caller.device_id,
-                            ti.text or "",
-                            session_id=ti.session_id or "default",
-                        )
-                    except Exception:
-                        _log.exception("memory forget failed")
-                try:
-                    removed += await self._history.forget_matching(
-                        conversation_id=ti.conversation_id,
-                        query=ti.text or "",
-                    )
-                except Exception:
-                    _log.exception("local history forget failed")
-                ack = "好的，我会忘掉的。"
+            self._prune_pending_forgets()
+            pending = self._pending_forgets.get(ti.conversation_id)
+            if pending is not None and _is_forget_cancel(ti.text):
+                self._pending_forgets.pop(ti.conversation_id, None)
+                ack = "好的，已取消，没有删除任何记忆。"
                 assistant_text_for_persist = ack
                 yield TurnEvent.delta(ti.turn_id, seq.next(), ack, time.time())
                 yield TurnEvent.done(
@@ -256,8 +381,37 @@ class TurnEngine:
                     seq.next(),
                     TurnStatus.OK,
                     time.time(),
-                    action="memory_forget",
-                    removed=removed,
+                    action="memory_forget_cancelled",
+                    memory_status="cancelled",
+                )
+                return
+            if pending is not None and _is_forget_confirmation(ti.text):
+                # Claim before awaiting so concurrent duplicate confirmations
+                # cannot submit the same pending operation twice.
+                self._pending_forgets.pop(ti.conversation_id, None)
+                ack, forget_data = await self._confirm_forget(ti, pending)
+                assistant_text_for_persist = ack
+                yield TurnEvent.delta(ti.turn_id, seq.next(), ack, time.time())
+                yield TurnEvent.done(
+                    ti.turn_id,
+                    seq.next(),
+                    TurnStatus.OK,
+                    time.time(),
+                    action="memory_forget_confirm",
+                    **forget_data,
+                )
+                return
+            if verdict.action is SafetyAction.FORGET:
+                ack, forget_data = await self._preview_forget(ti)
+                assistant_text_for_persist = ack
+                yield TurnEvent.delta(ti.turn_id, seq.next(), ack, time.time())
+                yield TurnEvent.done(
+                    ti.turn_id,
+                    seq.next(),
+                    TurnStatus.OK,
+                    time.time(),
+                    action="memory_forget_preview",
+                    **forget_data,
                 )
                 return
 
@@ -1240,3 +1394,36 @@ def _normalize_guard_mode(mode: str) -> str:
         return mode
     _log.warning("unknown development guard mode=%s; falling back to enabled", mode)
     return "enabled"
+
+
+def _requests_physical_delete(text: str | None) -> bool:
+    lower = (text or "").strip().lower()
+    return any(
+        marker in lower
+        for marker in (
+            "删除",
+            "删掉",
+            "彻底忘记",
+            "永久忘记",
+            "delete",
+            "erase",
+        )
+    )
+
+
+def _is_forget_confirmation(text: str | None) -> bool:
+    normalized = (text or "").strip().lower().strip("，。,.!?！？ ")
+    return normalized in {
+        "确认",
+        "确认删除",
+        "是的，删除",
+        "是的删除",
+        "全部删除",
+        "confirm",
+        "confirm delete",
+    }
+
+
+def _is_forget_cancel(text: str | None) -> bool:
+    normalized = (text or "").strip().lower().strip("，。,.!?！？ ")
+    return normalized in {"取消", "不要删除", "算了", "cancel"}

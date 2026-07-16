@@ -70,6 +70,38 @@ class MemoryRecallResult:
 
 
 @dataclass(frozen=True, slots=True)
+class MemoryForgetCandidate:
+    id: str
+    content: str
+    score: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryForgetPreview:
+    """Read-only resolution of a natural-language privacy request."""
+
+    status: Literal["preview", "not_found", "too_broad", "unavailable", "failed"]
+    target: str
+    action: Literal["archive", "delete"]
+    candidates: list[MemoryForgetCandidate] = field(default_factory=list)
+    requires_explicit_confirmation: bool = False
+    confirmation_token: str = ""
+    expires_at: str = ""
+    error: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryForgetOutcome:
+    """Terminal or accepted result of an exact-ID privacy command."""
+
+    status: Literal["accepted", "applied", "failed", "unavailable"]
+    action: Literal["archive", "delete"]
+    request_id: str = ""
+    drawer_ids: list[str] = field(default_factory=list)
+    error: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryQueryPlan:
     """How the strategy plans to query memory for a single turn."""
 

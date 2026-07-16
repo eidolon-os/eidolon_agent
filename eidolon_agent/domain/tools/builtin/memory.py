@@ -189,8 +189,11 @@ class MemoryForgetTool:
         self.schema = ToolSchema(
             name="memory_forget",
             description=(
-                "Forget memories matching a user-provided query. Use only when the user "
-                "explicitly asks to forget or delete remembered information."
+                "Archive memories matching a user-provided query so they no longer "
+                "participate in recall. Use only when the user explicitly asks to forget "
+                "remembered information. Irreversible deletion is handled by the explicit "
+                "preview/confirmation privacy flow, not this LLM tool. If the result status "
+                "is accepted, say it is still processing; only applied means completed."
             ),
             json_schema={
                 "type": "object",
@@ -222,19 +225,48 @@ class MemoryForgetTool:
                 error_code="invalid_memory_query",
                 error_message="query is required",
             )
-        removed = await self._memory.forget(
+        preview = await self._memory.preview_forget(
             ctx.caller.owner_id,
             ctx.caller.companion_id,
             ctx.caller.memory_realm_id,
             ctx.caller.device_id,
             query,
+            action="archive",
+            session_id=ctx.session_id or "default",
+        )
+        if preview.status != "preview" or not preview.confirmation_token:
+            return ToolResult(
+                call_id=call.id,
+                name=self.schema.name,
+                ok=False,
+                error_code=f"memory_forget_{preview.status}",
+                error_message=preview.error or "memory forget preview did not resolve",
+                content={
+                    "status": preview.status,
+                    "candidate_count": len(preview.candidates),
+                    "query": query,
+                },
+            )
+        outcome = await self._memory.confirm_forget(
+            ctx.caller.owner_id,
+            ctx.caller.companion_id,
+            ctx.caller.memory_realm_id,
+            ctx.caller.device_id,
+            preview.confirmation_token,
             session_id=ctx.session_id or "default",
         )
         return ToolResult(
             call_id=call.id,
             name=self.schema.name,
-            ok=True,
-            content={"removed": removed, "query": query},
+            ok=outcome.status in {"accepted", "applied"},
+            error_code=None if outcome.status in {"accepted", "applied"} else "memory_forget_failed",
+            error_message=outcome.error or None,
+            content={
+                "status": outcome.status,
+                "request_id": outcome.request_id,
+                "affected": len(outcome.drawer_ids),
+                "query": query,
+            },
         )
 
 
