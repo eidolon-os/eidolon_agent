@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from eidolon_agent.core.types.memory import (
     MemoryForgetOutcome,
@@ -98,6 +98,33 @@ class MemoryPort(Protocol):
         tags: list[str] | None = None,
     ) -> str:
         """Publish a verbatim explicit intent and return its request id."""
+        ...
+
+    async def apply_commitment(
+        self,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        promisor: str,
+        predicate: Literal["promised", "committed_to", "planned_to"],
+        action: str,
+        raw_claim: str,
+        *,
+        source_event_id: str,
+        tool_call_id: str,
+        operation: Literal["add", "update", "invalidate", "confirm"] = "confirm",
+        target_id: str | None = None,
+        beneficiaries: list[str] | None = None,
+        participants: list[str] | None = None,
+        condition: str | None = None,
+        due_at: str | None = None,
+        status: Literal[
+            "proposed", "confirmed", "fulfilled", "cancelled", "superseded"
+        ]
+        | None = None,
+        confidence: float = 0.99,
+    ) -> str:
+        """Publish an explicit Commitment lifecycle intent."""
         ...
 
     async def preview_forget(

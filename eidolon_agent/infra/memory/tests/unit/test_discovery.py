@@ -207,10 +207,26 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
         confidence=0.95,
         tags=["kg_fallback"],
     )
+    await pub.publish_commitment_intent(
+        owner_id="benchmark",
+        companion_id="test",
+        memory_realm_id="r_benchmark_default",
+        promisor="self",
+        predicate="promised",
+        action="带 companion:test 去恐龙园",
+        raw_claim="以后带你去恐龙园",
+        source_event_id="t1",
+        tool_call_id="call-commitment",
+        operation="update",
+        target_id="commitment:abc",
+        participants=["friend:小明"],
+        status="fulfilled",
+    )
 
     turn_event, turn_persistent = bus.events[0]
     cmd_event, cmd_persistent = bus.events[1]
     confirmed_event, confirmed_persistent = bus.events[2]
+    commitment_event, commitment_persistent = bus.events[3]
     assert turn_persistent is True
     assert turn_event.subject == "turns.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
     turn_payload = unwrap_memory_payload(turn_event.payload)
@@ -244,6 +260,39 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
     assert intent["attributes"]["source_instance_id"] == "test"
     assert intent["attributes"]["session_id"] == "s1"
     assert intent["attributes"]["tags"] == ["kg_fallback"]
+    assert commitment_persistent is True
+    assert commitment_event.subject == "cmds.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
+    commitment_payload = unwrap_memory_payload(commitment_event.payload)
+    commitment = commitment_payload["intent"]
+    assert commitment["intent_type"] == "commitment"
+    assert commitment["operation_hint"] == "update"
+    assert commitment["target_id"] == "commitment:abc"
+    assert commitment["subject"] == "self"
+    assert commitment["predicate"] == "promised"
+    assert commitment["object"] == "带 companion:test 去恐龙园"
+    assert commitment["attributes"] == {
+        "participants": ["friend:小明"],
+        "status": "fulfilled",
+    }
+
+
+@pytest.mark.asyncio
+async def test_commitment_publisher_requires_target_for_update():
+    pub = MemoryNatsPublisher(event_bus=object())
+
+    with pytest.raises(ValueError, match="requires target_id"):
+        await pub.publish_commitment_intent(
+            owner_id="benchmark",
+            companion_id="test",
+            memory_realm_id="r_benchmark_default",
+            promisor="self",
+            predicate="promised",
+            action="带 companion:test 去恐龙园",
+            raw_claim="补充一个朋友",
+            source_event_id="t1",
+            tool_call_id="call-commitment",
+            operation="update",
+        )
 
 
 def test_mcp_decode_prefers_structured_content_and_unwraps_fastmcp_result():

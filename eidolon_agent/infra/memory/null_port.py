@@ -99,6 +99,29 @@ class NullMemoryPort:
     ) -> None:
         return None
 
+    async def apply_commitment(
+        self,
+        owner_id,
+        companion_id,
+        memory_realm_id,
+        promisor,
+        predicate,
+        action,
+        raw_claim,
+        *,
+        source_event_id,
+        tool_call_id,
+        operation="confirm",
+        target_id=None,
+        beneficiaries=None,
+        participants=None,
+        condition=None,
+        due_at=None,
+        status=None,
+        confidence=0.99,
+    ) -> str:
+        return ""
+
     async def preview_forget(
         self,
         owner_id: str | None,

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from datetime import datetime, timezone
+from typing import Literal
 
 from eidolon_sdk.memory import (
     ConversationTurnPayload,
@@ -185,6 +187,97 @@ class MemoryNatsPublisher:
             issued_at=now,
             issuer="agent",
             intent=intent,
+        )
+        return await self._publish_intent(
+            payload,
+            memory_space_id=memory_space_id,
+            source_event_id=source_event_id,
+        )
+
+    async def publish_commitment_intent(
+        self,
+        *,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        promisor: str,
+        predicate: Literal["promised", "committed_to", "planned_to"],
+        action: str,
+        raw_claim: str,
+        source_event_id: str,
+        tool_call_id: str,
+        operation: Literal["add", "update", "invalidate", "confirm"] = "confirm",
+        target_id: str | None = None,
+        beneficiaries: list[str] | None = None,
+        participants: list[str] | None = None,
+        condition: str | None = None,
+        due_at: str | None = None,
+        status: Literal[
+            "proposed", "confirmed", "fulfilled", "cancelled", "superseded"
+        ]
+        | None = None,
+        confidence: float = 0.99,
+    ) -> str:
+        """Publish one explicit Commitment lifecycle intent over the command bus."""
+        if predicate not in {"promised", "committed_to", "planned_to"}:
+            raise ValueError("unsupported commitment predicate")
+        if target_id is None and operation not in {"add", "confirm"}:
+            raise ValueError("commitment update requires target_id")
+        memory_space_id = build_memory_space_id(memory_realm_id=memory_realm_id)
+        attributes: dict[str, object] = {}
+        if beneficiaries is not None:
+            attributes["beneficiaries"] = beneficiaries
+        if participants is not None:
+            attributes["participants"] = participants
+        if condition is not None:
+            attributes["condition"] = condition
+        if due_at is not None:
+            attributes["due_at"] = due_at
+        if status is not None:
+            attributes["status"] = status
+        identity_payload = json.dumps(
+            {
+                "target_id": target_id,
+                "promisor": promisor,
+                "predicate": predicate,
+                "action": action,
+                "operation": operation,
+                "raw_claim": raw_claim,
+                "attributes": attributes,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        intent_id = _explicit_intent_id(
+            memory_space_id,
+            source_event_id,
+            tool_call_id,
+            identity_payload,
+        )
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        payload = MemoryIntentCommand(
+            request_id=intent_id.removeprefix("intent:"),
+            memory_space_id=memory_space_id,
+            issued_at=now,
+            issuer="agent",
+            intent=MemoryIntent(
+                intent_id=intent_id,
+                memory_space_id=memory_space_id,
+                source_event_id=source_event_id,
+                authority="explicit_user",
+                intent_type="commitment",
+                raw_claim=raw_claim,
+                operation_hint=operation,
+                target_id=target_id,
+                subject=promisor,
+                predicate=predicate,
+                object=action,
+                occurred_at=now,
+                tool_call_id=tool_call_id,
+                confidence=confidence,
+                attributes=attributes,
+            ),
         )
         return await self._publish_intent(
             payload,

@@ -41,6 +41,9 @@ def _port(*, session_call=None, session_close=None, pub_methods=None):
     pub.publish_verbatim_intent = pub_methods.get(
         "publish_verbatim_intent", AsyncMock()
     )
+    pub.publish_commitment_intent = pub_methods.get(
+        "publish_commitment_intent", AsyncMock()
+    )
 
     return EidolonMemoryPort(pool=pool, publisher=pub), session, pool, pub
 
@@ -410,6 +413,49 @@ async def test_write_confirmed_fact_delegates_to_publisher() -> None:
         tool_call_id="call-1",
         confidence=0.95,
         tags=["kg_fallback"],
+    )
+
+
+async def test_apply_commitment_delegates_to_publisher() -> None:
+    port, _, _, pub = _port()
+    pub.publish_commitment_intent.return_value = "request-commitment"
+
+    request_id = await port.apply_commitment(
+        "owner-1",
+        "companion-1",
+        "realm-1",
+        "self",
+        "promised",
+        "带 companion-1 去恐龙园",
+        "以后带你去恐龙园",
+        source_event_id="turn-1",
+        tool_call_id="call-1",
+        operation="update",
+        target_id="commitment:abc",
+        participants=["friend:小明"],
+        status="fulfilled",
+        confidence=1.0,
+    )
+
+    assert request_id == "request-commitment"
+    pub.publish_commitment_intent.assert_awaited_once_with(
+        owner_id="owner-1",
+        companion_id="companion-1",
+        memory_realm_id="realm-1",
+        promisor="self",
+        predicate="promised",
+        action="带 companion-1 去恐龙园",
+        raw_claim="以后带你去恐龙园",
+        source_event_id="turn-1",
+        tool_call_id="call-1",
+        operation="update",
+        target_id="commitment:abc",
+        beneficiaries=None,
+        participants=["friend:小明"],
+        condition=None,
+        due_at=None,
+        status="fulfilled",
+        confidence=1.0,
     )
 
 
