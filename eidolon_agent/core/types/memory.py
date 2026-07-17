@@ -70,6 +70,32 @@ class MemoryRecallResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ActiveCommitment:
+    """One current Realm-bound commitment exposed to companion context."""
+
+    commitment_id: str
+    promisor: str
+    predicate: Literal["promised", "committed_to", "planned_to"]
+    action: str
+    status: Literal["proposed", "confirmed"]
+    beneficiaries: tuple[str, ...] = ()
+    participants: tuple[str, ...] = ()
+    condition: str | None = None
+    due_at: str | None = None
+    revision: int = 1
+    updated_at: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveCommitmentReadResult:
+    """Bounded product read result; terminal commitments are never included."""
+
+    commitments: list[ActiveCommitment] = field(default_factory=list)
+    degraded: bool = False
+    degraded_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryForgetCandidate:
     id: str
     content: str

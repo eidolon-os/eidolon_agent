@@ -15,6 +15,7 @@ class ContextSegmentKind(str, Enum):
     PERSONA_STATE = "persona_state"
     REALTIME = "realtime"
     MEMORY = "memory"
+    COMMITMENT = "commitment"
     SUMMARY = "summary"
     HISTORY = "history"
     CURRENT_USER = "current_user"
@@ -33,6 +34,7 @@ _SEGMENT_VOLATILITY: dict[ContextSegmentKind, str] = {
     ContextSegmentKind.HISTORY: "append_only",
     ContextSegmentKind.SUMMARY: "volatile",
     ContextSegmentKind.MEMORY: "volatile",
+    ContextSegmentKind.COMMITMENT: "volatile",
     ContextSegmentKind.REALTIME: "volatile",
     ContextSegmentKind.CURRENT_USER: "current",
 }

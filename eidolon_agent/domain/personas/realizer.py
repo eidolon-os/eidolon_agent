@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from eidolon_sdk.biz.persona import PersonaGenome
 
+from eidolon_agent.core.types.memory import ActiveCommitment
 from eidolon_agent.domain.personas.types import (
     AdaptedMemoryContext,
     PersonaRuntimeState,
@@ -58,6 +59,32 @@ class PersonaRealizer:
             evidence_refs=memory.evidence_refs,
             debug_trace=(f"realized modality={modality}",),
         )
+
+    def realize_commitment_context(
+        self,
+        commitments: list[ActiveCommitment],
+    ) -> str:
+        """Render bounded active Commitment records as relationship context."""
+        lines: list[str] = []
+        for record in commitments:
+            if record.status not in {"proposed", "confirmed"}:
+                continue
+            parts = [
+                f"id={record.commitment_id}",
+                f"status={record.status}",
+                f"承诺方={record.promisor}",
+                f"内容={record.action}",
+            ]
+            if record.beneficiaries:
+                parts.append("受益人=" + "、".join(record.beneficiaries))
+            if record.participants:
+                parts.append("参与者=" + "、".join(record.participants))
+            if record.condition:
+                parts.append("条件=" + record.condition)
+            if record.due_at:
+                parts.append("到期时间=" + record.due_at)
+            lines.append("- " + "；".join(parts))
+        return "\n".join(lines)
 
 
 def _identity_block(genome: PersonaGenome) -> str:

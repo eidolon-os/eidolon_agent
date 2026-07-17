@@ -341,6 +341,84 @@ async def test_recall_context_returns_route_reason_on_unavailable_session() -> N
     assert result.degraded_reason == "no_memory_route"
 
 
+# ---- active commitments --------------------------------------------------
+
+
+async def test_active_commitments_are_realm_bound_bounded_and_active_only() -> None:
+    records = [
+        {
+            "commitment_id": f"commitment-{idx}",
+            "memory_space_id": "realm-1",
+            "promisor": "小忆",
+            "predicate": "promised",
+            "action": f"陪 owner 散步 {idx}",
+            "status": "confirmed",
+            "beneficiaries": ["owner"],
+            "participants": ["铁锤"],
+            "condition": "天气合适",
+            "due_at": "2026-07-20T10:00:00+08:00",
+            "revision": idx + 1,
+            "updated_at": "2026-07-17T10:00:00+08:00",
+        }
+        for idx in range(12)
+    ]
+    records.insert(
+        1,
+        {
+            **records[0],
+            "commitment_id": "terminal",
+            "status": "fulfilled",
+        },
+    )
+    records.insert(
+        2,
+        {
+            **records[0],
+            "commitment_id": "other-realm",
+            "memory_space_id": "realm-2",
+        },
+    )
+    call = AsyncMock(
+        return_value={"memory_space_id": "realm-1", "commitments": records}
+    )
+    port, _, pool, _ = _port(session_call=call)
+
+    result = await port.read_active_commitments(
+        "owner-1",
+        companion_id="companion-1",
+        memory_realm_id="realm-1",
+        device_id="device-1",
+        session_id="s1",
+        limit=99,
+    )
+
+    pool.session_for.assert_awaited_once_with("realm-1")
+    name, args = call.await_args.args
+    assert name == "eidolon_memory_commitments"
+    assert args == {"include_terminal": False, "limit": 10}
+    assert result.degraded is False
+    assert len(result.commitments) == 10
+    assert all(item.status == "confirmed" for item in result.commitments)
+    assert all(item.commitment_id not in {"terminal", "other-realm"} for item in result.commitments)
+    assert result.commitments[0].participants == ("铁锤",)
+
+
+async def test_active_commitments_fail_closed_on_response_realm_mismatch() -> None:
+    call = AsyncMock(
+        return_value={"memory_space_id": "realm-2", "commitments": []}
+    )
+    port, *_ = _port(session_call=call)
+
+    result = await port.read_active_commitments(
+        "owner-1",
+        memory_realm_id="realm-1",
+    )
+
+    assert result.commitments == []
+    assert result.degraded is True
+    assert result.degraded_reason == "realm_mismatch"
+
+
 # ---- write_turn / assert_fact / forget ------------------------------------
 
 

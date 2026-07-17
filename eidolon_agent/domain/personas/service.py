@@ -8,7 +8,7 @@ from eidolon_sdk.biz.persona import (
 )
 
 from eidolon_agent.core.errors import ValidationError
-from eidolon_agent.core.types.memory import MemoryHit
+from eidolon_agent.core.types.memory import ActiveCommitment, MemoryHit
 from eidolon_agent.domain.personas.memory_adapter import PersonaMemoryAdapter
 from eidolon_agent.domain.personas.ports import PersonaGenomeStore
 from eidolon_agent.domain.personas.realizer import PersonaRealizer
@@ -137,6 +137,13 @@ class PersonasService:
             realtime=realtime,
             modality=modality,
         )
+
+    def realize_commitment_context(
+        self,
+        commitments: list[ActiveCommitment],
+    ) -> str:
+        """Render product-approved active commitments without mutating persona."""
+        return self._realizer.realize_commitment_context(commitments)
 
     async def record_observation(self, event: PersonaObservationEvent) -> None:
         await self._store.record_observation(event)

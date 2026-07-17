@@ -12,10 +12,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from eidolon_agent.core.types.memory import MemoryRecallResult
+from eidolon_agent.core.types.memory import (
+    ActiveCommitment,
+    ActiveCommitmentReadResult,
+    MemoryRecallResult,
+)
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.history.manager import HistoryManager
+from eidolon_agent.domain.personas.realizer import PersonaRealizer
 from tests.helpers import make_turn_input
 
 pytestmark = pytest.mark.functional
@@ -26,11 +31,15 @@ class _StubPersonas:
 
     def __init__(self, prompt: str = "[PERSONA]\nyou are an assistant") -> None:
         self._prompt = prompt
+        self._realizer = PersonaRealizer()
         self.calls: list[dict] = []
 
     async def realize_context(self, **kwargs):
         self.calls.append(kwargs)
         return SimpleNamespace(system_prompt=self._prompt, debug_trace=())
+
+    def realize_commitment_context(self, commitments):
+        return self._realizer.realize_commitment_context(commitments)
 
 
 class _StubMemory:
@@ -314,6 +323,94 @@ async def test_memory_recall_uses_turn_identity_as_companion_partition() -> None
     assert call["memory_realm_id"] == "realm-test"
     assert call["device_id"] == "device-test"
     assert call["session_id"] == "s1"
+
+
+async def test_active_commitments_route_as_bounded_non_actionable_context() -> None:
+    class _CommitmentMemory(_StubMemory):
+        def __init__(self) -> None:
+            super().__init__(formatted="")
+            self.commitment_calls: list[dict] = []
+
+        async def read_active_commitments(self, **kwargs):
+            self.commitment_calls.append(kwargs)
+            return ActiveCommitmentReadResult(
+                commitments=[
+                    ActiveCommitment(
+                        commitment_id="commitment-1",
+                        promisor="小忆",
+                        predicate="promised",
+                        action="周六陪 owner 去恐龙园",
+                        status="confirmed",
+                        participants=("朋友甲", "朋友乙"),
+                        due_at="2026-07-18T09:00:00+08:00",
+                    )
+                ]
+            )
+
+    memory = _CommitmentMemory()
+    ti = make_turn_input("今天聊点别的")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=memory,
+        active_commitment_limit=3,
+        active_commitment_timeout_s=0.15,
+    )
+
+    system = (await compiler.compile(ti))[0].content
+
+    assert "[ACTIVE COMMITMENTS]" in system
+    assert "actionability=must_not_execute" in system
+    assert "周六陪 owner 去恐龙园" in system
+    assert "Do not execute, fulfil, cancel, or modify" in system
+    call = memory.commitment_calls[0]
+    assert call["owner_id"] == "alice"
+    assert call["companion_id"] == "companion-test"
+    assert call["memory_realm_id"] == "realm-test"
+    assert call["device_id"] == "device-test"
+    assert call["session_id"] == "s1"
+    assert call["limit"] == 3
+    assert call["timeout_s"] == pytest.approx(0.15)
+    assert ti.metadata["commitment_context_trace"] == {
+        "attempted": True,
+        "skipped_reason": None,
+        "degraded": False,
+        "degraded_reason": None,
+        "elapsed_ms": ti.metadata["commitment_context_trace"]["elapsed_ms"],
+        "timeout_ms": 150,
+        "limit": 3,
+        "commitment_ids": ["commitment-1"],
+        "count": 1,
+        "context_injected": True,
+    }
+    assert any(
+        segment["kind"] == "commitment"
+        for segment in ti.metadata["context_ledger"]["segments"]
+    )
+
+
+async def test_empty_or_degraded_commitments_are_not_injected() -> None:
+    class _UnavailableCommitmentMemory(_StubMemory):
+        async def read_active_commitments(self, **_kwargs):
+            return ActiveCommitmentReadResult(
+                degraded=True,
+                degraded_reason="timeout",
+            )
+
+    ti = make_turn_input("继续聊")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=_UnavailableCommitmentMemory(),
+    )
+
+    system = (await compiler.compile(ti))[0].content
+
+    assert "[ACTIVE COMMITMENTS]" not in system
+    assert ti.metadata["commitment_context_trace"]["degraded"] is True
+    assert ti.metadata["commitment_context_trace"]["context_injected"] is False
 
 
 async def test_ordinary_memory_recall_uses_soft_timeout() -> None:

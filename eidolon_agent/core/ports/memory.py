@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from typing import Literal, Protocol, runtime_checkable
 
 from eidolon_agent.core.types.memory import (
+    ActiveCommitmentReadResult,
     MemoryForgetOutcome,
     MemoryForgetPreview,
     MemoryHit,
@@ -49,6 +50,20 @@ class MemoryPort(Protocol):
         session_id: str | None = None,
     ) -> MemoryRecallResult:
         """Returns prompt-ready recall context plus diagnostics."""
+        ...
+
+    async def read_active_commitments(
+        self,
+        owner_id: str | None,
+        *,
+        memory_realm_id: str,
+        companion_id: str | None = None,
+        device_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 5,
+        timeout_s: float = 0.2,
+    ) -> ActiveCommitmentReadResult:
+        """Read a bounded current Commitment set from the caller's Realm."""
         ...
 
     async def write_turn(

@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from eidolon_agent.core.types.memory import ActiveCommitmentReadResult
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from tests.helpers import make_turn_input
@@ -32,6 +33,10 @@ class _SlowMemory:
     async def recall_context(self, **_kwargs):
         await asyncio.sleep(_DELAY)
         return "prior", [], False
+
+    async def read_active_commitments(self, **_kwargs):
+        await asyncio.sleep(_DELAY)
+        return ActiveCommitmentReadResult()
 
 
 class _SlowHistory:

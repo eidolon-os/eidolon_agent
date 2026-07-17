@@ -9,6 +9,7 @@ protocol so the brain can run end to end with no memory service.
 from __future__ import annotations
 
 from eidolon_agent.core.types.memory import (
+    ActiveCommitmentReadResult,
     MemoryForgetOutcome,
     MemoryForgetPreview,
     MemoryHit,
@@ -52,6 +53,24 @@ class NullMemoryPort:
         session_id: str | None = None,
     ) -> MemoryRecallResult:
         return MemoryRecallResult(degraded=True, degraded_reason=_DEGRADED_REASON)
+
+    async def read_active_commitments(
+        self,
+        owner_id: str | None,
+        *,
+        memory_realm_id: str,
+        companion_id: str | None = None,
+        device_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 5,
+        timeout_s: float = 0.2,
+    ) -> ActiveCommitmentReadResult:
+        del owner_id, memory_realm_id, companion_id, device_id, session_id
+        del limit, timeout_s
+        return ActiveCommitmentReadResult(
+            degraded=True,
+            degraded_reason=_DEGRADED_REASON,
+        )
 
     async def write_turn(
         self,

@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from eidolon_agent.core.errors import MemoryUnavailableError
 from eidolon_agent.core.types.identity import build_memory_actor_context
 from eidolon_agent.core.types.memory import (
+    ActiveCommitment,
+    ActiveCommitmentReadResult,
     MemoryForgetCandidate,
     MemoryForgetOutcome,
     MemoryForgetPreview,
@@ -22,6 +24,8 @@ from eidolon_agent.infra.memory.mcp_client import McpClientPool
 from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
 
 _log = logging.getLogger(__name__)
+
+_MAX_ACTIVE_COMMITMENTS = 10
 
 
 class EidolonMemoryPort:
@@ -199,6 +203,99 @@ class EidolonMemoryPort:
             hits=hits,
             kg_triples=kg_triples,
             degraded=False,
+        )
+
+    async def read_active_commitments(
+        self,
+        owner_id: str | None,
+        *,
+        memory_realm_id: str,
+        companion_id: str | None = None,
+        device_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 5,
+        timeout_s: float = 0.2,
+    ) -> ActiveCommitmentReadResult:
+        """Read a small active-only set from the Realm-bound MCP endpoint."""
+        ctx = build_memory_actor_context(
+            owner_id=owner_id,
+            companion_id=companion_id,
+            memory_realm_id=memory_realm_id,
+            device_id=device_id,
+            session_id=session_id,
+        )
+        memory_space_id = ctx.memory_space_id
+        bounded_limit = max(1, min(int(limit), _MAX_ACTIVE_COMMITMENTS))
+        deadline = asyncio.get_running_loop().time() + timeout_s
+        try:
+            session = await self._pool.session_for(memory_space_id)
+        except MemoryUnavailableError as exc:
+            return ActiveCommitmentReadResult(
+                degraded=True,
+                degraded_reason=_memory_unavailable_reason(exc),
+            )
+
+        for attempt in range(2):
+            try:
+                raw = await asyncio.wait_for(
+                    session.call_tool(
+                        "eidolon_memory_commitments",
+                        {"include_terminal": False, "limit": bounded_limit},
+                    ),
+                    timeout=_remaining_timeout(deadline),
+                )
+                response_realm = str(raw.get("memory_space_id") or "")
+                if response_realm != memory_space_id:
+                    _log.error(
+                        "commitment read Realm mismatch expected=%s actual=%s",
+                        memory_space_id,
+                        response_realm,
+                    )
+                    return ActiveCommitmentReadResult(
+                        degraded=True,
+                        degraded_reason="realm_mismatch",
+                    )
+                return ActiveCommitmentReadResult(
+                    commitments=_records_to_active_commitments(
+                        raw.get("commitments") or [],
+                        memory_space_id=memory_space_id,
+                        limit=bounded_limit,
+                    )
+                )
+            except TimeoutError:
+                await self._pool.drop_session(memory_space_id, session=session)
+                return ActiveCommitmentReadResult(
+                    degraded=True,
+                    degraded_reason="timeout",
+                )
+            except MemoryUnavailableError as exc:
+                reason = _memory_unavailable_reason(exc)
+                await self._pool.drop_session(memory_space_id, session=session)
+                if attempt == 0 and _remaining_timeout(deadline) > 0:
+                    try:
+                        session = await self._pool.session_for(memory_space_id)
+                    except MemoryUnavailableError as retry_exc:
+                        return ActiveCommitmentReadResult(
+                            degraded=True,
+                            degraded_reason=_memory_unavailable_reason(retry_exc),
+                        )
+                    continue
+                return ActiveCommitmentReadResult(
+                    degraded=True,
+                    degraded_reason=reason,
+                )
+            except Exception:
+                _log.exception(
+                    "active commitment read failed for memory_space=%s",
+                    memory_space_id,
+                )
+                return ActiveCommitmentReadResult(
+                    degraded=True,
+                    degraded_reason="error",
+                )
+        return ActiveCommitmentReadResult(
+            degraded=True,
+            degraded_reason="memory_unavailable",
         )
 
     async def write_turn(
@@ -483,6 +580,67 @@ def _records_to_hits(records: list[dict]) -> list[MemoryHit]:
         except (ValueError, TypeError):
             continue
     return hits
+
+
+def _records_to_active_commitments(
+    records: list[dict],
+    *,
+    memory_space_id: str,
+    limit: int,
+) -> list[ActiveCommitment]:
+    commitments: list[ActiveCommitment] = []
+    for row in records:
+        if len(commitments) >= limit:
+            break
+        if not isinstance(row, dict):
+            continue
+        try:
+            if str(row.get("memory_space_id") or "") != memory_space_id:
+                continue
+            status = str(row.get("status") or "")
+            predicate = str(row.get("predicate") or "")
+            if status not in {"proposed", "confirmed"}:
+                continue
+            if predicate not in {"promised", "committed_to", "planned_to"}:
+                continue
+            commitment_id = str(row.get("commitment_id") or "").strip()
+            promisor = str(row.get("promisor") or "").strip()
+            action = str(row.get("action") or "").strip()
+            if not commitment_id or not promisor or not action:
+                continue
+            commitments.append(
+                ActiveCommitment(
+                    commitment_id=commitment_id,
+                    promisor=promisor,
+                    predicate=predicate,
+                    action=action,
+                    status=status,
+                    beneficiaries=_string_tuple(row.get("beneficiaries")),
+                    participants=_string_tuple(row.get("participants")),
+                    condition=_optional_string(row.get("condition")),
+                    due_at=_optional_string(row.get("due_at")),
+                    revision=max(1, int(row.get("revision") or 1)),
+                    updated_at=str(row.get("updated_at") or ""),
+                )
+            )
+        except (TypeError, ValueError):
+            continue
+    return commitments
+
+
+def _string_tuple(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(
+        cleaned
+        for item in value
+        if (cleaned := str(item).strip())
+    )
+
+
+def _optional_string(value: object) -> str | None:
+    cleaned = str(value or "").strip()
+    return cleaned or None
 
 
 def _parse_memory_datetime(value: object) -> datetime | None:
