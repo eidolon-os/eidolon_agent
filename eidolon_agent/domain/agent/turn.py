@@ -74,7 +74,7 @@ from eidolon_agent.domain.harness import RealtimeAgentHarness
 from eidolon_agent.domain.history.fanout import HistoryFanout
 from eidolon_agent.domain.history.manager import HistoryManager
 from eidolon_agent.domain.runtime_policy import TurnRuntimePolicy
-from eidolon_agent.domain.tools.body_capability_provider import BodyCapabilityToolProvider
+from eidolon_agent.domain.tools.body_capability_provider import RuntimeCapabilityToolProvider
 from eidolon_agent.domain.tools.builtin.submit_long_task import (
     DELEGATE_TO_COWORKER_TOOL,
 )
@@ -140,7 +140,7 @@ class TurnEngine:
         background_tasks: BackgroundTaskRunner | None = None,
         tool_latency_policy: ToolLatencyPolicy | None = None,
         companion_config_resolver: CompanionConfigResolver | None = None,
-        body_capability_provider: BodyCapabilityToolProvider | None = None,
+        body_capability_provider: RuntimeCapabilityToolProvider | None = None,
     ) -> None:
         self._compiler = compiler
         self._llm = llm
@@ -458,7 +458,11 @@ class TurnEngine:
             cfg = await self._resolve_companion_config(ti)
 
             # ---- LLM stream (with tool loop) -------------------------------
-            tools, extra_tools = await self._tool_schemas(ti, cfg)
+            tools, extra_tools, runtime_catalog = await self._tool_schemas(ti, cfg)
+            if runtime_catalog and messages and messages[0].role is MessageRole.SYSTEM:
+                messages[0] = messages[0].with_content(
+                    messages[0].content + "\n\n" + runtime_catalog
+                )
             tool_budget = self._harness.tool_schema_budget(tools)
             ti.metadata.setdefault("development_guards", {})[
                 "tool_schema_budget"
@@ -950,7 +954,7 @@ class TurnEngine:
 
     async def _tool_schemas(
         self, ti: TurnInput, cfg: CompanionRuntimeConfig
-    ) -> tuple[list, dict[str, ToolPort]]:
+    ) -> tuple[list, dict[str, ToolPort], str]:
         """Per-turn, caller-aware tool assembly (the F1/F2 junction).
 
         Filters the global static tools by this companion's allow/deny policy,
@@ -965,8 +969,11 @@ class TurnEngine:
             deny=cfg.tool_deny,
         )
         extra_tools: dict[str, ToolPort] = {}
+        runtime_catalog = ""
         if cfg.allow_body_control and self._body_capability_provider is not None:
-            cap_schemas, cap_ports = await self._body_capability_provider.assemble(ti.caller)
+            cap_schemas, cap_ports, runtime_catalog = (
+                await self._body_capability_provider.assemble(ti.caller)
+            )
             # deny applies to synthetic tools too: drop from BOTH schemas and overlay
             # so a denied capability can neither be seen nor actuated.
             if cfg.tool_deny:
@@ -975,7 +982,9 @@ class TurnEngine:
             schemas = schemas + cap_schemas
             extra_tools.update(cap_ports)
         visible = self._harness.visible_tool_schemas(schemas)
-        return visible, extra_tools
+        if not any(schema.name == "invoke_device_capability" for schema in visible):
+            runtime_catalog = ""
+        return visible, extra_tools, runtime_catalog
 
     async def _persist_turn(
         self,

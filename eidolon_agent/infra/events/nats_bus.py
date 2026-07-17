@@ -210,6 +210,11 @@ class NatsKVStore:
             return None
         return entry.value
 
+    async def clear(self) -> None:
+        await self._bus.connect()
+        assert self._bus._js is not None
+        await self._bus._js.purge_stream(f"KV_{self.bucket}")
+
     async def put(self, key: str, value: bytes, *, ttl_s: int | None = None) -> int:
         kv = await self._bind()
         # NATS KV TTL applies bucket-wide, not per-key in standard nats-py; we

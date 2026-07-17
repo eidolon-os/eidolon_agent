@@ -169,6 +169,13 @@ class InMemoryKVStore:
                 return None
             return entry.value
 
+    async def clear(self) -> None:
+        async with self._lock:
+            keys = list(self._store)
+            self._store.clear()
+            for key in keys:
+                await self._notify(key, None, -1)
+
     async def put(self, key: str, value: bytes, *, ttl_s: int | None = None) -> int:
         async with self._lock:
             existing = self._store.get(key)

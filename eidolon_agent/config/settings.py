@@ -89,6 +89,7 @@ class NatsSettings(BaseModel):
             "PAIRING_CODES",
             "DEVICE_REVOCATIONS",
             "EIDOLON_TOOL_IDEMP",
+            "EIDOLON_RUNTIME_DEVICES",
         ]
     )
 

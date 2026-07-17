@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from eidolon_sdk.biz.body import (
-    BODY_OP_DEVICE_REBOOT,
-    BodyCapability,
     BodyCommandResult,
     BodyDevice,
+    validate_capability_arguments,
 )
 
 from eidolon_agent.domain.body_control.errors import (
@@ -77,13 +74,9 @@ class BodyControlService:
         capability = device.capability(op)
         if capability is None:
             raise BodyCapabilityUnsupported(f"{device.name or device.device_id} does not support {op}")
-        if capability.requires_confirmation and not confirmed:
-            raise BodyCommandRejected(f"{op} requires explicit confirmation")
-        if op == BODY_OP_DEVICE_REBOOT and not confirmed:
-            raise BodyCommandRejected("device.reboot requires explicit confirmation")
-        if capability.requires_online and device.status in {"offline", "unknown"}:
+        if device.status in {"offline", "unknown"}:
             raise BodyDeviceOffline(f"{device.name or device.device_id} is not online")
-        schema_error = _validate_payload_schema(capability, payload)
+        schema_error = validate_capability_arguments(capability.input_schema, payload)
         if schema_error:
             raise BodyCommandRejected(schema_error)
 
@@ -122,40 +115,6 @@ class BodyControlService:
         if result.device_id not in allowed_device_ids:
             raise BodyCommandRejected("command does not belong to a visible body device")
         return result
-
-
-def _validate_payload_schema(capability: BodyCapability, payload: dict[str, Any]) -> str | None:
-    schema = capability.input_schema or {}
-    if not schema:
-        return None
-    if schema.get("type") == "object" and not isinstance(payload, dict):
-        return f"{capability.name} payload must be an object"
-    required = schema.get("required") or []
-    missing = [key for key in required if key not in payload]
-    if missing:
-        return f"{capability.name} payload missing required: {', '.join(missing)}"
-    properties = schema.get("properties") or {}
-    for key, prop_schema in properties.items():
-        if key not in payload or not isinstance(prop_schema, dict):
-            continue
-        expected = prop_schema.get("type")
-        if expected is None:
-            continue
-        if not _matches_json_type(payload[key], expected):
-            return f"{capability.name} payload field {key!r} must be {expected}"
-    return None
-
-
-def _matches_json_type(value: Any, expected: str) -> bool:
-    return {
-        "string": isinstance(value, str),
-        "integer": isinstance(value, int) and not isinstance(value, bool),
-        "number": isinstance(value, (int, float)) and not isinstance(value, bool),
-        "boolean": isinstance(value, bool),
-        "object": isinstance(value, dict),
-        "array": isinstance(value, list),
-    }.get(expected, True)
-
 
 def _validate_choice(value: str, allowed: set[str], field: str) -> str:
     normalized = str(value or "").strip()

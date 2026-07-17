@@ -40,9 +40,8 @@ from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.agent.turn import ToolLatencyPolicy, TurnEngine
 from eidolon_agent.domain.body_control import (
     BodyControlService,
-    CachedBodyDeviceStore,
-    EidolonDataBodyDeviceStore,
     HubBodyCommandClient,
+    NatsRuntimeBodyDeviceStore,
 )
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
@@ -52,14 +51,11 @@ from eidolon_agent.domain.long_tasks import LongTaskResultSummarizer
 from eidolon_agent.domain.personas import PersonasService, PersonaVoice
 from eidolon_agent.domain.signals import SignalBus
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
-from eidolon_agent.domain.tools.body_capability_provider import BodyCapabilityToolProvider
+from eidolon_agent.domain.tools.body_capability_provider import RuntimeCapabilityToolProvider
 from eidolon_agent.domain.tools.builtin import (
-    ControlBodyDeviceTool,
     EmitEventTool,
-    GetBodyCommandStatusTool,
     GetTimeTool,
     GetWeatherTool,
-    ListBodyDevicesTool,
     MemoryAssertFactTool,
     MemoryForgetTool,
     MemorySearchTool,
@@ -243,13 +239,10 @@ async def build_application(
             service_token=settings.body_control.service_token,
             timeout_s=settings.body_control.timeout_s,
         )
-        body_device_store = CachedBodyDeviceStore(
-            EidolonDataBodyDeviceStore(
-                data_store,
-                runtime_client=body_command_client,
-            ),
-            ttl_s=settings.body_control.cache_ttl_s,
-        )
+        device_blackboard_kv = container.kv_buckets.get("EIDOLON_RUNTIME_DEVICES")
+        if device_blackboard_kv is None:
+            raise RuntimeError("EIDOLON_RUNTIME_DEVICES KV bucket is not configured")
+        body_device_store = NatsRuntimeBodyDeviceStore(device_blackboard_kv)
         body_control = BodyControlService(
             device_store=body_device_store,
             command_port=body_command_client,
@@ -257,9 +250,6 @@ async def build_application(
         container.extras["body_device_store"] = body_device_store
         container.extras["body_control_http_client"] = body_http_client
         container.extras["body_control"] = body_control
-    tool_registry.register(ListBodyDevicesTool(body_control))
-    tool_registry.register(ControlBodyDeviceTool(body_control))
-    tool_registry.register(GetBodyCommandStatusTool(body_control))
     tool_registry.register(EmitEventTool(event_bus=container.event_bus))
     delegate_tool = SubmitLongTaskTool(
         long_task_submitter=long_task_worker,
@@ -279,11 +269,9 @@ async def build_application(
     # Per-companion operational config (model routing / tool allow-deny / policy),
     # read from companions.runtime_config_json, resolved per-turn off a TTL cache.
     container.extras["companion_config_resolver"] = CompanionConfigResolver(data_store)
-    # Device-declared capabilities → per-companion synthetic tools (reads the
-    # 3s-TTL body device store; None body_control degrades to no capability tools).
-    container.extras["body_capability_tool_provider"] = BodyCapabilityToolProvider(
-        container.extras.get("body_control"),
-        budget_tokens=settings.turn.tool_schema_budget_tokens,
+    # Hub blackboard → caller-scoped online catalog + one stable invocation tool.
+    container.extras["body_capability_tool_provider"] = RuntimeCapabilityToolProvider(
+        container.extras.get("body_control")
     )
 
     # 8. Runtime token verification ------------------------------------------

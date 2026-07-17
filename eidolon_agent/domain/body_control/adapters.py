@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+import logging
+from datetime import datetime
 from time import monotonic
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 from eidolon_sdk.biz.body import (
+    BodyCapability,
     BodyCommandResult,
     BodyDevice,
-    capabilities_from_json,
+    OwnerDeviceBlackboardSnapshot,
+    owner_device_blackboard_key,
 )
 
 from eidolon_agent.domain.body_control.errors import (
@@ -22,11 +25,18 @@ from eidolon_agent.domain.body_control.errors import (
 )
 from eidolon_agent.domain.body_control.ports import BodyCommandPort, BodyDeviceStorePort
 
+_log = logging.getLogger(__name__)
 
-class EidolonDataBodyDeviceStore(BodyDeviceStorePort):
-    def __init__(self, data_store, *, runtime_client: HubBodyCommandClient | None = None) -> None:
-        self._data = data_store
-        self._runtime = runtime_client
+
+class NatsRuntimeBodyDeviceStore(BodyDeviceStorePort):
+    """Read one owner's current runtime device snapshot directly from NATS KV.
+
+    The Agent is read-only and keeps no cross-turn device cache. Missing,
+    malformed or expired snapshots fail closed to an empty capability set.
+    """
+
+    def __init__(self, kv_store) -> None:
+        self._kv = kv_store
 
     async def list_devices(
         self,
@@ -35,72 +45,44 @@ class EidolonDataBodyDeviceStore(BodyDeviceStorePort):
         companion_id: str,
         source_device_id: str | None = None,
     ) -> list[BodyDevice]:
-        rows = await self._data.devices.list_devices_for_owner(owner_id)
-        runtime_by_id = await self._runtime_device_map()
-        companion_names: dict[str, str] = {}
+        try:
+            raw = await self._kv.get(owner_device_blackboard_key(owner_id))
+            if raw is None:
+                return []
+            snapshot = OwnerDeviceBlackboardSnapshot.from_bytes(
+                raw,
+                expected_owner_id=owner_id,
+            )
+            rows = snapshot.visible_devices(requester_companion_id=companion_id)
+        except Exception as exc:
+            _log.warning("runtime device blackboard read failed closed: %s", exc)
+            return []
         devices: list[BodyDevice] = []
         for row in rows:
-            if row.revoked_at is not None or row.status in {"disabled", "revoked"}:
+            device_id = row.device_id
+            provider_companion_id = row.provider_companion_id or ""
+            if not device_id or not provider_companion_id:
                 continue
-            provider_companion_id = str(row.bound_companion_id or "")
-            if not provider_companion_id:
-                continue
-            policy = getattr(row, "access_policy_json", None) or {}
-            visibility = str(policy.get("capability_visibility") or "owner")
-            if visibility == "bound_companion" and provider_companion_id != companion_id:
-                continue
-            if visibility not in {"owner", "bound_companion"}:
-                continue
-            if provider_companion_id not in companion_names:
-                companion_names[provider_companion_id] = await self._companion_display_name(
-                    provider_companion_id
-                )
-            runtime = runtime_by_id.get(row.device_id, {})
-            capabilities = capabilities_from_json(
-                row.capabilities_json or {},
-                device_kind=row.kind or "unknown",
-                known_only=True,
+            capabilities = tuple(
+                _runtime_capability(item.model_dump(mode="json"))
+                for item in row.capabilities
             )
-            status = _body_status_from_runtime(runtime.get("status"))
             devices.append(
                 BodyDevice(
-                    device_id=row.device_id,
-                    name=row.name or row.device_id,
-                    aliases=_aliases_from_metadata(
-                        row.metadata_json or {},
-                        companion_display_name=companion_names[provider_companion_id],
-                    ),
-                    kind=row.kind or "unknown",
-                    status=status,
+                    device_id=device_id,
+                    name=row.name or device_id,
+                    aliases=row.aliases,
+                    provider_companion_id=provider_companion_id,
+                    status="online_control",
                     is_current_device=bool(
-                        source_device_id and row.device_id == source_device_id
+                        source_device_id and device_id == source_device_id
                     ),
-                    last_seen=_latest_datetime(row.last_seen_at, _parse_datetime(runtime.get("last_seen"))),
-                    control_room_name=str(runtime.get("room_name") or ""),
+                    last_seen=row.last_seen_at,
+                    control_room_name=row.room_name,
                     capabilities=capabilities,
                 )
             )
         return devices
-
-    async def _runtime_device_map(self) -> dict[str, dict[str, Any]]:
-        if self._runtime is None:
-            return {}
-        try:
-            devices = await self._runtime.list_runtime_devices()
-        except Exception:
-            return {}
-        return {str(item.get("device_id") or ""): item for item in devices if item.get("device_id")}
-
-    async def _companion_display_name(self, companion_id: str) -> str:
-        companions = getattr(self._data, "companions", None)
-        get_companion = getattr(companions, "get", None)
-        if get_companion is None:
-            return ""
-        try:
-            companion = await get_companion(companion_id)
-        except Exception:
-            return ""
-        return str(getattr(companion, "display_name", "") or "").strip()
 
 
 class HubBodyCommandClient(BodyCommandPort):
@@ -116,11 +98,6 @@ class HubBodyCommandClient(BodyCommandPort):
         self._base_url = base_url.rstrip("/")
         self._service_token = service_token.strip()
         self._timeout_s = timeout_s
-
-    async def list_runtime_devices(self) -> list[dict[str, Any]]:
-        body = await self._request_json("GET", "/api/admin/devices")
-        rows = body.get("devices") if isinstance(body, dict) else None
-        return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
 
     async def send_command(
         self,
@@ -240,7 +217,9 @@ class HubBodyCommandClient(BodyCommandPort):
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             message = _response_detail(exc.response)
-            if exc.response.status_code == 409 and "not currently connected" in message:
+            if exc.response.status_code == 409 and (
+                "not currently connected" in message or "not online" in message
+            ):
                 raise BodyDeviceOffline(message) from exc
             if exc.response.status_code in {403, 404, 409, 422}:
                 raise BodyCommandRejected(message) from exc
@@ -298,45 +277,14 @@ def _command_status(value: str):
     return "failed"
 
 
-def _body_status_from_runtime(value: Any):
-    status = str(value or "").lower()
-    if status == "online":
-        return "online_control"
-    if status in {"in_voice", "offline", "unknown"}:
-        return status
-    return "offline"
-
-
-def _aliases_from_metadata(
-    metadata: dict[str, Any],
-    *,
-    companion_display_name: str = "",
-) -> tuple[str, ...]:
-    raw = metadata.get("aliases") or metadata.get("alias")
-    aliases: list[str] = []
-    if isinstance(raw, str):
-        aliases.append(raw)
-    elif isinstance(raw, list):
-        aliases.extend(str(item) for item in raw if item)
-    if companion_display_name:
-        aliases.append(companion_display_name)
-    return tuple(dict.fromkeys(item for item in aliases if item))
-
-
-def _latest_datetime(left: datetime | None, right: datetime | None) -> datetime | None:
-    if left is None:
-        return _aware_utc(right)
-    if right is None:
-        return _aware_utc(left)
-    return max(_aware_utc(left), _aware_utc(right))
-
-
-def _aware_utc(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+def _runtime_capability(value: dict[str, Any]) -> BodyCapability:
+    return BodyCapability(
+        name=str(value.get("name") or ""),
+        version=int(value.get("version") or 1),
+        description=str(value.get("description") or ""),
+        input_schema=(value.get("input_schema") if isinstance(value.get("input_schema"), dict) else {}),
+        result_schema=(value.get("result_schema") if isinstance(value.get("result_schema"), dict) else {}),
+    )
 
 
 def _parse_datetime(value: Any) -> datetime | None:
