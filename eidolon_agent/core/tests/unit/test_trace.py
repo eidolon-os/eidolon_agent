@@ -27,6 +27,10 @@ def test_turn_trace_metadata_shape_is_prompt_safe() -> None:
         latency=LatencyBreakdown(compile_ms=20, first_delta_ms=100, total_ms=180),
         context_ledger={"segments": [{"kind": "memory"}]},
         memory_trace={"hit_ids": ["m1"], "context_injected": True},
+        commitment_context_trace={
+            "commitment_ids": ["commitment-1"],
+            "context_injected": True,
+        },
         memory_write_trace={"disposition": "semantic_upsert", "fanout_allowed": True},
         tool_trace=[
             ToolTrace(call_id="tc1", name="delegate_to_coworker", ok=True, latency_ms=2)
@@ -46,6 +50,9 @@ def test_turn_trace_metadata_shape_is_prompt_safe() -> None:
     assert trace["turn"]["termination_cause"] == "user_stop"
     assert trace["latency"]["compile_ms"] == 20
     assert trace["memory_trace"]["hit_ids"] == ["m1"]
+    assert trace["commitment_context_trace"]["commitment_ids"] == [
+        "commitment-1"
+    ]
     assert trace["memory_write_trace"]["disposition"] == "semantic_upsert"
     assert trace["tool_trace"][0]["name"] == "delegate_to_coworker"
     assert "prompt" not in str(trace).lower()

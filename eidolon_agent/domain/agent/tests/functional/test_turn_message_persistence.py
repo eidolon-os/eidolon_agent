@@ -49,6 +49,7 @@ async def test_turn_persists_user_and_assistant_messages(
             assert trace["boundary"] == "eidolon_agent.brain"
             assert trace["turn"]["turn_id"] == ti.turn_id
             assert trace["context_ledger"]["segments"]
+            assert trace["commitment_context_trace"]["attempted"] is False
             assert trace["latency"]["total_ms"] is not None
             assert trace["latency"]["first_delta_ms"] <= trace["latency"]["total_ms"]
             assert trace["privacy"]["mode"] == "normal"

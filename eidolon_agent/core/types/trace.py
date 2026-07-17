@@ -122,6 +122,7 @@ class TurnTrace:
     termination_cause: str | None = None
     context_ledger: dict[str, Any] | None = None
     memory_trace: dict[str, Any] | None = None
+    commitment_context_trace: dict[str, Any] | None = None
     memory_recall_query: dict[str, Any] | None = None
     memory_write_trace: dict[str, Any] | None = None
     tool_trace: list[ToolTrace] = field(default_factory=list)
@@ -159,6 +160,7 @@ class TurnTrace:
             "latency": self.latency.to_metadata(),
             "context_ledger": self.context_ledger,
             "memory_trace": self.memory_trace,
+            "commitment_context_trace": self.commitment_context_trace,
             "memory_recall_query": self.memory_recall_query,
             "memory_write_trace": self.memory_write_trace,
             "tool_trace": [t.to_metadata() for t in self.tool_trace],
