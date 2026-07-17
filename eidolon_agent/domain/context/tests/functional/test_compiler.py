@@ -78,6 +78,7 @@ class _StubMemory:
             "device_id": device_id,
             "session_id": session_id,
             "query": query,
+            "plan": plan,
             "timeout_s": timeout_s,
         })
         return MemoryRecallResult(
@@ -437,7 +438,7 @@ async def test_ordinary_memory_recall_uses_soft_timeout() -> None:
 
 async def test_explicit_personal_memory_lookup_uses_extended_timeout() -> None:
     memory = _StubMemory(formatted="用户叫曼森，在北京化工大学读书。")
-    ti = make_turn_input("我叫什么？我在哪里读书？")
+    ti = make_turn_input("你记得我叫什么、在哪里读书吗？")
     compiler = ContextCompiler(
         personas_service=_StubPersonas(),
         instance_locator=_locator,
@@ -449,32 +450,34 @@ async def test_explicit_personal_memory_lookup_uses_extended_timeout() -> None:
 
     await compiler.compile(ti)
 
-    assert [call["query"] for call in memory.calls] == ["我的名字", "我的大学在哪里读的"]
+    assert [call["query"] for call in memory.calls] == [
+        "你记得我叫什么、在哪里读书吗？"
+    ]
     assert memory.calls[0]["timeout_s"] == pytest.approx(1.2)
-    assert 0 < memory.calls[1]["timeout_s"] <= 1.2
+    assert memory.calls[0]["plan"].kg_subjects == ("self",)
     assert ti.metadata["memory_trace"]["timeout_ms"] == 1200
     assert ti.metadata["memory_trace"]["hit_count"] == 1
-    assert ti.metadata["memory_recall_query"]["source"] == "explicit_personal_slots"
-    assert ti.metadata["memory_recall_query"]["query_count"] == 2
+    assert ti.metadata["memory_recall_query"]["source"] == "explicit_personal_lookup"
+    assert ti.metadata["memory_recall_query"]["query_count"] == 1
 
 
-async def test_explicit_personal_memory_lookup_merges_slot_results() -> None:
+async def test_explicit_personal_memory_lookup_uses_single_combined_result() -> None:
     class _SlotMemory:
         def __init__(self) -> None:
             self.calls: list[dict] = []
 
         async def recall_context(self, **kwargs):
             self.calls.append(kwargs)
-            if kwargs["query"] == "我的名字":
-                return MemoryRecallResult(
-                    context="个人画像与健康:\n- 用户的名字是曼森。",
-                    hits=[SimpleNamespace(id="name-hit")],
-                    kg_triples=[{"id": "kg-name"}],
-                )
             return MemoryRecallResult(
-                context="个人画像与健康:\n- 用户在北京化工大学就读，学校位于北京。",
-                hits=[SimpleNamespace(id="school-hit")],
-                kg_triples=[{"id": "kg-school"}],
+                context=(
+                    "个人画像与健康:\n- 用户的名字是曼森。\n"
+                    "- 用户在北京化工大学就读，学校位于北京。"
+                ),
+                hits=[
+                    SimpleNamespace(id="name-hit"),
+                    SimpleNamespace(id="school-hit"),
+                ],
+                kg_triples=[{"id": "kg-name"}, {"id": "kg-school"}],
             )
 
     memory = _SlotMemory()

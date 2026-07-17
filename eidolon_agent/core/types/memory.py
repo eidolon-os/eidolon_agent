@@ -140,6 +140,7 @@ class MemoryQueryPlan:
     semantic_k: int = 5
     promise_force: bool = True
     voice: bool = True  # honour memory-service 50ms KG sub-budget
+    kg_subjects: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

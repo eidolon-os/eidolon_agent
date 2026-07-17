@@ -118,6 +118,7 @@ class EidolonMemoryPort:
                     "voice": plan.voice,
                     "include_kg": True,
                     "include_sensitive_kg": False,
+                    "kg_subjects": list(plan.kg_subjects),
                 },
             ),
             timeout=_remaining_timeout(deadline),

@@ -106,6 +106,7 @@ async def test_get_weather_uses_injected_fetcher(caller_ctx) -> None:
 
 
 async def test_memory_tools_use_memory_port(caller_ctx) -> None:
+    caller_ctx.user_text = "请记住：我喜欢乌龙茶"
     memory = _FakeMemoryPort()
     reg = ToolRegistry()
     reg.register(MemorySearchTool(memory))
@@ -121,12 +122,7 @@ async def test_memory_tools_use_memory_port(caller_ctx) -> None:
         [
             _call(
                 "memory_assert_fact",
-                {
-                    "subject": "user",
-                    "predicate": "工作地点",
-                    "object": "乌龙茶",
-                    "confidence": 0.8,
-                },
+                {"claim": "我喜欢乌龙茶"},
             )
         ],
         ctx=caller_ctx,
@@ -145,17 +141,19 @@ async def test_memory_tools_use_memory_port(caller_ctx) -> None:
     assert asserted.ok
     assert asserted.content["status"] == "accepted"
     assert asserted.content["request_id"] == "request-1"
-    assert memory.asserted == [
+    assert memory.asserted == []
+    assert memory.confirmed_facts == [
         (
             "owner-1",
             "companion-1",
             "realm-1",
-            "user",
-            "works_at",
-            "乌龙茶",
+            "device-1",
+            None,
+            "我喜欢乌龙茶",
             "turn-1",
             "c",
-            0.8,
+            0.99,
+            ["memory_assert_fact", "verbatim", "current_request_grounded"],
         )
     ]
     assert forgotten.ok
@@ -242,9 +240,12 @@ async def test_body_control_tool_without_service_returns_error(caller_ctx) -> No
     assert res.error_code == "body_control_unavailable"
 
 
-async def test_memory_assert_fact_falls_back_to_confirmed_fact_for_unknown_predicate(
+@pytest.mark.parametrize("claim", ["我在某个城市工作", "你记得我在哪工作吗？"])
+async def test_memory_assert_fact_rejects_claim_sourced_from_background(
     caller_ctx,
+    claim,
 ) -> None:
+    caller_ctx.user_text = "你记得我在哪工作吗？"
     memory = _FakeMemoryPort()
     reg = ToolRegistry()
     reg.register(MemoryAssertFactTool(memory))
@@ -253,32 +254,16 @@ async def test_memory_assert_fact_falls_back_to_confirmed_fact_for_unknown_predi
         [
             _call(
                 "memory_assert_fact",
-                {"subject": "user", "predicate": "神秘关系", "object": "x"},
+                {"claim": claim},
             )
         ],
         ctx=caller_ctx,
     )
 
-    assert res.ok is True
-    assert res.content["status"] == "accepted"
-    assert res.content["request_id"] == "request-1"
-    assert res.content["kind"] == "confirmed_fact"
-    assert res.content["text"] == "user 神秘关系 x"
+    assert res.ok is False
+    assert res.error_code == "ungrounded_memory_claim"
     assert memory.asserted == []
-    assert memory.confirmed_facts == [
-        (
-            "owner-1",
-            "companion-1",
-            "realm-1",
-            "device-1",
-            None,
-            "user 神秘关系 x",
-            "turn-1",
-            "c",
-            0.9,
-            ["memory_assert_fact", "kg_fallback"],
-        )
-    ]
+    assert memory.confirmed_facts == []
 
 
 class _FakeBodyControl:

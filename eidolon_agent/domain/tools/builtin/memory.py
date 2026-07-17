@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from eidolon_sdk.memory import KG_PREDICATE_VALUES
-
 from eidolon_agent.core.ports.memory import MemoryPort
 from eidolon_agent.core.ports.tool import ToolInvocationContext
 from eidolon_agent.core.types.memory import MemoryHit, MemoryScope
@@ -85,95 +83,67 @@ class MemoryAssertFactTool:
         self.schema = ToolSchema(
             name="memory_assert_fact",
             description=(
-                "Store an explicit user-confirmed fact or preference in memory. Use only "
-                "when the user clearly asks you to remember something or confirms a stable "
-                "fact. Prefer canonical KG predicates when possible; if no predicate fits, "
-                "store the fact verbatim as user-confirmed memory. Do not infer sensitive "
-                "personal data."
+                "Store a verbatim claim only when the CURRENT REQUEST explicitly asks "
+                "you to remember it. The claim must be copied exactly from inside the "
+                "current user message. Never reconstruct a claim from conversation "
+                "background or retrieved memory."
             ),
             json_schema={
                 "type": "object",
                 "properties": {
-                    "subject": {"type": "string", "description": "Fact subject."},
-                    "predicate": {
+                    "claim": {
                         "type": "string",
                         "description": (
-                            "Fact predicate. Prefer one of: "
-                            f"{', '.join(KG_PREDICATE_VALUES)}."
+                            "Exact contiguous text copied from inside the current user "
+                            "message; do not paraphrase or fill values from history."
                         ),
                     },
-                    "object": {"type": "string", "description": "Fact object/value."},
-                    "confidence": {
-                        "type": "number",
-                        "description": "Confidence from 0.0 to 1.0. Defaults to 0.9.",
-                    },
                 },
-                "required": ["subject", "predicate", "object"],
+                "required": ["claim"],
                 "additionalProperties": False,
             },
             permissions=frozenset({Permission.MEMORY_WRITE, Permission.USER_DATA}),
             side_effect=True,
             timeout_s=timeout_s,
-            idempotency_key_template="${owner_id}:${companion_id}:memory_assert_fact:${subject}:${predicate}:${object}",
+            idempotency_key_template="${owner_id}:${companion_id}:memory_assert_fact:${claim}",
         )
         self._memory = memory_port
 
     async def invoke(self, call: ToolCall, *, ctx: ToolInvocationContext) -> ToolResult:
         if self._memory is None:
             return _unavailable(call.id, self.schema.name)
-        subject = str(call.arguments.get("subject") or "").strip()
-        raw_predicate = str(call.arguments.get("predicate") or "").strip()
-        predicate = _normalize_kg_predicate(raw_predicate)
-        object_ = str(call.arguments.get("object") or "").strip()
-        if not subject or not raw_predicate or not object_:
+        claim = str(call.arguments.get("claim") or "").strip()
+        current_request = str(ctx.user_text or "").strip()
+        if not claim:
             return ToolResult(
                 call_id=call.id,
                 name=self.schema.name,
                 ok=False,
-                error_code="invalid_memory_fact",
-                error_message="subject, predicate, and object are required",
+                error_code="invalid_memory_claim",
+                error_message="claim is required",
             )
-        confidence = _bounded_float(
-            call.arguments.get("confidence"), default=0.9, minimum=0.0, maximum=1.0
-        )
-        if predicate is None:
-            text = _confirmed_fact_text(subject, raw_predicate, object_)
-            confirmed_confidence = max(confidence, 0.9)
-            request_id = await self._memory.write_confirmed_fact(
-                ctx.caller.owner_id,
-                ctx.caller.companion_id,
-                ctx.caller.memory_realm_id,
-                ctx.caller.device_id,
-                ctx.session_id,
-                text,
-                source_event_id=ctx.turn_id,
-                tool_call_id=call.id,
-                confidence=confirmed_confidence,
-                tags=["memory_assert_fact", "kg_fallback"],
-            )
+        if not current_request or claim == current_request or claim not in current_request:
             return ToolResult(
                 call_id=call.id,
                 name=self.schema.name,
-                ok=True,
-                content={
-                    "status": "accepted",
-                    "request_id": request_id,
-                    "kind": "confirmed_fact",
-                    "text": text,
-                    "predicate": raw_predicate,
-                    "confidence": confirmed_confidence,
-                },
+                ok=False,
+                error_code="ungrounded_memory_claim",
+                error_message=(
+                    "claim must be exact text inside the current request; "
+                    "background and retrieved memory cannot authorize a write"
+                ),
             )
-        request_id = await self._memory.assert_fact(
+        request_id = await self._memory.write_confirmed_fact(
             ctx.caller.owner_id,
             ctx.caller.companion_id,
             ctx.caller.memory_realm_id,
-            subject,
-            predicate,
-            object_,
+            ctx.caller.device_id,
+            ctx.session_id,
+            claim,
             source_event_id=ctx.turn_id,
             tool_call_id=call.id,
-            confidence=confidence,
+            confidence=0.99,
+            tags=["memory_assert_fact", "verbatim", "current_request_grounded"],
         )
         return ToolResult(
             call_id=call.id,
@@ -182,10 +152,9 @@ class MemoryAssertFactTool:
             content={
                 "status": "accepted",
                 "request_id": request_id,
-                "subject": subject,
-                "predicate": predicate,
-                "object": object_,
-                "confidence": confidence,
+                "kind": "confirmed_fact",
+                "text": claim,
+                "confidence": 0.99,
             },
         )
 
@@ -294,59 +263,9 @@ def _scope(value: object) -> MemoryScope:
         return MemoryScope.ALL
 
 
-_KG_PREDICATE_ALIASES: dict[str, str] = {
-    "工作地点": "works_at",
-    "工作地": "works_at",
-    "工作于": "works_at",
-    "工作记录": "works_at",
-    "工作信息": "works_at",
-    "在...工作": "works_at",
-    "在…工作": "works_at",
-    "住址": "lives_in",
-    "居住地": "lives_in",
-    "住在": "lives_in",
-    "学习地点": "studies_at",
-    "就读于": "studies_at",
-    "职位": "holds_role",
-    "角色": "holds_role",
-    "喜欢": "likes",
-    "喜好": "likes",
-    "不喜欢": "dislikes",
-    "讨厌": "dislikes",
-    "偏好": "prefers",
-    "承诺": "promised",
-    "计划": "planned_to",
-    "担心": "worried_about",
-    "拥有": "owns",
-    "使用": "uses",
-}
-
-
-def _normalize_kg_predicate(value: str) -> str | None:
-    text = value.strip()
-    if not text:
-        return None
-    canonical = text.lower().replace(" ", "_").replace("-", "_")
-    if canonical in KG_PREDICATE_VALUES:
-        return canonical
-    return _KG_PREDICATE_ALIASES.get(text)
-
-
-def _confirmed_fact_text(subject: str, predicate: str, object_: str) -> str:
-    return f"{subject} {predicate} {object_}".strip()
-
-
 def _bounded_int(value: object, *, default: int, minimum: int, maximum: int) -> int:
     try:
         parsed = int(value)
-    except (TypeError, ValueError):
-        parsed = default
-    return max(minimum, min(maximum, parsed))
-
-
-def _bounded_float(value: object, *, default: float, minimum: float, maximum: float) -> float:
-    try:
-        parsed = float(value)
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(maximum, parsed))

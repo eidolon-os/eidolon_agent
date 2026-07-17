@@ -771,14 +771,17 @@ class ContextCompiler:
         if not TurnRuntimePolicy.from_metadata(ti.metadata).memory_recall_allowed:
             return None
         try:
+            recall_queries, query_source = await self._memory_recall_queries(ti)
             plan = MemoryQueryPlan(
                 episodic_query=ti.text,
                 semantic_query=ti.text,
                 episodic_k=3,
                 semantic_k=self._memory_top_k,
                 voice=ti.caller.caller_kind.value == "livekit_voice",
+                kg_subjects=("self",)
+                if query_source == "explicit_personal_lookup"
+                else (),
             )
-            recall_queries, query_source = await self._memory_recall_queries(ti)
             ti.metadata["memory_recall_query"] = {
                 "source": query_source,
                 "preview": " | ".join(recall_queries)[:160],
@@ -913,9 +916,8 @@ class ContextCompiler:
             raise
 
     async def _memory_recall_queries(self, ti: TurnInput) -> tuple[list[str], str]:
-        explicit_queries = _explicit_personal_memory_queries(ti.text or "")
-        if explicit_queries:
-            return explicit_queries, "explicit_personal_slots"
+        if _is_explicit_memory_lookup(ti.text or ""):
+            return [(ti.text or "").strip()], "explicit_personal_lookup"
         query, source = await self._memory_recall_query(ti)
         return [query], source
 
@@ -1179,133 +1181,20 @@ def _merge_memory_contexts(contexts: list[str]) -> str:
     return "\n\n".join(blocks)
 
 
-def _explicit_personal_memory_queries(text: str) -> list[str]:
-    normalized = "".join((text or "").split()).lower()
-    if not normalized or not _is_explicit_memory_lookup(text):
-        return []
-
-    queries: list[str] = []
-    slot_phrases = (
-        (
-            "我的名字",
-            (
-                "我叫什么",
-                "我的名字",
-                "我是谁",
-                "怎么称呼我",
-                "叫我什么",
-            ),
-        ),
-        (
-            "我的大学在哪里读的",
-            (
-                "我在哪里读书",
-                "我在哪读书",
-                "我哪里读书",
-                "我哪儿读书",
-                "我在哪儿读书",
-                "我读的学校",
-                "我的学校",
-                "我的大学",
-                "哪所大学",
-                "哪个大学",
-                "在哪里上学",
-                "在哪上学",
-            ),
-        ),
-        (
-            "我的工作地点",
-            (
-                "哪里工作",
-                "在哪工作",
-                "在哪里工作",
-                "我的工作",
-                "工作地点",
-                "在哪儿工作",
-            ),
-        ),
-        (
-            "我的居住地",
-            (
-                "住哪里",
-                "住哪儿",
-                "住在哪里",
-                "住在哪儿",
-                "我住哪",
-                "我住在哪里",
-            ),
-        ),
-        (
-            "我的家乡",
-            (
-                "我是哪里人",
-                "我来自哪里",
-                "我的家乡",
-                "老家哪里",
-                "老家在哪",
-            ),
-        ),
-    )
-    for query, phrases in slot_phrases:
-        if any(phrase in normalized for phrase in phrases):
-            queries.append(query)
-    return queries
-
-
 def _is_explicit_memory_lookup(text: str) -> bool:
     normalized = "".join((text or "").split()).lower()
     if not normalized:
         return False
 
-    memory_intent = any(
-        phrase in normalized
-        for phrase in (
-            "你记得",
-            "你还记得",
-            "记不记得",
-            "你知道我",
-            "关于我",
-            "告诉我我的",
-            "查一下我的",
-            "帮我找我的",
-        )
-    )
+    memory_intent = any(phrase in normalized for phrase in ("记得", "记不记得", "知道", "关于我", "了解我"))
     question_intent = any(
         token in normalized
         for token in ("?", "？", "吗", "什么", "哪里", "哪儿", "哪所", "在哪")
     )
-    if not memory_intent and not question_intent:
-        return False
-
-    personal_fact = any(
-        phrase in normalized
-        for phrase in (
-            "我叫什么",
-            "我的名字",
-            "我是谁",
-            "我在哪里读书",
-            "我在哪读书",
-            "我哪里读书",
-            "我哪儿读书",
-            "我在哪儿读书",
-            "我读的学校",
-            "我的学校",
-            "我的大学",
-            "哪所大学",
-            "哪个大学",
-            "哪里工作",
-            "在哪工作",
-            "在哪里工作",
-            "我的工作",
-            "住哪里",
-            "住哪儿",
-            "住在哪里",
-            "住在哪儿",
-            "我是哪里人",
-            "我来自哪里",
-        )
+    personal_subject = any(
+        marker in normalized for marker in ("我", "本人", "自己")
     )
-    return memory_intent or personal_fact
+    return personal_subject and question_intent and memory_intent
 
 
 def _kg_triple_ids(triples: object) -> list[str]:

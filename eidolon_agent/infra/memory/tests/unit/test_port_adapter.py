@@ -229,6 +229,7 @@ async def test_recall_context_returns_context_hits_and_degraded_false() -> None:
     assert args["context"]["device_id"] == "device-1"
     assert args["context"]["session_id"] == "s1"
     assert args["context"]["memory_space_id"] == "realm-1"
+    assert args["kg_subjects"] == []
 
 
 async def test_recall_context_returns_degraded_on_exception() -> None:
