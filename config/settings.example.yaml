@@ -64,6 +64,8 @@ long_task:
 body_control:
   enabled: true
   hub_base_url: http://127.0.0.1:8082
+  # Must match Hub's EIDOLON_RUNTIME_SERVICE_TOKEN when the Hub is not loopback-only.
+  service_token: ""
   timeout_s: 5.0
   cache_ttl_s: 3.0
 

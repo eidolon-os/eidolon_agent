@@ -188,6 +188,7 @@ class BodyControlSettings(BaseModel):
 
     enabled: bool = True
     hub_base_url: str = "http://127.0.0.1:8082"
+    service_token: str = ""
     timeout_s: float = 5.0
     cache_ttl_s: float = 3.0
 

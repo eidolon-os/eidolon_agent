@@ -21,6 +21,8 @@ class BodyCommandPort(Protocol):
     async def send_command(
         self,
         *,
+        owner_id: str,
+        companion_id: str,
         device_id: str,
         op: str,
         payload: dict,
@@ -32,4 +34,10 @@ class BodyCommandPort(Protocol):
         runtime_session_id: str | None = None,
     ) -> BodyCommandResult: ...
 
-    async def get_command_status(self, *, command_id: str) -> BodyCommandResult: ...
+    async def get_command_status(
+        self,
+        *,
+        owner_id: str,
+        companion_id: str,
+        command_id: str,
+    ) -> BodyCommandResult: ...

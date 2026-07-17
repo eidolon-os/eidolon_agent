@@ -44,6 +44,8 @@ async def test_send_command_resolves_named_online_device() -> None:
     assert result.ok
     assert commands.sent == [
         {
+            "owner_id": "owner-1",
+            "companion_id": "companion-1",
             "device_id": "box-3",
             "source_device_id": "device-206",
             "runtime_caller_id": "rc-1",
@@ -244,7 +246,7 @@ class _FakeCommands:
             status="sent",
         )
 
-    async def get_command_status(self, *, command_id: str):
+    async def get_command_status(self, *, command_id: str, **_kwargs):
         return BodyCommandResult(
             command_id=command_id,
             device_id=self.status_device_id,

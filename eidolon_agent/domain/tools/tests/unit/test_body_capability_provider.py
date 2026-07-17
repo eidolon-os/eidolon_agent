@@ -71,7 +71,7 @@ async def test_assemble_builds_one_tool_per_capability():
     provider = BodyCapabilityToolProvider(_FakeBody([dev]))
     schemas, ports = await provider.assemble(_caller())
     names = {s.name for s in schemas}
-    assert names == {"body__living_room__display_update", "body__living_room__sound_play"}
+    assert names == {"body__dev_1__display_update", "body__dev_1__sound_play"}
     assert set(ports) == names
 
 
@@ -87,11 +87,11 @@ async def test_dispatch_routes_to_send_command_with_target_op_payload():
     body = _FakeBody([dev])
     provider = BodyCapabilityToolProvider(body)
     _schemas, ports = await provider.assemble(_caller())
-    tool = ports["body__living_room__display_update"]
+    tool = ports["body__dev_1__display_update"]
     ctx = ToolInvocationContext(caller=_caller(), turn_id="turn-1")
     call = ToolCall(
         id="1",
-        name="body__living_room__display_update",
+        name="body__dev_1__display_update",
         arguments={"text": "hi", "confirmed": True},
     )
     res = await tool.invoke(call, ctx=ctx)
@@ -102,6 +102,7 @@ async def test_dispatch_routes_to_send_command_with_target_op_payload():
     assert sent["op"] == "display.update"
     assert sent["payload"] == {"text": "hi"}  # confirmed is popped out of the payload
     assert sent["confirmed"] is True
+    assert sent["qos"] == "result"
 
 
 async def test_budget_truncates_and_none_body_is_empty():

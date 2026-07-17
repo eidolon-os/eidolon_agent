@@ -1,7 +1,7 @@
-"""P4: device-declared capabilities become individually callable LLM tools.
+"""Device-declared capabilities become caller-aware LLM tools.
 
-A companion's bound devices declare capabilities (``devices.capabilities_json``,
-already per-companion filtered by the body device store). This provider turns
+An owner's visible devices declare capabilities (``devices.capabilities_json``).
+This provider turns
 each ``(device, capability)`` into a distinct ``ToolSchema`` + ``ToolPort`` so the
 LLM can call e.g. ``body__<device>__display_update`` directly, instead of the one
 generic ``control_body_device(op=...)`` escape hatch. Dispatch routes back through
@@ -40,7 +40,7 @@ def _slug(text: str) -> str:
 
 
 def _tool_name(device, capability_name: str) -> str:
-    return f"body__{_slug(device.name or device.device_id)}__{_slug(capability_name)}"
+    return f"body__{_slug(device.device_id)}__{_slug(capability_name)}"
 
 
 def _sanitize(text: str) -> str:
@@ -70,6 +70,7 @@ class _BodyCapabilityTool:
                 target=self._device.device_id,
                 op=self._capability.name,
                 payload=payload,
+                qos="result" if self._capability.requires_ack else "fire_and_forget",
                 confirmed=confirmed,
             )
         except BodyControlError as exc:
@@ -114,7 +115,10 @@ class BodyCapabilityToolProvider:
         # Spend the token budget on the most likely targets: current device, then
         # online devices, then the rest.
         def _priority(device):
-            return (0 if device.is_current_device else 1, 0 if device.status == "online" else 1)
+            return (
+                0 if device.is_current_device else 1,
+                0 if device.status in {"online_control", "in_voice"} else 1,
+            )
 
         max_tools = max(0, self._budget_tokens // _APPROX_TOKENS_PER_TOOL)
         schemas: list[ToolSchema] = []
@@ -160,6 +164,8 @@ class BodyCapabilityToolProvider:
 
         target = device.name or device.device_id
         desc = f"{capability.description or capability.name} — device: {target}."
+        if device.aliases:
+            desc += f" Also use this tool when the user calls it: {', '.join(device.aliases)}."
         if capability.requires_confirmation:
             desc += " Risky: ask the user to confirm, then pass confirmed=true."
 

@@ -88,6 +88,8 @@ class BodyControlService:
             raise BodyCommandRejected(schema_error)
 
         return await self._commands.send_command(
+            owner_id=owner_id,
+            companion_id=companion_id,
             device_id=device.device_id,
             source_device_id=source_device_id,
             runtime_caller_id=runtime_caller_id,
@@ -106,7 +108,11 @@ class BodyControlService:
         companion_id: str,
         command_id: str,
     ) -> BodyCommandResult:
-        result = await self._commands.get_command_status(command_id=command_id)
+        result = await self._commands.get_command_status(
+            owner_id=owner_id,
+            companion_id=companion_id,
+            command_id=command_id,
+        )
         devices = await self.list_devices(
             owner_id=owner_id,
             companion_id=companion_id,

@@ -240,6 +240,7 @@ async def build_application(
         body_command_client = HubBodyCommandClient(
             body_http_client,
             base_url=settings.body_control.hub_base_url,
+            service_token=settings.body_control.service_token,
             timeout_s=settings.body_control.timeout_s,
         )
         body_device_store = CachedBodyDeviceStore(

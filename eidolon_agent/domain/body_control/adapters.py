@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
+from time import monotonic
 from typing import Any
 from urllib.parse import quote
 
@@ -13,7 +15,11 @@ from eidolon_sdk.biz.body import (
     capabilities_from_json,
 )
 
-from eidolon_agent.domain.body_control.errors import BodyControlUnavailable, BodyDeviceOffline
+from eidolon_agent.domain.body_control.errors import (
+    BodyCommandRejected,
+    BodyControlUnavailable,
+    BodyDeviceOffline,
+)
 from eidolon_agent.domain.body_control.ports import BodyCommandPort, BodyDeviceStorePort
 
 
@@ -30,18 +36,30 @@ class EidolonDataBodyDeviceStore(BodyDeviceStorePort):
         source_device_id: str | None = None,
     ) -> list[BodyDevice]:
         rows = await self._data.devices.list_devices_for_owner(owner_id)
-        companion_name = await self._companion_display_name(companion_id)
         runtime_by_id = await self._runtime_device_map()
+        companion_names: dict[str, str] = {}
         devices: list[BodyDevice] = []
         for row in rows:
-            if row.revoked_at is not None or row.status == "revoked":
+            if row.revoked_at is not None or row.status in {"disabled", "revoked"}:
                 continue
-            if row.bound_companion_id != companion_id:
+            provider_companion_id = str(row.bound_companion_id or "")
+            if not provider_companion_id:
                 continue
+            policy = getattr(row, "access_policy_json", None) or {}
+            visibility = str(policy.get("capability_visibility") or "owner")
+            if visibility == "bound_companion" and provider_companion_id != companion_id:
+                continue
+            if visibility not in {"owner", "bound_companion"}:
+                continue
+            if provider_companion_id not in companion_names:
+                companion_names[provider_companion_id] = await self._companion_display_name(
+                    provider_companion_id
+                )
             runtime = runtime_by_id.get(row.device_id, {})
             capabilities = capabilities_from_json(
                 row.capabilities_json or {},
                 device_kind=row.kind or "unknown",
+                known_only=True,
             )
             status = _body_status_from_runtime(runtime.get("status"))
             devices.append(
@@ -50,7 +68,7 @@ class EidolonDataBodyDeviceStore(BodyDeviceStorePort):
                     name=row.name or row.device_id,
                     aliases=_aliases_from_metadata(
                         row.metadata_json or {},
-                        companion_display_name=companion_name,
+                        companion_display_name=companion_names[provider_companion_id],
                     ),
                     kind=row.kind or "unknown",
                     status=status,
@@ -91,10 +109,12 @@ class HubBodyCommandClient(BodyCommandPort):
         http_client: httpx.AsyncClient,
         *,
         base_url: str,
+        service_token: str = "",
         timeout_s: float = 5.0,
     ) -> None:
         self._http = http_client
         self._base_url = base_url.rstrip("/")
+        self._service_token = service_token.strip()
         self._timeout_s = timeout_s
 
     async def list_runtime_devices(self) -> list[dict[str, Any]]:
@@ -105,6 +125,8 @@ class HubBodyCommandClient(BodyCommandPort):
     async def send_command(
         self,
         *,
+        owner_id: str,
+        companion_id: str,
         device_id: str,
         op: str,
         payload: dict,
@@ -117,8 +139,10 @@ class HubBodyCommandClient(BodyCommandPort):
     ) -> BodyCommandResult:
         body = await self._request_json(
             "POST",
-            f"/api/admin/devices/{_quote(device_id)}/commands",
+            f"/api/runtime/devices/{_quote(device_id)}/commands",
             json={
+                "requester_owner_id": owner_id,
+                "requester_companion_id": companion_id,
                 "op": op,
                 "source_device_id": source_device_id,
                 "runtime_caller_id": runtime_caller_id,
@@ -129,16 +153,84 @@ class HubBodyCommandClient(BodyCommandPort):
                 "priority": priority,
             },
         )
-        return _command_result_from_json(body, fallback_device_id=device_id, fallback_op=op)
+        result = _command_result_from_json(
+            body,
+            fallback_device_id=device_id,
+            fallback_op=op,
+        )
+        if qos == "fire_and_forget" or result.status in _TERMINAL_COMMAND_STATUSES:
+            return result
+        return await self._wait_for_terminal(
+            owner_id=owner_id,
+            companion_id=companion_id,
+            command_id=result.command_id,
+            fallback_device_id=device_id,
+            fallback_op=op,
+            ttl_ms=ttl_ms,
+        )
 
-    async def get_command_status(self, *, command_id: str) -> BodyCommandResult:
-        body = await self._request_json("GET", f"/api/admin/commands/{_quote(command_id)}")
+    async def get_command_status(
+        self,
+        *,
+        owner_id: str,
+        companion_id: str,
+        command_id: str,
+    ) -> BodyCommandResult:
+        body = await self._request_json(
+            "GET",
+            f"/api/runtime/commands/{_quote(command_id)}",
+            params={
+                "requester_owner_id": owner_id,
+                "requester_companion_id": companion_id,
+            },
+        )
         return _command_result_from_json(body)
+
+    async def _wait_for_terminal(
+        self,
+        *,
+        owner_id: str,
+        companion_id: str,
+        command_id: str,
+        fallback_device_id: str,
+        fallback_op: str,
+        ttl_ms: int,
+    ) -> BodyCommandResult:
+        deadline = monotonic() + min(self._timeout_s, ttl_ms / 1000)
+        last = BodyCommandResult(
+            command_id=command_id,
+            device_id=fallback_device_id,
+            op=fallback_op,
+            status="sent",
+        )
+        while monotonic() < deadline:
+            await asyncio.sleep(0.1)
+            last = await self.get_command_status(
+                owner_id=owner_id,
+                companion_id=companion_id,
+                command_id=command_id,
+            )
+            if last.status in _TERMINAL_COMMAND_STATUSES:
+                return last
+        return BodyCommandResult(
+            command_id=last.command_id,
+            device_id=last.device_id or fallback_device_id,
+            op=last.op or fallback_op,
+            status="timeout",
+            message="device did not return a terminal result before the tool timeout",
+            ack=last.ack,
+            result=last.result,
+            updated_at=last.updated_at,
+        )
 
     async def _request_json(self, method: str, path: str, **kwargs) -> Any:
         if not self._base_url:
             raise BodyControlUnavailable("body control base_url is not configured")
         try:
+            if self._service_token:
+                headers = dict(kwargs.pop("headers", {}) or {})
+                headers["X-Eidolon-Service-Token"] = self._service_token
+                kwargs["headers"] = headers
             response = await self._http.request(
                 method,
                 f"{self._base_url}{path}",
@@ -150,10 +242,17 @@ class HubBodyCommandClient(BodyCommandPort):
             message = _response_detail(exc.response)
             if exc.response.status_code == 409 and "not currently connected" in message:
                 raise BodyDeviceOffline(message) from exc
+            if exc.response.status_code in {403, 404, 409, 422}:
+                raise BodyCommandRejected(message) from exc
             raise BodyControlUnavailable(message) from exc
         except httpx.HTTPError as exc:
             raise BodyControlUnavailable(str(exc)) from exc
         return response.json()
+
+
+_TERMINAL_COMMAND_STATUSES = frozenset(
+    {"done", "failed", "timeout", "offline", "unsupported", "rejected"}
+)
 
 
 def _command_result_from_json(
