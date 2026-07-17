@@ -219,6 +219,8 @@ class ContextCompiler:
             ) = memory_payload
 
         active_commitments: list[ActiveCommitment] = []
+        active_commitment_total = 0
+        active_commitments_truncated = False
         commitments_degraded = False
         commitments_degraded_reason: str | None = None
         if isinstance(commitment_payload, BaseException):
@@ -229,6 +231,10 @@ class ContextCompiler:
             )
         elif commitment_payload:
             active_commitments = list(commitment_payload.commitments)
+            active_commitment_total = max(
+                len(active_commitments), commitment_payload.total
+            )
+            active_commitments_truncated = bool(commitment_payload.truncated)
             commitments_degraded = bool(commitment_payload.degraded)
             commitments_degraded_reason = commitment_payload.degraded_reason
 
@@ -589,6 +595,8 @@ class ContextCompiler:
                 record.commitment_id for record in active_commitments
             ],
             "count": len(active_commitments),
+            "total": active_commitment_total,
+            "truncated": active_commitments_truncated,
             "context_injected": commitment_kept,
         }
 

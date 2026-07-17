@@ -379,7 +379,12 @@ async def test_active_commitments_are_realm_bound_bounded_and_active_only() -> N
         },
     )
     call = AsyncMock(
-        return_value={"memory_space_id": "realm-1", "commitments": records}
+        return_value={
+            "memory_space_id": "realm-1",
+            "total": 12,
+            "truncated": True,
+            "commitments": records,
+        }
     )
     port, _, pool, _ = _port(session_call=call)
 
@@ -398,6 +403,8 @@ async def test_active_commitments_are_realm_bound_bounded_and_active_only() -> N
     assert args == {"include_terminal": False, "limit": 10}
     assert result.degraded is False
     assert len(result.commitments) == 10
+    assert result.total == 12
+    assert result.truncated is True
     assert all(item.status == "confirmed" for item in result.commitments)
     assert all(item.commitment_id not in {"terminal", "other-realm"} for item in result.commitments)
     assert result.commitments[0].participants == ("铁锤",)

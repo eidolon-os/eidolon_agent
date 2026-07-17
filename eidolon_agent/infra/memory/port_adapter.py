@@ -255,12 +255,18 @@ class EidolonMemoryPort:
                         degraded=True,
                         degraded_reason="realm_mismatch",
                     )
+                active = _records_to_active_commitments(
+                    raw.get("commitments") or [],
+                    memory_space_id=memory_space_id,
+                    limit=bounded_limit,
+                )
+                total = _non_negative_int(raw.get("total"), default=len(active))
                 return ActiveCommitmentReadResult(
-                    commitments=_records_to_active_commitments(
-                        raw.get("commitments") or [],
-                        memory_space_id=memory_space_id,
-                        limit=bounded_limit,
-                    )
+                    commitments=active,
+                    total=max(total, len(active)),
+                    truncated=(
+                        raw.get("truncated") is True or total > len(active)
+                    ),
                 )
             except TimeoutError:
                 await self._pool.drop_session(memory_space_id, session=session)
@@ -636,6 +642,13 @@ def _string_tuple(value: object) -> tuple[str, ...]:
         for item in value
         if (cleaned := str(item).strip())
     )
+
+
+def _non_negative_int(value: object, *, default: int) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return default
 
 
 def _optional_string(value: object) -> str | None:

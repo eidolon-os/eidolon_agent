@@ -91,6 +91,8 @@ class ActiveCommitmentReadResult:
     """Bounded product read result; terminal commitments are never included."""
 
     commitments: list[ActiveCommitment] = field(default_factory=list)
+    total: int = 0
+    truncated: bool = False
     degraded: bool = False
     degraded_reason: str | None = None
 

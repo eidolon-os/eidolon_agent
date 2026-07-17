@@ -344,7 +344,9 @@ async def test_active_commitments_route_as_bounded_non_actionable_context() -> N
                         participants=("朋友甲", "朋友乙"),
                         due_at="2026-07-18T09:00:00+08:00",
                     )
-                ]
+                ],
+                total=7,
+                truncated=True,
             )
 
     memory = _CommitmentMemory()
@@ -382,6 +384,8 @@ async def test_active_commitments_route_as_bounded_non_actionable_context() -> N
         "limit": 3,
         "commitment_ids": ["commitment-1"],
         "count": 1,
+        "total": 7,
+        "truncated": True,
         "context_injected": True,
     }
     assert any(
