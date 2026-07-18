@@ -110,6 +110,33 @@ async def test_db_hydrate_runs_when_window_is_insufficient() -> None:
     assert [m.content for m in items] == ["db-old", "db-new", "cached"]
 
 
+async def test_db_and_memory_copies_of_same_turn_message_are_deduplicated() -> None:
+    now = datetime.now(timezone.utc)
+
+    def copy(message_id: str, created_at: datetime) -> ChatMessage:
+        return ChatMessage(
+            id=message_id,
+            role=MessageRole.ASSISTANT,
+            content="same completed turn",
+            created_at=created_at,
+            metadata={"turn_id": "turn-1", "seq_in_turn": 1},
+        )
+
+    async def _hydrate(*, conversation_id: str, window: int):
+        return [copy("sqlite-generated-id", now)]
+
+    mgr = HistoryManager(hydrate_messages=_hydrate)
+    await mgr.append(
+        conversation_id="c1",
+        message=copy("memory-generated-id", now + timedelta(milliseconds=10)),
+    )
+
+    items = await mgr.recent_window(conversation_id="c1", window=3)
+
+    assert [message.content for message in items] == ["same completed turn"]
+    assert items[0].id == "memory-generated-id"
+
+
 async def test_db_hydrate_merges_sqlite_naive_and_in_memory_aware_timestamps() -> None:
     """SQLite returns naive datetimes while in-memory appends use aware UTC."""
 

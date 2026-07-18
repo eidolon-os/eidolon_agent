@@ -92,9 +92,7 @@ class ToolDispatcher:
                 return
             batch = list(readonly)
             readonly.clear()
-            done = await asyncio.gather(
-                *(self._dispatch_one(call, ctx=ctx) for _, call in batch)
-            )
+            done = await asyncio.gather(*(self._dispatch_one(call, ctx=ctx) for _, call in batch))
             for (idx, _call), result in zip(batch, done, strict=True):
                 results[idx] = result
 
@@ -124,9 +122,7 @@ class ToolDispatcher:
             return extra[name]
         return self._registry.get(name)
 
-    async def _dispatch_one(
-        self, call: ToolCall, *, ctx: ToolInvocationContext
-    ) -> ToolResult:
+    async def _dispatch_one(self, call: ToolCall, *, ctx: ToolInvocationContext) -> ToolResult:
         try:
             tool = self._resolve_tool(call.name, ctx)
         except Exception as exc:
@@ -261,13 +257,25 @@ class ToolDispatcher:
         if not tmpl:
             return None
         try:
-            raw_key = Template(tmpl).safe_substitute(
-                owner_id=ctx.caller.owner_id,
-                companion_id=ctx.caller.companion_id,
-                memory_realm_id=ctx.caller.memory_realm_id,
-                turn_id=ctx.turn_id,
-                **call.arguments,
+            arguments_json = json.dumps(
+                call.arguments,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
             )
+            values = {
+                **call.arguments,
+                "owner_id": ctx.caller.owner_id,
+                "companion_id": ctx.caller.companion_id,
+                "memory_realm_id": ctx.caller.memory_realm_id,
+                "turn_id": ctx.turn_id,
+                "trace_id": ctx.caller.trace_id or ctx.turn_id,
+                "request_id": ctx.caller.request_id,
+                "tool_name": call.name,
+                "arguments_json": arguments_json,
+            }
+            raw_key = Template(tmpl).safe_substitute(values)
             digest = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
             return f"idemp_{digest}"
         except Exception:

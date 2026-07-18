@@ -61,11 +61,11 @@ class NatsRuntimeBodyDeviceStore(BodyDeviceStorePort):
         for row in rows:
             device_id = row.device_id
             provider_companion_id = row.provider_companion_id or ""
-            if not device_id or not provider_companion_id:
+            provider_companion_name = row.provider_companion_name.strip()
+            if not device_id or not provider_companion_id or not provider_companion_name:
                 continue
             capabilities = tuple(
-                _runtime_capability(item.model_dump(mode="json"))
-                for item in row.capabilities
+                _runtime_capability(item.model_dump(mode="json")) for item in row.capabilities
             )
             devices.append(
                 BodyDevice(
@@ -73,10 +73,9 @@ class NatsRuntimeBodyDeviceStore(BodyDeviceStorePort):
                     name=row.name or device_id,
                     aliases=row.aliases,
                     provider_companion_id=provider_companion_id,
+                    provider_companion_name=provider_companion_name,
                     status="online_control",
-                    is_current_device=bool(
-                        source_device_id and device_id == source_device_id
-                    ),
+                    is_current_device=bool(source_device_id and device_id == source_device_id),
                     last_seen=row.last_seen_at,
                     control_room_name=row.room_name,
                     capabilities=capabilities,
@@ -106,6 +105,7 @@ class HubBodyCommandClient(BodyCommandPort):
         companion_id: str,
         device_id: str,
         op: str,
+        capability_version: int | None,
         payload: dict,
         qos: str = "ack",
         ttl_ms: int = 30_000,
@@ -113,6 +113,10 @@ class HubBodyCommandClient(BodyCommandPort):
         source_device_id: str | None = None,
         runtime_caller_id: str | None = None,
         runtime_session_id: str | None = None,
+        runtime_trace_id: str | None = None,
+        runtime_turn_id: str | None = None,
+        runtime_tool_call_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> BodyCommandResult:
         body = await self._request_json(
             "POST",
@@ -121,9 +125,14 @@ class HubBodyCommandClient(BodyCommandPort):
                 "requester_owner_id": owner_id,
                 "requester_companion_id": companion_id,
                 "op": op,
+                "capability_version": capability_version,
                 "source_device_id": source_device_id,
                 "runtime_caller_id": runtime_caller_id,
                 "runtime_session_id": runtime_session_id,
+                "runtime_trace_id": runtime_trace_id,
+                "runtime_turn_id": runtime_turn_id,
+                "runtime_tool_call_id": runtime_tool_call_id,
+                "idempotency_key": idempotency_key,
                 "payload": payload,
                 "ttl_ms": ttl_ms,
                 "qos": qos,
@@ -246,6 +255,7 @@ def _command_result_from_json(
         command_id=str(body.get("command_id") or ""),
         device_id=str(body.get("device_id") or fallback_device_id),
         op=str(body.get("op") or fallback_op),
+        capability_version=_positive_int_or_none(body.get("capability_version")),
         status=status,
         message=str(body.get("error") or body.get("message") or ""),
         ack=body.get("ack") if isinstance(body.get("ack"), dict) else None,
@@ -282,8 +292,12 @@ def _runtime_capability(value: dict[str, Any]) -> BodyCapability:
         name=str(value.get("name") or ""),
         version=int(value.get("version") or 1),
         description=str(value.get("description") or ""),
-        input_schema=(value.get("input_schema") if isinstance(value.get("input_schema"), dict) else {}),
-        result_schema=(value.get("result_schema") if isinstance(value.get("result_schema"), dict) else {}),
+        input_schema=(
+            value.get("input_schema") if isinstance(value.get("input_schema"), dict) else {}
+        ),
+        result_schema=(
+            value.get("result_schema") if isinstance(value.get("result_schema"), dict) else {}
+        ),
     )
 
 
@@ -292,6 +306,16 @@ def _parse_datetime(value: Any) -> datetime | None:
         return value
     if not isinstance(value, str) or not value:
         return None
+
+
+def _positive_int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
     try:
         return datetime.fromisoformat(value)
     except ValueError:

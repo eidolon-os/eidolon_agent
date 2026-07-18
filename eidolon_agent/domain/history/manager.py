@@ -131,8 +131,16 @@ def _merge_tail(
 ) -> list[ChatMessage]:
     by_id: dict[str, ChatMessage] = {}
     for msg in [*hydrated, *cached]:
-        by_id[msg.id] = msg
+        by_id[_stable_message_key(msg)] = msg
     return sorted(by_id.values(), key=lambda m: _utc_sort_key(m.created_at))[-window:]
+
+
+def _stable_message_key(message: ChatMessage) -> str:
+    turn_id = str(message.metadata.get("turn_id") or "").strip()
+    seq_in_turn = message.metadata.get("seq_in_turn")
+    if turn_id and isinstance(seq_in_turn, int):
+        return f"turn:{turn_id}:{seq_in_turn}"
+    return f"message:{message.id}"
 
 
 def _utc_sort_key(value: datetime) -> datetime:

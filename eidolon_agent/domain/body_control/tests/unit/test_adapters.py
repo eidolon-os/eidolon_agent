@@ -35,12 +35,11 @@ async def test_runtime_store_uses_only_caller_scoped_online_blackboard() -> None
     by_id = {item.device_id: item for item in devices}
     assert by_id["box-3"].status == "online_control"
     assert "小王" in by_id["box-3"].aliases
-    assert by_id["box-3"].last_seen == datetime(
-        2026, 6, 29, 9, 14, 4, tzinfo=timezone.utc
-    )
+    assert by_id["box-3"].last_seen == datetime(2026, 6, 29, 9, 14, 4, tzinfo=timezone.utc)
     assert by_id["atk-guard"].capabilities[0].name == "device.roll_call"
     assert by_id["atk-guard"].capabilities[0].version == 1
     assert by_id["atk-guard"].provider_companion_id == "companion-2"
+    assert by_id["atk-guard"].provider_companion_name == "Companion 2"
 
 
 @pytest.mark.asyncio
@@ -54,10 +53,13 @@ async def test_runtime_store_fails_closed_for_missing_malformed_or_other_owner_s
     mismatched = NatsRuntimeBodyDeviceStore(_FakeKV({key: other_owner.to_bytes()}))
 
     for store in (missing, malformed, mismatched):
-        assert await store.list_devices(
-            owner_id="owner-1",
-            companion_id="companion-1",
-        ) == []
+        assert (
+            await store.list_devices(
+                owner_id="owner-1",
+                companion_id="companion-1",
+            )
+            == []
+        )
 
 
 @pytest.mark.asyncio
@@ -75,6 +77,7 @@ async def test_runtime_client_waits_for_guard_terminal_result() -> None:
                     "command_id": "cmd-1",
                     "device_id": "atk-guard",
                     "op": "device.roll_call",
+                    "capability_version": 1,
                     "status": "sent",
                 },
             )
@@ -85,6 +88,7 @@ async def test_runtime_client_waits_for_guard_terminal_result() -> None:
                 "command_id": "cmd-1",
                 "device_id": "atk-guard",
                 "op": "device.roll_call",
+                "capability_version": 1,
                 "status": "completed" if status_reads > 1 else "accepted",
                 "result": {"played": True} if status_reads > 1 else None,
             },
@@ -98,7 +102,9 @@ async def test_runtime_client_waits_for_guard_terminal_result() -> None:
             source_device_id="box-3",
             device_id="atk-guard",
             op="device.roll_call",
+            capability_version=1,
             payload={},
+            idempotency_key="idem-1",
             qos="result",
             ttl_ms=5000,
         )
@@ -122,7 +128,9 @@ async def test_runtime_client_reports_blackboard_disconnect_race_as_offline() ->
                 source_device_id="box-3",
                 device_id="atk-guard",
                 op="device.roll_call",
+                capability_version=1,
                 payload={},
+                idempotency_key="idem-1",
                 qos="result",
             )
 
@@ -166,6 +174,7 @@ def _entry(
     status: str = "online",
     aliases: tuple[str, ...] = (),
     last_seen: datetime | None = None,
+    companion_name: str | None = None,
 ):
     now = datetime.now(timezone.utc)
     manifest, capabilities = _declared(capability_name)
@@ -173,6 +182,7 @@ def _entry(
         device_id=device_id,
         registration_id=f"reg-{device_id}",
         provider_companion_id=companion_id,
+        provider_companion_name=companion_name or companion_id.replace("-", " ").title(),
         name=device_id,
         aliases=aliases,
         capabilities=capabilities,

@@ -269,7 +269,7 @@ async def build_application(
     # Per-companion operational config (model routing / tool allow-deny / policy),
     # read from companions.runtime_config_json, resolved per-turn off a TTL cache.
     container.extras["companion_config_resolver"] = CompanionConfigResolver(data_store)
-    # Hub blackboard → caller-scoped online catalog + one stable invocation tool.
+    # Hub blackboard → caller-scoped catalog + one tool per compatible capability contract.
     container.extras["body_capability_tool_provider"] = RuntimeCapabilityToolProvider(
         container.extras.get("body_control")
     )

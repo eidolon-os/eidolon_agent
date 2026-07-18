@@ -7,7 +7,6 @@ all durable business rows are owned by ``eidolon_data``.
 from __future__ import annotations
 
 import asyncio
-import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
@@ -264,11 +263,12 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                     turn_id=ti.turn_id,
                     seq=0,
                     message=ChatMessage(
-                        id=uuid.uuid4().hex,
+                        id=_turn_message_id(ti.turn_id, 0),
                         role=MessageRole.USER,
                         content=user_text,
                         created_at=started_at,
                         metadata=_message_metadata(
+                            turn_id=ti.turn_id,
                             seq_in_turn=0,
                             is_private=is_private,
                         ),
@@ -280,13 +280,14 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                     turn_id=ti.turn_id,
                     seq=1,
                     message=ChatMessage(
-                        id=uuid.uuid4().hex,
+                        id=_turn_message_id(ti.turn_id, 1),
                         role=MessageRole.ASSISTANT,
                         content=assistant_text,
                         tokens=usage_out or None,
                         model=model_id,
                         created_at=finished_at,
                         metadata=_message_metadata(
+                            turn_id=ti.turn_id,
                             seq_in_turn=1,
                             is_private=is_private,
                         ),
@@ -336,7 +337,9 @@ class EidolonDataLongTaskStore:
 
     async def accept(self, record: LongTaskRecord) -> None:
         now = datetime.now(timezone.utc)
-        record = replace(record, created_at=record.created_at or now, updated_at=record.updated_at or now)
+        record = replace(
+            record, created_at=record.created_at or now, updated_at=record.updated_at or now
+        )
         async with self._data_store.session_factory() as session:
             await _validate_owner_companion(
                 session,
@@ -456,9 +459,12 @@ class EidolonDataLongTaskStore:
                 last_progress_at=now,
                 updated_at=now,
                 mementos_session_id=mementos_session_id or record.mementos_session_id,
-                mementos_conversation_id=mementos_conversation_id or record.mementos_conversation_id,
+                mementos_conversation_id=mementos_conversation_id
+                or record.mementos_conversation_id,
                 mementos_run_id=mementos_run_id or record.mementos_run_id,
-                mementos_latest_seq=latest_seq if latest_seq is not None else record.mementos_latest_seq,
+                mementos_latest_seq=latest_seq
+                if latest_seq is not None
+                else record.mementos_latest_seq,
                 mementos_workspace_dir=workspace_dir or record.mementos_workspace_dir,
                 external_status=external_status or record.external_status,
             ),
@@ -483,7 +489,9 @@ class EidolonDataLongTaskStore:
                 updated_at=now,
                 progress_events=events,
                 progress_summary=summary if summary is not None else record.progress_summary,
-                mementos_latest_seq=latest_seq if latest_seq is not None else record.mementos_latest_seq,
+                mementos_latest_seq=latest_seq
+                if latest_seq is not None
+                else record.mementos_latest_seq,
             )
 
         return await self._update(task_id, mutate)
@@ -501,7 +509,9 @@ class EidolonDataLongTaskStore:
                 record,
                 last_polled_at=now,
                 updated_at=now,
-                mementos_latest_seq=latest_seq if latest_seq is not None else record.mementos_latest_seq,
+                mementos_latest_seq=latest_seq
+                if latest_seq is not None
+                else record.mementos_latest_seq,
                 external_status=external_status or record.external_status,
             ),
         )
@@ -636,7 +646,9 @@ class EidolonDataConversationReader:
             row = (
                 await session.execute(
                     select(TurnRow, ConversationRow)
-                    .join(ConversationRow, TurnRow.conversation_id == ConversationRow.conversation_id)
+                    .join(
+                        ConversationRow, TurnRow.conversation_id == ConversationRow.conversation_id
+                    )
                     .where(TurnRow.turn_id == turn_id)
                 )
             ).first()
@@ -679,8 +691,12 @@ async def _validate_owner_companion(
 
 async def _upsert_runtime_caller(session, ti: TurnInput, *, runtime_caller_id: str) -> None:
     metadata = dict(ti.metadata or {})
-    actor_kind = str(ti.caller.actor_kind or metadata.get("actor_kind") or ti.caller.caller_kind.value)
-    actor_id = str(ti.caller.actor_id or metadata.get("actor_id") or ti.caller.device_id or runtime_caller_id)
+    actor_kind = str(
+        ti.caller.actor_kind or metadata.get("actor_kind") or ti.caller.caller_kind.value
+    )
+    actor_id = str(
+        ti.caller.actor_id or metadata.get("actor_id") or ti.caller.device_id or runtime_caller_id
+    )
     row = await session.get(RuntimeCallerRow, runtime_caller_id)
     now = datetime.now(timezone.utc)
     if row is None:
@@ -697,7 +713,9 @@ async def _upsert_runtime_caller(session, ti: TurnInput, *, runtime_caller_id: s
     row.companion_id = ti.caller.companion_id
     row.actor_kind = actor_kind
     row.actor_id = actor_id
-    row.display_name = str(ti.caller.display_name or metadata.get("caller_display_name") or actor_kind)
+    row.display_name = str(
+        ti.caller.display_name or metadata.get("caller_display_name") or actor_kind
+    )
     row.source_device_id = ti.caller.device_id
     row.status = "active"
     row.metadata_json = {
@@ -774,19 +792,23 @@ def _runtime_session_id(ti: TurnInput) -> str:
     raise RuntimeError("runtime_session_id was not built at transport boundary")
 
 
-async def _insert_ignore(session, model, values: dict[str, Any], *, index_elements: list[str]) -> None:
+async def _insert_ignore(
+    session, model, values: dict[str, Any], *, index_elements: list[str]
+) -> None:
     """Insert a row if absent without turning first-writer races into failures."""
 
     dialect = session.get_bind().dialect.name
     if dialect == "sqlite":
-        stmt = sqlite_insert(model).values(**values).on_conflict_do_nothing(
-            index_elements=index_elements
+        stmt = (
+            sqlite_insert(model)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=index_elements)
         )
         await session.execute(stmt)
         return
     if dialect == "postgresql":
-        stmt = pg_insert(model).values(**values).on_conflict_do_nothing(
-            index_elements=index_elements
+        stmt = (
+            pg_insert(model).values(**values).on_conflict_do_nothing(index_elements=index_elements)
         )
         await session.execute(stmt)
         return
@@ -847,6 +869,7 @@ def _turn_metrics_json(result: TurnResult) -> dict[str, Any]:
 
 def _message_to_row(turn_id: str, message: ChatMessage, *, seq: int | None = None) -> MessageRow:
     metadata = dict(message.metadata or {})
+    metadata.setdefault("turn_id", turn_id)
     if message.tokens is not None:
         metadata["tokens"] = message.tokens
     if message.model is not None:
@@ -888,11 +911,18 @@ async def _upsert_message_row(session, *, turn_id: str, seq: int, message: ChatM
     existing.metadata_json = row.metadata_json
 
 
-def _message_metadata(*, seq_in_turn: int, is_private: bool) -> dict[str, Any]:
-    metadata: dict[str, Any] = {"seq_in_turn": seq_in_turn}
+def _message_metadata(*, turn_id: str, seq_in_turn: int, is_private: bool) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "turn_id": turn_id,
+        "seq_in_turn": seq_in_turn,
+    }
     if is_private:
         metadata["is_private"] = True
     return metadata
+
+
+def _turn_message_id(turn_id: str, seq_in_turn: int) -> str:
+    return f"msg_{turn_id}_{seq_in_turn}"
 
 
 def _message_seq_in_turn(row: MessageRow) -> int:
@@ -982,11 +1012,13 @@ def _turn_row_to_admin_dict(turn: TurnRow, conversation: ConversationRow) -> dic
         "metadata_": metadata,
         "owner_id": conversation.owner_id,
         "companion_id": conversation.companion_id,
-        "memory_realm_id": conversation_meta.get("memory_realm_id") or metadata.get("memory_realm_id"),
+        "memory_realm_id": conversation_meta.get("memory_realm_id")
+        or metadata.get("memory_realm_id"),
         "genome_id": conversation_meta.get("genome_id") or metadata.get("genome_id"),
         "genome_hash": conversation_meta.get("genome_hash") or metadata.get("genome_hash"),
         "schema_version": conversation_meta.get("schema_version") or metadata.get("schema_version"),
-        "realizer_version": conversation_meta.get("realizer_version") or metadata.get("realizer_version"),
+        "realizer_version": conversation_meta.get("realizer_version")
+        or metadata.get("realizer_version"),
         "conversation_title": conversation.title,
     }
 

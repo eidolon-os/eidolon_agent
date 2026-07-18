@@ -1,4 +1,4 @@
-"""Protocol-level E2E for Box-3 -> cross-Companion ATK Guard roll call.
+"""Protocol-level E2E for a dynamic cross-Companion device capability.
 
 The test uses the real registration signature verification, SQLite registry,
 Agent capability assembly, Hub runtime authorization, command persistence and
@@ -73,7 +73,8 @@ COMPANION_A = "companion-a"
 COMPANION_B = "companion-guard"
 BOX_DEVICE = "box-3"
 GUARD_DEVICE = "atk-guard"
-CAPABILITY_TOOL = "invoke_device_capability"
+CAPABILITY_TOOL = "cap_device_roll_call_v1"
+GUARD_COMPANION_NAME = "Guard"
 SERVICE_TOKEN = "cross-companion-e2e-token"
 _DEVICE_KEYS: dict[str, ec.EllipticCurvePrivateKey] = {}
 
@@ -98,19 +99,25 @@ class _FakeRoomService:
 
     async def list_participants(self, request):
         participants = {
-            "box-voice": [SimpleNamespace(
-                identity=BOX_DEVICE,
-                sid="PA_BOX",
-                metadata=json.dumps({
-                    "kind": "device",
-                    "registration_id": self.registration_ids.get(BOX_DEVICE, ""),
-                }),
-            )],
-            "guard-control": [SimpleNamespace(
-                identity=GUARD_DEVICE,
-                sid="PA_GUARD",
-                metadata=json.dumps(self.guard_participant_metadata),
-            )],
+            "box-voice": [
+                SimpleNamespace(
+                    identity=BOX_DEVICE,
+                    sid="PA_BOX",
+                    metadata=json.dumps(
+                        {
+                            "kind": "device",
+                            "registration_id": self.registration_ids.get(BOX_DEVICE, ""),
+                        }
+                    ),
+                )
+            ],
+            "guard-control": [
+                SimpleNamespace(
+                    identity=GUARD_DEVICE,
+                    sid="PA_GUARD",
+                    metadata=json.dumps(self.guard_participant_metadata),
+                )
+            ],
         }
         return SimpleNamespace(participants=participants.get(request.room, []))
 
@@ -119,7 +126,7 @@ class _FakeRoomService:
         self.sent_envelopes.append(envelope)
         if envelope.get("dst", {}).get("id") != GUARD_DEVICE:
             return SimpleNamespace()
-        if self.guard_behavior == "success":
+        if self.guard_behavior in {"success", "invalid_result"}:
             self.tasks.append(asyncio.create_task(self._complete_roll_call(envelope)))
         return SimpleNamespace()
 
@@ -150,7 +157,7 @@ class _FakeRoomService:
                 "op": command["op"],
                 "status": "completed",
                 "code": "OK",
-                "result": {"played": True},
+                "result": {"played": "yes" if self.guard_behavior == "invalid_result" else True},
             },
             sender_identity=GUARD_DEVICE,
         )
@@ -321,15 +328,21 @@ async def _stack(
         }
         assert all(item["status"] == "pending_approval" for item in initial.values())
         room.registration_ids = {
-            device_id: str(payload["registration_id"])
-            for device_id, payload in active.items()
+            device_id: str(payload["registration_id"]) for device_id, payload in active.items()
         }
         room.guard_participant_metadata = await _guard_runtime_participant_metadata(
             http,
             device_id=GUARD_DEVICE,
         )
-        assert room.guard_participant_metadata["registration_id"] == (
-            room.registration_ids[GUARD_DEVICE]
+        # Reproduce the real Guard lifecycle: the signed manifest has already
+        # advanced, while the still-reachable control participant carries a
+        # token minted for an older registration. Availability is the join of
+        # current signed manifest + current transport identity, not generation
+        # equality between those independent observations.
+        room.guard_participant_metadata["registration_id"] = "reg-before-manifest-refresh"
+        assert (
+            room.guard_participant_metadata["registration_id"]
+            != (room.registration_ids[GUARD_DEVICE])
         )
         await runtime.run_probe_cycle([BOX_DEVICE, GUARD_DEVICE])
 
@@ -413,10 +426,10 @@ async def _guard_runtime_participant_metadata(
     return captured
 
 
-def _capability(name: str, description: str) -> dict:
+def _capability(name: str, description: str, *, version: int = 1) -> dict:
     return {
         "name": name,
-        "version": 1,
+        "version": version,
         "description": description,
         "input_schema": {
             "type": "object",
@@ -502,7 +515,12 @@ def _runtime_request(*, op: str = "device.roll_call") -> dict:
         "source_device_id": BOX_DEVICE,
         "runtime_caller_id": "caller-box-3",
         "runtime_session_id": "session-box-3",
+        "runtime_trace_id": "trace-box-3",
+        "runtime_turn_id": "turn-box-3",
+        "runtime_tool_call_id": "tool-box-3",
+        "idempotency_key": f"e2e:{op}",
         "op": op,
+        "capability_version": 1,
         "payload": {},
         "qos": "result",
         "ttl_ms": 5000,
@@ -530,19 +548,21 @@ async def test_real_nats_kv_owner_snapshots_are_isolated_and_cleared_on_hub_rest
             (OWNER_A, BOX_DEVICE, COMPANION_A),
             (OWNER_B, GUARD_DEVICE, COMPANION_B),
         ):
-            entry = await board.register_device_manifest(
+            await board.register_device_manifest(
                 device_id=device_id,
                 manifest=CapabilityManifest.model_validate(
                     {"capabilities": [_capability("device.identify", "Identify locally")]}
                 ),
                 owner_id=owner_id,
                 provider_companion_id=companion_id,
+                provider_companion_name=(
+                    "Box Companion" if companion_id == COMPANION_A else GUARD_COMPANION_NAME
+                ),
                 name=device_id,
             )
             await board.mark_device_online(
                 owner_id=owner_id,
                 device_id=device_id,
-                registration_id=entry.registration_id,
                 room_name=f"room-{device_id}",
                 participant_sid=f"PA_{device_id}",
                 presence_revision=f"PA_{device_id}",
@@ -563,14 +583,20 @@ async def test_real_nats_kv_owner_snapshots_are_isolated_and_cleared_on_hub_rest
         restarted = OwnerRuntimeBlackboard(kv, epoch="epoch-restarted")
         await restarted.initialize([OWNER_A, OWNER_B])
         await restarted.mark_ready([OWNER_A, OWNER_B])
-        assert await reader.list_devices(
-            owner_id=OWNER_A,
-            companion_id=COMPANION_A,
-        ) == []
-        assert await reader.list_devices(
-            owner_id=OWNER_B,
-            companion_id=COMPANION_B,
-        ) == []
+        assert (
+            await reader.list_devices(
+                owner_id=OWNER_A,
+                companion_id=COMPANION_A,
+            )
+            == []
+        )
+        assert (
+            await reader.list_devices(
+                owner_id=OWNER_B,
+                companion_id=COMPANION_B,
+            )
+            == []
+        )
     finally:
         await kv.close()
 
@@ -592,31 +618,63 @@ async def test_box_voice_tool_calls_cross_companion_guard_and_waits_for_real_res
         assert guard_row.kind == "atk-guard"
         assert "ops" not in (guard_row.capabilities_json or {})
 
-        schemas, ports, catalog = await _tools(stack)
-        assert [item.name for item in schemas] == [CAPABILITY_TOOL]
+        schemas, ports = await _tools(stack)
+        assert {item.name for item in schemas} == {
+            "cap_device_identify_v1",
+            CAPABILITY_TOOL,
+        }
         assert CAPABILITY_TOOL in ports
-        assert '"device_id":"atk-guard"' in catalog
-        assert '"name":"device.roll_call"' in catalog
+        assert ports[CAPABILITY_TOOL].schema.json_schema["properties"]["target_companion"][
+            "enum"
+        ] == [GUARD_COMPANION_NAME]
+
+        # A repeated signed registration must update the contract atomically
+        # without hiding an already-online provider between probe cycles.
+        refreshed = await _register(
+            stack.http,
+            device_id=GUARD_DEVICE,
+            manifest={
+                "device": {"name": "ATK Guard", "kind": "atk-guard"},
+                "capabilities": [_capability("device.roll_call", "Play local roll-call response")],
+                "guard": True,
+                "guard_protocol_versions": [1],
+            },
+        )
+        assert (
+            refreshed["registration_id"] != stack.room.guard_participant_metadata["registration_id"]
+        )
+        refreshed_schemas, refreshed_ports = await _tools(stack)
+        assert CAPABILITY_TOOL in {item.name for item in refreshed_schemas}
+        assert CAPABILITY_TOOL in refreshed_ports
 
         result = await ports[CAPABILITY_TOOL].invoke(
             ToolCall(
                 id="tool-call-1",
                 name=CAPABILITY_TOOL,
                 arguments={
-                    "target_device_id": GUARD_DEVICE,
-                    "capability_name": "device.roll_call",
-                    "arguments": {},
+                    "target_companion": GUARD_COMPANION_NAME,
                 },
             ),
             ctx=ToolInvocationContext(caller=_caller(), turn_id="turn-guard-in-ma"),
         )
+        retry_result = await ports[CAPABILITY_TOOL].invoke(
+            ToolCall(
+                id="tool-call-retry",
+                name=CAPABILITY_TOOL,
+                arguments={"target_companion": GUARD_COMPANION_NAME},
+            ),
+            ctx=ToolInvocationContext(caller=_caller(), turn_id="different-agent-turn"),
+        )
 
         assert result.ok is True
+        assert retry_result.ok is True
+        assert retry_result.content["command_id"] == result.content["command_id"]
         assert result.content["status"] == "done"
         assert result.content["result"] == {"played": True}
         assert len(stack.room.sent_envelopes) == 1
         envelope = stack.room.sent_envelopes[0]
         assert envelope["op"] == "device.roll_call"
+        assert envelope["capability_version"] == 1
         assert envelope["dst"]["id"] == GUARD_DEVICE
         assert envelope["src"] == {
             "type": "companion",
@@ -628,6 +686,70 @@ async def test_box_voice_tool_calls_cross_companion_guard_and_waits_for_real_res
         assert persisted is not None
         assert persisted.status == "succeeded"
         assert persisted.result_json == {"played": True}
+        assert persisted.envelope_json["_hub_runtime"]["trace_id"] == _caller().trace_id
+        assert persisted.envelope_json["_hub_capability_contract"]["version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_contract_version_change_between_tool_assembly_and_invoke_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("EIDOLON_RUNTIME_SERVICE_TOKEN", SERVICE_TOKEN)
+    async with _stack(tmp_path) as stack:
+        _schemas, old_ports = await _tools(stack)
+        await _register(
+            stack.http,
+            device_id=GUARD_DEVICE,
+            manifest={
+                "device": {"name": "ATK Guard", "kind": "atk-guard"},
+                "capabilities": [
+                    _capability(
+                        "device.roll_call",
+                        "Play local roll-call response v2",
+                        version=2,
+                    )
+                ],
+                "guard": True,
+                "guard_protocol_versions": [1],
+            },
+        )
+
+        result = await old_ports[CAPABILITY_TOOL].invoke(
+            ToolCall(
+                id="stale-v1-call",
+                name=CAPABILITY_TOOL,
+                arguments={"target_companion": GUARD_COMPANION_NAME},
+            ),
+            ctx=ToolInvocationContext(caller=_caller(), turn_id="stale-v1-turn"),
+        )
+
+        assert result.ok is False
+        assert result.error_code == "body_capability_unsupported"
+        assert stack.room.sent_envelopes == []
+
+
+@pytest.mark.asyncio
+async def test_invalid_device_result_schema_is_not_reported_as_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("EIDOLON_RUNTIME_SERVICE_TOKEN", SERVICE_TOKEN)
+    async with _stack(tmp_path, guard_behavior="invalid_result") as stack:
+        _schemas, ports = await _tools(stack)
+        result = await ports[CAPABILITY_TOOL].invoke(
+            ToolCall(
+                id="invalid-result-call",
+                name=CAPABILITY_TOOL,
+                arguments={"target_companion": GUARD_COMPANION_NAME},
+            ),
+            ctx=ToolInvocationContext(caller=_caller(), turn_id="invalid-result-turn"),
+        )
+
+        assert result.ok is False
+        assert result.error_code == "failed"
+        assert "invalid capability result" in (result.error_message or "")
+        assert result.content["completed"] is False
 
 
 @pytest.mark.asyncio
@@ -659,9 +781,8 @@ async def test_private_capability_is_hidden_and_hub_rejects_direct_bypass(
 ) -> None:
     monkeypatch.setenv("EIDOLON_RUNTIME_SERVICE_TOKEN", SERVICE_TOKEN)
     async with _stack(tmp_path, visibility="bound_companion") as stack:
-        _schemas, ports, catalog = await _tools(stack)
-        assert CAPABILITY_TOOL in ports
-        assert GUARD_DEVICE not in catalog
+        _schemas, ports = await _tools(stack)
+        assert CAPABILITY_TOOL not in ports
 
         response = await stack.http.post(
             f"/api/runtime/devices/{GUARD_DEVICE}/commands",
@@ -679,9 +800,8 @@ async def test_cross_owner_target_is_hidden_and_rejected_by_hub(
 ) -> None:
     monkeypatch.setenv("EIDOLON_RUNTIME_SERVICE_TOKEN", SERVICE_TOKEN)
     async with _stack(tmp_path, guard_owner=OWNER_B) as stack:
-        _schemas, ports, catalog = await _tools(stack)
-        assert CAPABILITY_TOOL in ports
-        assert GUARD_DEVICE not in catalog
+        _schemas, ports = await _tools(stack)
+        assert CAPABILITY_TOOL not in ports
 
         response = await stack.http.post(
             f"/api/runtime/devices/{GUARD_DEVICE}/commands",
@@ -702,23 +822,21 @@ async def test_dynamic_declared_op_is_visible_but_undeclared_op_is_rejected(
         tmp_path,
         guard_capabilities=[_capability("vendor.ping", "Play a vendor ping")],
     ) as stack:
-        _schemas, ports, catalog = await _tools(stack)
-        assert CAPABILITY_TOOL in ports
-        assert '"name":"vendor.ping"' in catalog
+        _schemas, ports = await _tools(stack)
+        vendor_tool = "cap_vendor_ping_v1"
+        assert vendor_tool in ports
 
         undeclared = await stack.http.post(
             f"/api/runtime/devices/{GUARD_DEVICE}/commands",
             json=_runtime_request(),
             headers=_service_headers(),
         )
-        declared_result = await ports[CAPABILITY_TOOL].invoke(
+        declared_result = await ports[vendor_tool].invoke(
             ToolCall(
                 id="tool-call-vendor",
-                name=CAPABILITY_TOOL,
+                name=vendor_tool,
                 arguments={
-                    "target_device_id": GUARD_DEVICE,
-                    "capability_name": "vendor.ping",
-                    "arguments": {},
+                    "target_companion": GUARD_COMPANION_NAME,
                 },
             ),
             ctx=ToolInvocationContext(caller=_caller(), turn_id="turn-vendor"),
@@ -735,9 +853,8 @@ async def test_offline_guard_tool_fails_without_sending_or_claiming_success(
 ) -> None:
     monkeypatch.setenv("EIDOLON_RUNTIME_SERVICE_TOKEN", SERVICE_TOKEN)
     async with _stack(tmp_path, guard_behavior="offline") as stack:
-        _schemas, ports, catalog = await _tools(stack)
-        assert CAPABILITY_TOOL in ports
-        assert GUARD_DEVICE not in catalog
+        _schemas, ports = await _tools(stack)
+        assert CAPABILITY_TOOL not in ports
         assert stack.room.sent_envelopes == []
 
 
@@ -748,15 +865,13 @@ async def test_missing_terminal_result_returns_timeout_not_success(
 ) -> None:
     monkeypatch.setenv("EIDOLON_RUNTIME_SERVICE_TOKEN", SERVICE_TOKEN)
     async with _stack(tmp_path, guard_behavior="timeout") as stack:
-        _schemas, ports, _catalog = await _tools(stack)
+        _schemas, ports = await _tools(stack)
         result = await ports[CAPABILITY_TOOL].invoke(
             ToolCall(
                 id="tool-call-timeout",
                 name=CAPABILITY_TOOL,
                 arguments={
-                    "target_device_id": GUARD_DEVICE,
-                    "capability_name": "device.roll_call",
-                    "arguments": {},
+                    "target_companion": GUARD_COMPANION_NAME,
                 },
             ),
             ctx=ToolInvocationContext(caller=_caller(), turn_id="turn-timeout"),

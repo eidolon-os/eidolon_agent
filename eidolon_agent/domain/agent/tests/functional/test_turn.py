@@ -77,7 +77,7 @@ async def test_ordinary_turn_does_not_create_evolution_observation(
 
 async def test_persona_state_is_not_exposed_as_tool(turn_engine_factory):
     engine = turn_engine_factory()
-    schemas, _extra, _catalog = await engine._tool_schemas(
+    schemas, _extra = await engine._tool_schemas(
         make_turn_input("你好"), CompanionRuntimeConfig()
     )
     tool_names = {schema.name for schema in schemas}

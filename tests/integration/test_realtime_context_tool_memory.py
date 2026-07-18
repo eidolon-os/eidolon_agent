@@ -231,11 +231,12 @@ async def test_compiled_prompt_contains_tool_policy(turn_engine_factory) -> None
     assert "realtime agent" in system_prompt
     assert "cowork" in system_prompt
     assert "不要编造最终结果" in system_prompt
+    assert "仅在本轮工具成功后声称完成" in system_prompt
 
 
 async def test_builtin_tool_schemas_describe_usage_boundaries(turn_engine_factory) -> None:
     engine = turn_engine_factory()
-    visible, _dynamic, _catalog = await engine._tool_schemas(
+    visible, _dynamic = await engine._tool_schemas(
         make_turn_input(), CompanionRuntimeConfig()
     )
     schemas = {schema.name: schema for schema in visible}

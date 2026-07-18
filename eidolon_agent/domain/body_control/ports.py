@@ -25,6 +25,7 @@ class BodyCommandPort(Protocol):
         companion_id: str,
         device_id: str,
         op: str,
+        capability_version: int | None,
         payload: dict,
         qos: str = "ack",
         ttl_ms: int = 30_000,
@@ -32,6 +33,10 @@ class BodyCommandPort(Protocol):
         source_device_id: str | None = None,
         runtime_caller_id: str | None = None,
         runtime_session_id: str | None = None,
+        runtime_trace_id: str | None = None,
+        runtime_turn_id: str | None = None,
+        runtime_tool_call_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> BodyCommandResult: ...
 
     async def get_command_status(

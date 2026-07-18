@@ -80,7 +80,9 @@ async def test_dispatch_returns_results_in_input_order(stub_tool_factory, caller
     assert all(r.ok for r in results)
 
 
-async def test_readonly_calls_run_concurrently_but_results_keep_order(stub_tool_factory, caller_ctx) -> None:
+async def test_readonly_calls_run_concurrently_but_results_keep_order(
+    stub_tool_factory, caller_ctx
+) -> None:
     order: list[str] = []
 
     async def slow_invoke(call, ctx):
@@ -96,15 +98,15 @@ async def test_readonly_calls_run_concurrently_but_results_keep_order(stub_tool_
     reg.register(stub_tool_factory("slow", side_effect=False, invoke=slow_invoke))
     reg.register(stub_tool_factory("fast", side_effect=False, invoke=fast_invoke))
     disp = ToolDispatcher(reg)
-    results = await disp.dispatch_batch(
-        [_call("slow", "s1"), _call("fast", "f1")], ctx=caller_ctx
-    )
+    results = await disp.dispatch_batch([_call("slow", "s1"), _call("fast", "f1")], ctx=caller_ctx)
     assert order == ["fast:f1", "slow:s1"]
     assert [r.call_id for r in results] == ["s1", "f1"]
     assert results[0].latency_ms >= 15
 
 
-async def test_side_effect_calls_wait_for_prior_readonly_batch(stub_tool_factory, caller_ctx) -> None:
+async def test_side_effect_calls_wait_for_prior_readonly_batch(
+    stub_tool_factory, caller_ctx
+) -> None:
     order: list[str] = []
 
     async def slow(call, ctx):
@@ -142,15 +144,17 @@ async def test_timeout_returns_error(stub_tool_factory, caller_ctx) -> None:
 
 async def test_strict_schema_rejects_invalid_arguments(stub_tool_factory, caller_ctx) -> None:
     reg = ToolRegistry()
-    reg.register(stub_tool_factory(
-        "needs_subject",
-        json_schema={
-            "type": "object",
-            "properties": {"subject": {"type": "string"}},
-            "required": ["subject"],
-            "additionalProperties": False,
-        },
-    ))
+    reg.register(
+        stub_tool_factory(
+            "needs_subject",
+            json_schema={
+                "type": "object",
+                "properties": {"subject": {"type": "string"}},
+                "required": ["subject"],
+                "additionalProperties": False,
+            },
+        )
+    )
 
     [res] = await ToolDispatcher(reg, schema_strict=True).dispatch_batch(
         [_call("needs_subject", args={"extra": 1})],
@@ -163,15 +167,17 @@ async def test_strict_schema_rejects_invalid_arguments(stub_tool_factory, caller
 
 async def test_schema_compat_mode_warns_and_invokes(stub_tool_factory, caller_ctx, caplog) -> None:
     reg = ToolRegistry()
-    reg.register(stub_tool_factory(
-        "compat",
-        json_schema={
-            "type": "object",
-            "properties": {"subject": {"type": "string"}},
-            "required": ["subject"],
-            "additionalProperties": False,
-        },
-    ))
+    reg.register(
+        stub_tool_factory(
+            "compat",
+            json_schema={
+                "type": "object",
+                "properties": {"subject": {"type": "string"}},
+                "required": ["subject"],
+                "additionalProperties": False,
+            },
+        )
+    )
 
     [res] = await ToolDispatcher(reg, schema_strict=False).dispatch_batch(
         [_call("compat", args={})],
@@ -182,7 +188,9 @@ async def test_schema_compat_mode_warns_and_invokes(stub_tool_factory, caller_ct
     assert "compatibility mode" in caplog.text
 
 
-async def test_permission_denied_when_instance_lacks_permission(stub_tool_factory, caller_ctx) -> None:
+async def test_permission_denied_when_instance_lacks_permission(
+    stub_tool_factory, caller_ctx
+) -> None:
     reg = ToolRegistry()
     reg.register(stub_tool_factory("system_tool", permissions={Permission.SYSTEM}))
 
@@ -213,11 +221,13 @@ async def test_idempotency_key_hashes_runtime_identity_and_arguments(
     caller_ctx,
 ) -> None:
     reg = ToolRegistry()
-    reg.register(stub_tool_factory(
-        "remember",
-        side_effect=True,
-        idempotency_key_template="${owner_id}:${companion_id}:${subject}:${predicate}:${object}",
-    ))
+    reg.register(
+        stub_tool_factory(
+            "remember",
+            side_effect=True,
+            idempotency_key_template="${owner_id}:${companion_id}:${subject}:${predicate}:${object}",
+        )
+    )
     store = _FakeIdempotencyStore()
 
     [res] = await ToolDispatcher(reg, idempotency_store=store).dispatch_batch(
@@ -236,6 +246,40 @@ async def test_idempotency_key_hashes_runtime_identity_and_arguments(
 
     assert res.ok is True
     assert len(set(store.keys_seen)) == 1
+
+
+async def test_idempotency_cache_uses_logical_trace_across_retry_turn_ids(
+    stub_tool_factory,
+    caller_ctx,
+) -> None:
+    tool = stub_tool_factory(
+        "external_action",
+        side_effect=True,
+        idempotency_key_template="${owner_id}:${trace_id}:${arguments_json}",
+    )
+    reg = ToolRegistry()
+    reg.register(tool)
+    store = _FakeIdempotencyStore()
+    dispatcher = ToolDispatcher(reg, idempotency_store=store)
+    first_ctx = replace(caller_ctx, turn_id="turn-1")
+    retry_ctx = replace(caller_ctx, turn_id="turn-retry")
+
+    [first] = await dispatcher.dispatch_batch(
+        [_call("external_action", "call-1", {"enabled": True})],
+        ctx=first_ctx,
+    )
+    [retry] = await dispatcher.dispatch_batch(
+        [_call("external_action", "call-2", {"enabled": True})],
+        ctx=retry_ctx,
+    )
+    [changed] = await dispatcher.dispatch_batch(
+        [_call("external_action", "call-3", {"enabled": False})],
+        ctx=retry_ctx,
+    )
+
+    assert first.ok and retry.ok and changed.ok
+    assert retry.metadata["idempotent_cache"] is True
+    assert len(tool.calls) == 2
 
 
 async def test_batch_timeout_returns_stable_errors(stub_tool_factory, caller_ctx) -> None:

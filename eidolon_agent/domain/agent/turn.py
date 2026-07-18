@@ -458,15 +458,9 @@ class TurnEngine:
             cfg = await self._resolve_companion_config(ti)
 
             # ---- LLM stream (with tool loop) -------------------------------
-            tools, extra_tools, runtime_catalog = await self._tool_schemas(ti, cfg)
-            if runtime_catalog and messages and messages[0].role is MessageRole.SYSTEM:
-                messages[0] = messages[0].with_content(
-                    messages[0].content + "\n\n" + runtime_catalog
-                )
+            tools, extra_tools = await self._tool_schemas(ti, cfg)
             tool_budget = self._harness.tool_schema_budget(tools)
-            ti.metadata.setdefault("development_guards", {})[
-                "tool_schema_budget"
-            ] = tool_budget
+            ti.metadata.setdefault("development_guards", {})["tool_schema_budget"] = tool_budget
             _update_harness_snapshot_tools(
                 ti,
                 [schema.name for schema in tools],
@@ -497,13 +491,8 @@ class TurnEngine:
                         yield TurnEvent.delta(ti.turn_id, seq.next(), delta.text_delta, time.time())
                     if delta.tool_call is not None:
                         tool_calls.append(delta.tool_call)
-                        answer_announcement = _tool_answer_announcement(
-                            delta.tool_call, ti
-                        )
-                        if (
-                            answer_announcement
-                            and answer_announcement not in announced_answers
-                        ):
+                        answer_announcement = _tool_answer_announcement(delta.tool_call, ti)
+                        if answer_announcement and answer_announcement not in announced_answers:
                             announced_answers.add(answer_announcement)
                             if first_delta_ms is None:
                                 first_delta_ms = int((time.monotonic() - t0) * 1000)
@@ -558,10 +547,7 @@ class TurnEngine:
                     dispatch_calls: list[ToolCall] = []
                     suppressed_results: list[ToolResult] = []
                     for call in tool_calls:
-                        if (
-                            tool_failure_counts.get(call.name, 0)
-                            >= _MAX_FAILURES_PER_TOOL_PER_TURN
-                        ):
+                        if tool_failure_counts.get(call.name, 0) >= _MAX_FAILURES_PER_TOOL_PER_TURN:
                             tool_repeat_suppressed_count += 1
                             suppressed_results.append(_suppressed_tool_result(call))
                         else:
@@ -587,9 +573,7 @@ class TurnEngine:
                             name=f"turn-{ti.turn_id}-tool-dispatch",
                         )
                         try:
-                            slow_hint_delay_s = (
-                                self._tool_latency_policy.slow_hint_delay_s
-                            )
+                            slow_hint_delay_s = self._tool_latency_policy.slow_hint_delay_s
                             if (
                                 not slow_tool_hint_emitted
                                 and slow_hint_delay_s > 0
@@ -606,9 +590,7 @@ class TurnEngine:
                                 if dispatch_task not in done:
                                     slow_tool_hint_emitted = True
                                     if first_delta_ms is None:
-                                        first_delta_ms = int(
-                                            (time.monotonic() - t0) * 1000
-                                        )
+                                        first_delta_ms = int((time.monotonic() - t0) * 1000)
                                     yield TurnEvent.delta(
                                         ti.turn_id,
                                         seq.next(),
@@ -633,9 +615,7 @@ class TurnEngine:
                         if r.ok:
                             tool_failure_counts.pop(r.name, None)
                         else:
-                            tool_failure_counts[r.name] = (
-                                tool_failure_counts.get(r.name, 0) + 1
-                            )
+                            tool_failure_counts[r.name] = tool_failure_counts.get(r.name, 0) + 1
                     tool_trace.extend(
                         ToolTrace(
                             call_id=r.call_id,
@@ -669,9 +649,7 @@ class TurnEngine:
                             result=r,
                         )
                         if handoff is not None:
-                            handoff_summaries.append(
-                                _handoff_summary_from_tool_result(r)
-                            )
+                            handoff_summaries.append(_handoff_summary_from_tool_result(r))
                             _update_harness_snapshot_handoffs(ti, handoff_summaries)
                             yield handoff
                         tool_result_messages.append(
@@ -840,9 +818,7 @@ class TurnEngine:
                     ),
                     context_ledger=ti.metadata.get("context_ledger"),
                     memory_trace=ti.metadata.get("memory_trace"),
-                    commitment_context_trace=ti.metadata.get(
-                        "commitment_context_trace"
-                    ),
+                    commitment_context_trace=ti.metadata.get("commitment_context_trace"),
                     memory_recall_query=ti.metadata.get("memory_recall_query"),
                     memory_write_trace=memory_write_trace,
                     tool_trace=tool_trace,
@@ -859,9 +835,7 @@ class TurnEngine:
                     interrupted_context_dropped_count=int(
                         ti.metadata.get("interrupted_context_dropped_count") or 0
                     ),
-                    stale_generation_dropped=int(
-                        ti.metadata.get("stale_generation_dropped") or 0
-                    ),
+                    stale_generation_dropped=int(ti.metadata.get("stale_generation_dropped") or 0),
                     tool_repeat_suppressed_count=tool_repeat_suppressed_count,
                     development_guards=development_guards,
                     usage={"tokens_in": usage_in, "tokens_out": usage_out},
@@ -875,9 +849,7 @@ class TurnEngine:
                     "tool_ms": tool_ms_total,
                     "context_ledger": ti.metadata.get("context_ledger"),
                     "memory_trace": ti.metadata.get("memory_trace"),
-                    "commitment_context_trace": ti.metadata.get(
-                        "commitment_context_trace"
-                    ),
+                    "commitment_context_trace": ti.metadata.get("commitment_context_trace"),
                     "memory_recall_query": ti.metadata.get("memory_recall_query"),
                     "memory_write_trace": memory_write_trace,
                     "tool_trace": [t.to_metadata() for t in tool_trace],
@@ -888,10 +860,7 @@ class TurnEngine:
                         "interrupted_context_dropped_count"
                     )
                     or 0,
-                    "stale_generation_dropped": ti.metadata.get(
-                        "stale_generation_dropped"
-                    )
-                    or 0,
+                    "stale_generation_dropped": ti.metadata.get("stale_generation_dropped") or 0,
                     "tool_repeat_suppressed_count": tool_repeat_suppressed_count,
                     "turn_trace": trace,
                 }
@@ -954,14 +923,14 @@ class TurnEngine:
 
     async def _tool_schemas(
         self, ti: TurnInput, cfg: CompanionRuntimeConfig
-    ) -> tuple[list, dict[str, ToolPort], str]:
+    ) -> tuple[list, dict[str, ToolPort]]:
         """Per-turn, caller-aware tool assembly (the F1/F2 junction).
 
         Filters the global static tools by this companion's allow/deny policy,
-        then appends per-device capability tools synthesized from the caller's
-        bound devices. Returns the LLM-visible schema list plus an overlay of
-        dynamic tool ports resolved by name at dispatch. The harness makes the
-        final hidden-name cut.
+        then appends one dynamic tool per compatible online capability contract.
+        Companion names are tool targets; physical provider lookup remains in
+        the body-control service. Returns the LLM-visible schemas plus the
+        per-turn dynamic tool overlay resolved by name at dispatch.
         """
         schemas = ToolVisibilityPolicy.filter(
             self._tools.list_schemas(),
@@ -969,11 +938,8 @@ class TurnEngine:
             deny=cfg.tool_deny,
         )
         extra_tools: dict[str, ToolPort] = {}
-        runtime_catalog = ""
         if cfg.allow_body_control and self._body_capability_provider is not None:
-            cap_schemas, cap_ports, runtime_catalog = (
-                await self._body_capability_provider.assemble(ti.caller)
-            )
+            cap_schemas, cap_ports = await self._body_capability_provider.assemble(ti.caller)
             # deny applies to synthetic tools too: drop from BOTH schemas and overlay
             # so a denied capability can neither be seen nor actuated.
             if cfg.tool_deny:
@@ -982,9 +948,9 @@ class TurnEngine:
             schemas = schemas + cap_schemas
             extra_tools.update(cap_ports)
         visible = self._harness.visible_tool_schemas(schemas)
-        if not any(schema.name == "invoke_device_capability" for schema in visible):
-            runtime_catalog = ""
-        return visible, extra_tools, runtime_catalog
+        visible_names = {schema.name for schema in visible}
+        extra_tools = {name: port for name, port in extra_tools.items() if name in visible_names}
+        return visible, extra_tools
 
     async def _persist_turn(
         self,
@@ -1133,24 +1099,37 @@ class TurnEngine:
             await self._history.append(
                 conversation_id=ti.conversation_id,
                 message=ChatMessage(
-                    id=uuid.uuid4().hex,
+                    id=_turn_message_id(ti.turn_id, 0),
                     role=MessageRole.USER,
                     content=user_text,
                     created_at=now,
-                    metadata={"is_private": is_private} if is_private else {},
+                    metadata={
+                        "turn_id": ti.turn_id,
+                        "seq_in_turn": 0,
+                        **({"is_private": True} if is_private else {}),
+                    },
                 ),
             )
         if assistant_text:
             await self._history.append(
                 conversation_id=ti.conversation_id,
                 message=ChatMessage(
-                    id=uuid.uuid4().hex,
+                    id=_turn_message_id(ti.turn_id, 1),
                     role=MessageRole.ASSISTANT,
                     content=assistant_text,
                     created_at=now,
-                    metadata={"is_private": is_private} if is_private else {},
+                    metadata={
+                        "turn_id": ti.turn_id,
+                        "seq_in_turn": 1,
+                        **({"is_private": True} if is_private else {}),
+                    },
                 ),
             )
+
+
+def _turn_message_id(turn_id: str, seq_in_turn: int) -> str:
+    return f"msg_{turn_id}_{seq_in_turn}"
+
 
 class _SeqGen:
     __slots__ = ("_n",)
