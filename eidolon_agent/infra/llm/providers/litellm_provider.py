@@ -105,32 +105,73 @@ class LiteLLMProvider:
             )
             raise LLMUnavailableError(f"litellm call failed: {exc}") from exc
         connect_ms = int((time.monotonic() - t0) * 1000)
-        first_chunk_logged = False
+        first_raw_chunk_ms: int | None = None
+        first_effective_delta_logged = False
+        raw_chunk_count = 0
+        last_finish_reason: str | None = None
+        stream_outcome = "interrupted"
 
         try:
             try:
                 async for chunk in response:
-                    if not first_chunk_logged:
-                        ttft_ms = int((time.monotonic() - t0) * 1000)
+                    raw_chunk_count += 1
+                    if first_raw_chunk_ms is None:
+                        first_raw_chunk_ms = int((time.monotonic() - t0) * 1000)
                         _log.info(
-                            "litellm_timings req=%s model=%s connect_ms=%d ttft_ms=%d idle_ms=%d",
+                            "litellm_stream_first_chunk req=%s model=%s connect_ms=%d "
+                            "raw_ttft_ms=%d idle_ms=%d choices=%d",
                             request_id,
                             kwargs["model"],
                             connect_ms,
-                            ttft_ms,
+                            first_raw_chunk_ms,
                             idle_ms,
+                            len(chunk.choices or []),
                         )
-                        first_chunk_logged = True
                     if not chunk.choices:
                         continue
                     choice = chunk.choices[0]
                     delta = choice.delta
+                    if choice.finish_reason:
+                        last_finish_reason = str(choice.finish_reason)
 
-                    if delta and getattr(delta, "content", None):
-                        yield LLMDelta(text_delta=delta.content)
+                    content = getattr(delta, "content", None) if delta else None
+                    tool_call_deltas = getattr(delta, "tool_calls", None) if delta else None
+                    has_text = bool(content and content.strip())
+                    has_tool_call_fragment = bool(
+                        tool_call_deltas
+                        and any(
+                            getattr(tc, "id", None)
+                            or (
+                                getattr(tc, "function", None)
+                                and (
+                                    getattr(tc.function, "name", None)
+                                    or getattr(tc.function, "arguments", None)
+                                )
+                            )
+                            for tc in tool_call_deltas
+                        )
+                    )
+                    if not first_effective_delta_logged and (has_text or has_tool_call_fragment):
+                        effective_ttft_ms = int((time.monotonic() - t0) * 1000)
+                        _log.info(
+                            "litellm_timings req=%s model=%s connect_ms=%d ttft_ms=%d "
+                            "raw_ttft_ms=%d raw_chunks_before_effective=%d idle_ms=%d kind=%s",
+                            request_id,
+                            kwargs["model"],
+                            connect_ms,
+                            effective_ttft_ms,
+                            first_raw_chunk_ms,
+                            raw_chunk_count - 1,
+                            idle_ms,
+                            "text" if has_text else "tool_call",
+                        )
+                        first_effective_delta_logged = True
 
-                    if delta and getattr(delta, "tool_calls", None):
-                        for tc in delta.tool_calls:
+                    if content:
+                        yield LLMDelta(text_delta=content)
+
+                    if tool_call_deltas:
+                        for tc in tool_call_deltas:
                             idx = tc.index if hasattr(tc, "index") else 0
                             buf = tool_buf.setdefault(idx, {"id": None, "name": None, "args": ""})
                             if tc.id:
@@ -163,12 +204,27 @@ class LiteLLMProvider:
                                 tokens_out=getattr(usage, "completion_tokens", 0) or 0,
                             )
                         )
+                stream_outcome = "completed"
             except Exception as exc:
+                stream_outcome = "error"
                 # CancelledError is BaseException and bypasses this — we WANT
                 # cancellation to propagate so the finally below closes the
                 # upstream HTTP stream, but we don't want to wrap it.
                 raise LLMUnavailableError(f"litellm stream error: {exc}") from exc
         finally:
+            if not first_effective_delta_logged:
+                _log.info(
+                    "litellm_stream_no_effective_delta req=%s model=%s connect_ms=%d "
+                    "elapsed_ms=%d raw_ttft_ms=%d raw_chunks=%d finish_reason=%s outcome=%s",
+                    request_id,
+                    kwargs["model"],
+                    connect_ms,
+                    int((time.monotonic() - t0) * 1000),
+                    -1 if first_raw_chunk_ms is None else first_raw_chunk_ms,
+                    raw_chunk_count,
+                    last_finish_reason or "none",
+                    stream_outcome,
+                )
             # When the caller cancels mid-stream (TCP close, RPC cancel, …),
             # the underlying HTTP connection would otherwise be orphaned and
             # keep pulling tokens we'll never read — billing against a

@@ -139,6 +139,108 @@ async def test_text_chunks_yield_text_delta(monkeypatch: pytest.MonkeyPatch, pro
     assert any(d.finish is LLMFinishReason.STOP for d in out)
 
 
+async def test_ttft_ignores_empty_raw_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+    provider,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    chunks = [
+        _Chunk(choices=[]),
+        _Chunk(choices=[_Choice(delta=_Delta())]),
+        _Chunk(choices=[_Choice(delta=_Delta(content="   "))]),
+        _Chunk(choices=[_Choice(delta=_Delta(content="hello"))]),
+        _Chunk(choices=[_Choice(delta=_Delta(), finish_reason="stop")]),
+    ]
+
+    async def _fake(**kwargs):
+        return _aiter(chunks)
+
+    monkeypatch.setattr(litellm, "acompletion", _fake)
+    with caplog.at_level("INFO"):
+        out = [d async for d in provider.stream([_msg("hi")], request_id="effective-text")]
+
+    assert [d.text_delta for d in out if d.text_delta] == ["   ", "hello"]
+    raw = [
+        record.message
+        for record in caplog.records
+        if "litellm_stream_first_chunk" in record.message
+    ]
+    effective = [record.message for record in caplog.records if "litellm_timings" in record.message]
+    assert len(raw) == 1
+    assert len(effective) == 1
+    assert "raw_chunks_before_effective=3" in effective[0]
+    assert "kind=text" in effective[0]
+
+
+async def test_tool_call_fragment_counts_as_effective_delta(
+    monkeypatch: pytest.MonkeyPatch,
+    provider,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    chunks = [
+        _Chunk(choices=[]),
+        _Chunk(
+            choices=[
+                _Choice(
+                    delta=_Delta(
+                        tool_calls=[
+                            _ToolCallChunk(
+                                index=0,
+                                id="call-1",
+                                function=_ToolCallFunc(name="delegate_to_coworker"),
+                            )
+                        ]
+                    )
+                )
+            ]
+        ),
+        _Chunk(choices=[_Choice(delta=_Delta(), finish_reason="tool_calls")]),
+    ]
+
+    async def _fake(**kwargs):
+        return _aiter(chunks)
+
+    monkeypatch.setattr(litellm, "acompletion", _fake)
+    with caplog.at_level("INFO"):
+        out = [d async for d in provider.stream([_msg("hi")], request_id="effective-tool")]
+
+    assert any(d.tool_call for d in out)
+    effective = [record.message for record in caplog.records if "litellm_timings" in record.message]
+    assert len(effective) == 1
+    assert "raw_chunks_before_effective=1" in effective[0]
+    assert "kind=tool_call" in effective[0]
+
+
+async def test_stream_without_effective_delta_is_diagnosable(
+    monkeypatch: pytest.MonkeyPatch,
+    provider,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    chunks = [
+        _Chunk(choices=[]),
+        _Chunk(choices=[_Choice(delta=_Delta(), finish_reason="stop")]),
+    ]
+
+    async def _fake(**kwargs):
+        return _aiter(chunks)
+
+    monkeypatch.setattr(litellm, "acompletion", _fake)
+    with caplog.at_level("INFO"):
+        out = [d async for d in provider.stream([_msg("hi")], request_id="empty")]
+
+    assert any(d.finish is LLMFinishReason.STOP for d in out)
+    assert not any("litellm_timings" in record.message for record in caplog.records)
+    empty = [
+        record.message
+        for record in caplog.records
+        if "litellm_stream_no_effective_delta" in record.message
+    ]
+    assert len(empty) == 1
+    assert "raw_chunks=2" in empty[0]
+    assert "finish_reason=stop" in empty[0]
+    assert "outcome=completed" in empty[0]
+
+
 async def test_request_includes_retries_and_api_base(monkeypatch: pytest.MonkeyPatch, provider) -> None:
     seen = {}
 
@@ -305,7 +407,9 @@ async def test_response_aclose_called_on_normal_completion(
 
 
 async def test_response_aclose_called_on_cancel(
-    monkeypatch: pytest.MonkeyPatch, provider
+    monkeypatch: pytest.MonkeyPatch,
+    provider,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """If the consumer cancels mid-stream (TCP close, RPC cancel), the
     provider must still call ``aclose()`` on the upstream — otherwise the
@@ -335,12 +439,21 @@ async def test_response_aclose_called_on_cancel(
         async for _ in provider.stream([_msg("x")], request_id="r"):
             pass
 
-    task = asyncio.create_task(_consume())
-    await asyncio.sleep(0.05)  # let it block on __anext__
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    with caplog.at_level("INFO"):
+        task = asyncio.create_task(_consume())
+        await asyncio.sleep(0.05)  # let it block on __anext__
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
     assert closed["v"] is True
+    empty = [
+        record.message
+        for record in caplog.records
+        if "litellm_stream_no_effective_delta" in record.message
+    ]
+    assert len(empty) == 1
+    assert "raw_chunks=0" in empty[0]
+    assert "outcome=interrupted" in empty[0]
 
 
 async def test_count_tokens_falls_back_when_litellm_raises(
