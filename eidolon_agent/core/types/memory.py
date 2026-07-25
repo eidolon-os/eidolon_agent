@@ -172,6 +172,20 @@ class MemoryWriteDisposition:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class MemoryWriteOutcome:
+    """Truthful durable outcome for one explicit memory write."""
+
+    status: Literal["accepted", "retrying", "applied", "failed", "unknown"]
+    request_id: str
+    resource_id: str | None = None
+    error: str | None = None
+
+    @property
+    def completed(self) -> bool:
+        return self.status == "applied"
+
+
 def classify_memory_write(
     *,
     user_text: str,

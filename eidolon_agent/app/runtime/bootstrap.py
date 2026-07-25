@@ -57,8 +57,11 @@ from eidolon_agent.domain.tools.builtin import (
     GetTimeTool,
     GetWeatherTool,
     MemoryAssertFactTool,
+    MemoryConfirmPendingTool,
     MemoryForgetTool,
     MemorySearchTool,
+    MemoryStageCandidateTool,
+    PendingMemoryCandidateStore,
     SubmitLongTaskTool,
 )
 from eidolon_agent.infra.events import NatsEventBus, NatsKVStore
@@ -226,9 +229,15 @@ async def build_application(
     tool_registry = ToolRegistry()
     tool_registry.register(GetTimeTool())
     tool_registry.register(GetWeatherTool())
-    explicit_memory_timeout_s = settings.turn.explicit_memory_recall_timeout_ms / 1000
+    explicit_memory_timeout_s = settings.memory.explicit_recall_timeout_s
     tool_registry.register(MemorySearchTool(memory_port, timeout_s=explicit_memory_timeout_s))
     tool_registry.register(MemoryAssertFactTool(memory_port))
+    pending_memory_candidates = PendingMemoryCandidateStore()
+    container.extras["pending_memory_candidates"] = pending_memory_candidates
+    tool_registry.register(MemoryStageCandidateTool(pending_memory_candidates))
+    tool_registry.register(
+        MemoryConfirmPendingTool(memory_port, pending_memory_candidates)
+    )
     tool_registry.register(MemoryForgetTool(memory_port))
     body_control = None
     if settings.body_control.enabled:
@@ -390,7 +399,7 @@ def _build_turn_engine(
 
     harness = RealtimeAgentHarness(
         budget=HarnessBudget(
-            memory_timeout_ms=container.settings.turn.memory_recall_soft_timeout_ms,
+            memory_timeout_ms=int(container.settings.memory.recall_timeout_s * 1000),
             history_window=container.settings.turn.history_context_window,
             max_tool_iters=container.settings.turn.max_tool_iters,
             first_delta_budget_ms=container.settings.turn.first_delta_slo_p95_ms,
@@ -406,10 +415,8 @@ def _build_turn_engine(
         memory_port=container.memory_port,
         history_window=harness.budget.history_window,
         degraded_history_window=container.settings.turn.degraded_history_context_window,
-        memory_timeout_s=container.settings.turn.memory_recall_soft_timeout_ms / 1000,
-        explicit_memory_timeout_s=(
-            container.settings.turn.explicit_memory_recall_timeout_ms / 1000
-        ),
+        memory_timeout_s=container.settings.memory.recall_timeout_s,
+        explicit_memory_timeout_s=container.settings.memory.explicit_recall_timeout_s,
         context_budget_tokens=container.settings.turn.max_token_budget,
         context_budget_mode=container.settings.turn.context_budget_mode,
         harness=harness,

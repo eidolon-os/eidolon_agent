@@ -333,6 +333,7 @@ class TurnEngine:
         post_turn_allowed = False
         post_turn_scheduled = False
         recent_history_persisted = False
+        memory_tool_owned_turn = False
 
         try:
             # ---- Input guardrail --------------------------------------------
@@ -544,6 +545,19 @@ class TurnEngine:
                         )
                         break
                     tool_iters += 1
+                    if any(
+                        call.name
+                        in {
+                            "memory_assert_fact",
+                            "memory_stage_candidate",
+                            "memory_confirm_pending",
+                        }
+                        for call in tool_calls
+                    ):
+                        # Explicit memory tools own this turn's write contract.
+                        # The generic steward fanout must not create a second,
+                        # differently classified copy of the same claim.
+                        memory_tool_owned_turn = True
                     dispatch_calls: list[ToolCall] = []
                     suppressed_results: list[ToolResult] = []
                     for call in tool_calls:
@@ -662,6 +676,18 @@ class TurnEngine:
                                 created_at=now,
                             )
                         )
+                    memory_ack = _terminal_memory_write_ack(results)
+                    if memory_ack is not None:
+                        if first_delta_ms is None:
+                            first_delta_ms = int((time.monotonic() - t0) * 1000)
+                        assistant_text_parts.append(memory_ack)
+                        yield TurnEvent.delta(
+                            ti.turn_id,
+                            seq.next(),
+                            memory_ack,
+                            time.time(),
+                        )
+                        break
                     messages = [
                         *messages,
                         ChatMessage(
@@ -738,6 +764,7 @@ class TurnEngine:
                         final_text,
                         started_at,
                         history_already_persisted=recent_history_persisted,
+                        memory_tool_owned_turn=memory_tool_owned_turn,
                     ),
                     name=f"turn-{ti.turn_id}-post-turn",
                 )
@@ -786,6 +813,7 @@ class TurnEngine:
                     assistant_text=assistant_text_for_persist,
                     policy=runtime_policy,
                     mode=self._memory_write_mode,
+                    memory_tool_owned_turn=memory_tool_owned_turn,
                 )
                 development_guards = _development_guard_trace(
                     ti=ti,
@@ -896,6 +924,7 @@ class TurnEngine:
                         assistant_text_for_persist,
                         started_at,
                         history_already_persisted=recent_history_persisted,
+                        memory_tool_owned_turn=memory_tool_owned_turn,
                     ),
                     name=f"turn-{ti.turn_id}-post-turn",
                 )
@@ -1030,6 +1059,7 @@ class TurnEngine:
         started_at: datetime,
         *,
         history_already_persisted: bool = False,
+        memory_tool_owned_turn: bool = False,
     ) -> None:
         """Background work that runs AFTER DONE was yielded.
 
@@ -1053,6 +1083,7 @@ class TurnEngine:
             assistant_text=assistant_text,
             policy=policy,
             mode=self._memory_write_mode,
+            memory_tool_owned_turn=memory_tool_owned_turn,
         )
         if not write_trace["fanout_allowed"]:
             _log.info(
@@ -1183,6 +1214,39 @@ def _suppressed_tool_result(call: ToolCall) -> ToolResult:
     )
 
 
+def _terminal_memory_write_ack(results: list[ToolResult]) -> str | None:
+    """Return a truthful terminal response for simple memory write tools."""
+    write_names = {
+        "memory_assert_fact",
+        "memory_stage_candidate",
+        "memory_confirm_pending",
+    }
+    if not results or any(result.name not in write_names for result in results):
+        return None
+    if any(
+        result.name == "memory_assert_fact"
+        and not result.ok
+        and result.error_code == "memory_requires_consent"
+        for result in results
+    ):
+        # Let the model proceed to memory_stage_candidate and ask consent.
+        return None
+    result = results[-1]
+    content = result.content if isinstance(result.content, dict) else {}
+    status = str(content.get("status") or "")
+    if not result.ok:
+        return "这次没有确认写入成功，请稍后再试。"
+    if result.name == "memory_stage_candidate":
+        return "这条信息可能较敏感或存在歧义。你确认要把它保存为长期记忆吗？"
+    if result.name == "memory_confirm_pending":
+        if status == "applied":
+            return "已按你的确认保存为长期记忆。"
+        return "确认写入请求已提交，正在处理。"
+    if status == "applied":
+        return "已经记下了。"
+    return "记忆写入请求已提交，正在处理。"
+
+
 def _merge_tool_results(
     calls: list[ToolCall],
     results: list[ToolResult],
@@ -1310,6 +1374,7 @@ def _memory_write_trace(
     assistant_text: str,
     policy: TurnRuntimePolicy,
     mode: str = "enabled",
+    memory_tool_owned_turn: bool = False,
 ) -> dict:
     mode = _normalize_guard_mode(mode)
     disposition = None
@@ -1327,8 +1392,12 @@ def _memory_write_trace(
             user_text=ti.text or "",
             assistant_text=assistant_text,
         )
-        if mode == "shadow":
+        if memory_tool_owned_turn:
+            skipped_reason = "explicit_memory_tool"
+        elif mode == "shadow":
             skipped_reason = "shadow_only"
+        elif disposition.kind is MemoryWriteDispositionKind.IGNORE:
+            skipped_reason = "low_signal"
         elif disposition.kind is MemoryWriteDispositionKind.SENSITIVE_REQUIRES_CONSENT:
             skipped_reason = "requires_consent"
 

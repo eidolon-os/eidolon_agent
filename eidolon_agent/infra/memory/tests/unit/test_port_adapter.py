@@ -472,10 +472,16 @@ async def test_assert_fact_delegates_to_publisher() -> None:
     assert request_id == "request-structured"
 
 
-async def test_write_confirmed_fact_delegates_to_publisher() -> None:
-    port, _, _, pub = _port()
-    pub.publish_verbatim_intent.return_value = "request-verbatim"
-    request_id = await port.write_confirmed_fact(
+async def test_write_confirmed_fact_uses_observable_mcp_command() -> None:
+    command = AsyncMock(
+        return_value={
+            "status": "applied",
+            "request_id": "request-verbatim",
+            "resource_id": "drawer-1",
+        }
+    )
+    port, _, _, pub = _port(session_call=command)
+    outcome = await port.write_confirmed_fact(
         "owner-1",
         "companion-1",
         "realm-1",
@@ -487,19 +493,17 @@ async def test_write_confirmed_fact_delegates_to_publisher() -> None:
         confidence=0.95,
         tags=["kg_fallback"],
     )
-    assert request_id == "request-verbatim"
-    pub.publish_verbatim_intent.assert_awaited_once_with(
-        owner_id="owner-1",
-        companion_id="companion-1",
-        memory_realm_id="realm-1",
-        device_id="device-1",
-        session_id="s1",
-        text="用户 最终验证时间 2026-06-28 20:00",
-        source_event_id="turn-1",
-        tool_call_id="call-1",
-        confidence=0.95,
-        tags=["kg_fallback"],
-    )
+    assert outcome.status == "applied"
+    assert outcome.request_id == "request-verbatim"
+    assert outcome.resource_id == "drawer-1"
+    command.assert_awaited_once()
+    name, arguments = command.await_args.args
+    assert name == "eidolon_memory_user_confirm"
+    assert arguments["text"] == "用户 最终验证时间 2026-06-28 20:00"
+    assert arguments["wing"] == "auto"
+    assert arguments["memory_type"] == "auto"
+    assert arguments["request_id"]
+    pub.publish_verbatim_intent.assert_not_awaited()
 
 
 async def test_apply_commitment_delegates_to_publisher() -> None:

@@ -13,6 +13,7 @@ from eidolon_agent.core.types.memory import (
     MemoryQueryPlan,
     MemoryRecallResult,
     MemoryScope,
+    MemoryWriteOutcome,
 )
 
 
@@ -111,8 +112,9 @@ class MemoryPort(Protocol):
         tool_call_id: str,
         confidence: float = 0.99,
         tags: list[str] | None = None,
-    ) -> str:
-        """Publish a verbatim explicit intent and return its request id."""
+        wait_applied_seconds: float = 0.75,
+    ) -> MemoryWriteOutcome:
+        """Submit a verbatim intent and return its durable command outcome."""
         ...
 
     async def apply_commitment(

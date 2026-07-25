@@ -86,6 +86,54 @@ async def test_persona_state_is_not_exposed_as_tool(turn_engine_factory):
 
 
 @pytest.mark.asyncio
+async def test_memory_write_uses_truthful_terminal_ack_without_second_llm_pass(
+    turn_engine_factory,
+) -> None:
+    from eidolon_agent.core.types.tool import Permission, ToolResult, ToolSchema
+    from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
+
+    class _AppliedMemoryTool:
+        schema = ToolSchema(
+            name="memory_assert_fact",
+            description="test memory write",
+            json_schema={"type": "object", "properties": {}},
+            permissions=frozenset({Permission.MEMORY_WRITE}),
+            side_effect=True,
+        )
+
+        async def invoke(self, call, *, ctx):
+            del ctx
+            return ToolResult(
+                call_id=call.id,
+                name=call.name,
+                ok=True,
+                content={"status": "applied", "request_id": "request-1"},
+            )
+
+    registry = ToolRegistry()
+    registry.register(_AppliedMemoryTool())
+    llm = FakeLLM(
+        script=[
+            [{"kind": "tool_call", "name": "memory_assert_fact", "arguments": {}}],
+        ]
+    )
+    engine = turn_engine_factory(
+        llm=llm,
+        tool_dispatcher=ToolDispatcher(registry),
+    )
+
+    events = [ev async for ev in engine.run(make_turn_input("请记住明天我要去北京"))]
+    spoken = [
+        event.data["text"]
+        for event in events
+        if event.kind.value == "delta"
+    ]
+
+    assert spoken == ["已经记下了。"]
+    assert events[-1].kind.value == "done"
+
+
+@pytest.mark.asyncio
 async def test_crisis_turn_skips_normal_flow(turn_engine_factory):
     engine = turn_engine_factory()
     events = [ev async for ev in engine.run(make_turn_input("我不想活了"))]

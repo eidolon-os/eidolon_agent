@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from datetime import datetime, timezone
 
@@ -19,6 +20,7 @@ from eidolon_agent.core.types.memory import (
     MemoryQueryPlan,
     MemoryRecallResult,
     MemoryScope,
+    MemoryWriteOutcome,
 )
 from eidolon_agent.infra.memory.mcp_client import McpClientPool
 from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
@@ -368,18 +370,78 @@ class EidolonMemoryPort:
         tool_call_id: str,
         confidence: float = 0.99,
         tags: list[str] | None = None,
-    ) -> str:
-        return await self._pub.publish_verbatim_intent(
+        wait_applied_seconds: float = 0.75,
+    ) -> MemoryWriteOutcome:
+        """Use the Realm MCP write facade so command completion is observable."""
+        ctx = build_memory_actor_context(
             owner_id=owner_id,
             companion_id=companion_id,
             memory_realm_id=memory_realm_id,
             device_id=device_id,
             session_id=session_id,
-            text=text,
-            source_event_id=source_event_id,
-            tool_call_id=tool_call_id,
-            confidence=confidence,
-            tags=tags,
+        )
+        request_id = _confirmed_fact_request_id(
+            ctx.memory_space_id,
+            source_event_id,
+            text,
+        )
+        try:
+            session = await self._pool.session_for(ctx.memory_space_id)
+        except MemoryUnavailableError as exc:
+            return MemoryWriteOutcome(
+                status="failed",
+                request_id=request_id,
+                error=_memory_unavailable_reason(exc),
+            )
+        try:
+            raw = await asyncio.wait_for(
+                session.call_tool(
+                    "eidolon_memory_user_confirm",
+                    {
+                        "text": text,
+                        "wing": "auto",
+                        "memory_type": "auto",
+                        "confidence": confidence,
+                        "tags": list(tags or []),
+                        "scope": "persona",
+                        "visibility": "all_devices",
+                        "source_device_id": device_id or "",
+                        "source_instance_id": companion_id or "",
+                        "session_id": session_id or "",
+                        "source_event_id": source_event_id,
+                        "tool_call_id": tool_call_id,
+                        "request_id": request_id,
+                        "wait_applied_seconds": wait_applied_seconds,
+                    },
+                ),
+                timeout=max(0.25, wait_applied_seconds + 0.75),
+            )
+        except TimeoutError:
+            await self._pool.drop_session(ctx.memory_space_id, session=session)
+            return MemoryWriteOutcome(status="unknown", request_id=request_id)
+        except Exception as exc:
+            await self._pool.drop_session(ctx.memory_space_id, session=session)
+            return MemoryWriteOutcome(
+                status="failed",
+                request_id=request_id,
+                error=str(exc),
+            )
+        if not isinstance(raw, dict):
+            return MemoryWriteOutcome(
+                status="failed",
+                request_id=request_id,
+                error="memory write returned an invalid response",
+            )
+        status = str(raw.get("status") or "unknown")
+        if status not in {"accepted", "retrying", "applied", "failed"}:
+            status = "unknown"
+        return MemoryWriteOutcome(
+            status=status,
+            request_id=str(raw.get("request_id") or request_id),
+            resource_id=(
+                str(raw["resource_id"]) if raw.get("resource_id") is not None else None
+            ),
+            error=str(raw["error"]) if raw.get("error") is not None else None,
         )
 
     async def apply_commitment(
@@ -681,3 +743,14 @@ def _memory_unavailable_reason(exc: MemoryUnavailableError) -> str:
 
 def _remaining_timeout(deadline: float) -> float:
     return max(0.001, deadline - asyncio.get_running_loop().time())
+
+
+def _confirmed_fact_request_id(
+    memory_space_id: str,
+    source_event_id: str,
+    text: str,
+) -> str:
+    material = "\x1f".join(
+        (memory_space_id, source_event_id.strip(), text.strip())
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]

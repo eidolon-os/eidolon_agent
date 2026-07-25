@@ -12,6 +12,7 @@ from eidolon_agent.core.types.memory import (
     MemoryForgetPreview,
     MemoryHit,
     MemoryKind,
+    MemoryWriteOutcome,
 )
 from eidolon_agent.core.types.tool import ToolCall
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
@@ -20,8 +21,11 @@ from eidolon_agent.domain.tools.builtin import (
     GetTimeTool,
     GetWeatherTool,
     MemoryAssertFactTool,
+    MemoryConfirmPendingTool,
     MemoryForgetTool,
     MemorySearchTool,
+    MemoryStageCandidateTool,
+    PendingMemoryCandidateStore,
 )
 
 pytestmark = pytest.mark.functional
@@ -208,6 +212,41 @@ async def test_memory_assert_fact_rejects_claim_sourced_from_background(
     assert memory.confirmed_facts == []
 
 
+async def test_sensitive_memory_requires_separate_staged_consent(caller_ctx) -> None:
+    claim = "我的家庭住址是北京市朝阳区测试路 1 号"
+    caller_ctx.user_text = f"请记住：{claim}"
+    memory = _FakeMemoryPort()
+    candidates = PendingMemoryCandidateStore()
+    reg = ToolRegistry()
+    reg.register(MemoryAssertFactTool(memory))
+    reg.register(MemoryStageCandidateTool(candidates))
+    reg.register(MemoryConfirmPendingTool(memory, candidates))
+    disp = ToolDispatcher(reg)
+
+    [direct] = await disp.dispatch_batch(
+        [_call("memory_assert_fact", {"claim": claim})],
+        ctx=caller_ctx,
+    )
+    assert direct.ok is False
+    assert direct.error_code == "memory_requires_consent"
+
+    [staged] = await disp.dispatch_batch(
+        [_call("memory_stage_candidate", {"claims": [claim]})],
+        ctx=caller_ctx,
+    )
+    assert staged.ok
+    assert staged.content["status"] == "pending_consent"
+
+    caller_ctx.user_text = "好的，帮我记下来"
+    [confirmed] = await disp.dispatch_batch(
+        [_call("memory_confirm_pending")],
+        ctx=caller_ctx,
+    )
+    assert confirmed.ok
+    assert confirmed.content["status"] == "accepted"
+    assert memory.confirmed_facts[0][5] == claim
+
+
 class _FakeMemoryPort:
     def __init__(self) -> None:
         self.search_calls: list[dict] = []
@@ -293,7 +332,8 @@ class _FakeMemoryPort:
         tool_call_id,
         confidence=0.99,
         tags=None,
-    ) -> str:
+        wait_applied_seconds=0.75,
+    ) -> MemoryWriteOutcome:
         self.confirmed_facts.append(
             (
                 owner_id,
@@ -308,7 +348,7 @@ class _FakeMemoryPort:
                 list(tags or []),
             )
         )
-        return "request-1"
+        return MemoryWriteOutcome(status="accepted", request_id="request-1")
 
     async def preview_forget(
         self,

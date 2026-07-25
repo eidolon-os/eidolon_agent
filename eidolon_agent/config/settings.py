@@ -113,7 +113,8 @@ class MemorySettings(BaseModel):
     discovery_refresh_s: int = 30
     discovery_timeout_s: float = 2.0
     endpoints: list[MemoryEndpoint] = Field(default_factory=list)
-    recall_timeout_s: float = 0.2  # eidolon-memory has a 300ms hard budget
+    recall_timeout_s: float = Field(default=0.5, gt=0.0, le=10.0)
+    explicit_recall_timeout_s: float = Field(default=4.0, gt=0.0, le=10.0)
 
 
 class LLMModelConfig(BaseModel):
@@ -262,8 +263,6 @@ class TurnSettings(BaseModel):
     require_idempotency_for_side_effect_tools: bool = False
     tool_batch_timeout_s: float | None = None
     compile_soft_timeout_ms: int = 100
-    memory_recall_soft_timeout_ms: int = 200
-    explicit_memory_recall_timeout_ms: int = 4000
     slow_tool_hint_delay_ms: int = 1500
     first_delta_slo_p50_ms: int = 200
     first_delta_slo_p95_ms: int = 300

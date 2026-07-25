@@ -16,6 +16,7 @@ from eidolon_agent.core.types.memory import (
     MemoryQueryPlan,
     MemoryRecallResult,
     MemoryScope,
+    MemoryWriteOutcome,
 )
 
 _DEGRADED_REASON = "standalone_no_memory_service"
@@ -115,8 +116,13 @@ class NullMemoryPort:
         tool_call_id: str,
         confidence: float = 0.99,
         tags: list[str] | None = None,
-    ) -> None:
-        return None
+        wait_applied_seconds: float = 0.75,
+    ) -> MemoryWriteOutcome:
+        return MemoryWriteOutcome(
+            status="failed",
+            request_id="",
+            error=_DEGRADED_REASON,
+        )
 
     async def apply_commitment(
         self,
