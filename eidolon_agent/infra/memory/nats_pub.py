@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Literal
 
-from eidolon_sdk.memory import (
+from eidolon_memory_contracts import (
     ConversationTurnPayload,
     MemoryIntent,
     MemoryIntentCommand,

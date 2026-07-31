@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from eidolon_sdk.memory import unwrap_memory_payload
+from eidolon_memory_contracts import unwrap_memory_payload
 
 from eidolon_agent.config.settings import MemoryEndpoint, NatsSettings
 from eidolon_agent.infra.memory.discovery import (

@@ -20,7 +20,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
-from eidolon_sdk.memory import conversation_turn_subject
+from eidolon_memory_contracts import conversation_turn_subject
 
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity

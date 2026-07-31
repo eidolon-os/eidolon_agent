@@ -657,6 +657,7 @@ dependencies = [
     { name = "alembic" },
     { name = "anyio" },
     { name = "eidolon-data" },
+    { name = "eidolon-memory-contracts" },
     { name = "eidolon-sdk" },
     { name = "fastapi" },
     { name = "grpcio" },
@@ -703,6 +704,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13.0" },
     { name = "anyio", specifier = ">=4.3.0" },
     { name = "eidolon-data", editable = "../eidolon_data" },
+    { name = "eidolon-memory-contracts", editable = "../eidolon_memory/contracts" },
     { name = "eidolon-sdk", editable = "../eidolon_sdk" },
     { name = "fastapi", specifier = ">=0.110.0" },
     { name = "grpcio", specifier = ">=1.62.0" },
@@ -770,6 +772,23 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'api'", specifier = ">=0.32" },
 ]
 provides-extras = ["api", "dev"]
+
+[[package]]
+name = "eidolon-memory-contracts"
+version = "0.1.0"
+source = { editable = "../eidolon_memory/contracts" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.8" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "eidolon-sdk"

@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import nats.errors
 import pytest
-from eidolon_sdk.memory import conversation_turn_subject
+from eidolon_memory_contracts import conversation_turn_subject
 
 from eidolon_agent.core.errors import NatsUnavailableError
 from eidolon_agent.core.types.event import Event

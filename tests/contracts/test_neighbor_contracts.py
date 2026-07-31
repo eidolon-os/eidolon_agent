@@ -15,7 +15,7 @@ import asyncio
 
 import pytest
 from eidolon_data import DataSettings, DataStore
-from eidolon_sdk.memory import (
+from eidolon_memory_contracts import (
     ConversationTurnPayload,
     conversation_turn_subject,
     derive_memory_space_id,

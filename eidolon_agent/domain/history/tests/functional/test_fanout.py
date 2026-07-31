@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from eidolon_sdk.memory import (
+from eidolon_memory_contracts import (
     MEMORY_SCHEMA_VERSION,
     conversation_turn_subject,
     unwrap_memory_payload,

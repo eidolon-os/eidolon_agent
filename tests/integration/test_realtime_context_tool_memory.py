@@ -9,7 +9,7 @@ from dataclasses import replace
 import pytest
 from eidolon_data import DataSettings, DataStore
 from eidolon_data.schema.models import JobRow, TurnRow
-from eidolon_sdk.memory import conversation_turn_subject, unwrap_memory_payload
+from eidolon_memory_contracts import conversation_turn_subject, unwrap_memory_payload
 from sqlalchemy import select
 
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason

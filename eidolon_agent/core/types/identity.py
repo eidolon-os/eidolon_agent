@@ -10,7 +10,7 @@ import hashlib
 from dataclasses import dataclass
 from enum import Enum
 
-from eidolon_sdk.memory import MemoryActorContext, derive_memory_space_id
+from eidolon_memory_contracts import MemoryActorContext, derive_memory_space_id
 
 
 def build_memory_space_id(*, memory_realm_id: str) -> str:

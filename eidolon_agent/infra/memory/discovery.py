@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import httpx
-from eidolon_sdk.memory import memory_space_subject_token
+from eidolon_memory_contracts import memory_space_subject_token
 from pydantic import BaseModel, ConfigDict, Field
 
 from eidolon_agent.config.settings import MemoryEndpoint, MemorySettings, NatsSettings

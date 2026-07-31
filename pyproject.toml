@@ -33,6 +33,9 @@ dependencies = [
     "PyJWT[crypto]>=2.8.0",
     "eidolon-sdk",
     "eidolon-data",
+    # Protocol for talking to the memory service. Separate from eidolon-memory
+    # itself so we speak to it without installing its storage stack.
+    "eidolon-memory-contracts",
 
     # Infra: NATS (event bus + KV + JetStream), SQLite, config
     "nats-py>=2.7.0",
@@ -83,6 +86,7 @@ eidolon-agent = "eidolon_agent.app.runtime.cli:main"
 [tool.uv.sources]
 eidolon-sdk = { path = "../eidolon_sdk", editable = true }
 eidolon-data = { path = "../eidolon_data", editable = true }
+eidolon-memory-contracts = { path = "../eidolon_memory/contracts", editable = true }
 
 [tool.setuptools.packages.find]
 where = ["."]

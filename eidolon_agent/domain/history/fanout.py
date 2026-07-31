@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol
 
-from eidolon_sdk.memory import (
+from eidolon_memory_contracts import (
     ConversationTurnPayload,
     conversation_turn_subject,
     envelope_memory_payload,

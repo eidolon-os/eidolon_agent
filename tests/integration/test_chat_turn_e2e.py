@@ -11,7 +11,7 @@ across module reorgs.
 from __future__ import annotations
 
 import pytest
-from eidolon_sdk.memory import conversation_turn_subject
+from eidolon_memory_contracts import conversation_turn_subject
 
 from eidolon_agent.core.types.turn import TurnEventKind
 from tests.helpers import make_turn_input

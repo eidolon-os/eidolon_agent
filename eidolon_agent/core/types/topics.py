@@ -7,7 +7,7 @@ across the codebase. This makes refactoring trivial and lets us enforce the
 
 from __future__ import annotations
 
-from eidolon_sdk.memory import memory_space_subject_token
+from eidolon_memory_contracts import memory_space_subject_token
 
 
 class Topics:
