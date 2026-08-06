@@ -1,6 +1,6 @@
 # Agent Runtime Persistence Cutover
 
-- Status: implementation prepared; production activation pending
+- Status: atomically activated in production composition
 - Legacy data: no migration or compatibility reader
 - Target file: `~/eidolon/data/eidolon-agent.sqlite3`
 
@@ -19,9 +19,18 @@ opaque references copied from a verified runtime context. There are no
 cross-database foreign keys and no Data lookup in the terminal-turn write.
 
 The implementation is in `infra/persistence/runtime_store.py` and
-`infra/persistence/agent_runtime.py`. Production wiring still uses the existing
-DataStore session factory until the release gate below is complete; the runtime
-implementation itself imports no Data model.
+`infra/persistence/agent_runtime.py`. Production bootstrap opens the Agent
+runtime store directly. Data remains temporarily as a low-frequency catalog
+dependency for Owner/Companion/Persona/Realm reads, but the production
+connection is forced to SQLite `mode=ro` and `query_only=ON`: Agent cannot run
+Data migrations or perform Data mutations. Terminal-turn persistence imports
+no Data model or session factory and never waits on the System Data writer.
+
+That query-only connection is an explicit transition debt, not the final OS
+boundary. Agent is still compiled against the System Data read schema. It must
+eventually consume a narrow authenticated Companion/Persona runtime snapshot
+contract (including schema version and genome hash) so the authority can evolve
+its persistence without coordinating Agent SQL changes.
 
 ## Frequency policy
 
@@ -42,10 +51,9 @@ timeout/checkpoint policy, and a single pooled writer connection. Schema V1 is
 a clean baseline identified by `PRAGMA user_version=1`; no table or row is
 copied from `eidolon.sqlite3`.
 
-## Atomic activation gate
+## Atomic activation result
 
-Before production bootstrap may point at the new file, all of these must land
-in the same verified release:
+The activation gate landed as one release boundary:
 
 1. Agent Admin conversation and job readers use the runtime authority with no
    Data fallback.
@@ -58,7 +66,12 @@ in the same verified release:
    failure leaves request handling available.
 6. Cross-repository acceptance proves new turns appear only in
    `eidolon-agent.sqlite3` and no runtime write reaches `eidolon-system.sqlite3`.
+7. Production Agent opens `eidolon-system.sqlite3` as a query-only transitional
+   reader; Admin remains its sole writer.
 
-After that release passes, activation creates an empty Agent runtime database.
-The legacy runtime tables are dropped from Data in the subsequent clean V2
-baseline; they are not read, copied, or retained for compatibility.
+Activation creates or validates a clean Agent runtime database. Agent writes
+revocation tombstones before owner-runtime deletion, so a partial failure stays
+fail closed. Admin deletes Agent runtime before System Data and retains a
+durable retry journal when Agent is unavailable. Legacy runtime and event
+tables are absent from System Data; no rows are read, copied, or retained for
+compatibility.

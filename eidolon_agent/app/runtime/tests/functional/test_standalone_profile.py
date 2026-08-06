@@ -34,6 +34,8 @@ async def _standalone(tmp_path, monkeypatch):
             "log_dir": str(tmp_path / "logs"),
             "debug_dir": str(tmp_path / "debug"),
         },
+        observability={"log_dir": str(tmp_path / "logs")},
+        persistence={"sqlite_path": str(tmp_path / "eidolon-agent.sqlite3")},
     )
     container = await build_application(settings=settings)
     await container.data_store.owner_service.create_owner(
@@ -54,6 +56,7 @@ async def _standalone(tmp_path, monkeypatch):
         # GC'd during a later test would surface as an unraisable warning).
         await container.background_tasks.drain(timeout_s=2.0)
         await container.data_store.close()
+        await container.runtime_store.close()
 
 
 async def _run_turn(container, text: str):

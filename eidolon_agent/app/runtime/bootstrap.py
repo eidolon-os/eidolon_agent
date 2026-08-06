@@ -117,8 +117,16 @@ async def build_application(
 
     # System Data is opened separately for low-frequency Companion/Persona
     # authority. It must never receive session/turn/message/job writes.
-    data_store = DataStore.open(load_data_settings())
-    await data_store.init_schema()
+    data_settings = load_data_settings()
+    if not standalone:
+        data_settings = data_settings.model_copy(update={"sqlite_read_only": True})
+    data_store = DataStore.open(data_settings)
+    if standalone:
+        await data_store.init_schema()
+    else:
+        # System Data is a sibling authority. Deployment owns its Alembic
+        # lifecycle; Agent may validate but must never create or repair it.
+        await data_store.validate_schema()
     container.data_store = data_store
 
     memory_refresher = None
