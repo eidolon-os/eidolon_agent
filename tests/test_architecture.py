@@ -79,3 +79,38 @@ def test_no_cross_layer_deep_imports() -> None:
     assert not leaks, "cross-layer deep imports (must go through pkg __init__.py):\n" + "\n".join(
         f"  {s}:{ln} -> {d}" for s, d, ln in leaks
     )
+
+
+def test_agent_does_not_depend_on_removed_hub_device_runtime() -> None:
+    """Hub no longer owns commands, presence, or a runtime-device blackboard."""
+    forbidden = {
+        "EIDOLON_RUNTIME_DEVICES",
+        "OwnerDeviceBlackboardSnapshot",
+        "owner_device_blackboard_key",
+        "/api/runtime/devices/",
+        "/api/runtime/commands/",
+    }
+    violations: list[str] = []
+    for path in ROOT.rglob("*.py"):
+        if "/tests/" in path.as_posix():
+            continue
+        content = path.read_text(encoding="utf-8")
+        for marker in forbidden:
+            if marker in content:
+                violations.append(f"{path.relative_to(ROOT)}: {marker}")
+    assert violations == []
+
+
+def test_agent_runtime_authority_does_not_import_system_data() -> None:
+    """Hot runtime persistence owns its ORM and cannot regress to Data models."""
+
+    persistence = ROOT / "infra" / "persistence"
+    for filename in ("agent_runtime.py", "runtime_store.py", "audit_dispatch.py"):
+        source = (persistence / filename).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        imported = {
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module is not None
+        }
+        assert not any(module == "eidolon_data" or module.startswith("eidolon_data.") for module in imported)

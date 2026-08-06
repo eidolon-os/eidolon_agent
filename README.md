@@ -37,11 +37,27 @@
 | 决策 | 取舍 |
 |---|---|
 | Hexagonal Architecture（4 层 + Port/Adapter） | 多一层抽象，换底层不动业务 |
-| NATS 一统总线（pub/sub + JetStream + KV） | 不引入 Redis；in-process 仍可用 `InMemoryEventBus` 同 Protocol |
+| NATS 只服务已落地的 Agent/Memory 异步链路 | 不是 Eidolon OS IPC，也不承载 Device namespace/mount/command 权威 |
 | LiteLLM 作为唯一 LLM 出口 | 100+ provider 切换零成本；坏处：cost map 噪声 |
 | SQLite WAL + SQLAlchemy 2.0 async | 单机部署足够；多机时迁 Postgres 改 URL 即可 |
 | Persona = YAML 模板 + 实例（运行时状态 + 异步演化） | Git-friendly 模板；运行时 mood/energy 不写回 YAML |
 | gRPC 数据面 + 两个 HTTP（健康 / Admin） | 与 LiveKit 同机走 UDS；admin 独立端口免污染 |
+
+### Eidolon OS 边界
+
+- Agent 是 Companion brain/runtime，不是 Device registry、mount authority 或
+  Channel Provider。
+- Hub 决定 Device onboarding/approval/revocation；Kernel 决定 Owner namespace
+  下的 mount 与可选 Companion attachment；Channel 承担 audio/data/media 与设备命令。
+- `TurnContext.device_id` 只是可选来源事实。无 Device 的虚拟 Companion 是正常入口；
+  Device 没有 Companion target 时不能进入 Companion/audio brain 路径。
+- Owner 是 Agent 调用链唯一的安全 principal。不存在独立 `actor` 或
+  `caller` principal；输入形态、来源 Device 和本轮连接分别由 `input_modality`、
+  `device_id`、`session_id` 表达，这些都是运行事实，不是身份。
+- 领域层保留 `BodyDeviceStorePort`/`BodyCommandPort` 与 `BodyControlService`，但当前
+  没有稳定的 Channel Provider directory/command 契约。旧 Hub HTTP command 与 NATS
+  runtime-device blackboard adapter 已删除，`body_control.enabled` 默认关闭且误开启会
+  fail closed。详见 `docs/architecture/os-integration-boundaries.md`。
 
 ---
 
@@ -50,7 +66,7 @@
 ```
                 ┌──────────────────────────────┐
                 │       LiveKit voice agent     │
-                │   (caller of this service)    │
+                │    (voice transport client)   │
                 └──────────────┬───────────────┘
                                │ gRPC Chat bidi  (UDS or :45051)
                                ▼
@@ -193,7 +209,7 @@ gRPC Chat (bidi stream)
 EidolonAgentServicer.Chat   ←  AuthInterceptor 校验 device_token
    │
    ▼
-AgentRegistry.resolve_for_caller(tenant_id, user_id)   ← lazy 创建 CompanionAgent
+AgentRegistry.resolve_runtime(owner_id, companion_id, genome_id) ← lazy 创建 CompanionAgent
    │
    ▼
 CompanionAgent.run_turn(turn_input)
@@ -245,9 +261,12 @@ TurnEngine.run(ti)   ← 以下为热路径，逐步 yield TurnEvent
 
 ---
 
-## 6. 异步事件总线
+## 6. 已落地的异步事件链路
 
-NATS 是核心总线。**进程内** fire-and-forget 直接 `asyncio.create_task`；**跨进程** 走 NATS subject。两者共享同一个 `EventBus` Protocol。
+NATS 只承载下表中已经存在的 Agent/Memory 或 Agent-local 异步协议，不是统一 OS
+消息总线，也不承载 Device authority、Mount 或命令目录。进程内 fire-and-forget 使用
+`asyncio.create_task`；需要现有跨进程协议时才使用 NATS subject。两者可由同一个
+`EventBus` Port 适配，但这不等于统一 IPC。
 
 ### NATS Subject 约定（全部在 `core/types/topics.py`）
 
@@ -312,12 +331,14 @@ service EidolonAgent {
 }
 ```
 
-`AuthInterceptor` 在每个 RPC 上校验 `Bearer <runtime_token>`（JWT，HS256）。Token 必须携带
+`AuthInterceptor` 在每个 RPC 上校验 `Bearer <runtime_token>`（V4 JWT，HS256）。Token 必须携带
 `RuntimeIdentity(schema_version, owner_id, companion_id, device_id, memory_realm_id, genome_id, genome_hash, realizer_version)`。
 
-Agent 是 companion runtime，不负责 owner 注册、device pairing、或 companion 选择。外部调用方
-必须在进入 Agent 前完成 device -> companion 绑定，并重新签发包含具体 companion/genome/realm 的
-runtime token。对话热路径不会再按 owner 查询 active companion；session/turn metadata 会锁定
+Agent 是 Companion runtime，不负责 Owner 注册、Device pairing/Mount 或 Companion
+选择。外部调用方必须在进入 Agent 前选择并校验一个具体 Companion，再签发包含
+Owner/Companion/genome/realm 的 runtime token；Device 只是可选来源。无 Device 的虚拟
+Companion 可以正常进入，未选择 Companion 的 Device 则停留在 Channel 的 Device/data
+路径。对话热路径不会按 Owner 猜测 active Companion；session/turn metadata 会锁定
 `genome_id + genome_hash`，会话中不热切换人格。
 
 ### HTTP（`:8180`）—— 健康探针

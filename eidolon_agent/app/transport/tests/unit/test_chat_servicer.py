@@ -112,7 +112,7 @@ async def test_chat_cancels_active_turn_when_context_is_cancelled() -> None:
     agent.run_turn = _slow_turn
 
     registry = MagicMock()
-    registry.resolve_for_caller = AsyncMock(
+    registry.resolve_runtime = AsyncMock(
         return_value=_stub_instance(agent)
     )
     svc = EidolonAgentServicer(
@@ -125,7 +125,9 @@ async def test_chat_cancels_active_turn_when_context_is_cancelled() -> None:
     # simulating a client still holding the stream open.
     iterator_blocker = asyncio.Event()
     start_frame = pb.ChatRequest(
-        start=pb.StartTurn(turn_id="t1", conversation_id="c", text="hi")
+        start=pb.StartTurn(
+            turn_id="t1", conversation_id="c", text="hi", input_modality="voice"
+        )
     )
 
     async def _req_iter():
@@ -184,7 +186,7 @@ async def test_chat_does_not_cancel_active_turn_when_context_is_done_but_not_can
     agent.run_turn = _turn
 
     registry = MagicMock()
-    registry.resolve_for_caller = AsyncMock(
+    registry.resolve_runtime = AsyncMock(
         return_value=_stub_instance(agent)
     )
     svc = EidolonAgentServicer(
@@ -195,7 +197,9 @@ async def test_chat_does_not_cancel_active_turn_when_context_is_done_but_not_can
 
     async def _req_iter():
         yield pb.ChatRequest(
-            start=pb.StartTurn(turn_id="t1", conversation_id="c", text="hi")
+            start=pb.StartTurn(
+                turn_id="t1", conversation_id="c", text="hi", input_modality="voice"
+            )
         )
         await done_seen.wait()
 
@@ -226,7 +230,7 @@ async def test_chat_start_inline_realtime_reaches_turn_input() -> None:
     agent = MagicMock()
     agent.run_turn = _turn
     registry = MagicMock()
-    registry.resolve_for_caller = AsyncMock(
+    registry.resolve_runtime = AsyncMock(
         return_value=_stub_instance(agent)
     )
     signals = MagicMock()
@@ -242,6 +246,7 @@ async def test_chat_start_inline_realtime_reaches_turn_input() -> None:
                 turn_id="t1",
                 conversation_id="c",
                 text="hi",
+                input_modality="voice",
                 realtime={
                     "window_ms": 1000,
                     "dominant_emotion": "sad",
@@ -264,21 +269,20 @@ async def test_chat_start_inline_realtime_reaches_turn_input() -> None:
     signals.recent.assert_not_awaited()
 
 
-async def test_chat_start_metadata_sets_caller_kind() -> None:
-    from eidolon_agent.core.types.identity import CallerKind
+async def test_chat_start_uses_explicit_text_input_modality() -> None:
     from eidolon_agent.core.types.turn import TurnEvent
 
     captured = {}
 
     async def _turn(ti):
-        captured["caller_kind"] = ti.caller.caller_kind
+        captured["input_modality"] = ti.input_modality
         captured["metadata"] = ti.metadata
         yield TurnEvent(turn_id=ti.turn_id, seq=0, kind=TurnEventKind.DONE, data={})
 
     agent = MagicMock()
     agent.run_turn = _turn
     registry = MagicMock()
-    registry.resolve_for_caller = AsyncMock(return_value=_stub_instance(agent))
+    registry.resolve_runtime = AsyncMock(return_value=_stub_instance(agent))
     signals = MagicMock()
     signals.recent = AsyncMock(return_value=[])
     svc = EidolonAgentServicer(
@@ -293,7 +297,7 @@ async def test_chat_start_metadata_sets_caller_kind() -> None:
                 turn_id="t1",
                 conversation_id="c",
                 text="hi",
-                metadata={"caller_kind": "admin_test", "entrypoint": "admin_chat_test"},
+                input_modality="text",
             )
         )
 
@@ -306,8 +310,9 @@ async def test_chat_start_metadata_sets_caller_kind() -> None:
     finally:
         _current_identity.reset(token)
 
-    assert captured["caller_kind"] is CallerKind.ADMIN_TEST
-    assert captured["metadata"]["entrypoint"] == "admin_chat_test"
+    assert captured["input_modality"] == "text"
+    assert "caller_kind" not in captured["metadata"]
+    assert "entrypoint" not in captured["metadata"]
 
 
 async def test_chat_fuses_recent_signals_when_start_has_no_realtime() -> None:
@@ -325,7 +330,7 @@ async def test_chat_fuses_recent_signals_when_start_has_no_realtime() -> None:
     agent = MagicMock()
     agent.run_turn = _turn
     registry = MagicMock()
-    registry.resolve_for_caller = AsyncMock(
+    registry.resolve_runtime = AsyncMock(
         return_value=_stub_instance(agent)
     )
     now = datetime.now(timezone.utc)
@@ -344,7 +349,11 @@ async def test_chat_fuses_recent_signals_when_start_has_no_realtime() -> None:
     )
 
     async def _req_iter():
-        yield pb.ChatRequest(start=pb.StartTurn(turn_id="t1", conversation_id="c", text="hi"))
+        yield pb.ChatRequest(
+            start=pb.StartTurn(
+                turn_id="t1", conversation_id="c", text="hi", input_modality="voice"
+            )
+        )
 
     ctx = _make_context()
     ctx.cancelled = lambda: False

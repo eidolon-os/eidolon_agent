@@ -59,14 +59,14 @@ async def _standalone(tmp_path, monkeypatch):
 async def _run_turn(container, text: str):
     workspace = container.extras["standalone_workspace"]
     genome = workspace.persona_genome
-    inst = await container.agent_registry.resolve_for_caller(
+    inst = await container.agent_registry.resolve_runtime(
         owner_id="alice",
         companion_id=workspace.companion.companion_id,
         genome_id=genome.genome_id,
     )
     ti = make_turn_input(text)
-    identity = replace(
-        ti.caller.identity,
+    context = replace(
+        ti.context,
         companion_id=workspace.companion.companion_id,
         memory_realm_id=workspace.memory_realm.realm_id,
         genome_id=genome.genome_id,
@@ -74,7 +74,7 @@ async def _run_turn(container, text: str):
         genome_hash=genome.genome_hash,
         realizer_version=genome.realizer_version,
     )
-    ti = replace(ti, caller=replace(ti.caller, identity=identity))
+    ti = replace(ti, context=context)
     return [ev async for ev in inst.agent.run_turn(ti)]
 
 

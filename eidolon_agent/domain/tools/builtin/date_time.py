@@ -47,7 +47,7 @@ class GetTimeTool:
     async def invoke(self, call: ToolCall, *, ctx: ToolInvocationContext) -> ToolResult:
         timezone = str(call.arguments.get("timezone") or "").strip()
         if not timezone:
-            timezone = _LOCALE_TIMEZONES.get(ctx.caller.locale, "UTC")
+            timezone = _LOCALE_TIMEZONES.get(ctx.turn_context.locale, "UTC")
         try:
             tz = ZoneInfo(timezone)
         except ZoneInfoNotFoundError:
@@ -72,6 +72,6 @@ class GetTimeTool:
                 "weekday_zh": _WEEKDAYS_ZH[now.weekday()],
                 "timezone": timezone,
                 "utc_offset": now.strftime("%z"),
-                "locale": ctx.caller.locale,
+                "locale": ctx.turn_context.locale,
             },
         )

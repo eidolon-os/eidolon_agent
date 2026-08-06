@@ -2,7 +2,7 @@
 
 The proactive event must carry the source device_id so hub can route the wake
 (send_command room.join). Source of truth is the denormalized
-``LongTaskRecord.device_id`` (← caller identity / turns.source_device_id); until that is
+``LongTaskRecord.device_id`` (← TurnContext / turns.source_device_id); until that is
 wired end-to-end we fall back to parsing the livekit ``conversation_id``.
 """
 

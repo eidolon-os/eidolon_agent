@@ -19,7 +19,7 @@ class _CapturingSubmitter:
         self.record = record
 
 
-async def test_delegation_carries_tool_budget_and_duration(caller_ctx) -> None:
+async def test_delegation_carries_tool_budget_and_duration(tool_ctx) -> None:
     submitter = _CapturingSubmitter()
     tool = SubmitLongTaskTool(long_task_submitter=submitter)
 
@@ -35,7 +35,7 @@ async def test_delegation_carries_tool_budget_and_duration(caller_ctx) -> None:
                 "task_type": "document_work",
             },
         ),
-        ctx=caller_ctx,
+        ctx=tool_ctx,
     )
 
     assert res.ok
@@ -51,13 +51,13 @@ async def test_delegation_carries_tool_budget_and_duration(caller_ctx) -> None:
     assert rec.request_payload["expected_duration_hint"] == "大约一小时"
 
 
-async def test_delegation_defaults_when_contract_fields_omitted(caller_ctx) -> None:
+async def test_delegation_defaults_when_contract_fields_omitted(tool_ctx) -> None:
     submitter = _CapturingSubmitter()
     tool = SubmitLongTaskTool(long_task_submitter=submitter)
 
     res = await tool.invoke(
         ToolCall(id="c2", name="delegate_to_coworker", arguments={"instruction": "查天气"}),
-        ctx=caller_ctx,
+        ctx=tool_ctx,
     )
 
     assert res.ok
@@ -67,7 +67,7 @@ async def test_delegation_defaults_when_contract_fields_omitted(caller_ctx) -> N
     assert submitter.record.expected_duration_hint == ""
 
 
-async def test_malformed_tool_budget_does_not_fail_delegation(caller_ctx) -> None:
+async def test_malformed_tool_budget_does_not_fail_delegation(tool_ctx) -> None:
     submitter = _CapturingSubmitter()
     tool = SubmitLongTaskTool(long_task_submitter=submitter)
 
@@ -77,7 +77,7 @@ async def test_malformed_tool_budget_does_not_fail_delegation(caller_ctx) -> Non
             name="delegate_to_coworker",
             arguments={"instruction": "订机票", "tool_budget": "十二"},
         ),
-        ctx=caller_ctx,
+        ctx=tool_ctx,
     )
 
     assert res.ok

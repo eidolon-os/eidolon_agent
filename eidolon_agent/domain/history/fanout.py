@@ -14,8 +14,8 @@ from eidolon_memory_contracts import (
 )
 
 from eidolon_agent.core.types.event import Event
-from eidolon_agent.core.types.identity import build_memory_actor_context
 from eidolon_agent.core.types.topics import Topics
+from eidolon_agent.core.types.turn_context import build_memory_actor_context
 from eidolon_agent.domain.history.ports import MemoryTurnSubjectResolver
 
 _log = logging.getLogger(__name__)

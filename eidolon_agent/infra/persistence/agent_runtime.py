@@ -1,8 +1,4 @@
-"""Agent runtime persistence backed by ``eidolon_data``.
-
-This module keeps agent-domain type conversion inside ``eidolon_agent`` while
-all durable business rows are owned by ``eidolon_data``.
-"""
+"""Agent runtime persistence backed by the Agent-owned SQLite authority."""
 
 from __future__ import annotations
 
@@ -11,17 +7,6 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
-from eidolon_data.events.facade import build_event
-from eidolon_data.schema.models import (
-    CompanionRow,
-    ConversationRow,
-    JobRow,
-    MessageRow,
-    RuntimeCallerRow,
-    RuntimeSessionRow,
-    TurnRow,
-)
-from eidolon_data.services.datastore import DataStore
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -30,16 +15,21 @@ from sqlalchemy.exc import IntegrityError
 from eidolon_agent.core.types import ChatMessage, MessageRole
 from eidolon_agent.core.types.long_task import CallbackStatus, LongTaskRecord, LongTaskStatus
 from eidolon_agent.core.types.turn import TriageKind, TurnInput, TurnResult, TurnStatus
-from eidolon_agent.domain.history import MemoryFanoutStatus
+from eidolon_agent.infra.persistence.runtime_store import (
+    AgentAuditOutbox,
+    AgentRuntimeStore,
+    ConversationRow,
+    JobRow,
+    MessageRow,
+    RuntimeSessionRow,
+    TurnRow,
+)
 
 _LONG_TASK_PAYLOAD_KEY = "eidolon_agent_long_task"
-_MEMORY_FANOUT_EVENT_TYPE = "eidolon.memory.fanout.status"
 
-# Long-task status → job.* lifecycle event. Only these transitions are audit-worthy;
-# progress/poll churn (RUNNING→RUNNING) is filtered by the status-change guard.
+# Only terminal asynchronous outcomes are global receipts. Queueing, polling,
+# progress, and RUNNING transitions remain local runtime state/telemetry.
 _JOB_STATUS_EVENT = {
-    LongTaskStatus.QUEUED: "job.queued",
-    LongTaskStatus.RUNNING: "job.running",
     LongTaskStatus.SUCCEEDED: "job.succeeded",
     LongTaskStatus.FAILED: "job.failed",
     LongTaskStatus.CANCELLED: "job.cancelled",
@@ -48,7 +38,7 @@ _JOB_STATUS_EVENT = {
 
 
 def _emit_job_transition(session, *, before: LongTaskStatus, after: LongTaskRecord) -> None:
-    """Emit a job.* lifecycle event when the status actually changes (same transaction)."""
+    """Emit a terminal receipt in the same Agent authority transaction."""
     event_type = _JOB_STATUS_EVENT.get(after.status)
     if event_type is None or after.status == before:
         return
@@ -56,55 +46,30 @@ def _emit_job_transition(session, *, before: LongTaskStatus, after: LongTaskReco
     if after.error_code:
         payload["error_code"] = after.error_code
     session.add(
-        build_event(
-            event_type=event_type,
+        AgentAuditOutbox.build_row(
+            category="receipt",
             owner_id=after.owner_id,
-            companion_id=after.companion_id,
             subject_type="job",
             subject_id=after.id,
-            actor_type="agent",
+            action=event_type,
             trace_id=getattr(after, "trace_id", None),
-            payload_json=payload,
+            outcome="failure"
+            if after.status
+            in {
+                LongTaskStatus.FAILED,
+                LongTaskStatus.CANCELLED,
+                LongTaskStatus.TIMED_OUT,
+            }
+            else "success",
+            reason=after.error_code,
+            payload=payload,
         )
     )
 
 
-class EidolonDataMemoryFanoutStatusSink:
-    """Durable audit sink for agent -> memory fanout publish attempts."""
-
-    def __init__(self, data_store: DataStore) -> None:
-        self._data_store = data_store
-
-    async def record_memory_fanout(self, status: MemoryFanoutStatus) -> None:
-        # Contract-carrying facade (source="agent", tier from catalog). Standalone
-        # fire-and-forget emit; auto event id. Not same-tx (cross-boundary handoff).
-        await self._data_store.events.record_event(
-            owner_id=status.owner_id,
-            companion_id=status.companion_id,
-            subject_type="turn",
-            subject_id=status.turn_id,
-            event_type=_MEMORY_FANOUT_EVENT_TYPE,
-            actor_type="agent",
-            actor_id=status.companion_id,
-            trace_id=status.trace_id,
-            payload_json={
-                "turn_id": status.turn_id,
-                "owner_id": status.owner_id,
-                "companion_id": status.companion_id,
-                "memory_realm_id": status.memory_realm_id,
-                "memory_space_id": status.memory_space_id,
-                "subject": status.subject,
-                "state": status.state,
-                "error": status.error,
-                "recorded_at": status.recorded_at,
-                "semantics": "published means accepted by NATS/JetStream, not yet absorbed by memory runner",
-            },
-        )
-
-
-def build_eidolon_data_history_hydrator(data_store: DataStore):
+def build_agent_history_hydrator(runtime_store: AgentRuntimeStore):
     async def _hydrate(*, conversation_id: str, window: int) -> list[ChatMessage]:
-        async with data_store.session_factory() as session:
+        async with runtime_store.session_factory() as session:
             pairs = (
                 await session.execute(
                     select(MessageRow, TurnRow.seq)
@@ -128,7 +93,7 @@ def build_eidolon_data_history_hydrator(data_store: DataStore):
     return _hydrate
 
 
-def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provider):
+def build_agent_turn_persister(runtime_store: AgentRuntimeStore, *, model_id_provider):
     async def _persist_once(
         *,
         ti: TurnInput,
@@ -147,20 +112,12 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
         is_private: bool = False,
     ) -> None:
         model_id = model_id_provider()
-        companion_id = ti.caller.companion_id
-        runtime_caller_id = _runtime_caller_id(ti)
+        companion_id = ti.context.companion_id
         runtime_session_id = _runtime_session_id(ti)
-        async with data_store.session_factory() as session:
-            await _validate_owner_companion(
-                session,
-                owner_id=ti.caller.owner_id,
-                companion_id=companion_id,
-            )
-            await _upsert_runtime_caller(session, ti, runtime_caller_id=runtime_caller_id)
+        async with runtime_store.session_factory() as session:
             await _upsert_runtime_session(
                 session,
                 ti,
-                runtime_caller_id=runtime_caller_id,
                 runtime_session_id=runtime_session_id,
             )
             await _insert_ignore(
@@ -168,21 +125,21 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                 ConversationRow,
                 {
                     "conversation_id": ti.conversation_id,
-                    "owner_id": ti.caller.owner_id,
+                    "owner_id": ti.context.owner_id,
                     "companion_id": companion_id,
-                    "runtime_caller_id": runtime_caller_id,
                     "runtime_session_id": runtime_session_id,
-                    "source_device_id": ti.caller.device_id,
+                    "source_device_id": ti.context.device_id,
+                    "started_at": started_at,
+                    "updated_at": finished_at,
                     "metadata_json": {
-                        "owner_id": ti.caller.owner_id,
+                        "owner_id": ti.context.owner_id,
                         "companion_id": companion_id,
-                        "runtime_caller_id": runtime_caller_id,
                         "runtime_session_id": runtime_session_id,
-                        "memory_realm_id": ti.caller.memory_realm_id,
-                        "genome_id": ti.caller.genome_id,
-                        "genome_hash": ti.caller.genome_hash,
-                        "schema_version": ti.caller.schema_version,
-                        "realizer_version": ti.caller.realizer_version,
+                        "memory_realm_id": ti.context.memory_realm_id,
+                        "genome_id": ti.context.genome_id,
+                        "genome_hash": ti.context.genome_hash,
+                        "schema_version": ti.context.schema_version,
+                        "realizer_version": ti.context.realizer_version,
                         "session_id": ti.session_id,
                     },
                 },
@@ -192,9 +149,8 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
             if conversation is None:
                 raise RuntimeError(f"conversation insert failed: {ti.conversation_id}")
             conversation.updated_at = finished_at
-            conversation.runtime_caller_id = runtime_caller_id
             conversation.runtime_session_id = runtime_session_id
-            conversation.source_device_id = ti.caller.device_id
+            conversation.source_device_id = ti.context.device_id
 
             existing_turn = await session.get(TurnRow, ti.turn_id)
             if existing_turn is None:
@@ -203,14 +159,13 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                     turn_id=ti.turn_id,
                     conversation_id=ti.conversation_id,
                     seq=seq,
-                    runtime_caller_id=runtime_caller_id,
                     runtime_session_id=runtime_session_id,
-                    source_device_id=ti.caller.device_id,
+                    source_device_id=ti.context.device_id,
                     trigger=ti.trigger.value,
                     status=status.value,
                     started_at=started_at,
                     finished_at=finished_at,
-                    trace_id=ti.caller.trace_id or None,
+                    trace_id=ti.context.trace_id or None,
                     trace_json=_trace_json(timings),
                     metrics_json=_turn_metrics_json(
                         result=TurnResult(
@@ -229,8 +184,8 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                             model=model_id,
                             error_code=error_code,
                             seq_in_conversation=seq,
-                            device_id=ti.caller.device_id,
-                            caller_kind=ti.caller.caller_kind.value,
+                            device_id=ti.context.device_id,
+                            input_modality=ti.input_modality,
                             metadata=timings,
                         )
                     ),
@@ -242,10 +197,9 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                 existing_turn.status = status.value
                 existing_turn.started_at = started_at
                 existing_turn.finished_at = finished_at
-                existing_turn.runtime_caller_id = runtime_caller_id
                 existing_turn.runtime_session_id = runtime_session_id
-                existing_turn.source_device_id = ti.caller.device_id
-                existing_turn.trace_id = ti.caller.trace_id or None
+                existing_turn.source_device_id = ti.context.device_id
+                existing_turn.trace_id = ti.context.trace_id or None
                 existing_turn.trace_json = _trace_json(timings)
                 existing_turn.metrics_json = {
                     **(existing_turn.metrics_json or {}),
@@ -293,27 +247,6 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
                         ),
                     ),
                 )
-            if status is TurnStatus.ERRORED:
-                # Exceptional turn outcome → audit event (normal turns are derived
-                # from TurnRow). Same transaction as the turn row.
-                session.add(
-                    build_event(
-                        event_type="agent.turn.failed",
-                        owner_id=ti.caller.owner_id,
-                        companion_id=companion_id,
-                        subject_type="turn",
-                        subject_id=ti.turn_id,
-                        actor_type="agent",
-                        trace_id=ti.caller.trace_id or None,
-                        reason=error_code or None,
-                        payload_json={
-                            "error_code": error_code,
-                            "triage_kind": triage_kind.value,
-                            "total_latency_ms": total_ms,
-                            "model": model_id,
-                        },
-                    )
-                )
             await session.commit()
 
     async def _persist(**kwargs) -> None:
@@ -329,23 +262,18 @@ def build_eidolon_data_turn_persister(data_store: DataStore, *, model_id_provide
     return _persist
 
 
-class EidolonDataLongTaskStore:
-    """Long-task store backed by ``eidolon_data.jobs``."""
+class AgentLongTaskStore:
+    """Long-task store backed by the Agent authority's ``jobs`` table."""
 
-    def __init__(self, data_store: DataStore) -> None:
-        self._data_store = data_store
+    def __init__(self, runtime_store: AgentRuntimeStore) -> None:
+        self._runtime_store = runtime_store
 
     async def accept(self, record: LongTaskRecord) -> None:
         now = datetime.now(timezone.utc)
         record = replace(
             record, created_at=record.created_at or now, updated_at=record.updated_at or now
         )
-        async with self._data_store.session_factory() as session:
-            await _validate_owner_companion(
-                session,
-                owner_id=record.owner_id,
-                companion_id=record.companion_id,
-            )
+        async with self._runtime_store.session_factory() as session:
             row = await session.get(JobRow, record.id)
             if row is None:
                 session.add(_record_to_job_row(record))
@@ -357,7 +285,7 @@ class EidolonDataLongTaskStore:
         await self.accept(record)
 
     async def get(self, task_id: str) -> LongTaskRecord | None:
-        async with self._data_store.session_factory() as session:
+        async with self._runtime_store.session_factory() as session:
             row = await session.get(JobRow, task_id)
             return _job_row_to_record(row) if row is not None else None
 
@@ -372,7 +300,7 @@ class EidolonDataLongTaskStore:
         limit: int = 50,
         before: datetime | None = None,
     ) -> list[LongTaskRecord]:
-        async with self._data_store.session_factory() as session:
+        async with self._runtime_store.session_factory() as session:
             stmt = select(JobRow).order_by(JobRow.created_at.desc()).limit(limit)
             if owner_id:
                 stmt = stmt.where(JobRow.owner_id == owner_id)
@@ -421,7 +349,7 @@ class EidolonDataLongTaskStore:
         )
 
     async def find_mementos_session_id(self, session_key: str) -> str | None:
-        async with self._data_store.session_factory() as session:
+        async with self._runtime_store.session_factory() as session:
             rows = (
                 (
                     await session.execute(
@@ -546,7 +474,7 @@ class EidolonDataLongTaskStore:
         )
 
     async def claim_callback_delivery(self, task_id: str, *, subject: str) -> bool:
-        async with self._data_store.session_factory() as session:
+        async with self._runtime_store.session_factory() as session:
             row = await session.get(JobRow, task_id)
             if row is None:
                 return False
@@ -598,8 +526,28 @@ class EidolonDataLongTaskStore:
             ),
         )
 
+    async def retry_from_admin(self, task_id: str) -> LongTaskRecord | None:
+        """Return a terminal task to the accepted queue state."""
+        return await self._update(
+            task_id,
+            lambda record, now: replace(
+                record,
+                status=LongTaskStatus.ACCEPTED,
+                external_status=None,
+                progress_summary=None,
+                error_code=None,
+                error_message=None,
+                error_payload=None,
+                worker_id=None,
+                lease_until=None,
+                next_retry_at=None,
+                completed_at=None,
+                updated_at=now,
+            ),
+        )
+
     async def _update(self, task_id: str, mutator) -> LongTaskRecord | None:
-        async with self._data_store.session_factory() as session:
+        async with self._runtime_store.session_factory() as session:
             row = await session.get(JobRow, task_id)
             if row is None:
                 return None
@@ -611,11 +559,33 @@ class EidolonDataLongTaskStore:
             return updated
 
 
-class EidolonDataConversationReader:
-    """Admin/query reader for turns and messages stored in ``eidolon_data``."""
+class AgentConversationReader:
+    """Admin/query reader over the Agent authority."""
 
-    def __init__(self, data_store: DataStore) -> None:
-        self._data_store = data_store
+    def __init__(self, runtime_store: AgentRuntimeStore) -> None:
+        self._runtime_store = runtime_store
+
+    async def list_conversations(
+        self,
+        *,
+        owner_id: str | None = None,
+        companion_id: str | None = None,
+        limit: int = 50,
+        before: datetime | None = None,
+    ) -> list[ConversationRow]:
+        async with self._runtime_store.session_factory() as session:
+            stmt = select(ConversationRow).order_by(
+                ConversationRow.updated_at.desc(),
+                ConversationRow.conversation_id.desc(),
+            )
+            if owner_id is not None:
+                stmt = stmt.where(ConversationRow.owner_id == owner_id)
+            if companion_id is not None:
+                stmt = stmt.where(ConversationRow.companion_id == companion_id)
+            if before is not None:
+                stmt = stmt.where(ConversationRow.updated_at < before)
+            rows = await session.scalars(stmt.limit(limit))
+            return list(rows)
 
     async def list_turns_by_owner(
         self,
@@ -625,7 +595,7 @@ class EidolonDataConversationReader:
         limit: int = 50,
         before: datetime | None = None,
     ) -> list[dict]:
-        async with self._data_store.session_factory() as session:
+        async with self._runtime_store.session_factory() as session:
             stmt = (
                 select(TurnRow, ConversationRow)
                 .join(ConversationRow, TurnRow.conversation_id == ConversationRow.conversation_id)
@@ -642,7 +612,7 @@ class EidolonDataConversationReader:
             return [_turn_row_to_admin_dict(turn, conversation) for turn, conversation in rows]
 
     async def get_turn(self, turn_id: str) -> dict | None:
-        async with self._data_store.session_factory() as session:
+        async with self._runtime_store.session_factory() as session:
             row = (
                 await session.execute(
                     select(TurnRow, ConversationRow)
@@ -658,7 +628,7 @@ class EidolonDataConversationReader:
             return _turn_row_to_admin_dict(turn, conversation)
 
     async def list_for_turn(self, turn_id: str) -> list[ChatMessage]:
-        async with self._data_store.session_factory() as session:
+        async with self._runtime_store.session_factory() as session:
             rows = (
                 (
                     await session.execute(
@@ -673,120 +643,40 @@ class EidolonDataConversationReader:
             return [_row_to_message(row) for row in rows]
 
 
-async def _validate_owner_companion(
-    session,
-    *,
-    owner_id: str,
-    companion_id: str,
-) -> None:
-    companion = await session.get(CompanionRow, companion_id)
-    if companion is None:
-        raise RuntimeError(f"companion not provisioned: {companion_id}")
-    if companion.owner_id != owner_id:
-        raise RuntimeError(
-            f"companion {companion_id!r} belongs to owner {companion.owner_id!r}, not {owner_id!r}"
-        )
-    await session.flush()
-
-
-async def _upsert_runtime_caller(session, ti: TurnInput, *, runtime_caller_id: str) -> None:
-    metadata = dict(ti.metadata or {})
-    actor_kind = str(
-        ti.caller.actor_kind or metadata.get("actor_kind") or ti.caller.caller_kind.value
-    )
-    actor_id = str(
-        ti.caller.actor_id or metadata.get("actor_id") or ti.caller.device_id or runtime_caller_id
-    )
-    row = await session.get(RuntimeCallerRow, runtime_caller_id)
-    now = datetime.now(timezone.utc)
-    if row is None:
-        row = RuntimeCallerRow(
-            caller_id=runtime_caller_id,
-            owner_id=ti.caller.owner_id,
-            companion_id=ti.caller.companion_id,
-            actor_kind=actor_kind,
-            actor_id=actor_id,
-            first_seen_at=now,
-        )
-        session.add(row)
-    row.owner_id = ti.caller.owner_id
-    row.companion_id = ti.caller.companion_id
-    row.actor_kind = actor_kind
-    row.actor_id = actor_id
-    row.display_name = str(
-        ti.caller.display_name or metadata.get("caller_display_name") or actor_kind
-    )
-    row.source_device_id = ti.caller.device_id
-    row.status = "active"
-    row.metadata_json = {
-        "caller_kind": ti.caller.caller_kind.value,
-        "entrypoint": metadata.get("entrypoint"),
-        "session_id": ti.session_id,
-        "trace_id": ti.caller.trace_id,
-        "request_id": ti.caller.request_id,
-    }
-    row.last_seen_at = now
-    row.updated_at = now
-    await session.flush()
-
-
 async def _upsert_runtime_session(
     session,
     ti: TurnInput,
     *,
-    runtime_caller_id: str,
     runtime_session_id: str,
 ) -> None:
-    metadata = dict(ti.metadata or {})
     row = await session.get(RuntimeSessionRow, runtime_session_id)
     now = datetime.now(timezone.utc)
     if row is None:
         row = RuntimeSessionRow(
             session_id=runtime_session_id,
-            owner_id=ti.caller.owner_id,
-            companion_id=ti.caller.companion_id,
-            runtime_caller_id=runtime_caller_id,
-            source_device_id=ti.caller.device_id,
+            owner_id=ti.context.owner_id,
+            companion_id=ti.context.companion_id,
+            source_device_id=ti.context.device_id,
             started_at=now,
         )
         session.add(row)
-    row.owner_id = ti.caller.owner_id
-    row.companion_id = ti.caller.companion_id
-    row.runtime_caller_id = runtime_caller_id
-    row.source_device_id = ti.caller.device_id
-    row.transport = str(ti.caller.transport or metadata.get("transport") or "grpc_chat")
+    row.owner_id = ti.context.owner_id
+    row.companion_id = ti.context.companion_id
+    row.source_device_id = ti.context.device_id
+    row.transport = "grpc_chat"
     row.status = "active"
     row.metadata_json = {
-        "caller_kind": ti.caller.caller_kind.value,
-        "entrypoint": metadata.get("entrypoint"),
+        "input_modality": ti.input_modality,
         "conversation_id": ti.conversation_id,
-        "trace_id": ti.caller.trace_id,
-        "request_id": ti.caller.request_id,
+        "trace_id": ti.context.trace_id,
+        "request_id": ti.context.request_id,
     }
     row.last_seen_at = now
     row.updated_at = now
     await session.flush()
 
 
-def _runtime_caller_id(ti: TurnInput) -> str:
-    explicit_context = str(ti.caller.runtime_caller_id or "").strip()
-    if explicit_context:
-        return explicit_context
-    metadata = dict(ti.metadata or {})
-    explicit = str(metadata.get("runtime_caller_id") or "").strip()
-    if explicit:
-        return explicit
-    raise RuntimeError("runtime_caller_id was not built at transport boundary")
-
-
 def _runtime_session_id(ti: TurnInput) -> str:
-    explicit_context = str(ti.caller.runtime_session_id or "").strip()
-    if explicit_context:
-        return explicit_context
-    metadata = dict(ti.metadata or {})
-    explicit = str(metadata.get("runtime_session_id") or "").strip()
-    if explicit:
-        return explicit
     if ti.session_id:
         return ti.session_id
     raise RuntimeError("runtime_session_id was not built at transport boundary")
@@ -830,21 +720,20 @@ async def _next_turn_seq(session, conversation_id: str) -> int:
 def _turn_metadata_json(ti: TurnInput, triage_kind: TriageKind, timings: dict) -> dict[str, Any]:
     return {
         **(timings or {}),
-        "owner_id": ti.caller.owner_id,
-        "companion_id": ti.caller.companion_id,
-        "runtime_caller_id": _runtime_caller_id(ti),
+        "owner_id": ti.context.owner_id,
+        "companion_id": ti.context.companion_id,
         "runtime_session_id": _runtime_session_id(ti),
-        "memory_realm_id": ti.caller.memory_realm_id,
-        "genome_id": ti.caller.genome_id,
-        "genome_hash": ti.caller.genome_hash,
-        "schema_version": ti.caller.schema_version,
-        "realizer_version": ti.caller.realizer_version,
+        "memory_realm_id": ti.context.memory_realm_id,
+        "genome_id": ti.context.genome_id,
+        "genome_hash": ti.context.genome_hash,
+        "schema_version": ti.context.schema_version,
+        "realizer_version": ti.context.realizer_version,
         "session_id": ti.session_id,
-        "caller_kind": ti.caller.caller_kind.value,
-        "device_id": ti.caller.device_id,
+        "input_modality": ti.input_modality,
+        "device_id": ti.context.device_id,
         "triage_kind": triage_kind.value,
-        "trace_id": ti.caller.trace_id,
-        "request_id": ti.caller.request_id,
+        "trace_id": ti.context.trace_id,
+        "request_id": ti.context.request_id,
     }
 
 
@@ -862,7 +751,7 @@ def _turn_metrics_json(result: TurnResult) -> dict[str, Any]:
         "model": result.model,
         "error_code": result.error_code,
         "device_id": result.device_id,
-        "caller_kind": result.caller_kind,
+        "input_modality": result.input_modality,
         "triage_kind": result.triage_kind.value,
     }
 
@@ -982,12 +871,7 @@ def _turn_row_to_admin_dict(turn: TurnRow, conversation: ConversationRow) -> dic
         "conversation_id": turn.conversation_id,
         "seq": turn.seq,
         "trigger": turn.trigger,
-        "caller_kind": metrics.get("caller_kind") or metadata.get("caller_kind"),
-        "runtime_caller_id": (
-            turn.runtime_caller_id
-            or metadata.get("runtime_caller_id")
-            or conversation.runtime_caller_id
-        ),
+        "input_modality": metrics.get("input_modality") or metadata.get("input_modality"),
         "runtime_session_id": (
             turn.runtime_session_id
             or metadata.get("runtime_session_id")
@@ -1173,8 +1057,8 @@ def _dt_from_json(value: str | datetime | None) -> datetime | None:
 
 
 __all__ = [
-    "EidolonDataConversationReader",
-    "EidolonDataLongTaskStore",
-    "build_eidolon_data_history_hydrator",
-    "build_eidolon_data_turn_persister",
+    "AgentConversationReader",
+    "AgentLongTaskStore",
+    "build_agent_history_hydrator",
+    "build_agent_turn_persister",
 ]

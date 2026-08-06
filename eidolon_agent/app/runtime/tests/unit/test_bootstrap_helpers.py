@@ -22,11 +22,19 @@ from eidolon_agent.app.runtime.bootstrap import (
     _build_llm_router,
     _build_turn_engine,
     _generate_persisted_secret,
+    build_application,
 )
 from eidolon_agent.app.runtime.container import Container
 from eidolon_agent.config.settings import LLMModelConfig, Settings
 
 pytestmark = pytest.mark.unit
+
+
+async def test_removed_hub_body_runtime_cannot_be_enabled() -> None:
+    settings = Settings(body_control={"enabled": True})
+
+    with pytest.raises(RuntimeError, match="Channel has no stable Provider"):
+        await build_application(settings=settings)
 
 
 def test_build_llm_router_includes_fake_and_configured_models() -> None:

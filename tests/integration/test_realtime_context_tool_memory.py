@@ -7,8 +7,6 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 
 import pytest
-from eidolon_data import DataSettings, DataStore
-from eidolon_data.schema.models import JobRow, TurnRow
 from eidolon_memory_contracts import conversation_turn_subject, unwrap_memory_payload
 from sqlalchemy import select
 
@@ -26,6 +24,7 @@ from eidolon_agent.domain.history import HistoryManager
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import EmitEventTool, GetWeatherTool
 from eidolon_agent.infra.llm.providers.fake import FakeLLM
+from eidolon_agent.infra.persistence.runtime_store import AgentRuntimeStore, JobRow, TurnRow
 from tests.helpers import make_turn_input
 
 pytestmark = pytest.mark.integration
@@ -128,7 +127,7 @@ async def test_llm_selected_long_task_persists_minimal_receipt_record(
     turn_engine_factory,
     tmp_path,
 ) -> None:
-    data_store = await _data_store(tmp_path)
+    runtime_store = await _runtime_store(tmp_path)
     llm = _ScriptedCapturingLLM(
         [
             [
@@ -147,7 +146,7 @@ async def test_llm_selected_long_task_persists_minimal_receipt_record(
             [{"kind": "text", "text": "已经开始处理，我会继续跟进。"}],
         ]
     )
-    engine = turn_engine_factory(llm=llm, data_store=data_store)
+    engine = turn_engine_factory(llm=llm, runtime_store=runtime_store)
 
     events = [
         ev async for ev in engine.run(make_turn_input("整理我最近的项目资料"))
@@ -156,13 +155,13 @@ async def test_llm_selected_long_task_persists_minimal_receipt_record(
 
     tool_result = next(ev for ev in events if ev.kind is TurnEventKind.TOOL_RESULT)
     content = tool_result.data["content"]
-    async with data_store.session_factory() as session:
+    async with runtime_store.session_factory() as session:
         row = (
             await session.execute(
                 select(JobRow).where(JobRow.job_id == content["task_id"])
             )
         ).scalar_one_or_none()
-    await data_store.close()
+    await runtime_store.close()
 
     assert row is not None
     assert row.status == "accepted"
@@ -254,7 +253,7 @@ async def test_turn_trace_contains_harness_snapshot_for_coworker_handoff(
     turn_engine_factory,
     tmp_path,
 ) -> None:
-    data_store = await _data_store(tmp_path)
+    runtime_store = await _runtime_store(tmp_path)
     llm = _ScriptedCapturingLLM(
         [
             [
@@ -267,7 +266,7 @@ async def test_turn_trace_contains_harness_snapshot_for_coworker_handoff(
             [{"kind": "text", "text": "已交给后台。"}],
         ]
     )
-    engine = turn_engine_factory(llm=llm, data_store=data_store)
+    engine = turn_engine_factory(llm=llm, runtime_store=runtime_store)
 
     events = [ev async for ev in engine.run(make_turn_input("帮我整理资料"))]
     await _drain_background_tasks()
@@ -275,12 +274,12 @@ async def test_turn_trace_contains_harness_snapshot_for_coworker_handoff(
     assert any(ev.kind is TurnEventKind.HANDOFF for ev in events)
     row = None
     for _ in range(50):
-        async with data_store.session_factory() as session:
+        async with runtime_store.session_factory() as session:
             row = await session.get(TurnRow, "t1")
         if row is not None:
             break
         await asyncio.sleep(0.01)
-    await data_store.close()
+    await runtime_store.close()
 
     assert row is not None
     trace = row.trace_json
@@ -854,25 +853,9 @@ async def _drain_background_tasks() -> None:
     await asyncio.sleep(0)
 
 
-async def _data_store(tmp_path) -> DataStore:
-    store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
+async def _runtime_store(tmp_path) -> AgentRuntimeStore:
+    store = AgentRuntimeStore.open(tmp_path / "eidolon-agent.sqlite3")
     await store.init_schema()
-    # Seed the identity used by tests.helpers.make_turn_input — the runtime
-    # persistence layer validates owner/companion existence before writing.
-    await store.owner_service.create_owner(owner_id="alice", display_name="alice")
-    await store.workspace_provisioning.provision_workspace(
-        owner_id="alice",
-        companion_id="companion-test",
-        genome_id="genome-test",
-        realm_id="realm-test",
-    )
-    await store.devices.create_device(
-        device_id="device-test",
-        owner_id="alice",
-        bound_companion_id="companion-test",
-        auth_type="token",
-        secret_ref="test",
-    )
     return store
 
 

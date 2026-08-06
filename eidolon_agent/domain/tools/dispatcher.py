@@ -167,9 +167,9 @@ class ToolDispatcher:
                     "tool_name": call.name,
                     "call_id": call.id,
                     "turn_id": ctx.turn_id,
-                    "owner_id": ctx.caller.owner_id,
-                    "companion_id": ctx.caller.companion_id,
-                    "memory_realm_id": ctx.caller.memory_realm_id,
+                    "owner_id": ctx.turn_context.owner_id,
+                    "companion_id": ctx.turn_context.companion_id,
+                    "memory_realm_id": ctx.turn_context.memory_realm_id,
                 },
             )
             return ToolResult(
@@ -266,12 +266,12 @@ class ToolDispatcher:
             )
             values = {
                 **call.arguments,
-                "owner_id": ctx.caller.owner_id,
-                "companion_id": ctx.caller.companion_id,
-                "memory_realm_id": ctx.caller.memory_realm_id,
+                "owner_id": ctx.turn_context.owner_id,
+                "companion_id": ctx.turn_context.companion_id,
+                "memory_realm_id": ctx.turn_context.memory_realm_id,
                 "turn_id": ctx.turn_id,
-                "trace_id": ctx.caller.trace_id or ctx.turn_id,
-                "request_id": ctx.caller.request_id,
+                "trace_id": ctx.turn_context.trace_id or ctx.turn_id,
+                "request_id": ctx.turn_context.request_id,
                 "tool_name": call.name,
                 "arguments_json": arguments_json,
             }

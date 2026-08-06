@@ -13,7 +13,6 @@ may import the submodule directly when they want a narrower surface.
 from __future__ import annotations
 
 from eidolon_agent.core.types.event import Event
-from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason, LLMUsage
 from eidolon_agent.core.types.long_task import (
     CallbackStatus,
@@ -60,14 +59,14 @@ from eidolon_agent.core.types.turn import (
     TurnStatus,
     TurnTrigger,
 )
+from eidolon_agent.core.types.turn_context import InputModality, TurnContext
 
 __all__ = [  # noqa: RUF022 - grouped by domain rather than alphabetical for readability
     # event
     "Event",
-    # identity
-    "CallerContext",
-    "CallerKind",
-    "Identity",
+    # turn context
+    "InputModality",
+    "TurnContext",
     # llm
     "LLMDelta",
     "LLMFinishReason",

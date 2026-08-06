@@ -11,8 +11,8 @@ from copy import deepcopy
 from eidolon_sdk.biz.body import BodyCapability, BodyDevice
 
 from eidolon_agent.core.ports.tool import ToolInvocationContext, ToolPort
-from eidolon_agent.core.types.identity import CallerContext
 from eidolon_agent.core.types.tool import Permission, ToolCall, ToolResult, ToolSchema
+from eidolon_agent.core.types.turn_context import TurnContext
 from eidolon_agent.domain.body_control.errors import BodyControlError
 
 _log = logging.getLogger(__name__)
@@ -54,17 +54,16 @@ class _RuntimeCapabilityContractTool:
         payload = {key: value for key, value in call.arguments.items() if key != _TARGET_FIELD}
         try:
             result = await self._body.send_companion_capability(
-                owner_id=ctx.caller.owner_id,
-                companion_id=ctx.caller.companion_id,
-                source_device_id=ctx.caller.device_id,
-                runtime_caller_id=ctx.caller.runtime_caller_id,
-                runtime_session_id=ctx.caller.runtime_session_id,
-                runtime_trace_id=ctx.caller.trace_id,
+                owner_id=ctx.turn_context.owner_id,
+                companion_id=ctx.turn_context.companion_id,
+                source_device_id=ctx.turn_context.device_id,
+                runtime_session_id=ctx.session_id,
+                runtime_trace_id=ctx.turn_context.trace_id,
                 runtime_turn_id=ctx.turn_id,
                 runtime_tool_call_id=call.id,
                 idempotency_key=_runtime_idempotency_key(
-                    owner_id=ctx.caller.owner_id,
-                    logical_trace_id=ctx.caller.trace_id or ctx.turn_id,
+                    owner_id=ctx.turn_context.owner_id,
+                    logical_trace_id=ctx.turn_context.trace_id or ctx.turn_id,
                     capability=self._capability,
                     arguments=call.arguments,
                 ),
@@ -132,14 +131,14 @@ class RuntimeCapabilityToolProvider:
     def __init__(self, body_control) -> None:
         self._body = body_control
 
-    async def assemble(self, caller: CallerContext) -> tuple[list[ToolSchema], dict[str, ToolPort]]:
-        if self._body is None or not caller.owner_id or not caller.companion_id:
+    async def assemble(self, context: TurnContext) -> tuple[list[ToolSchema], dict[str, ToolPort]]:
+        if self._body is None or not context.owner_id or not context.companion_id:
             return [], {}
         try:
             devices = await self._body.list_devices(
-                owner_id=caller.owner_id,
-                companion_id=caller.companion_id,
-                source_device_id=caller.device_id,
+                owner_id=context.owner_id,
+                companion_id=context.companion_id,
+                source_device_id=context.device_id,
                 include_offline=False,
             )
         except Exception as exc:

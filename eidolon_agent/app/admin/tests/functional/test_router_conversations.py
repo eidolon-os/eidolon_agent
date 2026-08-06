@@ -13,31 +13,29 @@ from datetime import datetime, timezone
 
 import httpx
 import pytest
-from eidolon_data import DataSettings, DataStore
 from fastapi import FastAPI
 
 from eidolon_agent.app.admin.routers import conversations as conv_router
-from eidolon_agent.core.types import CallerContext, CallerKind, Identity
 from eidolon_agent.core.types.turn import TriageKind, TurnInput, TurnStatus, TurnTrigger
-from eidolon_agent.infra.persistence.eidolon_data_runtime import (
-    build_eidolon_data_turn_persister,
-)
+from eidolon_agent.core.types.turn_context import TurnContext
+from eidolon_agent.infra.persistence.agent_runtime import build_agent_turn_persister
+from eidolon_agent.infra.persistence.runtime_store import AgentRuntimeStore
 
 pytestmark = pytest.mark.functional
 
 
-async def _fresh_app(tmp_path) -> tuple[httpx.AsyncClient, DataStore]:
-    store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
+async def _fresh_app(tmp_path) -> tuple[httpx.AsyncClient, AgentRuntimeStore]:
+    store = AgentRuntimeStore.open(tmp_path / "eidolon-agent.sqlite3")
     await store.init_schema()
     app = FastAPI()
-    app.state.data_store = store
+    app.state.runtime_store = store
     app.include_router(conv_router.router, prefix="/api/admin")
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t")
     return client, store
 
 
 async def _seed_turn(
-    store: DataStore,
+    store: AgentRuntimeStore,
     *,
     owner_id: str,
     companion_id: str | None = None,
@@ -54,46 +52,26 @@ async def _seed_turn(
     genome_id = f"g_{owner_id}_default"
     realm_id = f"r_{owner_id}_default"
     device_id = f"device-{owner_id}"
-    if await store.companions.get(companion_id) is None:
-        await store.owner_service.create_owner(owner_id=owner_id, display_name=owner_id)
-        await store.workspace_provisioning.provision_workspace(
-            owner_id=owner_id,
-            companion_id=companion_id,
-            genome_id=genome_id,
-            realm_id=realm_id,
-        )
-    if await store.devices.get_device(device_id) is None:
-        await store.devices.create_device(
-            device_id=device_id,
-            owner_id=owner_id,
-            bound_companion_id=companion_id,
-            auth_type="token",
-            secret_ref="test",
-        )
-    persist = build_eidolon_data_turn_persister(store, model_id_provider=lambda: "test/model-1")
+    persist = build_agent_turn_persister(
+        store, model_id_provider=lambda: "test/model-1"
+    )
     await persist(
         ti=TurnInput(
             turn_id=turn_id,
             conversation_id=conversation_id,
             session_id=f"session-{conversation_id}",
-            caller=CallerContext(
-                identity=Identity(
-                    owner_id=owner_id,
-                    companion_id=companion_id,
-                    device_id=device_id,
-                    memory_realm_id=realm_id,
-                    genome_id=genome_id,
-                ),
-                caller_kind=CallerKind.WEB_CHAT,
+            context=TurnContext(
+                owner_id=owner_id,
+                companion_id=companion_id,
+                device_id=device_id,
+                memory_realm_id=realm_id,
+                genome_id=genome_id,
                 trace_id=f"trace-{turn_id}",
                 request_id=f"request-{turn_id}",
-                runtime_caller_id=f"rc-{device_id}",
-                runtime_session_id=f"session-{conversation_id}",
-                actor_kind="web_chat",
-                actor_id=device_id,
-                display_name=device_id,
-                transport="test",
+                schema_version="eidolon.persona_genome",
+                realizer_version="eidolon.persona_realizer",
             ),
+            input_modality="text",
             trigger=TurnTrigger.USER_UTTERANCE,
             text=user_text,
         ),
@@ -238,6 +216,63 @@ async def test_list_turns_returns_newest_first_and_filters_by_owner(tmp_path) ->
     await store.close()
 
 
+async def test_list_conversations_reads_agent_runtime_authority(tmp_path) -> None:
+    client, store = await _fresh_app(tmp_path)
+    await _seed_turn(
+        store,
+        owner_id="manson",
+        conversation_id="c-manson",
+        turn_id="t-manson",
+        seq=0,
+        user_text="ping",
+        assistant_text="pong",
+        started_at=datetime(2026, 6, 3, 9, 0, tzinfo=timezone.utc),
+    )
+    await _seed_turn(
+        store,
+        owner_id="alice",
+        conversation_id="c-alice",
+        turn_id="t-alice",
+        seq=0,
+        user_text="hello",
+        assistant_text="hi",
+        started_at=datetime(2026, 6, 3, 10, 0, tzinfo=timezone.utc),
+    )
+
+    async with client:
+        response = await client.get(
+            "/api/admin/conversations?owner_id=manson&limit=20"
+        )
+
+    assert response.status_code == 200
+    assert response.json()["conversations"] == [
+        {
+            "conversation_id": "c-manson",
+            "owner_id": "manson",
+            "companion_id": "manson-test",
+            "runtime_session_id": "session-c-manson",
+            "device_id": "device-manson",
+            "title": None,
+            "status": "active",
+            "started_at": "2026-06-03T09:00:00",
+            "updated_at": "2026-06-03T09:00:00",
+            "ended_at": None,
+            "metadata": {
+                "owner_id": "manson",
+                "companion_id": "manson-test",
+                "runtime_session_id": "session-c-manson",
+                "memory_realm_id": "r_manson_default",
+                "genome_id": "g_manson_default",
+                "genome_hash": "",
+                "schema_version": "eidolon.persona_genome",
+                "realizer_version": "eidolon.persona_realizer",
+                "session_id": "session-c-manson",
+            },
+        }
+    ]
+    await store.close()
+
+
 async def test_memory_audit_lists_write_candidates_without_message_text(tmp_path) -> None:
     client, store = await _fresh_app(tmp_path)
     t0 = datetime(2026, 6, 3, 9, 0, 0, tzinfo=timezone.utc)
@@ -350,8 +385,8 @@ async def test_list_turns_pagination_cursor(tmp_path) -> None:
     await store.close()
 
 
-async def test_list_turns_503_when_data_store_missing(tmp_path) -> None:
-    """Without a wired data_store the router returns a clear 503."""
+async def test_list_turns_503_when_runtime_store_missing(tmp_path) -> None:
+    """Without a wired runtime store the router returns a clear 503."""
     app = FastAPI()
     app.include_router(conv_router.router, prefix="/api/admin")
     transport = httpx.ASGITransport(app=app)

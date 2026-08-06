@@ -17,12 +17,12 @@ async def test_registry_resolves_dynamic_data_genome() -> None:
 
     registry = AgentRegistry(instance_factory=_factory)
 
-    first = await registry.resolve_for_caller(
+    first = await registry.resolve_runtime(
         owner_id="benchmark",
         companion_id="test",
         genome_id="genome-benchmark",
     )
-    second = await registry.resolve_for_caller(
+    second = await registry.resolve_runtime(
         owner_id="benchmark",
         companion_id="test",
         genome_id="genome-benchmark",
@@ -40,7 +40,7 @@ async def test_registry_rejects_identity_without_pinned_genome() -> None:
 
     registry = AgentRegistry(instance_factory=_factory)
     with pytest.raises(NotFoundError, match="does not pin"):
-        await registry.resolve_for_caller(
+        await registry.resolve_runtime(
             owner_id="owner",
             companion_id="companion",
         )

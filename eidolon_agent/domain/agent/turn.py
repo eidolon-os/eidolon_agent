@@ -195,10 +195,10 @@ class TurnEngine:
         action = "delete" if _requests_physical_delete(query) else "archive"
         try:
             preview = await self._memory.preview_forget(
-                ti.caller.owner_id,
-                ti.caller.companion_id,
-                ti.caller.memory_realm_id,
-                ti.caller.device_id,
+                ti.context.owner_id,
+                ti.context.companion_id,
+                ti.context.memory_realm_id,
+                ti.context.device_id,
                 query,
                 action=action,
                 session_id=ti.session_id or "default",
@@ -260,10 +260,10 @@ class TurnEngine:
             )
         try:
             outcome = await self._memory.confirm_forget(
-                ti.caller.owner_id,
-                ti.caller.companion_id,
-                ti.caller.memory_realm_id,
-                ti.caller.device_id,
+                ti.context.owner_id,
+                ti.context.companion_id,
+                ti.context.memory_realm_id,
+                ti.context.device_id,
                 pending.confirmation_token,
                 session_id=ti.session_id or "default",
                 wait_applied_seconds=2.0,
@@ -341,9 +341,9 @@ class TurnEngine:
             ts_guard_ms = int((time.monotonic() - t0) * 1000)
             if verdict.action is SafetyAction.ESCALATE:
                 crisis = await self._crisis.handle(
-                    companion_id=ti.caller.companion_id,
-                    owner_id=ti.caller.owner_id,
-                    locale=ti.caller.locale,
+                    companion_id=ti.context.companion_id,
+                    owner_id=ti.context.owner_id,
+                    locale=ti.context.locale,
                 )
                 ti.metadata["is_private"] = True
                 runtime_policy = TurnRuntimePolicy.from_metadata(ti.metadata)
@@ -573,13 +573,14 @@ class TurnEngine:
                             self._tools.dispatch_batch(
                                 dispatch_calls,
                                 ctx=ToolInvocationContext(
-                                    caller=ti.caller,
+                                    turn_context=ti.context,
+                                    input_modality=ti.input_modality,
                                     turn_id=ti.turn_id,
                                     conversation_id=ti.conversation_id,
                                     session_id=ti.session_id,
                                     user_text=ti.text or "",
-                                    companion_id=ti.caller.companion_id,
-                                    memory_realm_id=ti.caller.memory_realm_id,
+                                    companion_id=ti.context.companion_id,
+                                    memory_realm_id=ti.context.memory_realm_id,
                                     extra_tools=extra_tools,
                                     denied_tools=cfg.tool_deny,
                                 ),
@@ -830,9 +831,9 @@ class TurnEngine:
                     status=status.value,
                     trigger=ti.trigger.value,
                     triage=triage_kind.value,
-                    caller_kind=ti.caller.caller_kind.value,
+                    input_modality=ti.input_modality,
                     model=getattr(self._llm, "model_id", None),
-                    trace_id=ti.caller.trace_id,
+                    trace_id=ti.context.trace_id,
                     control_intent=ti.metadata.get("control_intent"),
                     termination_cause=ti.metadata.get("termination_cause"),
                     latency=LatencyBreakdown(
@@ -851,7 +852,7 @@ class TurnEngine:
                     memory_write_trace=memory_write_trace,
                     tool_trace=tool_trace,
                     persona=PersonaTrace(
-                        companion_id=ti.caller.companion_id,
+                        companion_id=ti.context.companion_id,
                         genome_id=self._genome_id,
                     ),
                     privacy=runtime_policy.privacy,
@@ -945,7 +946,7 @@ class TurnEngine:
         if self._companion_config is None:
             return CompanionRuntimeConfig()
         try:
-            return await self._companion_config.resolve(ti.caller.companion_id)
+            return await self._companion_config.resolve(ti.context.companion_id)
         except Exception as exc:
             _log.warning("companion config resolve failed: %s", exc)
             return CompanionRuntimeConfig()
@@ -953,7 +954,7 @@ class TurnEngine:
     async def _tool_schemas(
         self, ti: TurnInput, cfg: CompanionRuntimeConfig
     ) -> tuple[list, dict[str, ToolPort]]:
-        """Per-turn, caller-aware tool assembly (the F1/F2 junction).
+        """Per-turn, context-aware tool assembly (the F1/F2 junction).
 
         Filters the global static tools by this companion's allow/deny policy,
         then appends one dynamic tool per compatible online capability contract.
@@ -968,7 +969,7 @@ class TurnEngine:
         )
         extra_tools: dict[str, ToolPort] = {}
         if cfg.allow_body_control and self._body_capability_provider is not None:
-            cap_schemas, cap_ports = await self._body_capability_provider.assemble(ti.caller)
+            cap_schemas, cap_ports = await self._body_capability_provider.assemble(ti.context)
             # deny applies to synthetic tools too: drop from BOTH schemas and overlay
             # so a denied capability can neither be seen nor actuated.
             if cfg.tool_deny:
@@ -1045,7 +1046,7 @@ class TurnEngine:
                         "status": status.value,
                         "triage": triage_kind.value,
                     },
-                    trace_id=ti.caller.trace_id,
+                    trace_id=ti.context.trace_id,
                     source="agent.turn",
                 )
             )
@@ -1094,16 +1095,16 @@ class TurnEngine:
             return
         try:
             await self._fanout.publish_turn(
-                owner_id=ti.caller.owner_id,
-                companion_id=ti.caller.companion_id,
-                memory_realm_id=ti.caller.memory_realm_id,
-                device_id=ti.caller.device_id,
+                owner_id=ti.context.owner_id,
+                companion_id=ti.context.companion_id,
+                memory_realm_id=ti.context.memory_realm_id,
+                device_id=ti.context.device_id,
                 session_id=ti.session_id,
                 turn_id=ti.turn_id,
                 user_text=ti.text or "",
                 assistant_text=assistant_text,
                 timestamp_iso=started_at.isoformat(),
-                trace_id=ti.caller.trace_id,
+                trace_id=ti.context.trace_id,
                 metadata={
                     "memory_write_disposition": write_trace["disposition"],
                     "memory_write_reason": write_trace["reason"],

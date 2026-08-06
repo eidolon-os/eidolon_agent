@@ -18,7 +18,7 @@ from eidolon_memory_contracts import (
 )
 
 from eidolon_agent.core.types.event import Event
-from eidolon_agent.core.types.identity import (
+from eidolon_agent.core.types.turn_context import (
     build_memory_actor_context,
     build_memory_space_id,
 )

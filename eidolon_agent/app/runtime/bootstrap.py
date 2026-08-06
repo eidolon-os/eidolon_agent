@@ -16,11 +16,11 @@ This is the only place that knows the concrete dependency graph. Steps:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 from pathlib import Path
 
-import httpx
 from eidolon_data import DataStore
 from eidolon_data import load_settings as load_data_settings
 from eidolon_sdk.biz.runtime import RuntimeTokenVerifier
@@ -38,11 +38,6 @@ from eidolon_agent.domain.agent.companion_config import CompanionConfigResolver
 from eidolon_agent.domain.agent.registry import AgentRegistry
 from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.agent.turn import ToolLatencyPolicy, TurnEngine
-from eidolon_agent.domain.body_control import (
-    BodyControlService,
-    HubBodyCommandClient,
-    NatsRuntimeBodyDeviceStore,
-)
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.domain.harness import HarnessBudget, RealtimeAgentHarness
@@ -77,15 +72,16 @@ from eidolon_agent.infra.memory.mcp_client import McpClientPool
 from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
 from eidolon_agent.infra.memory.null_port import NullMemoryPort
 from eidolon_agent.infra.observability import configure_logging
+from eidolon_agent.infra.persistence.agent_runtime import (
+    AgentLongTaskStore,
+    build_agent_history_hydrator,
+    build_agent_turn_persister,
+)
+from eidolon_agent.infra.persistence.audit_dispatch import run_agent_audit_dispatcher
 from eidolon_agent.infra.persistence.eidolon_data_persona import (
     EidolonDataPersonaGenomeStore,
 )
-from eidolon_agent.infra.persistence.eidolon_data_runtime import (
-    EidolonDataLongTaskStore,
-    EidolonDataMemoryFanoutStatusSink,
-    build_eidolon_data_history_hydrator,
-    build_eidolon_data_turn_persister,
-)
+from eidolon_agent.infra.persistence.runtime_store import AgentRuntimeStore
 
 _log = logging.getLogger(__name__)
 
@@ -96,6 +92,11 @@ async def build_application(
 ) -> Container:
     """Construct and connect everything. Idempotent within a single process."""
     settings = settings or load_settings()
+    if settings.body_control.enabled:
+        raise RuntimeError(
+            "body_control is blocked: Channel has no stable Provider "
+            "directory/command contract; Hub is not a command runtime"
+        )
     container = Container(settings=settings)
 
     # 1. logging ----------------------------------------------------------------
@@ -104,8 +105,18 @@ async def build_application(
     # 2. container -------------------------------------------------------------
     # (already created above)
 
-    # 3. Eidolon Data + memory discovery + NATS -------------------------------
+    # 3. Authority stores + memory discovery + NATS ---------------------------
     standalone = settings.runtime.standalone
+    runtime_store = AgentRuntimeStore.open(
+        settings.persistence.sqlite_path,
+        busy_timeout_ms=settings.persistence.busy_timeout_ms,
+        wal_autocheckpoint_pages=settings.persistence.wal_autocheckpoint_pages,
+    )
+    await runtime_store.init_schema()
+    container.runtime_store = runtime_store
+
+    # System Data is opened separately for low-frequency Companion/Persona
+    # authority. It must never receive session/turn/message/job writes.
     data_store = DataStore.open(load_data_settings())
     await data_store.init_schema()
     container.data_store = data_store
@@ -174,13 +185,24 @@ async def build_application(
     container.personas_service = personas_service
 
     # 7. Cross-cutting services -----------------------------------------------
-    history = HistoryManager(hydrate_messages=build_eidolon_data_history_hydrator(data_store))
+    history = HistoryManager(hydrate_messages=build_agent_history_hydrator(runtime_store))
     fanout = HistoryFanout(
         event_bus=container.event_bus,
         memory_routes=memory_routes,
-        status_sink=EidolonDataMemoryFanoutStatusSink(data_store),
+        # Publish/absorb status is operational telemetry. Keeping it in the
+        # shared system-data SQLite made this per-turn async path the largest
+        # Event-table producer without providing a governance guarantee.
+        status_sink=None,
     )
     background_tasks = BackgroundTaskRunner(component="agent")
+    if not standalone:
+        container.extras["audit_dispatch_task"] = asyncio.create_task(
+            run_agent_audit_dispatcher(
+                runtime_store,
+                nats_url=effective_nats_url,
+            ),
+            name="eidolon-agent-audit-dispatcher",
+        )
     sig_bus = SignalBus()
     container.history_manager = history
     container.history_fanout = fanout
@@ -204,7 +226,7 @@ async def build_application(
     long_task_worker = None
     if settings.long_task.transport == "mementos_http" and not standalone:
         long_task_worker = MementosLongTaskWorker(
-            store=EidolonDataLongTaskStore(data_store),
+            store=AgentLongTaskStore(runtime_store),
             client=MementosHttpClient(
                 base_url=settings.long_task.mementos_base_url,
                 timeout_s=settings.long_task.worker_http_timeout_s,
@@ -239,26 +261,6 @@ async def build_application(
         MemoryConfirmPendingTool(memory_port, pending_memory_candidates)
     )
     tool_registry.register(MemoryForgetTool(memory_port))
-    body_control = None
-    if settings.body_control.enabled:
-        body_http_client = httpx.AsyncClient(timeout=settings.body_control.timeout_s)
-        body_command_client = HubBodyCommandClient(
-            body_http_client,
-            base_url=settings.body_control.hub_base_url,
-            service_token=settings.body_control.service_token,
-            timeout_s=settings.body_control.timeout_s,
-        )
-        device_blackboard_kv = container.kv_buckets.get("EIDOLON_RUNTIME_DEVICES")
-        if device_blackboard_kv is None:
-            raise RuntimeError("EIDOLON_RUNTIME_DEVICES KV bucket is not configured")
-        body_device_store = NatsRuntimeBodyDeviceStore(device_blackboard_kv)
-        body_control = BodyControlService(
-            device_store=body_device_store,
-            command_port=body_command_client,
-        )
-        container.extras["body_device_store"] = body_device_store
-        container.extras["body_control_http_client"] = body_http_client
-        container.extras["body_control"] = body_control
     tool_registry.register(EmitEventTool(event_bus=container.event_bus))
     delegate_tool = SubmitLongTaskTool(
         long_task_submitter=long_task_worker,
@@ -278,9 +280,9 @@ async def build_application(
     # Per-companion operational config (model routing / tool allow-deny / policy),
     # read from companions.runtime_config_json, resolved per-turn off a TTL cache.
     container.extras["companion_config_resolver"] = CompanionConfigResolver(data_store)
-    # Hub blackboard → caller-scoped catalog + one tool per compatible capability contract.
+    # Empty until a stable Channel Provider adapter implements the domain ports.
     container.extras["body_capability_tool_provider"] = RuntimeCapabilityToolProvider(
-        container.extras.get("body_control")
+        None
     )
 
     # 8. Runtime token verification ------------------------------------------
@@ -336,6 +338,7 @@ async def build_application(
         memory_routes=memory_routes,
         memory_discovery_refresher=memory_refresher,
         data_store=data_store,
+        runtime_store=runtime_store,
     )
     container.http_app = http_app
     container.admin_app = admin_app
@@ -442,8 +445,8 @@ def _build_turn_engine(
         taboos_provider=lambda: tuple(),
         companion_config_resolver=container.extras.get("companion_config_resolver"),
         body_capability_provider=container.extras.get("body_capability_tool_provider"),
-        turn_persister=build_eidolon_data_turn_persister(
-            container.data_store,
+        turn_persister=build_agent_turn_persister(
+            container.runtime_store,
             model_id_provider=lambda: getattr(container.llm_router, "model_id", None),
         ),
         harness=harness,

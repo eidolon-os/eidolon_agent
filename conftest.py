@@ -23,9 +23,9 @@ from eidolon_agent.infra.events import InMemoryEventBus, InMemoryKVStore
 from eidolon_agent.infra.llm import LLMRouter
 from eidolon_agent.infra.llm.providers.fake import FakeLLM
 from eidolon_agent.infra.persistence import (
-    EidolonDataLongTaskStore,
-    build_eidolon_data_history_hydrator,
-    build_eidolon_data_turn_persister,
+    AgentLongTaskStore,
+    build_agent_history_hydrator,
+    build_agent_turn_persister,
 )
 
 
@@ -67,7 +67,7 @@ async def turn_engine_factory(personas_service, event_bus):
         memory_port=None,
         tool_dispatcher=None,
         history=None,
-        data_store=None,
+        runtime_store=None,
         tool_latency_policy=None,
         body_capability_provider=None,
     ):
@@ -75,8 +75,8 @@ async def turn_engine_factory(personas_service, event_bus):
 
         history = history or HistoryManager(
             hydrate_messages=(
-                build_eidolon_data_history_hydrator(data_store)
-                if data_store is not None
+                build_agent_history_hydrator(runtime_store)
+                if runtime_store is not None
                 else None
             )
         )
@@ -85,8 +85,8 @@ async def turn_engine_factory(personas_service, event_bus):
             tools = ToolRegistry()
             tools.register(EmitEventTool(event_bus=event_bus))
             task_store = (
-                EidolonDataLongTaskStore(data_store)
-                if data_store is not None
+                AgentLongTaskStore(runtime_store)
+                if runtime_store is not None
                 else None
             )
             long_task_submitter = _ImmediateLongTaskSubmitter(
@@ -122,11 +122,11 @@ async def turn_engine_factory(personas_service, event_bus):
             genome_id="genome-test",
             memory_port=memory_port,
             turn_persister=(
-                build_eidolon_data_turn_persister(
-                    data_store,
+                build_agent_turn_persister(
+                    runtime_store,
                     model_id_provider=lambda: getattr(llm_router, "model_id", None),
                 )
-                if data_store is not None
+                if runtime_store is not None
                 else None
             ),
             background_tasks=background_tasks,

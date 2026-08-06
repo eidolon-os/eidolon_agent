@@ -1,8 +1,7 @@
-"""Verify turn/message persistence through Eidolon Data.
+"""Verify turn/message persistence through the Agent runtime authority.
 
-The production turn path now writes conversation state to the sovereign
-``eidolon_data`` schema. These tests drive a real TurnEngine against a temp
-SQLite DataStore and assert the durable ``turns`` and ``messages`` rows are
+These tests drive a real TurnEngine against a temporary AgentRuntimeStore and
+assert the durable ``turns`` and ``messages`` rows are
 created with the admin-facing trace metadata intact.
 """
 
@@ -12,11 +11,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
-from eidolon_data import DataSettings, DataStore
-from eidolon_data.schema.models import ConversationRow, MessageRow, TurnRow
 from sqlalchemy import select
 
 from eidolon_agent.core.types.turn import TriageKind, TurnStatus
+from eidolon_agent.infra.persistence.runtime_store import (
+    AgentRuntimeStore,
+    ConversationRow,
+    MessageRow,
+    TurnRow,
+)
 from tests.helpers import make_turn_input
 
 pytestmark = pytest.mark.functional
@@ -27,9 +30,9 @@ async def test_turn_persists_user_and_assistant_messages(
     tmp_path: Path,
     turn_engine_factory,
 ) -> None:
-    store = await _data_store(tmp_path)
+    store = await _runtime_store(tmp_path)
     try:
-        engine = turn_engine_factory(data_store=store)
+        engine = turn_engine_factory(runtime_store=store)
         ti = make_turn_input("铁锤几岁了？")
         _events = [ev async for ev in engine.run(ti)]
 
@@ -39,7 +42,7 @@ async def test_turn_persists_user_and_assistant_messages(
             turn_row = await session.get(TurnRow, ti.turn_id)
             assert turn_row is not None, "TurnRow missing - _persist_turn did not run"
             assert turn_row.conversation_id == ti.conversation_id
-            assert turn_row.source_device_id == ti.caller.identity.device_id
+            assert turn_row.source_device_id == ti.context.device_id
             conversation_row = await session.get(ConversationRow, ti.conversation_id)
             assert conversation_row is not None
             assert conversation_row.updated_at is not None
@@ -54,7 +57,9 @@ async def test_turn_persists_user_and_assistant_messages(
             assert trace["latency"]["first_delta_ms"] <= trace["latency"]["total_ms"]
             assert trace["privacy"]["mode"] == "normal"
             assert trace["memory_write_trace"]["source_turn_id"] == ti.turn_id
-            assert trace["memory_write_trace"]["fanout_allowed"] is True
+            # A low-signal factual question is intentionally not fanned out;
+            # persistence must retain the decision exactly as produced.
+            assert trace["memory_write_trace"]["fanout_allowed"] is False
             assert trace["development_guards"]["context_budget"]["mode"] == "disabled"
             assert trace["development_guards"]["context_budget"]["configured"] is False
             assert trace["development_guards"]["memory_write_policy"]["mode"] == "enabled"
@@ -80,9 +85,9 @@ async def test_persist_skips_messages_when_text_empty(
     tmp_path: Path,
     turn_engine_factory,
 ) -> None:
-    store = await _data_store(tmp_path)
+    store = await _runtime_store(tmp_path)
     try:
-        engine = turn_engine_factory(data_store=store)
+        engine = turn_engine_factory(runtime_store=store)
         ti = make_turn_input("only-user-text")
         await engine._persist_turn(
             ti=ti,
@@ -104,7 +109,7 @@ async def test_persist_skips_messages_when_text_empty(
             turn_row = await session.get(TurnRow, ti.turn_id)
             assert turn_row is not None
             assert turn_row.status == "errored"
-            assert turn_row.source_device_id == ti.caller.identity.device_id
+            assert turn_row.source_device_id == ti.context.device_id
             messages = await _messages_for_turn(session, ti.turn_id)
 
         assert messages == [], "empty text should not insert blank message rows"
@@ -117,9 +122,9 @@ async def test_crisis_turn_persists_private_user_and_assistant_messages(
     tmp_path: Path,
     turn_engine_factory,
 ) -> None:
-    store = await _data_store(tmp_path)
+    store = await _runtime_store(tmp_path)
     try:
-        engine = turn_engine_factory(data_store=store)
+        engine = turn_engine_factory(runtime_store=store)
         ti = make_turn_input("我想死，活不下去了")
         events = [ev async for ev in engine.run(ti)]
         assert events[-1].data.get("crisis") is True
@@ -140,16 +145,9 @@ async def test_crisis_turn_persists_private_user_and_assistant_messages(
         await store.close()
 
 
-async def _data_store(tmp_path: Path) -> DataStore:
-    store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
+async def _runtime_store(tmp_path: Path) -> AgentRuntimeStore:
+    store = AgentRuntimeStore.open(tmp_path / "eidolon-agent.sqlite3")
     await store.init_schema()
-    await store.owner_service.create_owner(owner_id="alice", display_name="Alice")
-    await store.workspace_provisioning.provision_workspace(
-        owner_id="alice",
-        companion_id="companion-test",
-        genome_id="genome-test",
-        realm_id="realm-test",
-    )
     return store
 
 

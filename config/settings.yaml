@@ -30,10 +30,8 @@ long_task:
   transport: mementos_http
   mementos_base_url: http://127.0.0.1:18765
 body_control:
-  enabled: true
-  hub_base_url: http://127.0.0.1:8082
-  timeout_s: 5.0
-  cache_ttl_s: 3.0
+  # Blocked until Channel publishes a stable Provider directory/command contract.
+  enabled: false
 observability:
   log_level: DEBUG
   log_json: true
@@ -45,5 +43,9 @@ runtime:
   log_dir: ~/eidolon/logs/agent
   run_dir: ~/eidolon/run
   debug_dir: ~/eidolon/debug
+persistence:
+  sqlite_path: ~/eidolon/data/eidolon-agent.sqlite3
+  busy_timeout_ms: 5000
+  wal_autocheckpoint_pages: 1000
 turn:
   slow_tool_hint_delay_ms: 1500

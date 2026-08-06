@@ -13,34 +13,6 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from eidolon_data import DataSettings, DataStore
-from eidolon_data.schema.models import (
-    CompanionRow as DataCompanionRow,
-)
-from eidolon_data.schema.models import (
-    ConversationRow as DataConversationRow,
-)
-from eidolon_data.schema.models import (
-    DeviceRow as DataDeviceRow,
-)
-from eidolon_data.schema.models import (
-    EventRow as DataEventRow,
-)
-from eidolon_data.schema.models import (
-    JobRow as DataJobRow,
-)
-from eidolon_data.schema.models import (
-    MemoryRealmRow as DataMemoryRealmRow,
-)
-from eidolon_data.schema.models import (
-    MessageRow as DataMessageRow,
-)
-from eidolon_data.schema.models import (
-    PersonaGenomeRow as DataPersonaGenomeRow,
-)
-from eidolon_data.schema.models import (
-    TurnRow as DataTurnRow,
-)
 from eidolon_sdk.biz.runtime import (
     RuntimeTokenRevokedError,
     RuntimeTokenVerifier,
@@ -48,22 +20,26 @@ from eidolon_sdk.biz.runtime import (
     owner_revocation_keys,
     sign_runtime_token,
 )
-from eidolon_sdk.biz.persona import build_default_persona_genome, persona_genome_to_json
 from fastapi import FastAPI
-from sqlalchemy import func, select
 
 from eidolon_agent.app.admin.routers import devices as devices_router
+from eidolon_agent.infra.persistence.runtime_store import (
+    AgentRuntimeStore,
+    ConversationRow,
+    JobRow,
+    MessageRow,
+    RuntimeSessionRow,
+    TurnRow,
+)
 
 pytestmark = pytest.mark.functional
 
 SECRET = "test-secret-32-bytes-long-aaaaaaaaa"
 
 
-def _sign_device_actor_token(*, device_id: str, **kwargs):
+def _sign_device_token(*, device_id: str, **kwargs):
     return sign_runtime_token(
         secret=SECRET,
-        actor_kind="device",
-        actor_id=device_id,
         device_id=device_id,
         schema_version=kwargs.pop("schema_version", "eidolon.persona_genome"),
         genome_hash=kwargs.pop("genome_hash", "pg_revoke_test"),
@@ -121,7 +97,7 @@ async def test_revoke_owner_sessions_writes_revocation_key() -> None:
     assert b"T" in val and b":" in val  # ISO format roughly
 
 
-async def test_delete_owner_data_503_when_data_store_missing() -> None:
+async def test_delete_owner_data_503_when_runtime_store_missing() -> None:
     kv = _FakeKV()
     app = _build_test_app(kv)
     async with httpx.AsyncClient(
@@ -130,109 +106,71 @@ async def test_delete_owner_data_503_when_data_store_missing() -> None:
         r = await client.delete("/api/admin/owners/alice/data")
 
     assert r.status_code == 503
-    assert "data_store" in r.json()["detail"]
+    assert "runtime_store" in r.json()["detail"]
 
 
-async def test_delete_owner_data_prefers_eidolon_data_store(tmp_path) -> None:
-    store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
+async def test_delete_owner_data_prefers_agent_runtime_authority(tmp_path) -> None:
+    store = AgentRuntimeStore.open(tmp_path / "eidolon-agent.sqlite3")
     await store.init_schema()
     kv = _FakeKV()
-    await kv.put(owner_revocation_keys("alice")[0], b"revoked")
-
     try:
-        await store.owners.create(owner_id="alice", display_name="Alice")
-        await store.companions.create(companion_id="companion-a", owner_id="alice")
-        await store.persona_repo.create_genome(
-            genome_id="genome-a",
-            companion_id="companion-a",
-            version=1,
-                genome_json=persona_genome_to_json(
-                    build_default_persona_genome(name="companion-a")
-                ),
-        )
-        await store.companions.set_current_genome("companion-a", "genome-a")
-        await store.devices.create_device(
-            device_id="dev-a",
-            owner_id="alice",
-            bound_companion_id="companion-a",
-            auth_type="token",
-            secret_ref="secret-ref",
-            access_policy_json={"capability": "chat"},
-        )
-        await store.conversations.create_conversation(
-            conversation_id="conv-a",
-            owner_id="alice",
-            companion_id="companion-a",
-            source_device_id="dev-a",
-        )
-        await store.conversations.append_turn(
-            turn_id="turn-a",
-            conversation_id="conv-a",
-            seq=1,
-        )
-        await store.conversations.append_message(
-            message_id="msg-a",
-            turn_id="turn-a",
-            role="user",
-            content="hello",
-        )
-        await store.jobs.create(
-            job_id="job-a",
-            owner_id="alice",
-            provider="mementos",
-            kind="writing",
-            turn_id="turn-a",
-        )
-        await store.memory_repo.create_realm(
-            realm_id="realm-a",
-            owner_id="alice",
-            companion_id="companion-a",
-        )
-        await store.events.append(
-            event_id="evt_a",
-            owner_id="alice",
-            subject_type="persona",
-            subject_id="companion-a",
-            event_type="persona.genome.committed",
-        )
+        async with store.session_factory() as session:
+            session.add(
+                RuntimeSessionRow(
+                    session_id="session-a",
+                    owner_id="alice",
+                    companion_id="companion-a",
+                )
+            )
+            await session.flush()
+            session.add(
+                ConversationRow(
+                    conversation_id="conv-a",
+                    owner_id="alice",
+                    companion_id="companion-a",
+                    runtime_session_id="session-a",
+                )
+            )
+            await session.flush()
+            session.add(TurnRow(turn_id="turn-a", conversation_id="conv-a", seq=0))
+            await session.flush()
+            session.add(
+                MessageRow(
+                    message_id="message-a",
+                    turn_id="turn-a",
+                    seq=0,
+                    role="user",
+                    content="hello",
+                )
+            )
+            session.add(
+                JobRow(
+                    job_id="job-a",
+                    owner_id="alice",
+                    companion_id="companion-a",
+                    provider="mementos",
+                    kind="writing",
+                )
+            )
+            await session.commit()
 
         app = _build_test_app(kv)
-        app.state.data_store = store
+        app.state.runtime_store = store
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
-            r = await client.delete("/api/admin/owners/alice/data")
+            response = await client.delete("/api/admin/owners/alice/data")
 
-        assert r.status_code == 200
-        body = r.json()
-        assert body["deleted"] is True
-        assert body["counts"]["conversations"] == 1
-        assert body["counts"]["turns"] == 1
-        assert body["counts"]["messages"] == 1
-        assert body["counts"]["persona_genomes"] == 1
-        assert body["counts"]["memory_realms"] == 1
-        assert body["counts"]["jobs"] == 1
-        assert body["counts"]["devices"] == 1
-        assert body["counts"]["events"] == 1
-        assert body["revocation_keys_cleared"] == 1
-
-        async with store.session_factory() as session:
-            for model in (
-                DataConversationRow,
-                DataTurnRow,
-                DataMessageRow,
-                DataPersonaGenomeRow,
-                DataMemoryRealmRow,
-                DataJobRow,
-                DataDeviceRow,
-                DataEventRow,
-            ):
-                count = await session.scalar(select(func.count()).select_from(model))
-                assert count == 0
-            companion = await session.get(DataCompanionRow, "companion-a")
-            assert companion is not None
-            assert companion.status == "deleted"
-            assert companion.current_genome_id is None
+        assert response.status_code == 200
+        assert response.json()["counts"] == {
+            "messages": 1,
+            "turns": 1,
+            "jobs": 1,
+            "conversations": 1,
+            "runtime_sessions": 1,
+        }
+        assert response.json()["revocation_keys_written"] == 1
+        assert await kv.get(owner_revocation_keys("alice")[0]) is not None
     finally:
         await store.close()
 
@@ -260,7 +198,7 @@ async def test_verifier_rejects_token_after_owner_revoke() -> None:
     kv = _FakeKV()
     verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
 
-    token, _ = _sign_device_actor_token(
+    token, _ = _sign_device_token(
         device_id="web-abc12345",
         owner_id="manson",
         companion_id="companion-a",
@@ -290,12 +228,12 @@ async def test_verifier_owner_revoke_does_not_affect_other_owners() -> None:
     kv = _FakeKV()
     verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
 
-    manson_token, _ = _sign_device_actor_token(
+    manson_token, _ = _sign_device_token(
         device_id="web-1", owner_id="manson",
         companion_id="companion-a", memory_realm_id="realm-a", genome_id="genome-a",
         scopes=["device"],
     )
-    default_token, _ = _sign_device_actor_token(
+    default_token, _ = _sign_device_token(
         device_id="web-2", owner_id="default",
         companion_id="companion-b", memory_realm_id="realm-b", genome_id="genome-b",
         scopes=["device"],
@@ -321,7 +259,7 @@ async def test_verifier_device_level_revoke_still_works() -> None:
     kv = _FakeKV()
     verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
 
-    token, _ = _sign_device_actor_token(
+    token, _ = _sign_device_token(
         device_id="dev-x", owner_id="alice",
         companion_id="companion-a", memory_realm_id="realm-a", genome_id="genome-a",
         scopes=["device"],
@@ -339,7 +277,7 @@ async def test_verifier_accepts_mac_device_id_without_invalid_kv_key() -> None:
     kv = _FakeKV()
     verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
 
-    token, _ = _sign_device_actor_token(
+    token, _ = _sign_device_token(
         device_id="1c:db:d4:7a:ef:0c",
         owner_id="alice",
         companion_id="companion-a",
@@ -357,7 +295,7 @@ async def test_verifier_rejects_mac_device_id_with_encoded_revocation_key() -> N
     verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
     device_id = "1c:db:d4:7a:ef:0c"
 
-    token, _ = _sign_device_actor_token(
+    token, _ = _sign_device_token(
         device_id=device_id,
         owner_id="alice",
         companion_id="companion-a",

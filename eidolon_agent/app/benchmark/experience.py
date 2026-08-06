@@ -19,11 +19,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from eidolon_sdk.core.runtime import BackgroundTaskRunner
 from eidolon_memory_contracts import conversation_turn_subject
+from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
 from eidolon_agent.core.types.event import Event
-from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
 from eidolon_agent.core.types.memory import (
     MemoryForgetCandidate,
@@ -33,6 +32,7 @@ from eidolon_agent.core.types.memory import (
 )
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEventKind, TurnInput, TurnTrigger
+from eidolon_agent.core.types.turn_context import TurnContext
 from eidolon_agent.domain.agent import TaskClassifier, TurnEngine
 from eidolon_agent.domain.context import ContextCompiler
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
@@ -743,18 +743,16 @@ def _make_turn_input(
         turn_id=turn_id,
         conversation_id=conversation_id,
         session_id="replay-session",
-        caller=CallerContext(
-            identity=Identity(
-                owner_id=_REPLAY_USER_ID,
-                companion_id=_REPLAY_AGENT_INSTANCE_ID,
-                device_id=None,
-                memory_realm_id=f"{_REPLAY_TENANT_ID}.{_REPLAY_USER_ID}",
-                genome_id=_REPLAY_PERSONA_ID,
-            ),
-            caller_kind=CallerKind.WEB_CHAT,
+        context=TurnContext(
+            owner_id=_REPLAY_USER_ID,
+            companion_id=_REPLAY_AGENT_INSTANCE_ID,
+            device_id=None,
+            memory_realm_id=f"{_REPLAY_TENANT_ID}.{_REPLAY_USER_ID}",
+            genome_id=_REPLAY_PERSONA_ID,
             trace_id=f"replay-{turn_id}",
             request_id=f"replay-{turn_id}",
         ),
+        input_modality="text",
         trigger=TurnTrigger.USER_UTTERANCE,
         text=text,
         metadata=metadata,

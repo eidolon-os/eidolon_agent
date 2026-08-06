@@ -63,12 +63,9 @@ long_task:
   worker_task_timeout_s: 1800.0
 
 body_control:
-  enabled: true
-  hub_base_url: http://127.0.0.1:8082
-  # Must match Hub's EIDOLON_RUNTIME_SERVICE_TOKEN when the Hub is not loopback-only.
-  service_token: ""
-  timeout_s: 5.0
-  cache_ttl_s: 3.0
+  # Hub is admission authority, not a device-command runtime. Keep disabled
+  # until Channel publishes a stable Provider directory/command contract.
+  enabled: false
 
 observability:
   log_level: INFO
@@ -83,6 +80,12 @@ runtime:
   log_dir: ~/eidolon/logs/agent
   run_dir: ~/eidolon/run
   debug_dir: ~/eidolon/debug
+
+persistence:
+  # Agent-owned hot runtime store. Never reuse eidolon-system.sqlite3 here.
+  sqlite_path: ~/eidolon/data/eidolon-agent.sqlite3
+  busy_timeout_ms: 5000
+  wal_autocheckpoint_pages: 1000
 
 turn:
   # Wait this long before speaking a brief "still working" hint for slow tools.

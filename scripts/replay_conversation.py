@@ -13,21 +13,28 @@ import json
 import sys
 from pathlib import Path
 
-from eidolon_data import DataStore
-from eidolon_data import load_settings as load_data_settings
-from eidolon_data.schema.models import MessageRow, TurnRow
 from sqlalchemy import select
 
+from eidolon_agent.config.settings import load_settings
 from eidolon_agent.infra.observability.replay_diff import (
     ReplayDiffThresholds,
     compare_replay_snapshots,
     snapshots_from_artifact,
 )
+from eidolon_agent.infra.persistence.runtime_store import (
+    AgentRuntimeStore,
+    MessageRow,
+    TurnRow,
+)
 
 
 async def _print_conversation(conv_id: str) -> None:
-    settings = load_data_settings()
-    store = DataStore.open(settings)
+    settings = load_settings()
+    store = AgentRuntimeStore.open(
+        settings.persistence.sqlite_path,
+        busy_timeout_ms=settings.persistence.busy_timeout_ms,
+        wal_autocheckpoint_pages=settings.persistence.wal_autocheckpoint_pages,
+    )
     async with store.session_factory() as s:
         rows = (
             await s.execute(
@@ -38,7 +45,7 @@ async def _print_conversation(conv_id: str) -> None:
             )
         ).all()
     if not rows:
-        print(f"no messages for {conv_id} in {settings.sqlite_path}")
+        print(f"no messages for {conv_id} in {settings.persistence.sqlite_path}")
         await store.close()
         return
     for msg, _turn in rows:
@@ -48,7 +55,12 @@ async def _print_conversation(conv_id: str) -> None:
 
 
 async def _export_traces(conv_id: str, path: Path) -> None:
-    store = DataStore.open(load_data_settings())
+    settings = load_settings()
+    store = AgentRuntimeStore.open(
+        settings.persistence.sqlite_path,
+        busy_timeout_ms=settings.persistence.busy_timeout_ms,
+        wal_autocheckpoint_pages=settings.persistence.wal_autocheckpoint_pages,
+    )
     async with store.session_factory() as s:
         turns = (
             (

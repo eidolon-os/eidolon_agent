@@ -10,8 +10,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from eidolon_agent.core.types.long_task import LongTaskRecord
-from eidolon_agent.infra.persistence import EidolonDataLongTaskStore
+from eidolon_agent.core.types.long_task import LongTaskRecord, LongTaskStatus
+from eidolon_agent.infra.persistence import AgentLongTaskStore
 
 router = APIRouter()
 
@@ -81,11 +81,11 @@ class LongTaskDetail(LongTaskSummary):
     next_retry_at: datetime | None
 
 
-def _data_store(request: Request) -> EidolonDataLongTaskStore:
-    data_store = getattr(request.app.state, "data_store", None)
-    if data_store is None:
-        raise HTTPException(503, "data_store not configured on admin app")
-    return EidolonDataLongTaskStore(data_store)
+def _runtime_store(request: Request) -> AgentLongTaskStore:
+    runtime_store = getattr(request.app.state, "runtime_store", None)
+    if runtime_store is None:
+        raise HTTPException(503, "runtime_store not configured on admin app")
+    return AgentLongTaskStore(runtime_store)
 
 
 @router.get("/long-tasks", response_model=ListLongTasksResponse)
@@ -102,7 +102,7 @@ async def list_long_tasks(
         description="ISO timestamp; only return tasks created strictly before this",
     ),
 ) -> ListLongTasksResponse:
-    store = _data_store(request)
+    store = _runtime_store(request)
     rows = await store.list_for_admin(
         owner_id=owner_id,
         companion_id=companion_id,
@@ -119,8 +119,45 @@ async def list_long_tasks(
 
 @router.get("/long-tasks/{task_id}", response_model=LongTaskDetail)
 async def get_long_task(request: Request, task_id: str) -> LongTaskDetail:
-    store = _data_store(request)
+    store = _runtime_store(request)
     record = await store.get(task_id)
+    if record is None:
+        raise HTTPException(404, "long task not found")
+    return _detail(record)
+
+
+@router.post("/long-tasks/{task_id}/cancel", response_model=LongTaskDetail)
+async def cancel_long_task(
+    request: Request,
+    task_id: str,
+    owner_id: str = Query(...),
+) -> LongTaskDetail:
+    store = _runtime_store(request)
+    current = await store.get(task_id)
+    if current is None or current.owner_id != owner_id:
+        raise HTTPException(404, "long task not found")
+    record = await store.mark_failed(
+        task_id,
+        error_code="admin_cancelled",
+        error_message="Cancelled by Admin",
+        status=LongTaskStatus.CANCELLED,
+    )
+    if record is None:
+        raise HTTPException(404, "long task not found")
+    return _detail(record)
+
+
+@router.post("/long-tasks/{task_id}/retry", response_model=LongTaskDetail)
+async def retry_long_task(
+    request: Request,
+    task_id: str,
+    owner_id: str = Query(...),
+) -> LongTaskDetail:
+    store = _runtime_store(request)
+    current = await store.get(task_id)
+    if current is None or current.owner_id != owner_id:
+        raise HTTPException(404, "long task not found")
+    record = await store.retry_from_admin(task_id)
     if record is None:
         raise HTTPException(404, "long task not found")
     return _detail(record)

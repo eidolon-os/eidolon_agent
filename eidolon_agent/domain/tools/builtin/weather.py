@@ -51,7 +51,9 @@ class GetWeatherTool:
 
     async def invoke(self, call: ToolCall, *, ctx: ToolInvocationContext) -> ToolResult:
         location = str(call.arguments.get("location") or "").strip() or self._default_location
-        lang = str(call.arguments.get("lang") or "").strip() or _weather_lang(ctx.caller.locale)
+        lang = str(call.arguments.get("lang") or "").strip() or _weather_lang(
+            ctx.turn_context.locale
+        )
         try:
             data = await self._fetcher(location, lang)
         except Exception as exc:

@@ -12,8 +12,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from eidolon_agent.core.types.identity import CallerContext
 from eidolon_agent.core.types.signal import SignalDigest
+from eidolon_agent.core.types.turn_context import InputModality, TurnContext
 
 
 class TurnTrigger(str, Enum):
@@ -81,7 +81,8 @@ class TurnInput:
     turn_id: str  # uuid7 from caller; server dedupes
     conversation_id: str
     session_id: str
-    caller: CallerContext
+    context: TurnContext
+    input_modality: InputModality
     trigger: TurnTrigger
     text: str | None = None
     realtime: SignalDigest | None = None
@@ -160,13 +161,12 @@ class TurnResult:
     model: str | None = None
     error_code: str | None = None
     seq_in_conversation: int = 0
-    # Owning device (from caller identity). Source of truth for the device
+    # Optional source Device. Source of truth for the device
     # dimension; long_tasks.device_id is denormalized from here. None until the
-    # channel relays device_id into the caller identity.
+    # channel relays device_id into the verified runtime context.
     device_id: str | None = None
-    # Where the call originated (CallerKind.value, e.g. "livekit_voice"). Lets
-    # admin/analytics split turns by channel without re-deriving from the trace.
-    caller_kind: str | None = None
+    # Whether the user input arrived as spoken audio or typed text.
+    input_modality: InputModality | None = None
     # Free-form per-turn diagnostics persisted into TurnRow.metadata (JSON).
     # Used by F3 to carry the granular phase timings (guard/triage/compile/
     # llm_ttft) without a schema migration.

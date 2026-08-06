@@ -35,7 +35,7 @@ def _call(name: str, args: dict | None = None) -> ToolCall:
     return ToolCall(id="c", name=name, arguments=args or {})
 
 
-async def test_emit_event_publishes_to_bus(event_bus, caller_ctx) -> None:
+async def test_emit_event_publishes_to_bus(event_bus, tool_ctx) -> None:
     received: list = []
 
     async def _handler(ev) -> None:
@@ -46,7 +46,7 @@ async def test_emit_event_publishes_to_bus(event_bus, caller_ctx) -> None:
     reg.register(EmitEventTool(event_bus=event_bus))
     [res] = await ToolDispatcher(reg).dispatch_batch(
         [_call("emit_event", {"subject": "agent.test.fired", "payload": {"k": "v"}})],
-        ctx=caller_ctx,
+        ctx=tool_ctx,
     )
     await asyncio.sleep(0)
     assert res.ok
@@ -54,21 +54,21 @@ async def test_emit_event_publishes_to_bus(event_bus, caller_ctx) -> None:
     assert received[0].payload == {"k": "v"}
 
 
-async def test_emit_event_without_bus_returns_error(caller_ctx) -> None:
+async def test_emit_event_without_bus_returns_error(tool_ctx) -> None:
     reg = ToolRegistry()
     reg.register(EmitEventTool(event_bus=None))
     [res] = await ToolDispatcher(reg).dispatch_batch(
-        [_call("emit_event", {"subject": "x"})], ctx=caller_ctx
+        [_call("emit_event", {"subject": "x"})], ctx=tool_ctx
     )
     assert res.ok is False
     assert res.error_code == "event_bus_unavailable"
 
 
-async def test_get_time_returns_locale_timezone(caller_ctx) -> None:
+async def test_get_time_returns_locale_timezone(tool_ctx) -> None:
     reg = ToolRegistry()
     reg.register(GetTimeTool())
 
-    [res] = await ToolDispatcher(reg).dispatch_batch([_call("get_time")], ctx=caller_ctx)
+    [res] = await ToolDispatcher(reg).dispatch_batch([_call("get_time")], ctx=tool_ctx)
 
     assert res.ok
     assert res.content["timezone"] == "Asia/Shanghai"
@@ -76,20 +76,20 @@ async def test_get_time_returns_locale_timezone(caller_ctx) -> None:
     assert "iso_datetime" in res.content
 
 
-async def test_get_time_rejects_unknown_timezone(caller_ctx) -> None:
+async def test_get_time_rejects_unknown_timezone(tool_ctx) -> None:
     reg = ToolRegistry()
     reg.register(GetTimeTool())
 
     [res] = await ToolDispatcher(reg).dispatch_batch(
         [_call("get_time", {"timezone": "Mars/Olympus"})],
-        ctx=caller_ctx,
+        ctx=tool_ctx,
     )
 
     assert res.ok is False
     assert res.error_code == "invalid_timezone"
 
 
-async def test_get_weather_uses_injected_fetcher(caller_ctx) -> None:
+async def test_get_weather_uses_injected_fetcher(tool_ctx) -> None:
     async def fetcher(location: str, lang: str) -> dict:
         return {"location": location, "lang": lang, "temperature": 26}
 
@@ -98,15 +98,15 @@ async def test_get_weather_uses_injected_fetcher(caller_ctx) -> None:
 
     [res] = await ToolDispatcher(reg).dispatch_batch(
         [_call("get_weather", {"location": "杭州"})],
-        ctx=caller_ctx,
+        ctx=tool_ctx,
     )
 
     assert res.ok
     assert res.content == {"location": "杭州", "lang": "zh", "temperature": 26}
 
 
-async def test_memory_tools_use_memory_port(caller_ctx) -> None:
-    caller_ctx.user_text = "请记住：我喜欢乌龙茶"
+async def test_memory_tools_use_memory_port(tool_ctx) -> None:
+    tool_ctx.user_text = "请记住：我喜欢乌龙茶"
     memory = _FakeMemoryPort()
     reg = ToolRegistry()
     reg.register(MemorySearchTool(memory))
@@ -116,7 +116,7 @@ async def test_memory_tools_use_memory_port(caller_ctx) -> None:
 
     [search] = await disp.dispatch_batch(
         [_call("memory_search", {"query": "乌龙茶", "top_k": 2, "scope": "semantic"})],
-        ctx=caller_ctx,
+        ctx=tool_ctx,
     )
     [asserted] = await disp.dispatch_batch(
         [
@@ -125,11 +125,11 @@ async def test_memory_tools_use_memory_port(caller_ctx) -> None:
                 {"claim": "我喜欢乌龙茶"},
             )
         ],
-        ctx=caller_ctx,
+        ctx=tool_ctx,
     )
     [forgotten] = await disp.dispatch_batch(
         [_call("memory_forget", {"query": "乌龙茶"})],
-        ctx=caller_ctx,
+        ctx=tool_ctx,
     )
 
     assert search.ok
@@ -148,7 +148,7 @@ async def test_memory_tools_use_memory_port(caller_ctx) -> None:
             "companion-1",
             "realm-1",
             "device-1",
-            None,
+            "rs-test",
             "我喜欢乌龙茶",
             "turn-1",
             "c",
@@ -166,20 +166,20 @@ async def test_memory_tools_use_memory_port(caller_ctx) -> None:
             "companion-1",
             "realm-1",
             "device-1",
-            "乌龙茶",
-            "archive",
-            "default",
-        )
+                "乌龙茶",
+                "archive",
+                "rs-test",
+            )
     ]
 
 
-async def test_memory_tool_without_port_returns_error(caller_ctx) -> None:
+async def test_memory_tool_without_port_returns_error(tool_ctx) -> None:
     reg = ToolRegistry()
     reg.register(MemorySearchTool(None))
 
     [res] = await ToolDispatcher(reg).dispatch_batch(
         [_call("memory_search", {"query": "x"})],
-        ctx=caller_ctx,
+        ctx=tool_ctx,
     )
 
     assert res.ok is False
@@ -188,10 +188,10 @@ async def test_memory_tool_without_port_returns_error(caller_ctx) -> None:
 
 @pytest.mark.parametrize("claim", ["我在某个城市工作", "你记得我在哪工作吗？"])
 async def test_memory_assert_fact_rejects_claim_sourced_from_background(
-    caller_ctx,
+    tool_ctx,
     claim,
 ) -> None:
-    caller_ctx.user_text = "你记得我在哪工作吗？"
+    tool_ctx.user_text = "你记得我在哪工作吗？"
     memory = _FakeMemoryPort()
     reg = ToolRegistry()
     reg.register(MemoryAssertFactTool(memory))
@@ -203,7 +203,7 @@ async def test_memory_assert_fact_rejects_claim_sourced_from_background(
                 {"claim": claim},
             )
         ],
-        ctx=caller_ctx,
+        ctx=tool_ctx,
     )
 
     assert res.ok is False
@@ -212,9 +212,9 @@ async def test_memory_assert_fact_rejects_claim_sourced_from_background(
     assert memory.confirmed_facts == []
 
 
-async def test_sensitive_memory_requires_separate_staged_consent(caller_ctx) -> None:
+async def test_sensitive_memory_requires_separate_staged_consent(tool_ctx) -> None:
     claim = "我的家庭住址是北京市朝阳区测试路 1 号"
-    caller_ctx.user_text = f"请记住：{claim}"
+    tool_ctx.user_text = f"请记住：{claim}"
     memory = _FakeMemoryPort()
     candidates = PendingMemoryCandidateStore()
     reg = ToolRegistry()
@@ -225,22 +225,22 @@ async def test_sensitive_memory_requires_separate_staged_consent(caller_ctx) -> 
 
     [direct] = await disp.dispatch_batch(
         [_call("memory_assert_fact", {"claim": claim})],
-        ctx=caller_ctx,
+        ctx=tool_ctx,
     )
     assert direct.ok is False
     assert direct.error_code == "memory_requires_consent"
 
     [staged] = await disp.dispatch_batch(
         [_call("memory_stage_candidate", {"claims": [claim]})],
-        ctx=caller_ctx,
+        ctx=tool_ctx,
     )
     assert staged.ok
     assert staged.content["status"] == "pending_consent"
 
-    caller_ctx.user_text = "好的，帮我记下来"
+    tool_ctx.user_text = "好的，帮我记下来"
     [confirmed] = await disp.dispatch_batch(
         [_call("memory_confirm_pending")],
-        ctx=caller_ctx,
+        ctx=tool_ctx,
     )
     assert confirmed.ok
     assert confirmed.content["status"] == "accepted"

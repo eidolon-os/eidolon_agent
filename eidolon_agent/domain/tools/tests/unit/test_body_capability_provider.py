@@ -5,29 +5,20 @@ from __future__ import annotations
 from eidolon_sdk.biz.body import BodyCapability, BodyCommandResult, BodyDevice
 
 from eidolon_agent.core.ports.tool import ToolInvocationContext
-from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
 from eidolon_agent.core.types.tool import ToolCall
+from eidolon_agent.core.types.turn_context import TurnContext
 from eidolon_agent.domain.tools.body_capability_provider import RuntimeCapabilityToolProvider
 
 
-def _caller(*, trace_id: str = "t") -> CallerContext:
-    return CallerContext(
-        identity=Identity(
-            owner_id="o1",
-            companion_id="c1",
-            device_id="source-device",
-            memory_realm_id="r1",
-            genome_id="g1",
-        ),
-        caller_kind=CallerKind.WEB_CHAT,
+def _context(*, trace_id: str = "t") -> TurnContext:
+    return TurnContext(
+        owner_id="o1",
+        companion_id="c1",
+        device_id="source-device",
+        memory_realm_id="r1",
+        genome_id="g1",
         trace_id=trace_id,
         request_id="r",
-        runtime_caller_id="rc",
-        runtime_session_id="rs",
-        actor_kind="web_chat",
-        actor_id="a",
-        display_name="A",
-        transport="test",
     )
 
 
@@ -95,7 +86,7 @@ async def test_assemble_groups_same_contract_across_companions_into_one_tool():
         )
     )
 
-    schemas, ports = await provider.assemble(_caller())
+    schemas, ports = await provider.assemble(_context())
 
     assert [schema.name for schema in schemas] == ["cap_lighting_set_state_v1"]
     assert list(ports) == ["cap_lighting_set_state_v1"]
@@ -108,7 +99,7 @@ async def test_assemble_groups_same_contract_across_companions_into_one_tool():
 
 async def test_dispatch_resolves_companion_at_invocation_and_returns_receipt():
     body = _FakeBody([_device("light-a", companion_id="ca", companion_name="客厅")])
-    _schemas, ports = await RuntimeCapabilityToolProvider(body).assemble(_caller())
+    _schemas, ports = await RuntimeCapabilityToolProvider(body).assemble(_context())
     tool = ports["cap_lighting_set_state_v1"]
 
     result = await tool.invoke(
@@ -117,7 +108,12 @@ async def test_dispatch_resolves_companion_at_invocation_and_returns_receipt():
             name="cap_lighting_set_state_v1",
             arguments={"target_companion": "客厅", "enabled": True},
         ),
-        ctx=ToolInvocationContext(caller=_caller(), turn_id="turn-1"),
+        ctx=ToolInvocationContext(
+            turn_context=_context(),
+            input_modality="text",
+            turn_id="turn-1",
+            session_id="rs",
+        ),
     )
 
     assert result.ok is True
@@ -141,7 +137,7 @@ async def test_dispatch_resolves_companion_at_invocation_and_returns_receipt():
 
 async def test_runtime_idempotency_follows_logical_trace_not_agent_turn_id():
     body = _FakeBody([_device("light-a", companion_id="ca", companion_name="客厅")])
-    _schemas, ports = await RuntimeCapabilityToolProvider(body).assemble(_caller())
+    _schemas, ports = await RuntimeCapabilityToolProvider(body).assemble(_context())
     tool = ports["cap_lighting_set_state_v1"]
     arguments = {"target_companion": "客厅", "enabled": True}
 
@@ -152,7 +148,12 @@ async def test_runtime_idempotency_follows_logical_trace_not_agent_turn_id():
                 name="cap_lighting_set_state_v1",
                 arguments=arguments,
             ),
-            ctx=ToolInvocationContext(caller=_caller(trace_id="logical-trace"), turn_id=turn_id),
+            ctx=ToolInvocationContext(
+                turn_context=_context(trace_id="logical-trace"),
+                input_modality="text",
+                turn_id=turn_id,
+                session_id="rs",
+            ),
         )
     await tool.invoke(
         ToolCall(
@@ -160,7 +161,12 @@ async def test_runtime_idempotency_follows_logical_trace_not_agent_turn_id():
             name="cap_lighting_set_state_v1",
             arguments=arguments,
         ),
-        ctx=ToolInvocationContext(caller=_caller(trace_id="new-logical-trace"), turn_id="turn-3"),
+        ctx=ToolInvocationContext(
+            turn_context=_context(trace_id="new-logical-trace"),
+            input_modality="text",
+            turn_id="turn-3",
+            session_id="rs",
+        ),
     )
 
     assert body.sent[0]["idempotency_key"] == body.sent[1]["idempotency_key"]
@@ -187,9 +193,9 @@ async def test_conflicting_contract_schemas_are_hidden_fail_closed():
         ]
     )
 
-    assert await RuntimeCapabilityToolProvider(body).assemble(_caller()) == ([], {})
+    assert await RuntimeCapabilityToolProvider(body).assemble(_context()) == ([], {})
 
 
 async def test_no_online_capabilities_means_no_dynamic_tool():
-    assert await RuntimeCapabilityToolProvider(None).assemble(_caller()) == ([], {})
-    assert await RuntimeCapabilityToolProvider(_FakeBody([])).assemble(_caller()) == ([], {})
+    assert await RuntimeCapabilityToolProvider(None).assemble(_context()) == ([], {})
+    assert await RuntimeCapabilityToolProvider(_FakeBody([])).assemble(_context()) == ([], {})

@@ -31,10 +31,11 @@ from eidolon_agent.config.settings import (
     LLMSettings,
     LongTaskSettings,
     ObservabilitySettings,
+    PersistenceSettings,
     RuntimeSettings,
     Settings,
 )
-from eidolon_agent.infra.persistence import EidolonDataConversationReader
+from eidolon_agent.infra.persistence import AgentConversationReader, AgentRuntimeStore
 
 
 @dataclass
@@ -74,7 +75,8 @@ async def run_product_acceptance_profile(
 
     started = time.perf_counter()
     work_dir.mkdir(parents=True, exist_ok=True)
-    sqlite_path = sqlite_path or (work_dir / "eidolon.sqlite3")
+    sqlite_path = sqlite_path or (work_dir / "eidolon-system.sqlite3")
+    runtime_sqlite_path = work_dir / "eidolon-agent.sqlite3"
     sqlite_path.parent.mkdir(parents=True, exist_ok=True)
     secret = "product-acceptance-local-secret-32-bytes-minimum"
     cleanup_done = False
@@ -91,7 +93,7 @@ async def run_product_acceptance_profile(
         os.environ["EIDOLON_DATA_SQLITE_PATH"] = str(sqlite_path)
         os.environ["PAIRING_JWT_SECRET"] = secret
 
-        settings = _profile_settings(work_dir)
+        settings = _profile_settings(work_dir, runtime_sqlite_path=runtime_sqlite_path)
         container = await build_application(settings=settings)
         await container.grpc_server.start()
 
@@ -113,7 +115,7 @@ async def run_product_acceptance_profile(
         if container.background_tasks is not None and hasattr(container.background_tasks, "drain"):
             await container.background_tasks.drain(timeout_s=5)
 
-        reader = EidolonDataConversationReader(store)
+        reader = AgentConversationReader(container.runtime_store)
         turns = await reader.list_turns_by_owner(
             owner_id=owner_id,
             companion_id=companion_id,
@@ -135,24 +137,24 @@ async def run_product_acceptance_profile(
                     f"turn metadata mismatch for {key}: {turn.get(key)!r} != {value!r}"
                 )
 
-        events = await store.events.list_for_owner(owner_id, limit=100)
-        event_types = [event.event_type for event in events]
+        audit_events = await store.audit_outbox.list_pending(limit=100)
+        event_types = [
+            event.action for event in audit_events if event.owner_id == owner_id
+        ]
         required_events = {
             "owner.created",
-            "companion.created",
-            "persona.genome.committed",
-            "memory_realm.created",
             "companion.workspace.initialized",
-            "device.web_body.provisioned",
         }
         missing = required_events.difference(event_types)
         if missing:
             raise AssertionError(f"missing event timeline entries: {sorted(missing)}")
 
-        cleanup = await store.dev_maintenance.delete_owner_tree(owner_id)
-        if not cleanup.deleted:
+        runtime_cleanup = await container.runtime_store.delete_owner_runtime(owner_id)
+        system_cleanup = await store.dev_maintenance.delete_owner_tree(owner_id)
+        if not system_cleanup.deleted:
             raise AssertionError("cleanup did not delete acceptance owner")
         cleanup_done = True
+        cleanup_counts = {**asdict(system_cleanup), **runtime_cleanup}
 
         return ProductAcceptanceResult(
             passed=True,
@@ -165,13 +167,14 @@ async def run_product_acceptance_profile(
             chat_event_kinds=kinds,
             turn_metadata={key: turn.get(key) for key in expected_metadata},
             event_types=event_types,
-            cleanup_counts=asdict(cleanup),
+            cleanup_counts=cleanup_counts,
             elapsed_ms=round((time.perf_counter() - started) * 1000, 3),
         )
     finally:
         if not cleanup_done:
             await _cleanup_owner_best_effort(
-                sqlite_path=sqlite_path,
+                system_sqlite_path=sqlite_path,
+                runtime_sqlite_path=runtime_sqlite_path,
                 owner_id=owner_id,
                 container=container,
             )
@@ -321,7 +324,7 @@ def _decode_sse_block(lines: list[str]) -> dict[str, Any] | None:
     return {"event": event_type, "data": json.loads(data)}
 
 
-def _profile_settings(work_dir: Path) -> Settings:
+def _profile_settings(work_dir: Path, *, runtime_sqlite_path: Path) -> Settings:
     grpc_port = _free_port()
     return Settings(
         grpc=GrpcSettings(tcp_host="127.0.0.1", tcp_port=grpc_port),
@@ -339,6 +342,7 @@ def _profile_settings(work_dir: Path) -> Settings:
         ),
         long_task=LongTaskSettings(transport="disabled"),
         body_control=BodyControlSettings(enabled=False),
+        persistence=PersistenceSettings(sqlite_path=runtime_sqlite_path),
         observability=ObservabilitySettings(
             log_json=False,
             log_dir=work_dir / "logs",
@@ -386,22 +390,41 @@ async def _close_container(container) -> None:  # type: ignore[no-untyped-def]
         if container.llm_router is not None and hasattr(container.llm_router, "close"):
             await container.llm_router.close()
     with suppress(Exception):
+        audit_dispatch_task = container.extras.get("audit_dispatch_task")
+        if audit_dispatch_task is not None:
+            audit_dispatch_task.cancel()
+            await audit_dispatch_task
+    with suppress(Exception):
         if container.data_store is not None and hasattr(container.data_store, "close"):
             await container.data_store.close()
+    with suppress(Exception):
+        if container.runtime_store is not None and hasattr(container.runtime_store, "close"):
+            await container.runtime_store.close()
 
 
 async def _cleanup_owner_best_effort(
     *,
-    sqlite_path: Path,
+    system_sqlite_path: Path,
+    runtime_sqlite_path: Path,
     owner_id: str,
     container,
 ) -> None:
+    with suppress(Exception):
+        if container is not None and container.runtime_store is not None:
+            await container.runtime_store.delete_owner_runtime(owner_id)
     with suppress(Exception):
         if container is not None and container.data_store is not None:
             await container.data_store.dev_maintenance.delete_owner_tree(owner_id)
             return
     with suppress(Exception):
-        store = DataStore.open(DataSettings(sqlite_path=str(sqlite_path)))
+        runtime_store = AgentRuntimeStore.open(runtime_sqlite_path)
+        try:
+            await runtime_store.init_schema()
+            await runtime_store.delete_owner_runtime(owner_id)
+        finally:
+            await runtime_store.close()
+    with suppress(Exception):
+        store = DataStore.open(DataSettings(sqlite_path=str(system_sqlite_path)))
         try:
             await store.dev_maintenance.delete_owner_tree(owner_id)
         finally:

@@ -29,11 +29,7 @@ async def test_product_acceptance_profile_runs_admin_onboarding_and_agent_grpc(t
     }
     assert {
         "owner.created",
-        "companion.created",
-        "persona.genome.committed",
-        "memory_realm.created",
         "companion.workspace.initialized",
-        "device.web_body.provisioned",
     }.issubset(set(result.event_types))
     assert result.cleanup_counts["deleted"] is True
     assert result.cleanup_counts["companions"] == 1
@@ -71,7 +67,9 @@ async def test_product_acceptance_profile_cleans_partial_onboarding_failure(
     with pytest.raises(RuntimeError, match="forced onboarding failure"):
         await product_acceptance.run_product_acceptance_profile(work_dir=tmp_path)
 
-    store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
+    store = DataStore.open(
+        DataSettings(sqlite_path=str(tmp_path / "eidolon-system.sqlite3"))
+    )
     try:
         await store.init_schema()
         assert await store.owners.get("owner_acceptance") is None

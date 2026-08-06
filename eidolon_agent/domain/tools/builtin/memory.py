@@ -124,14 +124,14 @@ class MemorySearchTool:
         top_k = _bounded_int(call.arguments.get("top_k"), default=5, minimum=1, maximum=20)
         scope = _scope(call.arguments.get("scope"))
         hits = await self._memory.search(
-            ctx.caller.owner_id,
+            ctx.turn_context.owner_id,
             query,
-            companion_id=ctx.caller.companion_id,
-            memory_realm_id=ctx.caller.memory_realm_id,
-            device_id=ctx.caller.device_id,
+            companion_id=ctx.turn_context.companion_id,
+            memory_realm_id=ctx.turn_context.memory_realm_id,
+            device_id=ctx.turn_context.device_id,
             top_k=top_k,
             scope=scope,
-            voice=ctx.caller.caller_kind.value == "livekit_voice",
+            voice=ctx.input_modality == "voice",
             timeout_s=self.schema.timeout_s,
             session_id=ctx.session_id or "default",
         )
@@ -210,10 +210,10 @@ class MemoryAssertFactTool:
                 ),
             )
         outcome = await self._memory.write_confirmed_fact(
-            ctx.caller.owner_id,
-            ctx.caller.companion_id,
-            ctx.caller.memory_realm_id,
-            ctx.caller.device_id,
+            ctx.turn_context.owner_id,
+            ctx.turn_context.companion_id,
+            ctx.turn_context.memory_realm_id,
+            ctx.turn_context.device_id,
             ctx.session_id,
             claim,
             source_event_id=ctx.turn_id,
@@ -366,10 +366,10 @@ class MemoryConfirmPendingTool:
         outcomes = await asyncio.gather(
             *(
                 self._memory.write_confirmed_fact(
-                    ctx.caller.owner_id,
-                    ctx.caller.companion_id,
-                    ctx.caller.memory_realm_id,
-                    ctx.caller.device_id,
+                    ctx.turn_context.owner_id,
+                    ctx.turn_context.companion_id,
+                    ctx.turn_context.memory_realm_id,
+                    ctx.turn_context.device_id,
                     ctx.session_id,
                     claim,
                     source_event_id=f"memory-candidate:{candidate.candidate_id}",
@@ -457,10 +457,10 @@ class MemoryForgetTool:
                 error_message="query is required",
             )
         preview = await self._memory.preview_forget(
-            ctx.caller.owner_id,
-            ctx.caller.companion_id,
-            ctx.caller.memory_realm_id,
-            ctx.caller.device_id,
+            ctx.turn_context.owner_id,
+            ctx.turn_context.companion_id,
+            ctx.turn_context.memory_realm_id,
+            ctx.turn_context.device_id,
             query,
             action="archive",
             session_id=ctx.session_id or "default",
@@ -479,10 +479,10 @@ class MemoryForgetTool:
                 },
             )
         outcome = await self._memory.confirm_forget(
-            ctx.caller.owner_id,
-            ctx.caller.companion_id,
-            ctx.caller.memory_realm_id,
-            ctx.caller.device_id,
+            ctx.turn_context.owner_id,
+            ctx.turn_context.companion_id,
+            ctx.turn_context.memory_realm_id,
+            ctx.turn_context.device_id,
             preview.confirmation_token,
             session_id=ctx.session_id or "default",
         )
@@ -513,8 +513,8 @@ def _unavailable(call_id: str, name: str) -> ToolResult:
 
 def _candidate_key(ctx: ToolInvocationContext) -> tuple[str, str, str]:
     return (
-        ctx.caller.memory_realm_id,
-        ctx.caller.companion_id,
+        ctx.turn_context.memory_realm_id,
+        ctx.turn_context.companion_id,
         ctx.session_id or "default",
     )
 

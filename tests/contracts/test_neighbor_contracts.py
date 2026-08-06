@@ -1,4 +1,4 @@
-"""Agent-side contract tests for the eidolon_memory and eidolon_data seams.
+"""Agent-side contract tests for memory, system data, and runtime authority seams.
 
 These pin what eidolon_agent *consumes and produces* at each cross-project
 boundary, and run entirely in-process — no NATS, no memory service, no live
@@ -25,6 +25,7 @@ from eidolon_memory_contracts import (
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.domain.history.fanout import HistoryFanout
 from eidolon_agent.infra.events.adapters.inmem import InMemoryEventBus
+from eidolon_agent.infra.persistence import AgentRuntimeStore
 
 pytestmark = pytest.mark.integration
 
@@ -75,15 +76,11 @@ async def test_fanout_payload_round_trips_to_memory_contract() -> None:
     assert payload.metadata["memory_write_disposition"] == "semantic_upsert"
 
 
-# --- agent -> eidolon_data (repository surface the adapters call) -----------
+# --- agent -> eidolon_data (low-frequency system catalog) ------------------
 
-_REQUIRED_DATASTORE_ATTRS = (
-    "events",
+_REQUIRED_SYSTEM_DATASTORE_ATTRS = (
     "companions",
     "owner_service",
-    "owner_data_ops",
-    "runtime_callers",
-    "runtime_sessions",
     "workspace_provisioning",
     "session_factory",
     "init_schema",
@@ -97,15 +94,26 @@ async def test_datastore_exposes_surface_agent_depends_on(tmp_path) -> None:
     store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
     try:
         await store.init_schema()
-        for attr in _REQUIRED_DATASTORE_ATTRS:
+        for attr in _REQUIRED_SYSTEM_DATASTORE_ATTRS:
             assert hasattr(store, attr), f"DataStore missing agent-required '{attr}'"
     finally:
         await store.close()
 
 
+async def test_agent_runtime_store_exposes_hot_path_authority(tmp_path) -> None:
+    store = AgentRuntimeStore.open(tmp_path / "eidolon-agent.sqlite3")
+    try:
+        await store.init_schema()
+        assert store.session_factory is not None
+        assert store.audit_outbox is not None
+        assert not hasattr(store, "owners")
+        assert not hasattr(store, "devices")
+    finally:
+        await store.close()
+
+
 async def test_datastore_provisioning_roundtrip(tmp_path) -> None:
-    """The provisioning path the agent relies on (owner -> workspace) works and
-    the runtime persistence validation can see the companion."""
+    """The low-frequency system provisioning path still resolves companions."""
     store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
     try:
         await store.init_schema()

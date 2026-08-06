@@ -5,32 +5,25 @@ from __future__ import annotations
 import pytest
 
 from eidolon_agent.core.ports.tool import ToolInvocationContext
-from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
 from eidolon_agent.core.types.tool import ToolCall, ToolSchema
+from eidolon_agent.core.types.turn_context import TurnContext
 
 
 @pytest.fixture
-def caller_ctx() -> ToolInvocationContext:
+def tool_ctx() -> ToolInvocationContext:
     return ToolInvocationContext(
-        caller=CallerContext(
-            identity=Identity(
-                owner_id="owner-1",
-                companion_id="companion-1",
-                device_id="device-1",
-                memory_realm_id="realm-1",
-                genome_id="genome-1",
-            ),
-            caller_kind=CallerKind.WEB_CHAT,
+        turn_context=TurnContext(
+            owner_id="owner-1",
+            companion_id="companion-1",
+            device_id="device-1",
+            memory_realm_id="realm-1",
+            genome_id="genome-1",
             trace_id="trace",
             request_id="req",
-            runtime_caller_id="rc-test",
-            runtime_session_id="rs-test",
-            actor_kind="web_chat",
-            actor_id="browser-test",
-            display_name="Browser Test",
-            transport="test",
         ),
+        input_modality="text",
         turn_id="turn-1",
+        session_id="rs-test",
     )
 
 

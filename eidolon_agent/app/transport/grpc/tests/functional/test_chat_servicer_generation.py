@@ -10,20 +10,27 @@ import pytest
 from eidolon_agent.app.transport.grpc import chat_servicer
 from eidolon_agent.app.transport.grpc.chat_servicer import EidolonAgentServicer
 from eidolon_agent.app.transport.grpc.proto import pb
-from eidolon_agent.core.types.identity import Identity
 from eidolon_agent.core.types.turn import TurnEvent, TurnStatus
 
 pytestmark = pytest.mark.functional
 
 
-async def test_new_start_supersedes_old_turn_and_drops_late_events(monkeypatch) -> None:
-    identity = Identity(
+def _identity() -> SimpleNamespace:
+    return SimpleNamespace(
         owner_id="owner-1",
         companion_id="companion-1",
         device_id="dev-1",
         memory_realm_id="realm-1",
         genome_id="genome-1",
+        schema_version="schema-v1",
+        genome_hash="hash-v1",
+        realizer_version="realizer-v1",
+        session_id="session-1",
     )
+
+
+async def test_new_start_supersedes_old_turn_and_drops_late_events(monkeypatch) -> None:
+    identity = _identity()
     monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
     first_agent = _LateAfterCancelAgent("old-late")
     second_agent = _ImmediateAgent("new-answer")
@@ -43,6 +50,7 @@ async def test_new_start_supersedes_old_turn_and_drops_late_events(monkeypatch) 
                         turn_id="old",
                         conversation_id="conv",
                         text="old request",
+                        input_modality="voice",
                     )
                 ),
                 pb.ChatRequest(
@@ -50,6 +58,7 @@ async def test_new_start_supersedes_old_turn_and_drops_late_events(monkeypatch) 
                         turn_id="new",
                         conversation_id="conv",
                         text="new request",
+                        input_modality="voice",
                     )
                 ),
             ]
@@ -67,13 +76,7 @@ async def test_new_start_supersedes_old_turn_and_drops_late_events(monkeypatch) 
 
 
 async def test_explicit_cancel_drops_late_events(monkeypatch) -> None:
-    identity = Identity(
-        owner_id="owner-1",
-        companion_id="companion-1",
-        device_id="dev-1",
-        memory_realm_id="realm-1",
-        genome_id="genome-1",
-    )
+    identity = _identity()
     monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
     cancelled_agent = _LateAfterCancelAgent("cancelled-late")
     registry = _Registry([cancelled_agent])
@@ -92,6 +95,7 @@ async def test_explicit_cancel_drops_late_events(monkeypatch) -> None:
                         turn_id="to-cancel",
                         conversation_id="conv",
                         text="old request",
+                        input_modality="voice",
                     )
                 ),
                 pb.ChatRequest(cancel=pb.CancelTurn(turn_id="to-cancel")),
@@ -109,13 +113,7 @@ async def test_explicit_cancel_drops_late_events(monkeypatch) -> None:
 
 
 async def test_cancel_of_finished_turn_acks_already_done(monkeypatch) -> None:
-    identity = Identity(
-        owner_id="owner-1",
-        companion_id="companion-1",
-        device_id="dev-1",
-        memory_realm_id="realm-1",
-        genome_id="genome-1",
-    )
+    identity = _identity()
     monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
     context = _Context()
     servicer = EidolonAgentServicer(
@@ -139,13 +137,7 @@ async def test_cancel_of_finished_turn_acks_already_done(monkeypatch) -> None:
 
 
 async def test_cancel_played_chars_stashed_on_turn_input(monkeypatch) -> None:
-    identity = Identity(
-        owner_id="owner-1",
-        companion_id="companion-1",
-        device_id="dev-1",
-        memory_realm_id="realm-1",
-        genome_id="genome-1",
-    )
+    identity = _identity()
     monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
     agent = _CapturingLateAgent()
     context = _Context()
@@ -163,6 +155,7 @@ async def test_cancel_played_chars_stashed_on_turn_input(monkeypatch) -> None:
                         turn_id="to-truncate",
                         conversation_id="conv",
                         text="讲个故事",
+                        input_modality="voice",
                     )
                 ),
                 pb.ChatRequest(
@@ -184,13 +177,7 @@ async def test_cancel_played_chars_stashed_on_turn_input(monkeypatch) -> None:
 
 
 async def test_start_turn_trace_id_reaches_turn_input(monkeypatch) -> None:
-    identity = Identity(
-        owner_id="owner-1",
-        companion_id="companion-1",
-        device_id="dev-1",
-        memory_realm_id="realm-1",
-        genome_id="genome-1",
-    )
+    identity = _identity()
     monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
     agent = _CapturingLateAgent()
     context = _Context()
@@ -209,6 +196,7 @@ async def test_start_turn_trace_id_reaches_turn_input(monkeypatch) -> None:
                         conversation_id="conv",
                         text="你好",
                         trace_id="channel-trace-123",
+                        input_modality="voice",
                     )
                 ),
             ]
@@ -216,19 +204,13 @@ async def test_start_turn_trace_id_reaches_turn_input(monkeypatch) -> None:
         context,
     )
 
-    # The caller-minted per-turn trace id propagates onto the TurnInput.
+    # The per-turn trace id propagates onto the TurnInput context.
     assert agent.ti is not None
-    assert agent.ti.caller.trace_id == "channel-trace-123"
+    assert agent.ti.context.trace_id == "channel-trace-123"
 
 
 async def test_parallel_conversations_do_not_supersede_each_other(monkeypatch) -> None:
-    identity = Identity(
-        owner_id="owner-1",
-        companion_id="companion-1",
-        device_id="dev-1",
-        memory_realm_id="realm-1",
-        genome_id="genome-1",
-    )
+    identity = _identity()
     monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
     first_agent = _DelayedAgent("conv-a-answer", delay_s=0.01)
     second_agent = _ImmediateAgent("conv-b-answer")
@@ -248,6 +230,7 @@ async def test_parallel_conversations_do_not_supersede_each_other(monkeypatch) -
                         turn_id="a",
                         conversation_id="conv-a",
                         text="first request",
+                        input_modality="voice",
                     )
                 ),
                 pb.ChatRequest(
@@ -255,6 +238,7 @@ async def test_parallel_conversations_do_not_supersede_each_other(monkeypatch) -
                         turn_id="b",
                         conversation_id="conv-b",
                         text="second request",
+                        input_modality="voice",
                     )
                 ),
             ]
@@ -276,7 +260,7 @@ class _Registry:
         self._agents = list(agents)
         self._idx = 0
 
-    async def resolve_for_caller(self, **_):
+    async def resolve_runtime(self, **_):
         agent = self._agents[min(self._idx, len(self._agents) - 1)]
         self._idx += 1
         return SimpleNamespace(

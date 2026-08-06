@@ -105,7 +105,7 @@ class ContextCompiler:
 
     async def compile(self, ti: TurnInput) -> list[ChatMessage]:
         companion_id, genome_id = self._locator(
-            ti.caller.owner_id, ti.caller.companion_id, ti.conversation_id
+            ti.context.owner_id, ti.context.companion_id, ti.conversation_id
         )
         policy = TurnRuntimePolicy.from_metadata(ti.metadata)
 
@@ -119,10 +119,10 @@ class ContextCompiler:
         persona_task = _timed(
             "persona",
             self._personas.realize_context(
-                owner_id=ti.caller.owner_id,
+                owner_id=ti.context.owner_id,
                 companion_id=companion_id,
                 genome_id=genome_id,
-                genome_hash=ti.caller.genome_hash,
+                genome_hash=ti.context.genome_hash,
                 user_text=ti.text or "",
                 realtime=_realtime_dict(ti.realtime),
                 dry_run_memory=[],
@@ -252,11 +252,7 @@ class ContextCompiler:
                 persona=persona,
                 hits=memory_hits,
                 realtime=_realtime_dict(ti.realtime),
-                modality=(
-                    "voice"
-                    if ti.caller.caller_kind.value == "livekit_voice"
-                    else "text"
-                ),
+                modality=ti.input_modality,
             )
             ti.metadata["persona_evidence_refs"] = [
                 item.model_dump(mode="json") for item in persona.evidence_refs
@@ -777,7 +773,7 @@ class ContextCompiler:
                 semantic_query=ti.text,
                 episodic_k=3,
                 semantic_k=self._memory_top_k,
-                voice=ti.caller.caller_kind.value == "livekit_voice",
+                voice=ti.input_modality == "voice",
                 kg_subjects=("self",)
                 if query_source == "explicit_personal_lookup"
                 else (),
@@ -801,12 +797,12 @@ class ContextCompiler:
                     degraded_reason = degraded_reason or "timeout"
                     break
                 recall = await self._memory.recall_context(
-                    owner_id=ti.caller.owner_id,
+                    owner_id=ti.context.owner_id,
                     query=recall_query,
                     plan=plan,
-                    companion_id=ti.caller.companion_id,
-                    memory_realm_id=ti.caller.memory_realm_id,
-                    device_id=ti.caller.device_id,
+                    companion_id=ti.context.companion_id,
+                    memory_realm_id=ti.context.memory_realm_id,
+                    device_id=ti.context.device_id,
                     session_id=ti.session_id,
                     timeout_s=remaining,
                 )
@@ -845,7 +841,7 @@ class ContextCompiler:
             _log.exception(
                 "memory recall failed for owner=%s; injecting degraded notice "
                 "into system prompt",
-                ti.caller.owner_id,
+                ti.context.owner_id,
             )
             return (
                 self._MEMORY_DEGRADED_NOTICE,
@@ -869,10 +865,10 @@ class ContextCompiler:
             return None
         try:
             return await reader(
-                owner_id=ti.caller.owner_id,
-                companion_id=ti.caller.companion_id,
-                memory_realm_id=ti.caller.memory_realm_id,
-                device_id=ti.caller.device_id,
+                owner_id=ti.context.owner_id,
+                companion_id=ti.context.companion_id,
+                memory_realm_id=ti.context.memory_realm_id,
+                device_id=ti.context.device_id,
                 session_id=ti.session_id,
                 limit=self._active_commitment_limit,
                 timeout_s=self._active_commitment_timeout_s,
@@ -880,7 +876,7 @@ class ContextCompiler:
         except Exception as exc:
             _log.exception(
                 "active commitment read failed for owner=%s",
-                ti.caller.owner_id,
+                ti.context.owner_id,
             )
             return ActiveCommitmentReadResult(
                 degraded=True,

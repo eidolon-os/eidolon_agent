@@ -52,20 +52,20 @@ class SubmitLongTaskTool:
 
         task_id = uuid.uuid4().hex
         progress_subject = progress_subject_for(task_id)
-        now = _localized_now(ctx.caller.locale)
+        now = _localized_now(ctx.turn_context.locale)
         task_date = now.date().isoformat()
-        session_key = session_key_for(ctx.caller.owner_id, now.date())
+        session_key = session_key_for(ctx.turn_context.owner_id, now.date())
         task_key = task_key_for(session_key, task_id)
         payload = {
             "task_id": task_id,
-            "owner_id": ctx.caller.owner_id,
-            "companion_id": ctx.caller.companion_id,
-            "memory_realm_id": ctx.caller.memory_realm_id,
-            "genome_id": ctx.caller.genome_id,
+            "owner_id": ctx.turn_context.owner_id,
+            "companion_id": ctx.turn_context.companion_id,
+            "memory_realm_id": ctx.turn_context.memory_realm_id,
+            "genome_id": ctx.turn_context.genome_id,
             "conversation_id": ctx.conversation_id,
             "session_id": ctx.session_id,
             "turn_id": ctx.turn_id,
-            "trace_id": ctx.caller.trace_id,
+            "trace_id": ctx.turn_context.trace_id,
             "tool_call_id": call.id,
             "session_key": session_key,
             "task_key": task_key,
@@ -89,15 +89,15 @@ class SubmitLongTaskTool:
             id=task_id,
             provider="mementos",
             status=LongTaskStatus.ACCEPTED,
-            owner_id=ctx.caller.owner_id,
-            companion_id=ctx.caller.companion_id,
-            memory_realm_id=ctx.caller.memory_realm_id,
-            genome_id=ctx.caller.genome_id,
-            device_id=ctx.caller.device_id,
+            owner_id=ctx.turn_context.owner_id,
+            companion_id=ctx.turn_context.companion_id,
+            memory_realm_id=ctx.turn_context.memory_realm_id,
+            genome_id=ctx.turn_context.genome_id,
+            device_id=ctx.turn_context.device_id,
             conversation_id=ctx.conversation_id,
             turn_id=ctx.turn_id,
             session_id=ctx.session_id,
-            trace_id=ctx.caller.trace_id,
+            trace_id=ctx.turn_context.trace_id,
             tool_call_id=call.id,
             session_key=session_key,
             task_date=task_date,

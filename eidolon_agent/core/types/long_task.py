@@ -52,7 +52,7 @@ class LongTaskRecord:
     user_text: str = ""
     memory_realm_id: str | None = None
     genome_id: str | None = None
-    # Source device (from caller identity / turns.source_device_id). Carried so a
+    # Source Device (from TurnContext / turns.source_device_id). Carried so a
     # proactive report can be routed back to the device (Phase 3 wake).
     device_id: str | None = None
     tool_call_id: str | None = None

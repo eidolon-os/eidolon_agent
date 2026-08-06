@@ -29,6 +29,7 @@ def build_admin_app(
     personas_service=None,
     revocation_kv=None,
     data_store=None,
+    runtime_store=None,
     memory_routes=None,
     memory_discovery_refresher=None,
 ) -> FastAPI:
@@ -55,6 +56,7 @@ def build_admin_app(
     # already configured at bootstrap (same instance).
     app.state.revocation_kv = revocation_kv
     app.state.data_store = data_store
+    app.state.runtime_store = runtime_store
     app.state.memory_routes = memory_routes
     app.state.memory_discovery_refresher = memory_discovery_refresher
 

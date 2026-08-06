@@ -110,7 +110,7 @@ class TurnTrace:
     status: str
     trigger: str
     triage: str | None
-    caller_kind: str | None
+    input_modality: str | None
     model: str | None
     latency: LatencyBreakdown
     # Cross-hop correlation id (channel->agent->memory). Persisted in the turn
@@ -151,7 +151,7 @@ class TurnTrace:
                 "status": self.status,
                 "trigger": self.trigger,
                 "triage": self.triage,
-                "caller_kind": self.caller_kind,
+                "input_modality": self.input_modality,
                 "model": self.model,
                 "trace_id": self.trace_id,
                 "control_intent": self.control_intent,

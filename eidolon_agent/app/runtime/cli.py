@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import logging
 import sys
+from contextlib import suppress
 
 import uvicorn
 
@@ -85,17 +86,21 @@ async def _run(args) -> int:  # type: ignore[no-untyped-def]
         await long_task_worker.stop()
     if container.background_tasks is not None and hasattr(container.background_tasks, "drain"):
         await container.background_tasks.drain(timeout_s=settings.runtime.drain_timeout_s)
+    audit_dispatch_task = container.extras.get("audit_dispatch_task")
+    if isinstance(audit_dispatch_task, asyncio.Task):
+        audit_dispatch_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await audit_dispatch_task
     if container.personas_service is not None and hasattr(container.personas_service, "stop"):
         await container.personas_service.stop()
     if container.memory_port is not None and hasattr(container.memory_port, "close"):
         await container.memory_port.close()
-    body_http_client = container.extras.get("body_control_http_client")
-    if body_http_client is not None and hasattr(body_http_client, "aclose"):
-        await body_http_client.aclose()
     if container.llm_router is not None and hasattr(container.llm_router, "close"):
         await container.llm_router.close()
     if container.data_store is not None and hasattr(container.data_store, "close"):
         await container.data_store.close()
+    if container.runtime_store is not None and hasattr(container.runtime_store, "close"):
+        await container.runtime_store.close()
     return 0
 
 

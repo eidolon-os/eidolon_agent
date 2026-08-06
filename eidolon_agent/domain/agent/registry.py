@@ -41,7 +41,7 @@ class AgentRegistry:
     def list_instances(self) -> list[AgentInstance]:
         return list(self._instances.values())
 
-    async def resolve_for_caller(
+    async def resolve_runtime(
         self,
         *,
         owner_id: str,
@@ -50,7 +50,7 @@ class AgentRegistry:
     ) -> AgentInstance:
         resolved_genome_id = (genome_id or "").strip()
         if not resolved_genome_id:
-            raise NotFoundError("runtime identity does not pin a persona genome")
+            raise NotFoundError("runtime binding does not pin a persona genome")
         key = f"{owner_id}:{companion_id}:{resolved_genome_id}"
         inst = self._instances.get(key)
         if inst is not None:

@@ -21,6 +21,7 @@ class Container:
     sqlite_engine: object | None = None
     session_factory: object | None = None
     data_store: object | None = None
+    runtime_store: object | None = None
 
     persona_genome_store: object | None = None
     personas_service: object | None = None

@@ -8,7 +8,6 @@ import logging
 from datetime import datetime, timezone
 
 from eidolon_agent.core.errors import MemoryUnavailableError
-from eidolon_agent.core.types.identity import build_memory_actor_context
 from eidolon_agent.core.types.memory import (
     ActiveCommitment,
     ActiveCommitmentReadResult,
@@ -22,6 +21,7 @@ from eidolon_agent.core.types.memory import (
     MemoryScope,
     MemoryWriteOutcome,
 )
+from eidolon_agent.core.types.turn_context import build_memory_actor_context
 from eidolon_agent.infra.memory.mcp_client import McpClientPool
 from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
 

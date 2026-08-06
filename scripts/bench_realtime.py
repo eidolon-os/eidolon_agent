@@ -25,6 +25,9 @@ from typing import Any
 
 import grpc
 import httpx
+
+from eidolon_agent.app.benchmark import load_replay_scenarios
+from eidolon_agent.app.benchmark.experience import ExperienceReplayRunner
 from eidolon_agent.app.benchmark.live_service import (
     _issue_token as _issue_live_token,
 )
@@ -36,10 +39,13 @@ from eidolon_agent.app.benchmark.live_service import (
     ensure_registry_user,
     issue_runtime_token,
 )
-
+from eidolon_agent.app.benchmark.suites import (
+    LIVE_AGENT_MEMORY_BENCHMARK_NAME,
+    live_agent_memory_experience_scenarios,
+)
+from eidolon_agent.app.runtime.bootstrap import _build_llm_router
 from eidolon_agent.app.transport.grpc.codec import struct_to_dict
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
-from eidolon_agent.app.runtime.bootstrap import _build_llm_router
 from eidolon_agent.config import load_settings
 from eidolon_agent.infra.benchmark import (
     BenchmarkReportSummarizer,
@@ -56,12 +62,6 @@ from eidolon_agent.infra.benchmark.users import (
     DEFAULT_BENCHMARK_TENANT_ID,
     DEFAULT_BENCHMARK_USER_ID,
     resolve_benchmark_identity,
-)
-from eidolon_agent.app.benchmark import load_replay_scenarios
-from eidolon_agent.app.benchmark.experience import ExperienceReplayRunner
-from eidolon_agent.app.benchmark.suites import (
-    LIVE_AGENT_MEMORY_BENCHMARK_NAME,
-    live_agent_memory_experience_scenarios,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -325,6 +325,7 @@ async def _bench_reused_stream(
                             turn_id=turn_id,
                             conversation_id=conversation_id,
                             text=prompt,
+                            input_modality="text",
                         )
                     )
                 )
@@ -375,6 +376,7 @@ async def _run_one_grpc_turn(
                 turn_id=turn_id,
                 conversation_id=conversation_id,
                 text=prompt,
+                input_modality="text",
             )
         )
         while True:

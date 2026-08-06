@@ -6,15 +6,16 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
-from eidolon_agent.core.types.identity import CallerContext
 from eidolon_agent.core.types.tool import ToolCall, ToolResult, ToolSchema
+from eidolon_agent.core.types.turn_context import InputModality, TurnContext
 
 
 @dataclass(slots=True)
 class ToolInvocationContext:
     """Per-call context provided by the dispatcher."""
 
-    caller: CallerContext
+    turn_context: TurnContext
+    input_modality: InputModality
     turn_id: str
     conversation_id: str | None = None
     session_id: str | None = None

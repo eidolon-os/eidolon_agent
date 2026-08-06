@@ -281,11 +281,11 @@ async def test_persona_locator_args_match_turn_input() -> None:
         history_manager=HistoryManager(),
     )
     ti = make_turn_input("hi")
-    # Override caller fields via direct attribute (TurnInput is frozen, so this
+    # Override turn-context fields via direct attribute (TurnInput is frozen, so this
     # just sanity-checks the default args go through).
     await compiler.compile(ti)
     call = personas.calls[0]
-    assert call["owner_id"] == ti.caller.owner_id
+    assert call["owner_id"] == ti.context.owner_id
     assert call["companion_id"] == "alice/companion-test"
     assert call["genome_id"] == "tpl"
     assert call["user_text"] == "hi"

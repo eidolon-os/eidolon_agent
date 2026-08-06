@@ -15,7 +15,6 @@ from pydantic import BaseModel
 
 from eidolon_agent.app.transport.grpc.codec import struct_to_dict
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
-from eidolon_agent.core.types.identity import derive_runtime_caller_id
 
 _log = logging.getLogger(__name__)
 
@@ -54,17 +53,9 @@ async def chat_test(body: ChatTestRequest, request: Request):
     jwt_secret = resolve_shared_secret(settings.runtime_token.jwt_secret)
     if not jwt_secret:
         raise RuntimeError("runtime token secret not configured")
-    actor_id = f"admin-chat-test:{body.owner_id}:{body.companion_id}"
-    runtime_caller_id = _admin_runtime_caller_id(
-        owner_id=body.owner_id,
-        companion_id=body.companion_id,
-        actor_id=actor_id,
-    )
     runtime_token, _ = sign_runtime_token(
         secret=jwt_secret,
         algorithm=settings.runtime_token.jwt_algorithm,
-        actor_kind="admin_console",
-        actor_id=actor_id,
         owner_id=body.owner_id,
         companion_id=body.companion_id,
         memory_realm_id=companion.default_memory_realm_id,
@@ -88,8 +79,6 @@ async def chat_test(body: ChatTestRequest, request: Request):
                 metadata.update(
                     _chat_test_metadata(
                         persist_memory=body.persist_memory,
-                        runtime_caller_id=runtime_caller_id,
-                        actor_id=actor_id,
                     )
                 )
                 yield pb.ChatRequest(
@@ -97,6 +86,7 @@ async def chat_test(body: ChatTestRequest, request: Request):
                         turn_id=uuid.uuid4().hex,
                         conversation_id=f"admin-test-{uuid.uuid4().hex[:8]}",
                         text=body.text,
+                        input_modality="text",
                         metadata=metadata,
                     )
                 )
@@ -132,30 +122,11 @@ def _sse(event: str, data: dict) -> str:
 def _chat_test_metadata(
     *,
     persist_memory: bool,
-    runtime_caller_id: str = "",
-    actor_id: str = "",
 ) -> dict:
     return {
-        "caller_kind": "admin_test",
-        "runtime_caller_id": runtime_caller_id,
-        "actor_kind": "admin_console",
-        "actor_id": actor_id,
-        "caller_display_name": "Admin Chat Test",
-        "entrypoint": "admin_chat_test",
         "private": not persist_memory,
         "persist_memory": persist_memory,
     }
-
-
-def _admin_runtime_caller_id(*, owner_id: str, companion_id: str, actor_id: str) -> str:
-    return derive_runtime_caller_id(
-        owner_id=owner_id,
-        companion_id=companion_id,
-        actor_kind="admin_console",
-        actor_id=actor_id,
-    )
-
-
 async def _refresh_memory_discovery_for_admin_chat(
     request: Request,
     *,

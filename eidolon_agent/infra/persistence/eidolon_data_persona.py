@@ -66,8 +66,6 @@ class EidolonDataPersonaGenomeStore:
             companion_id=event.companion_id,
             subject_type="persona_observation",
             subject_id=event.observation_id,
-            actor_type="agent",
-            actor_id=event.source,
             source="agent",
             payload_json=event.model_dump(mode="json", exclude_none=True),
         )

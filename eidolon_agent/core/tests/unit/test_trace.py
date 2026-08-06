@@ -22,7 +22,7 @@ def test_turn_trace_metadata_shape_is_prompt_safe() -> None:
         status="ok",
         trigger="user_utterance",
         triage="simple",
-        caller_kind="livekit_voice",
+        input_modality="voice",
         model="fake",
         latency=LatencyBreakdown(compile_ms=20, first_delta_ms=100, total_ms=180),
         context_ledger={"segments": [{"kind": "memory"}]},
@@ -65,7 +65,7 @@ def test_turn_trace_control_fields_default_none() -> None:
         status="ok",
         trigger="user_utterance",
         triage="simple",
-        caller_kind="web_chat",
+        input_modality="text",
         model="fake",
         latency=LatencyBreakdown(),
     ).to_metadata()

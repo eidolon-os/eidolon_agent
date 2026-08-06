@@ -40,7 +40,7 @@ class DeleteOwnerDataResponse(BaseModel):
     owner_id: str
     deleted: bool
     counts: dict[str, int]
-    revocation_keys_cleared: int = 0
+    revocation_keys_written: int = 0
 
 
 @router.post(
@@ -73,37 +73,56 @@ async def revoke_owner_sessions(owner_id: str, request: Request) -> RevokeOwnerS
     status_code=status.HTTP_200_OK,
 )
 async def delete_owner_data(owner_id: str, request: Request) -> DeleteOwnerDataResponse:
-    """Hard-delete Eidolon Data business rows for one owner.
+    """Hard-delete Agent-owned runtime rows for one owner.
 
-    Admin calls this from its owner-delete cascade. Ownership and deletion order
-    live in ``eidolon_data`` so agent does not carry unified-schema SQL.
+    System Data is a separate authority and is never mutated by this endpoint.
     """
-    data_store = getattr(request.app.state, "data_store", None)
-    if data_store is None:
+    runtime_store = getattr(request.app.state, "runtime_store", None)
+    if runtime_store is None:
         raise HTTPException(
             status_code=503,
-            detail="data_store not configured; cannot delete user data",
+            detail="runtime_store not configured; cannot delete Agent runtime data",
         )
 
-    counts = await data_store.owner_data_ops.delete_owner_data(owner_id)
-    cleared_revocations = await _clear_owner_revocations(request, owner_id)
+    # Revoke first: if process/database deletion fails, stale credentials stay
+    # denied and the orchestrator can safely retry the idempotent cleanup.
+    written_revocations = await _write_owner_revocations(request, owner_id)
+    counts = await runtime_store.delete_owner_runtime(owner_id)
 
     return DeleteOwnerDataResponse(
         owner_id=owner_id,
         deleted=True,
         counts=counts,
-        revocation_keys_cleared=cleared_revocations,
+        revocation_keys_written=written_revocations,
     )
 
 
-async def _clear_owner_revocations(request: Request, owner_id: str) -> int:
-    cleared_revocations = 0
+@router.delete(
+    "/owners/{owner_id}/companions/{companion_id}/data",
+    response_model=DeleteOwnerDataResponse,
+)
+async def delete_companion_data(
+    owner_id: str,
+    companion_id: str,
+    request: Request,
+) -> DeleteOwnerDataResponse:
+    runtime_store = getattr(request.app.state, "runtime_store", None)
+    if runtime_store is None:
+        raise HTTPException(503, "runtime_store not configured")
+    counts = await runtime_store.delete_companion_runtime(owner_id, companion_id)
+    return DeleteOwnerDataResponse(
+        owner_id=owner_id,
+        deleted=True,
+        counts=counts,
+    )
+
+
+async def _write_owner_revocations(request: Request, owner_id: str) -> int:
+    written = 0
     kv = getattr(request.app.state, "revocation_kv", None)
     if kv is not None:
+        timestamp = datetime.now(timezone.utc).isoformat().encode("utf-8")
         for key in owner_revocation_keys(owner_id):
-            delete_key = getattr(kv, "delete", None)
-            if delete_key is not None and await kv.get(key) is not None:
-                await delete_key(key)
-                cleared_revocations += 1
-    return cleared_revocations
-
+            await kv.put(key, timestamp)
+            written += 1
+    return written

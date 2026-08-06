@@ -31,7 +31,6 @@ class BodyCommandPort(Protocol):
         ttl_ms: int = 30_000,
         priority: str = "normal",
         source_device_id: str | None = None,
-        runtime_caller_id: str | None = None,
         runtime_session_id: str | None = None,
         runtime_trace_id: str | None = None,
         runtime_turn_id: str | None = None,

@@ -23,9 +23,9 @@ from eidolon_sdk.biz.persona import (
 )
 
 from eidolon_agent.core.errors import NotFoundError, ValidationError
-from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
 from eidolon_agent.core.types.memory import MemoryHit, MemoryKind, MemoryRecallResult
 from eidolon_agent.core.types.turn import TurnInput, TurnTrigger
+from eidolon_agent.core.types.turn_context import TurnContext
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.history import HistoryManager
 from eidolon_agent.domain.personas import PersonasService
@@ -77,7 +77,7 @@ async def persona_stack(tmp_path):
 
 
 async def test_real_turn_context_uses_pinned_genome_and_memory_evidence(persona_stack):
-    store, workspace, service = persona_stack
+    _store, workspace, service = persona_stack
     memory = _MemoryPort(workspace.memory_realm.realm_id)
     compiler = ContextCompiler(
         personas_service=service,
@@ -300,21 +300,19 @@ def _turn(workspace) -> TurnInput:
         turn_id="turn-persona-memory-e2e",
         conversation_id="conversation-persona-memory-e2e",
         session_id="session-persona-memory-e2e",
-        caller=CallerContext(
-            identity=Identity(
-                owner_id="owner-e2e",
-                companion_id=workspace.companion.companion_id,
-                device_id=None,
-                memory_realm_id=workspace.memory_realm.realm_id,
-                genome_id=genome.genome_id,
-                schema_version=PERSONA_GENOME_SCHEMA,
-                genome_hash=genome.genome_hash,
-                realizer_version=PERSONA_REALIZER,
-            ),
-            caller_kind=CallerKind.ADMIN_TEST,
+        context=TurnContext(
+            owner_id="owner-e2e",
+            companion_id=workspace.companion.companion_id,
+            device_id=None,
+            memory_realm_id=workspace.memory_realm.realm_id,
+            genome_id=genome.genome_id,
             trace_id="trace-persona-memory-e2e",
             request_id="request-persona-memory-e2e",
+            schema_version=PERSONA_GENOME_SCHEMA,
+            genome_hash=genome.genome_hash,
+            realizer_version=PERSONA_REALIZER,
         ),
+        input_modality="text",
         trigger=TurnTrigger.USER_UTTERANCE,
         text="你记得我希望你怎么回答吗？",
     )

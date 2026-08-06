@@ -41,6 +41,7 @@ def _expand_all_paths(obj: object) -> None:
         elif isinstance(v, BaseModel):
             _expand_all_paths(v)
 
+
 # ---------------------------------------------------------------------------
 # Section models
 # ---------------------------------------------------------------------------
@@ -89,7 +90,6 @@ class NatsSettings(BaseModel):
             "PAIRING_CODES",
             "DEVICE_REVOCATIONS",
             "EIDOLON_TOOL_IDEMP",
-            "EIDOLON_RUNTIME_DEVICES",
         ]
     )
 
@@ -188,11 +188,7 @@ class LongTaskSettings(BaseModel):
 class BodyControlSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = True
-    hub_base_url: str = "http://127.0.0.1:8082"
-    service_token: str = ""
-    timeout_s: float = 5.0
-    cache_ttl_s: float = 3.0
+    enabled: bool = False
 
 
 class PersonaSettings(BaseModel):
@@ -232,6 +228,7 @@ class RuntimeTokenSettings(BaseModel):
             if val == "PAIRING_JWT_SECRET":
                 data["jwt_secret"] = ""
         return data
+
     device_token_ttl_days: int = 30
     trusted_mtls_cn_whitelist: list[str] = Field(default_factory=list)
 
@@ -250,6 +247,16 @@ class RuntimeSettings(BaseModel):
     # coworker worker. Lets the whole agent be started and exercised offline
     # (input -> full TurnEvent stream + trace) for development and testing.
     standalone: bool = False
+
+
+class PersistenceSettings(BaseModel):
+    """Agent authority SQLite profile; never points at the system-data DB."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sqlite_path: Path = Path("~/eidolon/data/eidolon-agent.sqlite3")
+    busy_timeout_ms: int = Field(default=5_000, ge=100, le=60_000)
+    wal_autocheckpoint_pages: int = Field(default=1_000, ge=100, le=100_000)
 
 
 class TurnSettings(BaseModel):
@@ -337,6 +344,7 @@ class Settings(BaseSettings):
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     runtime_token: RuntimeTokenSettings = Field(default_factory=RuntimeTokenSettings)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
+    persistence: PersistenceSettings = Field(default_factory=PersistenceSettings)
     turn: TurnSettings = Field(default_factory=TurnSettings)
 
     @model_validator(mode="after")
@@ -422,9 +430,7 @@ def _resolve_env_path() -> Path:
         return p.resolve()
     p = _DEFAULT_ENV
     if not p.is_file():
-        raise FileNotFoundError(
-            f"env file not found: {p}. Copy config/.env.example to config/.env"
-        )
+        raise FileNotFoundError(f"env file not found: {p}. Copy config/.env.example to config/.env")
     return p.resolve()
 
 

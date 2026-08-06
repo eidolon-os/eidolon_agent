@@ -1,7 +1,7 @@
 """gRPC servicer — Chat / PushSignal / SubscribeProactive.
 
 The servicer is intentionally thin: it translates proto frames ↔ core types,
-resolves the AgentInstance from the caller's identity, and delegates each Turn
+resolves the AgentInstance from the verified Owner runtime binding, and delegates each Turn
 to the :class:`CompanionAgent`. All business logic lives behind the ports.
 """
 
@@ -19,12 +19,6 @@ from eidolon_agent.app.transport.grpc.codec import struct_to_dict, turn_event_to
 from eidolon_agent.app.transport.grpc.interceptors import current_identity
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
 from eidolon_agent.core.errors import EidolonError, NotFoundError
-from eidolon_agent.core.types.identity import (
-    CallerContext,
-    CallerKind,
-    Identity,
-    derive_runtime_caller_id,
-)
 from eidolon_agent.core.types.signal import SignalDigest
 from eidolon_agent.core.types.turn import (
     TurnEvent,
@@ -32,6 +26,7 @@ from eidolon_agent.core.types.turn import (
     TurnInput,
     TurnTrigger,
 )
+from eidolon_agent.core.types.turn_context import InputModality, TurnContext
 from eidolon_agent.domain.signals import SignalFuser
 
 _log = logging.getLogger(__name__)
@@ -154,7 +149,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 generation = generation_by_conversation.get(conversation_id, 0) + 1
                 generation_by_conversation[conversation_id] = generation
                 try:
-                    inst = await self._registry.resolve_for_caller(
+                    inst = await self._registry.resolve_runtime(
                         owner_id=identity.owner_id,
                         companion_id=identity.companion_id,
                         genome_id=identity.genome_id,
@@ -176,33 +171,15 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                         window_ms=signal_fuser.window_ms,
                     )
                     realtime = signal_fuser.fuse(recent_signals)
-                actor_kind = str(
-                    getattr(identity, "actor_kind", "")
-                    or start_metadata.get("actor_kind")
-                    or _caller_kind_from_metadata(start_metadata).value
-                )
-                actor_id = str(
-                    getattr(identity, "actor_id", "")
-                    or start_metadata.get("actor_id")
-                    or identity.device_id
-                    or conversation_id
-                )
-                runtime_caller_id = str(start_metadata.get("runtime_caller_id") or "").strip()
-                if not runtime_caller_id:
-                    runtime_caller_id = derive_runtime_caller_id(
-                        owner_id=identity.owner_id,
-                        companion_id=inst.companion_id,
-                        actor_kind=actor_kind,
-                        actor_id=actor_id,
-                    )
                 runtime_session_id = str(
-                    start_metadata.get("runtime_session_id")
-                    or getattr(identity, "session_id", None)
-                    or conversation_id
+                    getattr(identity, "session_id", None) or conversation_id
                 ).strip()
-                caller_kind = _caller_kind_from_metadata(start_metadata)
+                try:
+                    input_modality = _input_modality(start.input_modality)
+                except ValueError as exc:
+                    await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
                 # Correlation id for cross-hop tracing (channel->agent->memory).
-                # Prefer the per-turn trace_id the caller minted; fall back to
+                # Prefer the per-turn trace_id the transport client minted; fall back to
                 # call-level x-trace-id, then a fresh uuid.
                 trace_id = (
                     str(start.trace_id or "").strip()
@@ -214,33 +191,21 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     turn_id=start.turn_id or uuid.uuid4().hex,
                     conversation_id=conversation_id,
                     session_id=runtime_session_id,
-                    caller=CallerContext(
-                        identity=Identity(
-                            owner_id=identity.owner_id,
-                            companion_id=inst.companion_id,
-                            device_id=identity.device_id,
-                            memory_realm_id=identity.memory_realm_id,
-                            genome_id=inst.genome_id,
-                            schema_version=identity.schema_version,
-                            genome_hash=identity.genome_hash,
-                            realizer_version=identity.realizer_version,
-                        ),
-                        caller_kind=caller_kind,
+                    context=TurnContext(
+                        owner_id=identity.owner_id,
+                        companion_id=inst.companion_id,
+                        device_id=identity.device_id,
+                        memory_realm_id=identity.memory_realm_id,
+                        genome_id=inst.genome_id,
                         trace_id=trace_id,
                         request_id=dict(context.invocation_metadata()).get(
                             "x-request-id", uuid.uuid4().hex
                         ),
-                        runtime_caller_id=runtime_caller_id,
-                        runtime_session_id=runtime_session_id,
-                        actor_kind=actor_kind,
-                        actor_id=actor_id,
-                        display_name=str(
-                            start_metadata.get("caller_display_name")
-                            or start_metadata.get("display_name")
-                            or actor_kind
-                        ),
-                        transport="grpc_chat",
+                        schema_version=identity.schema_version,
+                        genome_hash=identity.genome_hash,
+                        realizer_version=identity.realizer_version,
                     ),
+                    input_modality=input_modality,
                     trigger=TurnTrigger.USER_UTTERANCE,
                     text=start.text,
                     realtime=realtime,
@@ -324,7 +289,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         await self._signals.publish(request.session_id, sig)
         if self._personas is not None and identity is not None:
             try:
-                inst = await self._registry.resolve_for_caller(
+                inst = await self._registry.resolve_runtime(
                     owner_id=identity.owner_id,
                     companion_id=identity.companion_id,
                     genome_id=identity.genome_id,
@@ -401,16 +366,13 @@ def _digest_from_dict(data: dict) -> SignalDigest | None:
     )
 
 
-def _caller_kind_from_metadata(metadata: dict | None) -> CallerKind:
-    if not metadata:
-        return CallerKind.LIVEKIT_VOICE
-    raw = metadata.get("caller_kind")
-    if not raw:
-        return CallerKind.LIVEKIT_VOICE
-    try:
-        return CallerKind(str(raw))
-    except ValueError:
-        return CallerKind.LIVEKIT_VOICE
+def _input_modality(raw: str) -> InputModality:
+    value = str(raw or "").strip().lower()
+    if value == "voice":
+        return "voice"
+    if value == "text":
+        return "text"
+    raise ValueError("input_modality must be 'voice' or 'text'")
 
 
 def _signal_from_proto(signal) -> object:  # type: ignore[no-untyped-def]

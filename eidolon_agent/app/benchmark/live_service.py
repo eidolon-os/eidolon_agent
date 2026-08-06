@@ -102,8 +102,6 @@ async def issue_runtime_token(
     token, _ = sign_runtime_token(
         secret=secret,
         algorithm=settings.runtime_token.jwt_algorithm,
-        actor_kind="device",
-        actor_id=device_id,
         device_id=device_id,
         owner_id=user_id,
         companion_id=companion_id,
@@ -304,6 +302,7 @@ async def _run_turn(
             turn_id=turn_id,
             conversation_id=conversation_id,
             text=text,
+            input_modality="text",
         )
         if turn_metadata:
             start.metadata.update(turn_metadata)

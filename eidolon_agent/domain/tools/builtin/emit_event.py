@@ -51,7 +51,12 @@ class EmitEventTool:
         subject = call.arguments["subject"]
         payload = call.arguments.get("payload") or {}
         await self._bus.publish(
-            Event(subject=subject, payload=payload, trace_id=ctx.caller.trace_id, source="tool.emit_event")
+            Event(
+                subject=subject,
+                payload=payload,
+                trace_id=ctx.turn_context.trace_id,
+                source="tool.emit_event",
+            )
         )
         return ToolResult(
             call_id=call.id, name=self.schema.name, ok=True, content={"subject": subject}

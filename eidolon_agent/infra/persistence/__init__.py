@@ -1,25 +1,21 @@
-"""Eidolon Agent persistence adapters.
+"""Agent-owned runtime persistence plus low-frequency system-data adapters."""
 
-Durable business data is owned by ``eidolon_data``. This package exposes only
-the agent-side adapters that map agent domain types onto that unified schema.
-"""
-
+from eidolon_agent.infra.persistence.agent_runtime import (
+    AgentConversationReader,
+    AgentLongTaskStore,
+    build_agent_history_hydrator,
+    build_agent_turn_persister,
+)
 from eidolon_agent.infra.persistence.eidolon_data_persona import (
     EidolonDataPersonaGenomeStore,
 )
-from eidolon_agent.infra.persistence.eidolon_data_runtime import (
-    EidolonDataConversationReader,
-    EidolonDataLongTaskStore,
-    EidolonDataMemoryFanoutStatusSink,
-    build_eidolon_data_history_hydrator,
-    build_eidolon_data_turn_persister,
-)
+from eidolon_agent.infra.persistence.runtime_store import AgentRuntimeStore
 
 __all__ = [
-    "EidolonDataConversationReader",
-    "EidolonDataLongTaskStore",
-    "EidolonDataMemoryFanoutStatusSink",
+    "AgentConversationReader",
+    "AgentLongTaskStore",
+    "AgentRuntimeStore",
     "EidolonDataPersonaGenomeStore",
-    "build_eidolon_data_history_hydrator",
-    "build_eidolon_data_turn_persister",
+    "build_agent_history_hydrator",
+    "build_agent_turn_persister",
 ]

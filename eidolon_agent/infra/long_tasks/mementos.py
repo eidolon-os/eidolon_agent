@@ -32,7 +32,7 @@ def _device_id_from_conversation_id(conversation_id: str | None) -> str | None:
     (a MAC) contains colons; the prefix and room do not — so the identity is the
     middle, i.e. everything between the first and last ``:`` segments. This is a
     transitional fallback used until ``device_id`` is wired end-to-end onto the
-    record (caller identity → turns.source_device_id / long_tasks.device_id). Returns
+    record (TurnContext → turns.source_device_id / long_tasks.device_id). Returns
     None when the shape doesn't match (then the proactive wake is simply skipped
     upstream).
     """

@@ -4,26 +4,27 @@ import asyncio
 from datetime import datetime, timezone
 
 import pytest
-from eidolon_data import DataSettings, DataStore
-from eidolon_data.testing import assert_event
 
-from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
 from eidolon_agent.core.types.long_task import LongTaskRecord, LongTaskStatus
 from eidolon_agent.core.types.messages import MessageRole
 from eidolon_agent.core.types.turn import TriageKind, TurnInput, TurnStatus, TurnTrigger
-from eidolon_agent.domain.history.fanout import MemoryFanoutStatus
-from eidolon_agent.infra.persistence.eidolon_data_runtime import (
-    EidolonDataConversationReader,
-    EidolonDataLongTaskStore,
-    EidolonDataMemoryFanoutStatusSink,
-    build_eidolon_data_history_hydrator,
-    build_eidolon_data_turn_persister,
+from eidolon_agent.core.types.turn_context import TurnContext
+from eidolon_agent.infra.persistence.agent_runtime import (
+    AgentConversationReader,
+    AgentLongTaskStore,
+    build_agent_history_hydrator,
+    build_agent_turn_persister,
+)
+from eidolon_agent.infra.persistence.runtime_store import (
+    AgentRuntimeStore,
+    RuntimeSessionRow,
+    TurnRow,
 )
 
 
 @pytest.fixture
-async def data_store(tmp_path):
-    store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
+async def runtime_store(tmp_path):
+    store = AgentRuntimeStore.open(tmp_path / "eidolon-agent.sqlite3")
     await store.init_schema()
     try:
         yield store
@@ -32,7 +33,7 @@ async def data_store(tmp_path):
 
 
 async def _provision_runtime_identity(
-    store: DataStore,
+    store: AgentRuntimeStore,
     *,
     owner_id: str,
     companion_id: str,
@@ -40,96 +41,40 @@ async def _provision_runtime_identity(
     genome_id: str = "genome-1",
     realm_id: str = "realm-1",
 ) -> None:
-    await store.owner_service.create_owner(owner_id=owner_id, display_name=owner_id)
-    await store.workspace_provisioning.provision_workspace(
-        owner_id=owner_id,
-        companion_id=companion_id,
-        genome_id=genome_id,
-        realm_id=realm_id,
-    )
-    await store.devices.create_device(
-        device_id=device_id,
-        owner_id=owner_id,
-        bound_companion_id=companion_id,
-        auth_type="token",
-        secret_ref="test",
-    )
+    # Authority references arrive in a verified TurnContext. Agent persistence
+    # intentionally performs no system-Data lookup or cross-database FK check.
+    del store, owner_id, companion_id, device_id, genome_id, realm_id
 
 
-def _caller(
+def _context(
     *,
     owner_id: str,
     companion_id: str,
     device_id: str | None,
     realm_id: str,
     genome_id: str,
-    caller_kind: CallerKind = CallerKind.WEB_CHAT,
     trace_id: str = "trace-1",
     request_id: str = "request-1",
-    runtime_caller_id: str = "rc-test",
-    runtime_session_id: str = "session-1",
-    actor_kind: str = "web_chat",
-    actor_id: str = "actor-1",
-) -> CallerContext:
-    return CallerContext(
-        identity=Identity(
-            owner_id=owner_id,
-            companion_id=companion_id,
-            device_id=device_id,
-            memory_realm_id=realm_id,
-            genome_id=genome_id,
-        ),
-        caller_kind=caller_kind,
+    runtime_session_id: str | None = None,
+) -> TurnContext:
+    del runtime_session_id
+    return TurnContext(
+        owner_id=owner_id,
+        companion_id=companion_id,
+        device_id=device_id,
+        memory_realm_id=realm_id,
+        genome_id=genome_id,
         trace_id=trace_id,
         request_id=request_id,
-        runtime_caller_id=runtime_caller_id,
-        runtime_session_id=runtime_session_id,
-        actor_kind=actor_kind,
-        actor_id=actor_id,
-        display_name=actor_kind,
-        transport="test",
     )
 
 
 @pytest.mark.asyncio
-async def test_memory_fanout_status_sink_records_event(data_store: DataStore) -> None:
-    await data_store.owner_service.create_owner(
-        owner_id="owner-1",
-        display_name="Owner 1",
-    )
-    sink = EidolonDataMemoryFanoutStatusSink(data_store)
-
-    await sink.record_memory_fanout(
-        MemoryFanoutStatus(
-            turn_id="turn-1",
-            owner_id="owner-1",
-            companion_id="companion-1",
-            memory_realm_id="realm-1",
-            memory_space_id="realm-1",
-            subject="eidolon.memory.turn.realm-1",
-            state="published",
-            error=None,
-            recorded_at="2026-06-29T00:00:00+00:00",
-            trace_id="trace-xyz",
-        )
-    )
-
-    events = await data_store.events.list_for_subject(
-        subject_type="turn",
-        subject_id="turn-1",
-    )
-    assert len(events) == 1
-    assert events[0].event_type == "eidolon.memory.fanout.status"
-    assert events[0].payload_json["state"] == "published"
-    assert events[0].payload_json["memory_space_id"] == "realm-1"
-    assert events[0].trace_id == "trace-xyz"  # correlation carried onto the audit row
-    assert events[0].source == "agent"
-
-
-@pytest.mark.asyncio
-async def test_turn_persister_writes_eidolon_data_history(data_store: DataStore) -> None:
+async def test_turn_persister_writes_agent_runtime_history(
+    runtime_store: AgentRuntimeStore,
+) -> None:
     await _provision_runtime_identity(
-        data_store,
+        runtime_store,
         owner_id="owner-1",
         companion_id="companion-1",
         device_id="device-1",
@@ -141,17 +86,18 @@ async def test_turn_persister_writes_eidolon_data_history(data_store: DataStore)
         turn_id="turn-1",
         conversation_id="conversation-1",
         session_id="session-1",
-        caller=_caller(
+        context=_context(
             owner_id="owner-1",
             companion_id="companion-1",
             device_id="device-1",
             realm_id="realm-1",
             genome_id="genome-1",
         ),
+        input_modality="text",
         trigger=TurnTrigger.USER_UTTERANCE,
         text="hello",
     )
-    persist = build_eidolon_data_turn_persister(data_store, model_id_provider=lambda: "fake")
+    persist = build_agent_turn_persister(runtime_store, model_id_provider=lambda: "fake")
 
     await persist(
         ti=ti,
@@ -169,36 +115,37 @@ async def test_turn_persister_writes_eidolon_data_history(data_store: DataStore)
         assistant_text="hi",
     )
 
-    messages = await build_eidolon_data_history_hydrator(data_store)(
+    messages = await build_agent_history_hydrator(runtime_store)(
         conversation_id="conversation-1",
         window=10,
     )
     assert [message.role for message in messages] == [MessageRole.USER, MessageRole.ASSISTANT]
     assert [message.content for message in messages] == ["hello", "hi"]
 
-    rows = await EidolonDataConversationReader(data_store).list_turns_by_owner(owner_id="owner-1")
+    rows = await AgentConversationReader(runtime_store).list_turns_by_owner(
+        owner_id="owner-1"
+    )
     assert rows[0]["owner_id"] == "owner-1"
     assert rows[0]["companion_id"] == "companion-1"
-    assert rows[0]["runtime_caller_id"] == "rc-test"
     assert rows[0]["runtime_session_id"] == "session-1"
     assert rows[0]["tokens_out"] == 6
     # trace_id lands in the first-class indexed column (not just trace_json).
     assert rows[0]["trace_id"] == "trace-1"
-    async with data_store.session_factory() as session:
-        from eidolon_data.schema.models import TurnRow
-
+    async with runtime_store.session_factory() as session:
         turn_row = await session.get(TurnRow, "turn-1")
     assert turn_row is not None and turn_row.trace_id == "trace-1"
     assert rows[0]["metadata_"]["turn_trace"]["memory_write_trace"]["disposition"] == "skip"
-    assert await data_store.runtime_callers.get("rc-test") is not None
-    assert await data_store.runtime_sessions.get("session-1") is not None
+    async with runtime_store.session_factory() as session:
+        assert await session.get(RuntimeSessionRow, "session-1") is not None
 
 
 @pytest.mark.asyncio
-async def test_turn_persister_emits_agent_turn_failed_on_errored(data_store: DataStore) -> None:
-    """P3 (agent) — an errored turn writes agent.turn.failed; a normal turn does not."""
+async def test_turn_failure_stays_in_runtime_history_not_global_audit(
+    runtime_store: AgentRuntimeStore,
+) -> None:
+    """Operational turn errors are queryable locally without audit amplification."""
     await _provision_runtime_identity(
-        data_store,
+        runtime_store,
         owner_id="owner-e",
         companion_id="companion-e",
         device_id="device-e",
@@ -212,18 +159,19 @@ async def test_turn_persister_emits_agent_turn_failed_on_errored(data_store: Dat
             turn_id=turn_id,
             conversation_id="conv-e",
             session_id="sess-e",
-            caller=_caller(
+            context=_context(
                 owner_id="owner-e",
                 companion_id="companion-e",
                 device_id="device-e",
                 realm_id="realm-e",
                 genome_id="genome-e",
             ),
+            input_modality="text",
             trigger=TurnTrigger.USER_UTTERANCE,
             text=text,
         )
 
-    persist = build_eidolon_data_turn_persister(data_store, model_id_provider=lambda: "fake")
+    persist = build_agent_turn_persister(runtime_store, model_id_provider=lambda: "fake")
 
     await persist(
         ti=_ti("turn-err", "boom?"),
@@ -240,11 +188,13 @@ async def test_turn_persister_emits_agent_turn_failed_on_errored(data_store: Dat
         user_text="boom?",
         assistant_text="",
     )
-    events = await data_store.events.list_for_subject(subject_type="turn", subject_id="turn-err")
-    ev = assert_event(events, event_type="agent.turn.failed")
-    assert ev.source == "agent" and ev.severity == "error" and ev.outcome == "failure"
-    assert ev.owner_id == "owner-e" and ev.companion_id == "companion-e"
-    assert ev.reason == "llm_timeout" and ev.payload_json["error_code"] == "llm_timeout"
+    async with runtime_store.session_factory() as session:
+        failed_turn = await session.get(TurnRow, "turn-err")
+    assert failed_turn is not None
+    assert failed_turn.status == TurnStatus.ERRORED.value
+    assert failed_turn.metrics_json["error_code"] == "llm_timeout"
+    pending = await runtime_store.audit_outbox.list_pending()
+    assert not any(event.subject_id == "turn-err" for event in pending)
 
     # a normal (OK) turn must NOT emit agent.turn.failed
     await persist(
@@ -262,47 +212,33 @@ async def test_turn_persister_emits_agent_turn_failed_on_errored(data_store: Dat
         user_text="hi",
         assistant_text="ok",
     )
-    ok_events = await data_store.events.list_for_subject(subject_type="turn", subject_id="turn-ok")
-    assert not any(e.event_type == "agent.turn.failed" for e in ok_events)
+    pending = await runtime_store.audit_outbox.list_pending()
+    assert not any(event.subject_id == "turn-ok" for event in pending)
 
 
 @pytest.mark.asyncio
 async def test_turn_persister_records_admin_test_without_device_row(
-    data_store: DataStore,
+    runtime_store: AgentRuntimeStore,
 ) -> None:
-    await data_store.owner_service.create_owner(
-        owner_id="owner-admin",
-        display_name="Owner Admin",
-    )
-    await data_store.workspace_provisioning.provision_workspace(
-        owner_id="owner-admin",
-        companion_id="companion-admin",
-        genome_id="genome-admin",
-        realm_id="realm-admin",
-    )
     now = datetime.now(timezone.utc)
     ti = TurnInput(
         turn_id="turn-admin",
         conversation_id="conversation-admin",
         session_id="session-admin",
-        caller=_caller(
+        context=_context(
             owner_id="owner-admin",
             companion_id="companion-admin",
             device_id=None,
             realm_id="realm-admin",
             genome_id="genome-admin",
-            caller_kind=CallerKind.ADMIN_TEST,
             trace_id="trace-admin",
             request_id="request-admin",
-            runtime_caller_id="rc-admin",
-            runtime_session_id="session-admin",
-            actor_kind="admin_console",
-            actor_id="admin-chat-test",
         ),
+        input_modality="text",
         trigger=TurnTrigger.USER_UTTERANCE,
         text="hello from admin",
     )
-    persist = build_eidolon_data_turn_persister(data_store, model_id_provider=lambda: "fake")
+    persist = build_agent_turn_persister(runtime_store, model_id_provider=lambda: "fake")
 
     await persist(
         ti=ti,
@@ -320,27 +256,26 @@ async def test_turn_persister_records_admin_test_without_device_row(
         assistant_text="hi",
     )
 
-    rows = await EidolonDataConversationReader(data_store).list_turns_by_owner(
+    rows = await AgentConversationReader(runtime_store).list_turns_by_owner(
         owner_id="owner-admin"
     )
     assert rows[0]["device_id"] is None
-    assert rows[0]["runtime_caller_id"] == "rc-admin"
     assert rows[0]["runtime_session_id"] == "session-admin"
 
 
 @pytest.mark.asyncio
 async def test_turn_persister_is_idempotent_under_concurrent_first_writes(
-    data_store: DataStore,
+    runtime_store: AgentRuntimeStore,
 ) -> None:
     await _provision_runtime_identity(
-        data_store,
+        runtime_store,
         owner_id="owner-race",
         companion_id="companion-race",
         device_id="device-race",
         genome_id="genome-race",
         realm_id="realm-race",
     )
-    persist = build_eidolon_data_turn_persister(data_store, model_id_provider=lambda: "fake")
+    persist = build_agent_turn_persister(runtime_store, model_id_provider=lambda: "fake")
     now = datetime.now(timezone.utc)
 
     async def _write(index: int) -> None:
@@ -348,7 +283,7 @@ async def test_turn_persister_is_idempotent_under_concurrent_first_writes(
             turn_id=f"turn-{index}",
             conversation_id="conversation-race",
             session_id="session-1",
-            caller=_caller(
+            context=_context(
                 owner_id="owner-race",
                 companion_id="companion-race",
                 device_id="device-race",
@@ -356,10 +291,9 @@ async def test_turn_persister_is_idempotent_under_concurrent_first_writes(
                 genome_id="genome-race",
                 trace_id=f"trace-{index}",
                 request_id=f"request-{index}",
-                runtime_caller_id="rc-race",
                 runtime_session_id="session-1",
-                actor_id="device-race",
             ),
+            input_modality="text",
             trigger=TurnTrigger.USER_UTTERANCE,
             text=f"hello {index}",
         )
@@ -381,22 +315,26 @@ async def test_turn_persister_is_idempotent_under_concurrent_first_writes(
 
     await asyncio.gather(*(_write(i) for i in range(12)))
 
-    rows = await EidolonDataConversationReader(data_store).list_turns_by_owner(owner_id="owner-race")
+    rows = await AgentConversationReader(runtime_store).list_turns_by_owner(
+        owner_id="owner-race"
+    )
     assert len(rows) == 12
     assert sorted(row["seq"] for row in rows) == list(range(12))
 
 
 @pytest.mark.asyncio
-async def test_long_task_store_maps_records_to_jobs(data_store: DataStore) -> None:
+async def test_long_task_store_maps_records_to_jobs(
+    runtime_store: AgentRuntimeStore,
+) -> None:
     await _provision_runtime_identity(
-        data_store,
+        runtime_store,
         owner_id="owner-1",
         companion_id="companion-1",
         device_id="device-1",
         genome_id="genome-1",
         realm_id="realm-1",
     )
-    store = EidolonDataLongTaskStore(data_store)
+    store = AgentLongTaskStore(runtime_store)
     record = LongTaskRecord(
         id="task-1",
         provider="mementos",
@@ -440,17 +378,19 @@ async def test_long_task_store_maps_records_to_jobs(data_store: DataStore) -> No
     assert [row.id for row in rows] == ["task-1"]
 
 
-async def test_long_task_transitions_emit_job_lifecycle_events(data_store: DataStore) -> None:
-    """L3 (agent) — job.* events fire on state transitions; progress churn does not."""
+async def test_long_task_transitions_emit_job_lifecycle_events(
+    runtime_store: AgentRuntimeStore,
+) -> None:
+    """Only a terminal job outcome enters global audit; progress remains local."""
     await _provision_runtime_identity(
-        data_store,
+        runtime_store,
         owner_id="owner-j",
         companion_id="companion-j",
         device_id="device-j",
         genome_id="genome-j",
         realm_id="realm-j",
     )
-    store = EidolonDataLongTaskStore(data_store)
+    store = AgentLongTaskStore(runtime_store)
     record = LongTaskRecord(
         id="job-lc",
         provider="mementos",
@@ -471,31 +411,36 @@ async def test_long_task_transitions_emit_job_lifecycle_events(data_store: DataS
         task_type="writing",
     )
 
-    await store.accept(record)                                          # ACCEPTED — no event
-    await store.mark_queued("job-lc", worker_id="w1")                   # → job.queued
-    await store.attach_mementos_run("job-lc", mementos_session_id="m1")  # → job.running
-    await store.append_progress("job-lc", {"seq": 1})                  # RUNNING→RUNNING — no event
-    await store.complete("job-lc", result_text="done")                 # → job.succeeded
+    await store.accept(record)
+    await store.mark_queued("job-lc", worker_id="w1")
+    await store.attach_mementos_run("job-lc", mementos_session_id="m1")
+    await store.append_progress("job-lc", {"seq": 1})
+    await store.complete("job-lc", result_text="done")
 
-    events = await data_store.events.list_for_subject(subject_type="job", subject_id="job-lc")
-    assert {e.event_type for e in events} == {"job.queued", "job.running", "job.succeeded"}
-    succeeded = assert_event(events, event_type="job.succeeded")
-    assert succeeded.source == "agent"
-    assert succeeded.companion_id == "companion-j"
-    assert succeeded.trace_id == "trace-j"       # trace correlation carried from the record
-    assert succeeded.event_class == "audit"
+    receipts = [
+        event
+        for event in await runtime_store.audit_outbox.list_pending()
+        if event.subject_type == "job" and event.subject_id == "job-lc"
+    ]
+    assert [event.action for event in receipts] == ["job.succeeded"]
+    assert receipts[0].producer == "eidolon-agent"
+    assert receipts[0].category == "receipt"
+    assert receipts[0].trace_id == "trace-j"
+    assert receipts[0].outcome == "success"
 
 
-async def test_long_task_failure_emits_job_failed(data_store: DataStore) -> None:
+async def test_long_task_failure_emits_job_failed(
+    runtime_store: AgentRuntimeStore,
+) -> None:
     await _provision_runtime_identity(
-        data_store,
+        runtime_store,
         owner_id="owner-f",
         companion_id="companion-f",
         device_id="device-f",
         genome_id="genome-f",
         realm_id="realm-f",
     )
-    store = EidolonDataLongTaskStore(data_store)
+    store = AgentLongTaskStore(runtime_store)
     record = LongTaskRecord(
         id="job-f",
         provider="mementos",
@@ -519,8 +464,12 @@ async def test_long_task_failure_emits_job_failed(data_store: DataStore) -> None
     await store.accept(record)
     await store.mark_failed("job-f", error_code="boom", error_message="kaboom")
 
-    events = await data_store.events.list_for_subject(subject_type="job", subject_id="job-f")
-    failed = assert_event(events, event_type="job.failed")
-    assert failed.outcome == "failure"      # from catalog default
-    assert failed.severity == "error"
-    assert failed.payload_json.get("error_code") == "boom"
+    receipts = [
+        event
+        for event in await runtime_store.audit_outbox.list_pending()
+        if event.subject_type == "job" and event.subject_id == "job-f"
+    ]
+    assert [event.action for event in receipts] == ["job.failed"]
+    assert receipts[0].outcome == "failure"
+    assert receipts[0].reason == "boom"
+    assert receipts[0].payload.get("error_code") == "boom"

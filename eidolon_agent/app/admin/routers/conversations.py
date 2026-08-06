@@ -36,7 +36,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from eidolon_agent.infra.observability import build_turn_observability_summary
-from eidolon_agent.infra.persistence import EidolonDataConversationReader
+from eidolon_agent.infra.persistence import AgentConversationReader
 
 router = APIRouter()
 
@@ -57,8 +57,7 @@ class TurnSummary(BaseModel):
     genome_id: str | None
     genome_hash: str | None
     trigger: str
-    caller_kind: str | None
-    runtime_caller_id: str | None
+    input_modality: str | None
     runtime_session_id: str | None
     device_id: str | None
     started_at: datetime
@@ -78,6 +77,25 @@ class ListTurnsResponse(BaseModel):
     turns: list[TurnSummary]
     # Cursor for the next page (oldest started_at in the current page);
     # null when ``len(turns) < limit`` i.e. last page reached.
+    next_before: datetime | None = None
+
+
+class ConversationSummary(BaseModel):
+    conversation_id: str
+    owner_id: str
+    companion_id: str
+    runtime_session_id: str | None = None
+    device_id: str | None = None
+    title: str | None = None
+    status: str
+    started_at: datetime
+    updated_at: datetime
+    ended_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ListConversationsResponse(BaseModel):
+    conversations: list[ConversationSummary]
     next_before: datetime | None = None
 
 
@@ -133,8 +151,7 @@ class TurnDetail(BaseModel):
     genome_id: str | None
     genome_hash: str | None
     trigger: str
-    caller_kind: str | None
-    runtime_caller_id: str | None
+    input_modality: str | None
     runtime_session_id: str | None
     device_id: str | None
     started_at: datetime
@@ -158,11 +175,48 @@ class TurnDetail(BaseModel):
 # ── endpoints ──────────────────────────────────────────────────────────────
 
 
-def _data_reader(request: Request) -> EidolonDataConversationReader:
-    data_store = getattr(request.app.state, "data_store", None)
-    if data_store is None:
-        raise HTTPException(503, "data_store not configured on admin app")
-    return EidolonDataConversationReader(data_store)
+def _runtime_reader(request: Request) -> AgentConversationReader:
+    runtime_store = getattr(request.app.state, "runtime_store", None)
+    if runtime_store is None:
+        raise HTTPException(503, "runtime_store not configured on admin app")
+    return AgentConversationReader(runtime_store)
+
+
+@router.get("/conversations", response_model=ListConversationsResponse)
+async def list_conversations(
+    request: Request,
+    owner_id: str | None = Query(default=None),
+    companion_id: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    before: datetime | None = Query(default=None),
+) -> ListConversationsResponse:
+    """Page of Agent-owned conversations for control-plane composition."""
+    rows = await _runtime_reader(request).list_conversations(
+        owner_id=owner_id,
+        companion_id=companion_id,
+        limit=limit,
+        before=before,
+    )
+    conversations = [
+        ConversationSummary(
+            conversation_id=row.conversation_id,
+            owner_id=row.owner_id,
+            companion_id=row.companion_id,
+            runtime_session_id=row.runtime_session_id,
+            device_id=row.source_device_id,
+            title=row.title,
+            status=row.status,
+            started_at=row.started_at,
+            updated_at=row.updated_at,
+            ended_at=row.ended_at,
+            metadata=dict(row.metadata_json or {}),
+        )
+        for row in rows
+    ]
+    return ListConversationsResponse(
+        conversations=conversations,
+        next_before=conversations[-1].updated_at if len(conversations) == limit else None,
+    )
 
 
 @router.get("/conversations/turns", response_model=ListTurnsResponse)
@@ -177,7 +231,7 @@ async def list_turns(
     ),
 ) -> ListTurnsResponse:
     """Page of turns, newest-first. Pure read; no side-effects."""
-    reader = _data_reader(request)
+    reader = _runtime_reader(request)
     rows = await reader.list_turns_by_owner(
         owner_id=owner_id,
         companion_id=companion_id,
@@ -196,8 +250,7 @@ async def list_turns(
             genome_id=r["genome_id"],
             genome_hash=r.get("genome_hash"),
             trigger=r["trigger"],
-            caller_kind=r["caller_kind"],
-            runtime_caller_id=r["runtime_caller_id"],
+            input_modality=r["input_modality"],
             runtime_session_id=r["runtime_session_id"],
             device_id=r["device_id"],
             started_at=r["started_at"],
@@ -233,7 +286,7 @@ async def list_memory_audit(
     before: datetime | None = Query(default=None),
 ) -> MemoryAuditResponse:
     """Prompt-safe memory write candidates from local turn traces."""
-    reader = _data_reader(request)
+    reader = _runtime_reader(request)
     rows = await reader.list_turns_by_owner(
         owner_id=owner_id,
         companion_id=companion_id,
@@ -246,7 +299,6 @@ async def list_memory_audit(
         write = trace.get("memory_write_trace") or {}
         if not write:
             continue
-        fanout = await _latest_memory_fanout_status(request, row["id"])
         out.append(
             MemoryAuditRow(
                 turn_id=row["id"],
@@ -263,40 +315,20 @@ async def list_memory_audit(
                 fanout_allowed=bool(write.get("fanout_allowed")),
                 skipped_reason=write.get("skipped_reason"),
                 privacy_mode=write.get("privacy_mode"),
-                fanout_publish_state=fanout.get("state") if fanout else None,
-                fanout_subject=fanout.get("subject") if fanout else None,
-                fanout_error=fanout.get("error") if fanout else None,
-                fanout_recorded_at=fanout.get("recorded_at") if fanout else None,
+                fanout_publish_state=None,
+                fanout_subject=None,
+                fanout_error=None,
+                fanout_recorded_at=None,
             )
         )
     next_before = out[-1].started_at if len(rows) == limit and out else None
     return MemoryAuditResponse(rows=out, next_before=next_before)
 
 
-async def _latest_memory_fanout_status(
-    request: Request, turn_id: str
-) -> dict[str, Any] | None:
-    data_store = getattr(request.app.state, "data_store", None)
-    if data_store is None:
-        return None
-    events = await data_store.events.list_for_subject(
-        subject_type="turn",
-        subject_id=turn_id,
-    )
-    matches = [
-        event
-        for event in events
-        if event.event_type == "eidolon.memory.fanout.status"
-    ]
-    if not matches:
-        return None
-    return dict(matches[-1].payload_json or {})
-
-
 @router.get("/conversations/turns/{turn_id}", response_model=TurnDetail)
 async def get_turn(turn_id: str, request: Request) -> TurnDetail:
     """One turn + its chat messages."""
-    reader = _data_reader(request)
+    reader = _runtime_reader(request)
     row = await reader.get_turn(turn_id)
     if row is None:
         raise HTTPException(404, f"turn {turn_id!r} not found")
@@ -314,8 +346,7 @@ async def get_turn(turn_id: str, request: Request) -> TurnDetail:
         genome_id=row["genome_id"],
         genome_hash=row.get("genome_hash"),
         trigger=row["trigger"],
-        caller_kind=row["caller_kind"],
-        runtime_caller_id=row["runtime_caller_id"],
+        input_modality=row["input_modality"],
         runtime_session_id=row["runtime_session_id"],
         device_id=row["device_id"],
         started_at=row["started_at"],

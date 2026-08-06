@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from eidolon_data import DataSettings, DataStore
 
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.long_task import (
@@ -20,14 +19,14 @@ from eidolon_agent.infra.long_tasks.mementos import (
     MementosLongTaskWorker,
     MementosWorkerConfig,
 )
-from eidolon_agent.infra.persistence import EidolonDataLongTaskStore
+from eidolon_agent.infra.persistence import AgentLongTaskStore, AgentRuntimeStore
 
 pytestmark = pytest.mark.asyncio
 
 
 async def test_worker_keeps_tool_path_to_accepted_then_completes(tmp_path) -> None:
-    data_store = await _data_store(tmp_path)
-    store = EidolonDataLongTaskStore(data_store)
+    runtime_store = await _runtime_store(tmp_path)
+    store = AgentLongTaskStore(runtime_store)
     client = _FakeMementosClient()
     worker = MementosLongTaskWorker(
         store=store,
@@ -50,7 +49,7 @@ async def test_worker_keeps_tool_path_to_accepted_then_completes(tmp_path) -> No
 
     completed = await store.get("task-1")
     await client.close()
-    await data_store.close()
+    await runtime_store.close()
 
     assert drained is True
     assert completed is not None
@@ -67,8 +66,8 @@ async def test_worker_keeps_tool_path_to_accepted_then_completes(tmp_path) -> No
 
 
 async def test_worker_publishes_proactive_report_on_success(tmp_path) -> None:
-    data_store = await _data_store(tmp_path)
-    store = EidolonDataLongTaskStore(data_store)
+    runtime_store = await _runtime_store(tmp_path)
+    store = AgentLongTaskStore(runtime_store)
     client = _FakeMementosClient()
     bus = InMemoryEventBus()
     received: list[Event] = []
@@ -108,7 +107,7 @@ async def test_worker_publishes_proactive_report_on_success(tmp_path) -> None:
 
     completed = await store.get("task-1")
     await client.close()
-    await data_store.close()
+    await runtime_store.close()
 
     assert completed is not None
     assert completed.callback_status is CallbackStatus.DELIVERED
@@ -120,8 +119,8 @@ async def test_worker_publishes_proactive_report_on_success(tmp_path) -> None:
 async def test_proactive_fallback_is_persona_framed_not_raw(tmp_path) -> None:
     """When the TTS summary fails, the proactive report must not dump raw
     output — PersonaVoice frames a clean fallback line instead."""
-    data_store = await _data_store(tmp_path)
-    store = EidolonDataLongTaskStore(data_store)
+    runtime_store = await _runtime_store(tmp_path)
+    store = AgentLongTaskStore(runtime_store)
     client = _FakeMementosClient()
     bus = InMemoryEventBus()
     received: list[Event] = []
@@ -146,7 +145,7 @@ async def test_proactive_fallback_is_persona_framed_not_raw(tmp_path) -> None:
     await asyncio.sleep(0)
 
     await client.close()
-    await data_store.close()
+    await runtime_store.close()
 
     assert len(received) == 1
     text = received[0].payload["text"]
@@ -156,8 +155,8 @@ async def test_proactive_fallback_is_persona_framed_not_raw(tmp_path) -> None:
 
 
 async def test_worker_skips_proactive_report_without_event_bus(tmp_path) -> None:
-    data_store = await _data_store(tmp_path)
-    store = EidolonDataLongTaskStore(data_store)
+    runtime_store = await _runtime_store(tmp_path)
+    store = AgentLongTaskStore(runtime_store)
     client = _FakeMementosClient()
     worker = MementosLongTaskWorker(
         store=store,
@@ -172,23 +171,16 @@ async def test_worker_skips_proactive_report_without_event_bus(tmp_path) -> None
 
     completed = await store.get("task-1")
     await client.close()
-    await data_store.close()
+    await runtime_store.close()
 
     assert completed is not None
     # No announcement claimed → callback stays pending.
     assert completed.callback_status is CallbackStatus.PENDING
 
 
-async def _data_store(tmp_path) -> DataStore:
-    store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
+async def _runtime_store(tmp_path) -> AgentRuntimeStore:
+    store = AgentRuntimeStore.open(tmp_path / "eidolon-agent.sqlite3")
     await store.init_schema()
-    await store.owner_service.create_owner(owner_id="alice", display_name="Alice")
-    await store.workspace_provisioning.provision_workspace(
-        owner_id="alice",
-        companion_id="companion-test",
-        genome_id="genome-test",
-        realm_id="realm-test",
-    )
     return store
 
 

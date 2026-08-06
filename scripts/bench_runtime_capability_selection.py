@@ -24,9 +24,9 @@ from eidolon_sdk.biz.body import BodyCapability, BodyCommandResult, BodyDevice
 from eidolon_agent.app.runtime.bootstrap import _build_llm_router
 from eidolon_agent.config import load_settings
 from eidolon_agent.core.ports.tool import ToolInvocationContext
-from eidolon_agent.core.types.identity import CallerContext, CallerKind, Identity
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.tool import ToolCall
+from eidolon_agent.core.types.turn_context import TurnContext
 from eidolon_agent.domain.tools.body_capability_provider import RuntimeCapabilityToolProvider
 
 
@@ -151,24 +151,15 @@ def _device(
     )
 
 
-def _caller(trace_id: str) -> CallerContext:
-    return CallerContext(
-        identity=Identity(
-            owner_id="benchmark-owner",
-            companion_id="box-companion",
-            device_id="box-3",
-            memory_realm_id="benchmark-memory",
-            genome_id="benchmark-genome",
-        ),
-        caller_kind=CallerKind.LIVEKIT_VOICE,
+def _context(trace_id: str) -> TurnContext:
+    return TurnContext(
+        owner_id="benchmark-owner",
+        companion_id="box-companion",
+        device_id="box-3",
+        memory_realm_id="benchmark-memory",
+        genome_id="benchmark-genome",
         trace_id=trace_id,
         request_id=trace_id,
-        runtime_caller_id="benchmark-caller",
-        runtime_session_id="benchmark-session",
-        actor_kind="device",
-        actor_id="box-3",
-        display_name="Benchmark Owner",
-        transport="livekit",
     )
 
 
@@ -240,7 +231,12 @@ async def _run_scenario(llm, schemas, ports, scenario: Scenario, repeat: int) ->
             if not errors and call.name in ports:
                 result = await ports[call.name].invoke(
                     call,
-                    ctx=ToolInvocationContext(caller=_caller(trace_id), turn_id=trace_id),
+                    ctx=ToolInvocationContext(
+                        turn_context=_context(trace_id),
+                        input_modality="voice",
+                        turn_id=trace_id,
+                        session_id="benchmark-session",
+                    ),
                 )
                 if not result.ok:
                     errors.append(f"tool execution failed: {result.error_code}")
@@ -300,7 +296,7 @@ async def main() -> int:
         raise RuntimeError("live capability selection gate requires a configured real LLM")
     body = _RuntimeBody()
     schemas, ports = await RuntimeCapabilityToolProvider(body).assemble(
-        _caller("capability-selection-assembly")
+        _context("capability-selection-assembly")
     )
     rows = []
     try:

@@ -6,44 +6,36 @@ from pathlib import Path
 
 import httpx
 import pytest
-from eidolon_data import DataSettings, DataStore
 from fastapi import FastAPI
 
 from eidolon_agent.app.admin.routers import long_tasks as long_tasks_router
 from eidolon_agent.core.types.long_task import LongTaskRecord, LongTaskStatus
-from eidolon_agent.infra.persistence import EidolonDataLongTaskStore
+from eidolon_agent.infra.persistence import AgentLongTaskStore, AgentRuntimeStore
 
 pytestmark = pytest.mark.functional
 
 
 async def _fresh_app(
     tmp_path: Path,
-) -> tuple[httpx.AsyncClient, DataStore]:
-    store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
+) -> tuple[httpx.AsyncClient, AgentRuntimeStore]:
+    store = AgentRuntimeStore.open(tmp_path / "eidolon-agent.sqlite3")
     await store.init_schema()
     app = FastAPI()
-    app.state.data_store = store
+    app.state.runtime_store = store
     app.include_router(long_tasks_router.router, prefix="/api/admin")
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t")
     return client, store
 
 
 async def _seed_task(
-    store: DataStore,
+    store: AgentRuntimeStore,
     *,
     task_id: str,
     owner_id: str,
     status: LongTaskStatus = LongTaskStatus.ACCEPTED,
     task_type: str = "research",
 ) -> None:
-    await store.owner_service.create_owner(owner_id=owner_id, display_name=owner_id)
-    await store.workspace_provisioning.provision_workspace(
-        owner_id=owner_id,
-        companion_id=f"agent-{owner_id}",
-        genome_id=f"genome-{owner_id}",
-        realm_id=f"realm-{owner_id}",
-    )
-    task_store = EidolonDataLongTaskStore(store)
+    task_store = AgentLongTaskStore(store)
     await task_store.create(
         LongTaskRecord(
             id=task_id,
@@ -143,7 +135,7 @@ async def test_get_long_task_returns_404_for_unknown_id(tmp_path) -> None:
         await store.close()
 
 
-async def test_list_long_tasks_503_when_data_store_missing() -> None:
+async def test_list_long_tasks_503_when_runtime_store_missing() -> None:
     app = FastAPI()
     app.include_router(long_tasks_router.router, prefix="/api/admin")
     transport = httpx.ASGITransport(app=app)
