@@ -29,8 +29,7 @@ def build_realtime_benchmark_report(
 ) -> dict[str, Any]:
     generated_at = generated_at or datetime.now(timezone.utc)
     metrics = {
-        field: _latency_stats([turn.get(field) for turn in turns])
-        for field in _LATENCY_FIELDS
+        field: _latency_stats([turn.get(field) for turn in turns]) for field in _LATENCY_FIELDS
     }
     failed_turns = [turn for turn in turns if not turn.get("passed", True)]
     failed_checks = [
@@ -103,9 +102,7 @@ def build_realtime_benchmark_report(
             report,
             baseline_report=baseline_report,
             max_regression_ms=int(thresholds.get("baseline_max_regression_ms", 150)),
-            max_regression_ratio=float(
-                thresholds.get("baseline_max_regression_ratio", 0.25)
-            ),
+            max_regression_ratio=float(thresholds.get("baseline_max_regression_ratio", 0.25)),
         )
         if report["baseline"]["regressed"]:
             report["passed"] = False
@@ -113,7 +110,9 @@ def build_realtime_benchmark_report(
     return report
 
 
-def normalize_experience_report(report: dict[str, Any], *, mode: str) -> tuple[list[dict], list[dict]]:
+def normalize_experience_report(
+    report: dict[str, Any], *, mode: str
+) -> tuple[list[dict], list[dict]]:
     scenarios: list[dict[str, Any]] = []
     turns: list[dict[str, Any]] = []
     for scenario in report.get("scenarios") or []:
@@ -147,7 +146,9 @@ def normalize_experience_report(report: dict[str, Any], *, mode: str) -> tuple[l
     return scenarios, turns
 
 
-def normalize_live_service_report(report: dict[str, Any], *, mode: str) -> tuple[list[dict], list[dict]]:
+def normalize_live_service_report(
+    report: dict[str, Any], *, mode: str
+) -> tuple[list[dict], list[dict]]:
     scenarios: list[dict[str, Any]] = []
     turns: list[dict[str, Any]] = []
     for scenario in report.get("scenarios") or []:
@@ -160,10 +161,7 @@ def normalize_live_service_report(report: dict[str, Any], *, mode: str) -> tuple
                 "context": {
                     "segments": (obs.get("context") or {}).get("segment_kinds") or [],
                     "dropped": (obs.get("context") or {}).get("dropped_kinds") or [],
-                    "degraded_sources": (obs.get("context") or {}).get(
-                        "degraded_sources"
-                    )
-                    or [],
+                    "degraded_sources": (obs.get("context") or {}).get("degraded_sources") or [],
                 },
                 "memory_recall": obs.get("memory") or {},
                 "memory_write": obs.get("memory_write") or {},
@@ -335,11 +333,7 @@ def _diagnosis_categories(
     for check in failed_thresholds:
         metric = str(check.get("metric") or "")
         category = "latency_first_delta" if metric == "first_delta_ms" else "latency_total"
-        summary = (
-            "首响延迟超过阈值"
-            if category == "latency_first_delta"
-            else "总耗时超过阈值"
-        )
+        summary = "首响延迟超过阈值" if category == "latency_first_delta" else "总耗时超过阈值"
         add(
             category,
             summary,
@@ -365,9 +359,8 @@ def _diagnosis_categories(
     for item in failed_checks:
         name = str(item.get("name") or "")
         detail = str(item.get("detail") or "")
-        evidence = (
-            f"{item.get('scenario_id')} / {item.get('turn_id')} / {name}"
-            + (f" ({detail})" if detail else "")
+        evidence = f"{item.get('scenario_id')} / {item.get('turn_id')} / {name}" + (
+            f" ({detail})" if detail else ""
         )
         add(_failure_category(name), _failure_summary(name), evidence)
 
@@ -394,9 +387,10 @@ def _diagnosis_categories(
         "other": 8,
     }
     for bucket in buckets.values():
-        if bucket["category"] in {"startup", "baseline_regression", "privacy_memory"}:
-            bucket["severity"] = "high"
-        elif bucket["count"] >= 3:
+        if (
+            bucket["category"] in {"startup", "baseline_regression", "privacy_memory"}
+            or bucket["count"] >= 3
+        ):
             bucket["severity"] = "high"
     return sorted(
         buckets.values(),
@@ -457,13 +451,10 @@ def _scenario_breakdown(
         ]
         if not failed_turns and not scenario_checks and scenario.get("passed", True):
             continue
-        first_values = [
-            _number_or_none(turn.get("first_delta_ms")) for turn in turns
-        ]
+        first_values = [_number_or_none(turn.get("first_delta_ms")) for turn in turns]
         total_values = [_number_or_none(turn.get("total_ms")) for turn in turns]
         failed_names = [
-            str(item.get("name") or "")
-            for item in checks_by_scenario.get(scenario_id, [])
+            str(item.get("name") or "") for item in checks_by_scenario.get(scenario_id, [])
         ] + [str(item.get("name") or "") for item in scenario_checks]
         breakdown.append(
             {
@@ -509,21 +500,37 @@ def _diagnosis_recommendations(categories: list[dict[str, Any]]) -> list[str]:
     category_ids = {item.get("category") for item in categories}
     recommendations = []
     if "startup" in category_ids:
-        recommendations.append("先检查 agent/admin/memory 服务健康、端口和 pairing 路径，确保没有 startup failure。")
+        recommendations.append(
+            "先检查 agent/system-data/memory 服务健康、端口和 runtime authority 路径，确保没有 startup failure。"
+        )
     if "latency_first_delta" in category_ids:
-        recommendations.append("优先看首响链路：LLM 首 token、memory recall、context 构建、tool 决策是否阻塞首包。")
+        recommendations.append(
+            "优先看首响链路：LLM 首 token、memory recall、context 构建、tool 决策是否阻塞首包。"
+        )
     if "latency_total" in category_ids:
-        recommendations.append("检查总耗时：工具二跳、长输出、memory write fanout、consolidator 或外部 API 等尾部耗时。")
+        recommendations.append(
+            "检查总耗时：工具二跳、长输出、memory write fanout、consolidator 或外部 API 等尾部耗时。"
+        )
     if "behavior_expectation" in category_ids:
-        recommendations.append("对失败 fixture 回看 assistant_preview 和 trace，判断是 prompt/记忆召回/期望本身需要调整。")
+        recommendations.append(
+            "对失败 fixture 回看 assistant_preview 和 trace，判断是 prompt/记忆召回/期望本身需要调整。"
+        )
     if "privacy_memory" in category_ids:
-        recommendations.append("重点检查 private/temporary/forget 的 history 与 memory 过滤，避免禁词从历史或记忆块回流。")
+        recommendations.append(
+            "重点检查 private/temporary/forget 的 history 与 memory 过滤，避免禁词从历史或记忆块回流。"
+        )
     if "tool_behavior" in category_ids:
-        recommendations.append("核对工具注册、权限策略和模型 tool choice；确认 fixture 预期与当前开发配置一致。")
+        recommendations.append(
+            "核对工具注册、权限策略和模型 tool choice；确认 fixture 预期与当前开发配置一致。"
+        )
     if "context_memory" in category_ids:
-        recommendations.append("检查 context segment、memory write disposition、budget shadow 配置与 trace summary。")
+        recommendations.append(
+            "检查 context segment、memory write disposition、budget shadow 配置与 trace summary。"
+        )
     if "baseline_regression" in category_ids:
-        recommendations.append("对比 baseline 的慢 turn 和当前慢 turn，确认是模型/网络波动还是代码路径回退。")
+        recommendations.append(
+            "对比 baseline 的慢 turn 和当前慢 turn，确认是模型/网络波动还是代码路径回退。"
+        )
     return recommendations or ["当前报告没有明显失败原因；可继续观察趋势或引入 baseline 对比。"]
 
 
@@ -550,7 +557,15 @@ def _diagnosis_markdown(diagnosis: dict[str, Any]) -> list[str]:
     lines = ["", "## Diagnosis", "", diagnosis.get("headline") or ""]
     causes = diagnosis.get("top_causes") or []
     if causes:
-        lines.extend(["", "### Top Causes", "", "| category | severity | count | summary | evidence |", "|---|---|---:|---|---|"])
+        lines.extend(
+            [
+                "",
+                "### Top Causes",
+                "",
+                "| category | severity | count | summary | evidence |",
+                "|---|---|---:|---|---|",
+            ]
+        )
         for item in causes:
             evidence = "<br>".join(str(part) for part in (item.get("evidence") or [])[:3])
             lines.append(
@@ -559,7 +574,15 @@ def _diagnosis_markdown(diagnosis: dict[str, Any]) -> list[str]:
             )
     scenarios = diagnosis.get("scenario_breakdown") or []
     if scenarios:
-        lines.extend(["", "### Scenario Breakdown", "", "| scenario | failed turns | failed checks | max first | max total | reasons | examples |", "|---|---:|---:|---:|---:|---|---|"])
+        lines.extend(
+            [
+                "",
+                "### Scenario Breakdown",
+                "",
+                "| scenario | failed turns | failed checks | max first | max total | reasons | examples |",
+                "|---|---:|---:|---:|---:|---|---|",
+            ]
+        )
         for item in scenarios:
             lines.append(
                 f"| {item.get('scenario_id')} | {item.get('failed_turn_count')} | "
@@ -601,6 +624,8 @@ def _diagnosis_html(diagnosis: dict[str, Any]) -> str:
         for item in scenarios
     )
     recommendation_items = "".join(f"<li>{_h(item)}</li>" for item in recommendations)
+    empty_cause_rows = '<tr><td colspan="5" class="subtle">None</td></tr>'
+    empty_scenario_rows = '<tr><td colspan="6" class="subtle">None</td></tr>'
     return (
         '<section class="diagnosis">'
         "<h2>Diagnosis</h2>"
@@ -608,11 +633,11 @@ def _diagnosis_html(diagnosis: dict[str, Any]) -> str:
         "<h3>Top Causes</h3>"
         "<table><thead><tr><th>Category</th><th>Severity</th><th>Count</th>"
         "<th>Summary</th><th>Evidence</th></tr></thead>"
-        f"<tbody>{cause_rows or '<tr><td colspan=\"5\" class=\"subtle\">None</td></tr>'}</tbody></table>"
+        f"<tbody>{cause_rows or empty_cause_rows}</tbody></table>"
         "<h3>Scenario Breakdown</h3>"
         "<table><thead><tr><th>Scenario</th><th>Failed Turns</th><th>Failed Checks</th>"
         "<th>Max First</th><th>Max Total</th><th>Reasons</th></tr></thead>"
-        f"<tbody>{scenario_rows or '<tr><td colspan=\"6\" class=\"subtle\">None</td></tr>'}</tbody></table>"
+        f"<tbody>{scenario_rows or empty_scenario_rows}</tbody></table>"
         "<h3>Recommendations</h3>"
         f"<ul>{recommendation_items}</ul>"
         "</section>"
@@ -652,7 +677,15 @@ def render_benchmark_markdown(report: dict[str, Any]) -> str:
         text = str(llm_summary.get("text") or llm_summary.get("error") or "").strip()
         if text:
             lines.extend([text, ""])
-    lines.extend(["", "## Latency Metrics", "", "| metric | count | p50 | p95 | p99 | max | mean |", "|---|---:|---:|---:|---:|---:|---:|"])
+    lines.extend(
+        [
+            "",
+            "## Latency Metrics",
+            "",
+            "| metric | count | p50 | p95 | p99 | max | mean |",
+            "|---|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
     for field in _LATENCY_FIELDS:
         stat = metrics.get(field) or {}
         lines.append(
@@ -670,7 +703,9 @@ def render_benchmark_markdown(report: dict[str, Any]) -> str:
             )
             + " |"
         )
-    lines.extend(["", "## Thresholds", "", "| check | passed | actual | threshold |", "|---|---:|---:|---:|"])
+    lines.extend(
+        ["", "## Thresholds", "", "| check | passed | actual | threshold |", "|---|---:|---:|---:|"]
+    )
     for check in report.get("threshold_checks") or []:
         lines.append(
             f"| {check.get('name')} | {check.get('passed')} | "
@@ -678,7 +713,17 @@ def render_benchmark_markdown(report: dict[str, Any]) -> str:
         )
     baseline = report.get("baseline")
     if baseline:
-        lines.extend(["", "## Baseline Comparison", "", f"- regressed: `{baseline.get('regressed')}`", "", "| metric | stat | baseline | current | delta | ratio | regressed |", "|---|---|---:|---:|---:|---:|---:|"])
+        lines.extend(
+            [
+                "",
+                "## Baseline Comparison",
+                "",
+                f"- regressed: `{baseline.get('regressed')}`",
+                "",
+                "| metric | stat | baseline | current | delta | ratio | regressed |",
+                "|---|---|---:|---:|---:|---:|---:|",
+            ]
+        )
         for item in baseline.get("comparisons") or []:
             lines.append(
                 f"| {item['metric']} | {item['stat']} | {_fmt_ms(item['baseline'])} | "
@@ -693,13 +738,31 @@ def render_benchmark_markdown(report: dict[str, Any]) -> str:
         )
     failed = report.get("failed_checks") or []
     if failed:
-        lines.extend(["", "## Failed Checks", "", "| scenario | turn | check | detail |", "|---|---|---|---|"])
+        lines.extend(
+            [
+                "",
+                "## Failed Checks",
+                "",
+                "| scenario | turn | check | detail |",
+                "|---|---|---|---|",
+            ]
+        )
         for item in failed:
             lines.append(
                 f"| {item.get('scenario_id')} | {item.get('turn_id')} | "
                 f"{item.get('name')} | {item.get('detail') or ''} |"
             )
-    lines.extend(["", "## Admin Read Contract", "", "- List: `GET /api/admin/reports?kind=realtime`", "- Detail: `GET /api/admin/reports/realtime/<filename>.json`", "- Primary chart data: `payload.metrics`, `payload.turns`, `payload.scenarios`, `payload.baseline`.", ""])
+    lines.extend(
+        [
+            "",
+            "## Admin Read Contract",
+            "",
+            "- List: `GET /api/admin/reports?kind=realtime`",
+            "- Detail: `GET /api/admin/reports/realtime/<filename>.json`",
+            "- Primary chart data: `payload.metrics`, `payload.turns`, `payload.scenarios`, `payload.baseline`.",
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -708,7 +771,10 @@ def render_benchmark_html(report: dict[str, Any]) -> str:
     turns = report.get("turns") or []
     max_total = max([_number_or_none(t.get("total_ms")) or 0 for t in turns] or [1])
     rows = "\n".join(_turn_row_html(turn, max_total=max_total) for turn in turns)
-    cards = "\n".join(_metric_card_html(name, report.get("metrics", {}).get(name) or {}) for name in _LATENCY_FIELDS)
+    cards = "\n".join(
+        _metric_card_html(name, report.get("metrics", {}).get(name) or {})
+        for name in _LATENCY_FIELDS
+    )
     diagnosis_html = _diagnosis_html(report.get("diagnosis") or build_benchmark_diagnosis(report))
     summary_html = _llm_summary_html(report.get("llm_summary") or {})
     failed = report.get("failed_checks") or []
@@ -749,7 +815,7 @@ def render_benchmark_html(report: dict[str, Any]) -> str:
 </head>
 <body>
   <h1>{_h(title)}</h1>
-  <div class="meta">mode={_h(report.get('mode'))} profile={_h(report.get('profile'))} generated={_h(report.get('generated_at'))} passed=<b class="{ 'pass' if report.get('passed') else 'fail' }">{_h(report.get('passed'))}</b></div>
+  <div class="meta">mode={_h(report.get("mode"))} profile={_h(report.get("profile"))} generated={_h(report.get("generated_at"))} passed=<b class="{"pass" if report.get("passed") else "fail"}">{_h(report.get("passed"))}</b></div>
   {diagnosis_html}
   {summary_html}
   <div class="cards">{cards}</div>
@@ -980,8 +1046,7 @@ def _threshold_checks(metrics: dict[str, Any], thresholds: dict[str, Any]) -> li
 def _dimension_metrics(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out = [{"name": "all", "filters": {}, "metrics": {}}]
     out[0]["metrics"] = {
-        field: _latency_stats([turn.get(field) for turn in turns])
-        for field in _LATENCY_FIELDS
+        field: _latency_stats([turn.get(field) for turn in turns]) for field in _LATENCY_FIELDS
     }
     scenario_ids = sorted({str(turn.get("scenario_id")) for turn in turns})
     for scenario_id in scenario_ids:
@@ -1004,7 +1069,7 @@ def _metric_card_html(name: str, stat: dict[str, Any]) -> str:
         '<div class="card">'
         f"<b>{_h(name)} p95</b>"
         f"<span>{_fmt_ms(stat.get('p95'))}</span>"
-        f"<div class=\"subtle\">p50 {_fmt_ms(stat.get('p50'))} / p99 {_fmt_ms(stat.get('p99'))}</div>"
+        f'<div class="subtle">p50 {_fmt_ms(stat.get("p50"))} / p99 {_fmt_ms(stat.get("p99"))}</div>'
         "</div>"
     )
 
@@ -1017,9 +1082,7 @@ def _llm_summary_html(summary: dict[str, Any]) -> str:
         return ""
     status = summary.get("status") or "unknown"
     model = summary.get("model_id") or summary.get("requested_model") or ""
-    paragraphs = "".join(
-        f"<p>{_h(part)}</p>" for part in re_split_paragraphs(text)
-    )
+    paragraphs = "".join(f"<p>{_h(part)}</p>" for part in re_split_paragraphs(text))
     return (
         '<section class="card" style="margin-bottom:24px">'
         f"<b>LLM Summary · {_h(status)} · {_h(model)}</b>"
@@ -1043,12 +1106,12 @@ def _turn_row_html(turn: dict[str, Any], *, max_total: int) -> str:
         "<tr>"
         f"<td>{_h(turn.get('scenario_id'))}</td>"
         f"<td>{_h(turn.get('logical_turn_id') or turn.get('turn_id'))}</td>"
-        f"<td class=\"{status_class}\">{status}</td>"
+        f'<td class="{status_class}">{status}</td>'
         f"<td>{_fmt_ms(turn.get('first_delta_ms'))}</td>"
         f"<td>{_fmt_ms(turn.get('total_ms'))}</td>"
         "<td>"
-        f"<div class=\"bar\"><span style=\"width:{total_width}%\"></span></div>"
-        f"<div class=\"bar\" style=\"margin-top:3px\"><span class=\"first\" style=\"width:{first_width}%\"></span></div>"
+        f'<div class="bar"><span style="width:{total_width}%"></span></div>'
+        f'<div class="bar" style="margin-top:3px"><span class="first" style="width:{first_width}%"></span></div>'
         "</td>"
         "</tr>"
     )

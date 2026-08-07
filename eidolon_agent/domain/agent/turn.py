@@ -946,7 +946,10 @@ class TurnEngine:
         if self._companion_config is None:
             return CompanionRuntimeConfig()
         try:
-            return await self._companion_config.resolve(ti.context.companion_id)
+            return await self._companion_config.resolve(
+                ti.context.owner_id,
+                ti.context.companion_id,
+            )
         except Exception as exc:
             _log.warning("companion config resolve failed: %s", exc)
             return CompanionRuntimeConfig()

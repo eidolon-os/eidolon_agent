@@ -22,7 +22,7 @@ from eidolon_sdk.biz.runtime import (
 )
 from fastapi import FastAPI
 
-from eidolon_agent.app.admin.routers import devices as devices_router
+from eidolon_agent.app.admin.routers import owner_runtime as owner_runtime_router
 from eidolon_agent.infra.persistence.runtime_store import (
     AgentRuntimeStore,
     ConversationRow,
@@ -41,9 +41,7 @@ def _sign_device_token(*, device_id: str, **kwargs):
     return sign_runtime_token(
         secret=SECRET,
         device_id=device_id,
-        schema_version=kwargs.pop("schema_version", "eidolon.persona_genome"),
-        genome_hash=kwargs.pop("genome_hash", "pg_revoke_test"),
-        realizer_version=kwargs.pop("realizer_version", "eidolon.persona_realizer"),
+        ttl_seconds=kwargs.pop("ttl_seconds", 3600),
         **kwargs,
     )
 
@@ -72,7 +70,7 @@ class _FakeKV:
 
 def _build_test_app(kv: _FakeKV) -> FastAPI:
     app = FastAPI()
-    app.include_router(devices_router.router, prefix="/api/admin")
+    app.include_router(owner_runtime_router.router, prefix="/api/admin")
     app.state.revocation_kv = kv
     return app
 
@@ -179,7 +177,7 @@ async def test_revoke_owner_sessions_503_when_kv_missing() -> None:
     """If the bucket wasn't initialized at startup (NATS down at boot,
     say), the endpoint must report 503 — not silently succeed."""
     app = FastAPI()
-    app.include_router(devices_router.router, prefix="/api/admin")
+    app.include_router(owner_runtime_router.router, prefix="/api/admin")
     # NOT setting app.state.revocation_kv on purpose
 
     async with httpx.AsyncClient(
@@ -202,8 +200,6 @@ async def test_verifier_rejects_token_after_owner_revoke() -> None:
         device_id="web-abc12345",
         owner_id="manson",
         companion_id="companion-a",
-        memory_realm_id="realm-a",
-        genome_id="genome-a",
         scopes=["device"],
     )
     # Sanity: works pre-revoke.
@@ -229,13 +225,15 @@ async def test_verifier_owner_revoke_does_not_affect_other_owners() -> None:
     verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
 
     manson_token, _ = _sign_device_token(
-        device_id="web-1", owner_id="manson",
-        companion_id="companion-a", memory_realm_id="realm-a", genome_id="genome-a",
+        device_id="web-1",
+        owner_id="manson",
+        companion_id="companion-a",
         scopes=["device"],
     )
     default_token, _ = _sign_device_token(
-        device_id="web-2", owner_id="default",
-        companion_id="companion-b", memory_realm_id="realm-b", genome_id="genome-b",
+        device_id="web-2",
+        owner_id="default",
+        companion_id="companion-b",
         scopes=["device"],
     )
 
@@ -260,8 +258,9 @@ async def test_verifier_device_level_revoke_still_works() -> None:
     verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
 
     token, _ = _sign_device_token(
-        device_id="dev-x", owner_id="alice",
-        companion_id="companion-a", memory_realm_id="realm-a", genome_id="genome-a",
+        device_id="dev-x",
+        owner_id="alice",
+        companion_id="companion-a",
         scopes=["device"],
     )
 
@@ -281,8 +280,6 @@ async def test_verifier_accepts_mac_device_id_without_invalid_kv_key() -> None:
         device_id="1c:db:d4:7a:ef:0c",
         owner_id="alice",
         companion_id="companion-a",
-        memory_realm_id="realm-a",
-        genome_id="genome-a",
         scopes=["device"],
     )
 
@@ -299,8 +296,6 @@ async def test_verifier_rejects_mac_device_id_with_encoded_revocation_key() -> N
         device_id=device_id,
         owner_id="alice",
         companion_id="companion-a",
-        memory_realm_id="realm-a",
-        genome_id="genome-a",
         scopes=["device"],
     )
     await kv.put(device_revocation_keys(device_id)[0], b"manual-test")

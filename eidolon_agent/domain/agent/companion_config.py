@@ -1,4 +1,4 @@
-"""Per-companion runtime configuration (``companions.runtime_config_json``).
+"""Per-companion operational configuration from the Runtime Authority port.
 
 The single agent codebase is differentiated per companion by three layers:
 its persona genome (personality/prompt), its memory realm, and its *operational*
@@ -71,45 +71,57 @@ def _str_set(value: object) -> frozenset[str]:
 class CompanionConfigResolver:
     """Resolve ``CompanionRuntimeConfig`` per companion, TTL-cached.
 
-    Reads ``companions.runtime_config_json`` from eidolon_data. The per-companion
+    Reads the versioned System Data runtime snapshot. The per-companion
     ``TurnEngine`` is cached with no eviction, so config is resolved *per turn*
     through this cache (default 5s TTL) — admin edits land within the TTL without
     a process restart, and a DB hit only happens on a cache miss (off the hot path
     otherwise).
     """
 
-    def __init__(self, data_store: object, *, ttl_s: float = 5.0) -> None:
-        self._data_store = data_store
+    def __init__(self, runtime_authority: object, *, ttl_s: float = 5.0) -> None:
+        self._runtime_authority = runtime_authority
         self._ttl_s = ttl_s
-        self._cache: dict[str, tuple[float, CompanionRuntimeConfig]] = {}
+        self._cache: dict[tuple[str, str], tuple[float, CompanionRuntimeConfig]] = {}
 
-    async def resolve(self, companion_id: str | None) -> CompanionRuntimeConfig:
-        if not companion_id:
+    async def resolve(
+        self,
+        owner_id: str | None,
+        companion_id: str | None,
+    ) -> CompanionRuntimeConfig:
+        if not owner_id or not companion_id:
             return CompanionRuntimeConfig()
+        key = (owner_id, companion_id)
         now = time.monotonic()
-        hit = self._cache.get(companion_id)
+        hit = self._cache.get(key)
         if hit is not None and (now - hit[0]) < self._ttl_s:
             return hit[1]
-        cfg = await self._fetch(companion_id)
-        self._cache[companion_id] = (now, cfg)
+        cfg = await self._fetch(owner_id, companion_id)
+        self._cache[key] = (now, cfg)
         return cfg
 
-    async def _fetch(self, companion_id: str) -> CompanionRuntimeConfig:
-        companions = getattr(self._data_store, "companions", None)
-        get = getattr(companions, "get", None)
-        if get is None:
-            return CompanionRuntimeConfig()
+    async def _fetch(self, owner_id: str, companion_id: str) -> CompanionRuntimeConfig:
         try:
-            row = await get(companion_id)
+            facts = await self._runtime_authority.resolve(
+                owner_id=owner_id,
+                companion_id=companion_id,
+            )
         except Exception as exc:  # config must never break a turn
             _log.warning("companion runtime_config fetch failed for %s: %s", companion_id, exc)
             return CompanionRuntimeConfig()
-        if row is None:
-            return CompanionRuntimeConfig()
-        return CompanionRuntimeConfig.parse(getattr(row, "runtime_config_json", None))
+        return CompanionRuntimeConfig.parse(facts.runtime_config)
 
-    def invalidate(self, companion_id: str | None = None) -> None:
-        if companion_id is None:
+    def invalidate(
+        self,
+        *,
+        owner_id: str | None = None,
+        companion_id: str | None = None,
+    ) -> None:
+        if owner_id is None and companion_id is None:
             self._cache.clear()
-        else:
-            self._cache.pop(companion_id, None)
+            return
+        for key in list(self._cache):
+            if owner_id is not None and key[0] != owner_id:
+                continue
+            if companion_id is not None and key[1] != companion_id:
+                continue
+            self._cache.pop(key, None)

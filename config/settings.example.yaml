@@ -72,6 +72,13 @@ observability:
   log_json: true
   log_dir: ~/eidolon/logs/agent
 
+system_data:
+  # Data Companion Runtime Authority; no direct System Data SQLite reads in production.
+  base_url: http://127.0.0.1:8084
+  service_token_env: EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN
+  timeout_s: 5.0
+  connect_timeout_s: 2.0
+
 runtime_token:
   jwt_secret: PAIRING_JWT_SECRET
   jwt_algorithm: HS256

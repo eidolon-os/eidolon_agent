@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from eidolon_agent.domain.agent.companion_config import (
     CompanionConfigResolver,
     CompanionRuntimeConfig,
@@ -43,55 +45,48 @@ def test_parse_is_defensive_about_bad_types():
     assert cfg.max_tool_iters is None
 
 
-class _Row:
-    def __init__(self, runtime_config_json):
-        self.runtime_config_json = runtime_config_json
-
-
-class _Companions:
-    def __init__(self, rows):
-        self._rows = rows
+class _RuntimeAuthority:
+    def __init__(self, configs):
+        self._configs = configs
         self.calls = 0
 
-    async def get(self, companion_id):
+    async def resolve(self, *, owner_id, companion_id):
         self.calls += 1
-        return self._rows.get(companion_id)
-
-
-class _DataStore:
-    def __init__(self, rows):
-        self.companions = _Companions(rows)
+        if companion_id not in self._configs:
+            raise KeyError(companion_id)
+        return SimpleNamespace(
+            owner_id=owner_id,
+            companion_id=companion_id,
+            runtime_config=self._configs[companion_id],
+        )
 
 
 async def test_resolver_reads_then_caches_then_invalidates():
-    ds = _DataStore({"c1": _Row({"model": "m1"})})
-    resolver = CompanionConfigResolver(ds, ttl_s=100.0)
+    authority = _RuntimeAuthority({"c1": {"model": "m1"}})
+    resolver = CompanionConfigResolver(authority, ttl_s=100.0)
 
-    first = await resolver.resolve("c1")
-    second = await resolver.resolve("c1")
+    first = await resolver.resolve("owner-1", "c1")
+    second = await resolver.resolve("owner-1", "c1")
     assert first.model == "m1"
     assert second is first  # cache returns the same resolved config object
-    assert ds.companions.calls == 1  # second served from cache
+    assert authority.calls == 1  # second served from cache
 
-    resolver.invalidate("c1")
-    await resolver.resolve("c1")
-    assert ds.companions.calls == 2  # re-fetched after invalidate
+    resolver.invalidate(owner_id="owner-1", companion_id="c1")
+    await resolver.resolve("owner-1", "c1")
+    assert authority.calls == 2  # re-fetched after invalidate
 
 
 async def test_resolver_handles_none_id_and_missing_companion():
-    ds = _DataStore({})
-    resolver = CompanionConfigResolver(ds)
-    assert await resolver.resolve(None) == CompanionRuntimeConfig()
-    assert await resolver.resolve("missing") == CompanionRuntimeConfig()
+    resolver = CompanionConfigResolver(_RuntimeAuthority({}))
+    assert await resolver.resolve(None, None) == CompanionRuntimeConfig()
+    assert await resolver.resolve("owner-1", "missing") == CompanionRuntimeConfig()
 
 
 async def test_resolver_never_raises_on_store_error():
-    class _BadCompanions:
-        async def get(self, companion_id):
+    class _BadAuthority:
+        async def resolve(self, *, owner_id, companion_id):
+            del owner_id, companion_id
             raise RuntimeError("db down")
 
-    class _BadStore:
-        companions = _BadCompanions()
-
-    resolver = CompanionConfigResolver(_BadStore())
-    assert await resolver.resolve("c1") == CompanionRuntimeConfig()
+    resolver = CompanionConfigResolver(_BadAuthority())
+    assert await resolver.resolve("owner-1", "c1") == CompanionRuntimeConfig()

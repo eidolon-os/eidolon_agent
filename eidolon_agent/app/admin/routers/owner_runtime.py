@@ -1,4 +1,4 @@
-"""Admin: device list / revoke (revocation propagates via NATS KV)."""
+"""Owner-scoped Agent runtime revocation and deletion endpoints."""
 
 from __future__ import annotations
 
@@ -9,26 +9,6 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
 router = APIRouter()
-
-
-class DeviceInfo(BaseModel):
-    id: str
-    owner_id: str
-    companion_id: str | None = None
-    name: str | None
-    revoked: bool
-
-
-@router.get("/devices", response_model=list[DeviceInfo])
-async def list_devices(request: Request):
-    # Real impl reads from SQLite DeviceRepository via UoW. Skeleton returns [].
-    return []
-
-
-@router.delete("/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def revoke_device(device_id: str, request: Request):
-    # Real impl: DeviceRepository.revoke + KV put on bucket DEVICE_REVOCATIONS.
-    return None
 
 
 class RevokeOwnerSessionsResponse(BaseModel):
@@ -48,8 +28,11 @@ class DeleteOwnerDataResponse(BaseModel):
     response_model=RevokeOwnerSessionsResponse,
     status_code=status.HTTP_200_OK,
 )
-async def revoke_owner_sessions(owner_id: str, request: Request) -> RevokeOwnerSessionsResponse:
-    """Invalidate all active runtime tokens for an owner boundary."""
+async def revoke_owner_sessions(
+    owner_id: str,
+    request: Request,
+) -> RevokeOwnerSessionsResponse:
+    """Invalidate active Agent runtime tokens for one Owner namespace."""
     kv = getattr(request.app.state, "revocation_kv", None)
     if kv is None:
         raise HTTPException(
@@ -59,8 +42,6 @@ async def revoke_owner_sessions(owner_id: str, request: Request) -> RevokeOwnerS
                 "bucket failed to initialize at startup"
             ),
         )
-    # Value can be anything truthy — verifier just checks key existence.
-    # Store the timestamp for ops-side audit ("when was this revoked").
     timestamp = datetime.now(timezone.utc).isoformat()
     for key in owner_revocation_keys(owner_id):
         await kv.put(key, timestamp.encode("utf-8"))
@@ -72,8 +53,11 @@ async def revoke_owner_sessions(owner_id: str, request: Request) -> RevokeOwnerS
     response_model=DeleteOwnerDataResponse,
     status_code=status.HTTP_200_OK,
 )
-async def delete_owner_data(owner_id: str, request: Request) -> DeleteOwnerDataResponse:
-    """Hard-delete Agent-owned runtime rows for one owner.
+async def delete_owner_data(
+    owner_id: str,
+    request: Request,
+) -> DeleteOwnerDataResponse:
+    """Hard-delete Agent-owned runtime rows for one Owner.
 
     System Data is a separate authority and is never mutated by this endpoint.
     """
@@ -83,12 +67,8 @@ async def delete_owner_data(owner_id: str, request: Request) -> DeleteOwnerDataR
             status_code=503,
             detail="runtime_store not configured; cannot delete Agent runtime data",
         )
-
-    # Revoke first: if process/database deletion fails, stale credentials stay
-    # denied and the orchestrator can safely retry the idempotent cleanup.
     written_revocations = await _write_owner_revocations(request, owner_id)
     counts = await runtime_store.delete_owner_runtime(owner_id)
-
     return DeleteOwnerDataResponse(
         owner_id=owner_id,
         deleted=True,

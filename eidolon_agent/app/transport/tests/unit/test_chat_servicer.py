@@ -29,12 +29,23 @@ pytestmark = pytest.mark.unit
 class _StubIdentity:
     owner_id: str = "owner-1"
     companion_id: str = "companion-1"
+    device_id: str | None = "dev-1"
+    session_id: str | None = None
+
+
+@dataclass
+class _RuntimeFacts:
+    owner_id: str = "owner-1"
+    companion_id: str = "companion-1"
     memory_realm_id: str = "realm-1"
     genome_id: str = "genome-1"
-    device_id: str | None = "dev-1"
     schema_version: str = "eidolon.persona_genome"
     genome_hash: str = "pg_stub"
     realizer_version: str = "eidolon.persona_realizer"
+
+
+def _runtime_authority() -> SimpleNamespace:
+    return SimpleNamespace(resolve=AsyncMock(return_value=_RuntimeFacts()))
 
 
 def _make_context() -> MagicMock:
@@ -73,7 +84,9 @@ async def test_push_signal_publishes_to_signal_bus() -> None:
     signals.publish = AsyncMock()
     svc = EidolonAgentServicer(
         agent_registry=MagicMock(),
-        signals_bus=signals, proactive_bus=MagicMock(),
+        signals_bus=signals,
+        proactive_bus=MagicMock(),
+        runtime_authority=_runtime_authority(),
     )
     req = pb.SignalRequest(
         session_id="sess-1",
@@ -102,7 +115,9 @@ async def test_chat_cancels_active_turn_when_context_is_cancelled() -> None:
         try:
             # Yield one event, then sleep — emulates an LLM that hasn't started
             # producing yet but is holding the upstream HTTP connection.
-            yield TurnEvent(turn_id="t", seq=0, kind=TurnEventKind.STATE, data={"state": "speaking"})
+            yield TurnEvent(
+                turn_id="t", seq=0, kind=TurnEventKind.STATE, data={"state": "speaking"}
+            )
             await asyncio.sleep(5.0)
         except asyncio.CancelledError:
             cancelled_during_turn.set()
@@ -112,22 +127,19 @@ async def test_chat_cancels_active_turn_when_context_is_cancelled() -> None:
     agent.run_turn = _slow_turn
 
     registry = MagicMock()
-    registry.resolve_runtime = AsyncMock(
-        return_value=_stub_instance(agent)
-    )
+    registry.resolve_runtime = AsyncMock(return_value=_stub_instance(agent))
     svc = EidolonAgentServicer(
         agent_registry=registry,
         signals_bus=SimpleNamespace(recent=AsyncMock(return_value=[])),
         proactive_bus=MagicMock(),
+        runtime_authority=_runtime_authority(),
     )
 
     # Build a request iterator that yields one start frame and then blocks,
     # simulating a client still holding the stream open.
     iterator_blocker = asyncio.Event()
     start_frame = pb.ChatRequest(
-        start=pb.StartTurn(
-            turn_id="t1", conversation_id="c", text="hi", input_modality="voice"
-        )
+        start=pb.StartTurn(turn_id="t1", conversation_id="c", text="hi", input_modality="voice")
     )
 
     async def _req_iter():
@@ -169,7 +181,9 @@ async def test_chat_does_not_cancel_active_turn_when_context_is_done_but_not_can
 
     async def _turn(_ti):
         try:
-            yield TurnEvent(turn_id="t", seq=0, kind=TurnEventKind.STATE, data={"state": "speaking"})
+            yield TurnEvent(
+                turn_id="t", seq=0, kind=TurnEventKind.STATE, data={"state": "speaking"}
+            )
             await asyncio.sleep(0.1)
             yield TurnEvent(turn_id="t", seq=1, kind=TurnEventKind.DONE, data={})
         except asyncio.CancelledError:
@@ -186,20 +200,17 @@ async def test_chat_does_not_cancel_active_turn_when_context_is_done_but_not_can
     agent.run_turn = _turn
 
     registry = MagicMock()
-    registry.resolve_runtime = AsyncMock(
-        return_value=_stub_instance(agent)
-    )
+    registry.resolve_runtime = AsyncMock(return_value=_stub_instance(agent))
     svc = EidolonAgentServicer(
         agent_registry=registry,
         signals_bus=SimpleNamespace(recent=AsyncMock(return_value=[])),
         proactive_bus=MagicMock(),
+        runtime_authority=_runtime_authority(),
     )
 
     async def _req_iter():
         yield pb.ChatRequest(
-            start=pb.StartTurn(
-                turn_id="t1", conversation_id="c", text="hi", input_modality="voice"
-            )
+            start=pb.StartTurn(turn_id="t1", conversation_id="c", text="hi", input_modality="voice")
         )
         await done_seen.wait()
 
@@ -230,14 +241,14 @@ async def test_chat_start_inline_realtime_reaches_turn_input() -> None:
     agent = MagicMock()
     agent.run_turn = _turn
     registry = MagicMock()
-    registry.resolve_runtime = AsyncMock(
-        return_value=_stub_instance(agent)
-    )
+    registry.resolve_runtime = AsyncMock(return_value=_stub_instance(agent))
     signals = MagicMock()
     signals.recent = AsyncMock(return_value=[])
     svc = EidolonAgentServicer(
         agent_registry=registry,
-        signals_bus=signals, proactive_bus=MagicMock(),
+        signals_bus=signals,
+        proactive_bus=MagicMock(),
+        runtime_authority=_runtime_authority(),
     )
 
     async def _req_iter():
@@ -289,6 +300,7 @@ async def test_chat_start_uses_explicit_text_input_modality() -> None:
         agent_registry=registry,
         signals_bus=signals,
         proactive_bus=MagicMock(),
+        runtime_authority=_runtime_authority(),
     )
 
     async def _req_iter():
@@ -330,29 +342,29 @@ async def test_chat_fuses_recent_signals_when_start_has_no_realtime() -> None:
     agent = MagicMock()
     agent.run_turn = _turn
     registry = MagicMock()
-    registry.resolve_runtime = AsyncMock(
-        return_value=_stub_instance(agent)
-    )
+    registry.resolve_runtime = AsyncMock(return_value=_stub_instance(agent))
     now = datetime.now(timezone.utc)
     signals = MagicMock()
-    signals.recent = AsyncMock(return_value=[
-        RealtimeSignal(
-            ts=now - timedelta(milliseconds=10),
-            modality=SignalModality.PROSODY,
-            label="calm",
-            confidence=0.9,
-        )
-    ])
+    signals.recent = AsyncMock(
+        return_value=[
+            RealtimeSignal(
+                ts=now - timedelta(milliseconds=10),
+                modality=SignalModality.PROSODY,
+                label="calm",
+                confidence=0.9,
+            )
+        ]
+    )
     svc = EidolonAgentServicer(
         agent_registry=registry,
-        signals_bus=signals, proactive_bus=MagicMock(),
+        signals_bus=signals,
+        proactive_bus=MagicMock(),
+        runtime_authority=_runtime_authority(),
     )
 
     async def _req_iter():
         yield pb.ChatRequest(
-            start=pb.StartTurn(
-                turn_id="t1", conversation_id="c", text="hi", input_modality="voice"
-            )
+            start=pb.StartTurn(turn_id="t1", conversation_id="c", text="hi", input_modality="voice")
         )
 
     ctx = _make_context()
@@ -373,7 +385,9 @@ async def test_push_signal_unknown_modality_falls_back_to_ambient() -> None:
     signals.publish = AsyncMock()
     svc = EidolonAgentServicer(
         agent_registry=MagicMock(),
-        signals_bus=signals, proactive_bus=MagicMock(),
+        signals_bus=signals,
+        proactive_bus=MagicMock(),
+        runtime_authority=_runtime_authority(),
     )
     from eidolon_agent.core.types.signal import SignalModality
 

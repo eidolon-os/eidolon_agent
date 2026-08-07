@@ -71,16 +71,18 @@ class _StubMemory:
         plan,
         timeout_s,
     ):
-        self.calls.append({
-            "owner_id": owner_id,
-            "companion_id": companion_id,
-            "memory_realm_id": memory_realm_id,
-            "device_id": device_id,
-            "session_id": session_id,
-            "query": query,
-            "plan": plan,
-            "timeout_s": timeout_s,
-        })
+        self.calls.append(
+            {
+                "owner_id": owner_id,
+                "companion_id": companion_id,
+                "memory_realm_id": memory_realm_id,
+                "device_id": device_id,
+                "session_id": session_id,
+                "query": query,
+                "plan": plan,
+                "timeout_s": timeout_s,
+            }
+        )
         return MemoryRecallResult(
             context=self._formatted,
             hits=[SimpleNamespace(id="mem-1")],
@@ -390,8 +392,7 @@ async def test_active_commitments_route_as_bounded_non_actionable_context() -> N
         "context_injected": True,
     }
     assert any(
-        segment["kind"] == "commitment"
-        for segment in ti.metadata["context_ledger"]["segments"]
+        segment["kind"] == "commitment" for segment in ti.metadata["context_ledger"]["segments"]
     )
 
 
@@ -450,9 +451,7 @@ async def test_explicit_personal_memory_lookup_uses_extended_timeout() -> None:
 
     await compiler.compile(ti)
 
-    assert [call["query"] for call in memory.calls] == [
-        "你记得我叫什么、在哪里读书吗？"
-    ]
+    assert [call["query"] for call in memory.calls] == ["你记得我叫什么、在哪里读书吗？"]
     assert memory.calls[0]["timeout_s"] == pytest.approx(1.2)
     assert memory.calls[0]["plan"].kg_subjects == ("self",)
     assert ti.metadata["memory_trace"]["timeout_ms"] == 1200
@@ -560,6 +559,7 @@ async def test_memory_failure_injects_degraded_notice_into_prompt() -> None:
 
     See compiler.ContextCompiler._MEMORY_DEGRADED_NOTICE.
     """
+
     class _Boom:
         async def recall_context(self, **_):
             raise RuntimeError("MemoryUnavailableError: no reachable MCP endpoint")
@@ -641,9 +641,11 @@ async def test_context_ledger_metadata_is_written_without_prompt_text() -> None:
     assert snapshot["memory"]["hit_count"] == 1
     assert ti.metadata["context_structure_version"] == "context_structure.v2"
     assert ti.metadata["history_presentation"] == "background_context"
-    assert {
-        tag["authority"] for tag in ti.metadata["context_tags"]
-    } >= {"instruction", "current_request", "retrieved_memory"}
+    assert {tag["authority"] for tag in ti.metadata["context_tags"]} >= {
+        "instruction",
+        "current_request",
+        "retrieved_memory",
+    }
 
 
 async def test_summary_provider_injects_existing_summary_without_moving_current_turn() -> None:
@@ -881,7 +883,9 @@ async def test_budget_keeps_recent_history_before_older_history() -> None:
         personas_service=_StubPersonas("[P]"),
         instance_locator=_locator,
         history_manager=history,
-        context_budget_tokens=260,
+        # Mandatory persona + harness + current request currently consume 314
+        # estimated tokens. Leave room for exactly one 32-token history item.
+        context_budget_tokens=346,
     )
 
     ti = make_turn_input("now")

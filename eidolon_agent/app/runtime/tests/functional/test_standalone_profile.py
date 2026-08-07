@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 
 import pytest
+from eidolon_sdk.biz.persona import PersonaObservationEvent
 
 from eidolon_agent.app.runtime.bootstrap import build_application
 from eidolon_agent.config.settings import Settings
@@ -38,15 +39,15 @@ async def _standalone(tmp_path, monkeypatch):
         persistence={"sqlite_path": str(tmp_path / "eidolon-agent.sqlite3")},
     )
     container = await build_application(settings=settings)
-    await container.data_store.owner_service.create_owner(
+    await container.local_system_data.owner_commands.create_owner(
         owner_id="alice",
         display_name="Alice",
     )
-    container.extras["standalone_workspace"] = (
-        await container.data_store.workspace_provisioning.provision_workspace(
-            owner_id="alice",
-            companion_display_name="Test Companion",
-        )
+    container.extras[
+        "standalone_workspace"
+    ] = await container.local_system_data.companion_workspaces.provision_workspace(
+        owner_id="alice",
+        companion_display_name="Test Companion",
     )
     try:
         yield container
@@ -55,7 +56,7 @@ async def _standalone(tmp_path, monkeypatch):
         # connection is torn down under an in-flight write (a leaked connection
         # GC'd during a later test would surface as an unraisable warning).
         await container.background_tasks.drain(timeout_s=2.0)
-        await container.data_store.close()
+        await container.local_system_data.close()
         await container.runtime_store.close()
 
 
@@ -101,6 +102,31 @@ async def test_standalone_runs_a_full_turn_offline(tmp_path, monkeypatch) -> Non
         # Full turn completes against FakeLLM with the null memory port; recall
         # is degraded but the turn still finishes.
         assert kinds[-1] is TurnEventKind.DONE
+
+
+async def test_standalone_preserves_persona_observation_command(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    async with _standalone(tmp_path, monkeypatch) as container:
+        workspace = container.extras["standalone_workspace"]
+        await container.personas_service.record_observation(
+            PersonaObservationEvent(
+                observation_id="standalone-observation-1",
+                owner_id="alice",
+                companion_id=workspace.companion.companion_id,
+                kind="interaction",
+                source="agent",
+                summary="Owner prefers concise replies.",
+            )
+        )
+
+        pending = await container.local_system_data.audit_outbox.list_pending()
+        assert any(
+            event.event_id == "standalone-observation-1"
+            and event.action == "persona.observation.created"
+            for event in pending
+        )
 
 
 async def test_standalone_stop_command_short_circuits_offline(tmp_path, monkeypatch) -> None:

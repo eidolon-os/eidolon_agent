@@ -65,8 +65,8 @@ Live benchmark scripts default to an isolated identity:
 - user: `benchmark`
 - registry API: `http://127.0.0.1:9000/api` or `EIDOLON_BENCHMARK_REGISTRY_HTTP`
 
-The scripts create or verify that user through `eidolon_admin` before pairing,
-so benchmark runs do not write to a normal person's memory space. Use
+The scripts use an explicitly provisioned Owner/Companion runtime so benchmark
+runs do not write to a normal person's memory space. Use
 `--user benchmark-voice` or another `benchmark-*` user for a dedicated profile.
 Passing a non-benchmark user requires `--allow-non-benchmark-user`; that flag is
 intended only for explicit debugging.

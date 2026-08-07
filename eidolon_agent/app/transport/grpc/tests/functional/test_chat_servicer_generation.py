@@ -20,13 +20,31 @@ def _identity() -> SimpleNamespace:
         owner_id="owner-1",
         companion_id="companion-1",
         device_id="dev-1",
-        memory_realm_id="realm-1",
-        genome_id="genome-1",
-        schema_version="schema-v1",
-        genome_hash="hash-v1",
-        realizer_version="realizer-v1",
         session_id="session-1",
     )
+
+
+def _runtime_authority() -> SimpleNamespace:
+    return SimpleNamespace(
+        resolve=_async_value(
+            SimpleNamespace(
+                owner_id="owner-1",
+                companion_id="companion-1",
+                memory_realm_id="realm-1",
+                genome_id="genome-1",
+                schema_version="schema-v1",
+                genome_hash="hash-v1",
+                realizer_version="realizer-v1",
+            )
+        )
+    )
+
+
+def _async_value(value):
+    async def _resolve(**_kwargs):
+        return value
+
+    return _resolve
 
 
 async def test_new_start_supersedes_old_turn_and_drops_late_events(monkeypatch) -> None:
@@ -40,6 +58,7 @@ async def test_new_start_supersedes_old_turn_and_drops_late_events(monkeypatch) 
         agent_registry=registry,
         signals_bus=_Signals(),
         proactive_bus=None,
+        runtime_authority=_runtime_authority(),
     )
 
     await servicer.Chat(
@@ -85,6 +104,7 @@ async def test_explicit_cancel_drops_late_events(monkeypatch) -> None:
         agent_registry=registry,
         signals_bus=_Signals(),
         proactive_bus=None,
+        runtime_authority=_runtime_authority(),
     )
 
     await servicer.Chat(
@@ -120,12 +140,11 @@ async def test_cancel_of_finished_turn_acks_already_done(monkeypatch) -> None:
         agent_registry=_Registry([_ImmediateAgent("hi")]),
         signals_bus=_Signals(),
         proactive_bus=None,
+        runtime_authority=_runtime_authority(),
     )
 
     await servicer.Chat(
-        _Requests(
-            [pb.ChatRequest(cancel=pb.CancelTurn(turn_id="never-started"))]
-        ),
+        _Requests([pb.ChatRequest(cancel=pb.CancelTurn(turn_id="never-started"))]),
         context,
     )
 
@@ -145,6 +164,7 @@ async def test_cancel_played_chars_stashed_on_turn_input(monkeypatch) -> None:
         agent_registry=_Registry([agent]),
         signals_bus=_Signals(),
         proactive_bus=None,
+        runtime_authority=_runtime_authority(),
     )
 
     await servicer.Chat(
@@ -185,6 +205,7 @@ async def test_start_turn_trace_id_reaches_turn_input(monkeypatch) -> None:
         agent_registry=_Registry([agent]),
         signals_bus=_Signals(),
         proactive_bus=None,
+        runtime_authority=_runtime_authority(),
     )
 
     await servicer.Chat(
@@ -220,6 +241,7 @@ async def test_parallel_conversations_do_not_supersede_each_other(monkeypatch) -
         agent_registry=registry,
         signals_bus=_Signals(),
         proactive_bus=None,
+        runtime_authority=_runtime_authority(),
     )
 
     await servicer.Chat(

@@ -13,7 +13,6 @@ from typing import Any
 
 import grpc
 import httpx
-from eidolon_sdk.biz.persona import PERSONA_GENOME_SCHEMA, PERSONA_REALIZER
 from eidolon_sdk.biz.runtime import resolve_shared_secret, sign_runtime_token
 
 from eidolon_agent.app.transport.grpc.codec import struct_to_dict
@@ -22,9 +21,7 @@ from eidolon_agent.config import load_settings
 
 DEFAULT_BENCHMARK_COMPANION_ID = "benchmark"
 DEFAULT_BENCHMARK_MEMORY_REALM_ID = "default.benchmark.default"
-DEFAULT_REGISTRY_HTTP = (
-    os.getenv("EIDOLON_BENCHMARK_REGISTRY_HTTP") or "http://127.0.0.1:9000/api"
-)
+DEFAULT_REGISTRY_HTTP = os.getenv("EIDOLON_BENCHMARK_REGISTRY_HTTP") or "http://127.0.0.1:9000/api"
 
 
 async def ensure_registry_user(
@@ -89,6 +86,7 @@ async def issue_runtime_token(
     ttl_seconds: int = 3600,
 ) -> tuple[str, str]:
     """Mint a real runtime token using the same secret as the running agent."""
+    del tenant_id, template_id, memory_realm_id
     settings = load_settings()
     secret = resolve_shared_secret(settings.runtime_token.jwt_secret)
     if not secret:
@@ -105,11 +103,6 @@ async def issue_runtime_token(
         device_id=device_id,
         owner_id=user_id,
         companion_id=companion_id,
-        memory_realm_id=memory_realm_id,
-        genome_id=template_id,
-        schema_version=PERSONA_GENOME_SCHEMA,
-        genome_hash=f"benchmark_{template_id}",
-        realizer_version=PERSONA_REALIZER,
         scopes=["benchmark"],
         ttl_seconds=ttl_seconds,
     )
@@ -314,6 +307,7 @@ async def _run_turn(
 
     call = stub.Chat(_requests(), metadata=metadata)
     try:
+
         async def _receive_until_terminal() -> None:
             nonlocal error, first_delta_ms, total_ms
             async for ev in call:
@@ -677,11 +671,7 @@ def _startup_failure_report(
 
 def _merge_expectations(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     if override.get("skip_default_expect"):
-        return {
-            key: value
-            for key, value in override.items()
-            if key != "skip_default_expect"
-        }
+        return {key: value for key, value in override.items() if key != "skip_default_expect"}
     merged = dict(base)
     for key, value in override.items():
         if isinstance(value, list) and isinstance(merged.get(key), list):

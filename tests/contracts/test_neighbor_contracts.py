@@ -76,21 +76,25 @@ async def test_fanout_payload_round_trips_to_memory_contract() -> None:
     assert payload.metadata["memory_write_disposition"] == "semantic_upsert"
 
 
-# --- agent -> eidolon_data (low-frequency system catalog) ------------------
+# --- standalone profile -> eidolon_data (current V2 local composition) -----
 
 _REQUIRED_SYSTEM_DATASTORE_ATTRS = (
     "companions",
-    "owner_service",
-    "workspace_provisioning",
-    "session_factory",
+    "persona_genomes",
+    "memory_realms",
+    "owner_commands",
+    "companion_workspaces",
+    "persona_commands",
     "init_schema",
     "close",
 )
 
 
 async def test_datastore_exposes_surface_agent_depends_on(tmp_path) -> None:
-    """Agent's persistence adapters call these DataStore members; pin them so a
-    data-layer rename fails here, not deep in a background persist."""
+    """Only the self-contained profile imports Data's current composition root.
+
+    Production consumes the versioned System Data Runtime HTTP contract.
+    """
     store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
     try:
         await store.init_schema()
@@ -117,17 +121,14 @@ async def test_datastore_provisioning_roundtrip(tmp_path) -> None:
     store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "eidolon.sqlite3")))
     try:
         await store.init_schema()
-        await store.owner_service.create_owner(owner_id="alice", display_name="alice")
-        await store.workspace_provisioning.provision_workspace(
+        await store.owner_commands.create_owner(owner_id="alice", display_name="alice")
+        await store.companion_workspaces.provision_workspace(
             owner_id="alice",
             companion_id="companion-1",
             genome_id="genome-1",
             realm_id="realm-1",
         )
-        from eidolon_data.schema.models import CompanionRow
-
-        async with store.session_factory() as session:
-            row = await session.get(CompanionRow, "companion-1")
+        row = await store.companions.get("companion-1")
         assert row is not None
         assert row.owner_id == "alice"
     finally:

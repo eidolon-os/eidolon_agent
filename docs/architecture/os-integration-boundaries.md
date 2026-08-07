@@ -31,6 +31,10 @@ NATS is retained only where a concrete Agent/Memory or Agent-local asynchronous 
 already exists. It is not a universal OS IPC, shared blackboard, or source of Device
 authority.
 
+Production Companion/Realm/Genome reads cross a narrow
+`CompanionRuntimeAuthority` Port backed by System Data's versioned HTTP snapshot contract.
+The Channel token does not carry those facts, and Agent does not read a sibling database.
+
 ## Removed legacy path
 
 Hub's current code has no runtime Device command endpoints, command persistence, presence

@@ -32,17 +32,13 @@ class ChatTestRequest(BaseModel):
 async def chat_test(body: ChatTestRequest, request: Request):
     """Stream a turn over the real authenticated gRPC Chat bidi path."""
     settings = request.app.state.settings
-    data_store = getattr(request.app.state, "data_store", None)
-    if data_store is None:
-        raise RuntimeError("data_store not configured")
-    companion = await data_store.companions.get(body.companion_id)
-    if companion is None or companion.owner_id != body.owner_id:
-        raise RuntimeError("companion not found for owner")
-    if not companion.default_memory_realm_id or not companion.current_genome_id:
-        raise RuntimeError("companion has no default memory realm or current genome")
-    genome = await data_store.persona_repo.get_genome(companion.current_genome_id)
-    if genome is None or genome.status != "committed":
-        raise RuntimeError("companion current genome is not committed")
+    runtime_authority = getattr(request.app.state, "runtime_authority", None)
+    if runtime_authority is None:
+        raise RuntimeError("runtime_authority not configured")
+    await runtime_authority.resolve(
+        owner_id=body.owner_id,
+        companion_id=body.companion_id,
+    )
 
     await _refresh_memory_discovery_for_admin_chat(
         request,
@@ -58,11 +54,6 @@ async def chat_test(body: ChatTestRequest, request: Request):
         algorithm=settings.runtime_token.jwt_algorithm,
         owner_id=body.owner_id,
         companion_id=body.companion_id,
-        memory_realm_id=companion.default_memory_realm_id,
-        genome_id=companion.current_genome_id,
-        schema_version=genome.schema_version,
-        genome_hash=genome.genome_hash,
-        realizer_version=genome.realizer_version,
         scopes=["admin-chat-test"],
         ttl_seconds=600,
     )
@@ -98,12 +89,15 @@ async def chat_test(body: ChatTestRequest, request: Request):
             async for ev in stream:
                 kind = pb.TurnEvent.Kind.Name(ev.kind)
                 data = struct_to_dict(ev.data) if ev.data else {}
-                yield _sse("event", {
-                    "turn_id": ev.turn_id,
-                    "seq": ev.seq,
-                    "kind": kind,
-                    "data": data,
-                })
+                yield _sse(
+                    "event",
+                    {
+                        "turn_id": ev.turn_id,
+                        "seq": ev.seq,
+                        "kind": kind,
+                        "data": data,
+                    },
+                )
                 if kind in ("DONE", "ERROR"):
                     break
         except grpc.aio.AioRpcError as exc:
@@ -127,6 +121,8 @@ def _chat_test_metadata(
         "private": not persist_memory,
         "persist_memory": persist_memory,
     }
+
+
 async def _refresh_memory_discovery_for_admin_chat(
     request: Request,
     *,

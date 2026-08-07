@@ -15,8 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from eidolon_agent.app.admin.routers import (
     chat_test,
     conversations,
-    devices,
     long_tasks,
+    owner_runtime,
     reports,
 )
 from eidolon_agent.config.settings import Settings
@@ -28,7 +28,7 @@ def build_admin_app(
     agent_registry,
     personas_service=None,
     revocation_kv=None,
-    data_store=None,
+    runtime_authority=None,
     runtime_store=None,
     memory_routes=None,
     memory_discovery_refresher=None,
@@ -55,16 +55,18 @@ def build_admin_app(
     # revocation keys. Verifier reads via its own ``revocation_kv``
     # already configured at bootstrap (same instance).
     app.state.revocation_kv = revocation_kv
-    app.state.data_store = data_store
+    app.state.runtime_authority = runtime_authority
     app.state.runtime_store = runtime_store
     app.state.memory_routes = memory_routes
     app.state.memory_discovery_refresher = memory_discovery_refresher
 
-    app.include_router(devices.router, prefix="/api/admin", tags=["devices"])
-    app.include_router(chat_test.router, prefix="/api/admin", tags=["chat-test"])
     app.include_router(
-        conversations.router, prefix="/api/admin", tags=["conversations"]
+        owner_runtime.router,
+        prefix="/api/admin",
+        tags=["owner-runtime"],
     )
+    app.include_router(chat_test.router, prefix="/api/admin", tags=["chat-test"])
+    app.include_router(conversations.router, prefix="/api/admin", tags=["conversations"])
     app.include_router(long_tasks.router, prefix="/api/admin", tags=["long-tasks"])
     app.include_router(reports.router, prefix="/api/admin", tags=["reports"])
     return app

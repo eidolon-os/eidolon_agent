@@ -40,7 +40,7 @@
 | NATS 只服务已落地的 Agent/Memory 异步链路 | 不是 Eidolon OS IPC，也不承载 Device namespace/mount/command 权威 |
 | LiteLLM 作为唯一 LLM 出口 | 100+ provider 切换零成本；坏处：cost map 噪声 |
 | SQLite WAL + SQLAlchemy 2.0 async | 单机部署足够；多机时迁 Postgres 改 URL 即可 |
-| Persona = YAML 模板 + 实例（运行时状态 + 异步演化） | Git-friendly 模板；运行时 mood/energy 不写回 YAML |
+| Persona = System Data 中的 immutable Genome snapshot | 会话固定 id/hash；运行时 mood/energy 不写回 Genome |
 | gRPC 数据面 + 两个 HTTP（健康 / Admin） | 与 LiveKit 同机走 UDS；admin 独立端口免污染 |
 
 ### Eidolon OS 边界
@@ -58,6 +58,9 @@
   没有稳定的 Channel Provider directory/command 契约。旧 Hub HTTP command 与 NATS
   runtime-device blackboard adapter 已删除，`body_control.enabled` 默认关闭且误开启会
   fail closed。详见 `docs/architecture/os-integration-boundaries.md`。
+- Channel→Agent 的 V5 runtime token 只做进程边界认证，携带 Owner、Companion 和可选
+  Device/Session。Agent 通过 `CompanionRuntimeAuthority` Port 从 System Data HTTP
+  重新解析 Realm/Genome 并校验 owner scope、schema 和 hash；生产不直读兄弟 SQLite。
 
 ---
 
@@ -131,7 +134,7 @@ eidolon_agent/
 ├── core/              # L0 — 纯类型 & 协议，对兄弟模块零依赖
 │   ├── types/         #   ChatMessage / TurnEvent / LLMDelta / MemoryHit /
 │   │                  #   Event / Topics / Identity / Signal / Tool / Turn / Messages
-│   ├── ports/         #   LLMPort / MemoryPort / EventBus / KVStore / ToolPort /
+│   ├── ports/         #   LLMPort / MemoryPort / RuntimeAuthority / EventBus / KVStore /
 │   │                  #   ChatMessageRepository / ConversationRepository /
 │   │                  #   DeviceRepository / UnitOfWork
 │   └── errors.py      #   异常类型层级
@@ -156,15 +159,16 @@ eidolon_agent/
 │   │                  #   InMemoryEventBus + InMemoryKVStore (测试)
 │   ├── memory/        #   McpClientPool + MemoryNatsPublisher
 │   │                  #   + MemoryRoutingTable + EidolonMemoryPort
+│   ├── system_data/   #   Companion Runtime Authority HTTP adapter
 │   └── observability/ #   loguru 配置（stdlib 桥接 + 三方静默）
 │
 ├── app/               # L3 — 进程编排 + I/O 入口
 │   ├── runtime/       #   bootstrap.py（10 步连线）/ container / cli / lifecycle
 │   ├── transport/     #   grpc/ (Chat servicer + interceptors + codec)
 │   │                  #   http/ (健康探针 /readyz)
-│   │                  #   pairing/ (JWT device token + 配对码)
+│   │                  #   gRPC runtime-token authentication
 │   └── admin/         #   独立 FastAPI app + 路由
-│                      #     devices / personas / pairing / chat_test
+│                      #     owner runtime / conversations / jobs / chat_test
 │
 └── config/            # 共享 Pydantic settings（所有层都可读）
 ```
@@ -251,8 +255,7 @@ TurnEngine.run(ti)   ← 以下为热路径，逐步 yield TurnEvent
    └─ 9. asyncio.create_task(_post_turn(...))   ←━ 后台异步，不阻塞返回
                             │
                             ├─ HistoryManager.append (SQLite 写)
-                            ├─ HistoryFanout.publish_turn (NATS → memory + emotion)
-                            └─ PersonasService.submit_interaction (内部队列 → evolution worker)
+                            └─ HistoryFanout.publish_turn (NATS → memory + emotion)
 ```
 
 **延迟预算（除 LLM）**：< 250ms，其中 200ms 是 memory recall 的上限。LLM 本身 1–30s 取决于 token 数。
@@ -276,14 +279,16 @@ NATS 只承载下表中已经存在的 Agent/Memory 或 Agent-local 异步协议
 | 内部生命周期 | `agent.fsm.changed.<session_id>` | FSM 状态变化 | 否 |
 | 信号 | `agent.signal.<modality>.<session>` | 实时信号入队 | 否 |
 | 系统 | `agent.system.config.updated` | 配置变更广播 | 否 |
-| 系统 | `agent.pairing.revoked` | 设备 token 吊销 | 否 |
 | **外部出站** | `eidolon.memory.turn.<space_token>` | turn 完成 → memory 服务 | **是** |
 | **外部出站** | `eidolon.memory.cmd.<space_token>` | Memory 写命令 | **是** |
 | **外部出站** | `agent.emotion.turn.<user>` | turn 完成 → emotion 服务 | **是** |
 | **外部入站** | `eidolon.memory.event.*` | memory 服务推送（promise_due 等） | **是** |
 长任务不再使用 NATS subject；`delegate_to_coworker` 写入 SQLite receipt 后进入本地内存队列，由 mementos worker 通过 HTTP 执行。`submit_long_task` 仅保留为兼容旧调用的隐藏别名。
 
-人格演化不走 NATS worker；typed proposal、approve/reject、commit/rollback 与 genome 指针变更统一由 `eidolon_data` 事务持久化。JetStream 持久化前缀为 `eidolon.memory.*` / `agent.emotion.*`。
+人格演化不走 NATS worker。Data V2 已有 typed proposal、approve/reject、commit/rollback
+事务，但 production Agent 尚无稳定的 System Data 写契约；它只通过 Runtime Authority
+读取快照。standalone profile 继续直接使用这些 Data V2 命令。JetStream 持久化前缀为
+`eidolon.memory.*` / `agent.emotion.*`。
 
 ### KV Buckets
 
@@ -307,13 +312,16 @@ NATS 只承载下表中已经存在的 Agent/Memory 或 Agent-local 异步协议
 
 详见 [`eidolon_agent/domain/personas/README.md`](eidolon_agent/domain/personas/README.md)。要点：
 
-- **模板** 是只读 YAML（`domain/personas/templates/*.yaml`），定义 identity_core + 行为旋钮 (knobs)。
-- **实例** 是 companion 的运行时 persona/genome 快照；生产环境写入 `eidolon_data.persona_genomes`。
-- **演化** 异步：TurnEngine yield DONE 后 `submit_interaction` 入队，`PersonaEvolutionWorker` 后台消费、按规则微调 knob、持久化到 SQLite + YAML。
-- **运行时状态**（mood/energy/attention）不写 YAML，长在内存里 + 周期 snapshot。
-- **演化护栏**：identity_core 不可演化；knob 有 min/max + step_limit + cooldown。
+- **权威快照** 是 System Data 中的 immutable `PersonaGenome`，没有 YAML template/instance
+  fallback、knob DSL 或后台 auto-evolution worker。
+- **生产读取** 通过 System Data Runtime Authority HTTP 契约完成；Agent 不打开兄弟 SQLite。
+- **生产命令**（observation/propose/approve/reject/rollback）尚无稳定、幂等的跨服务契约，
+  当前显式不可用；旧 non-standalone 连接本来就是 query-only，不能合法提交这些写入。
+- **standalone** 继续使用本地 Data V2 命令，保留人格命令及其 E2E/benchmark 能力。
+- **运行时状态**（mood/energy/attention）仅在内存中，不写回 Genome。
 
-热路径只用 3 个公开方法：`realize_context / submit_signal / submit_interaction`。其余是 admin 路由调用。
+会话热路径使用 `realize_context` 和 `submit_signal`；完整候选快照的演化校验保留在
+`PersonasService`，等待独立的 System Data command Port。
 
 ---
 
@@ -331,14 +339,15 @@ service EidolonAgent {
 }
 ```
 
-`AuthInterceptor` 在每个 RPC 上校验 `Bearer <runtime_token>`（V4 JWT，HS256）。Token 必须携带
-`RuntimeIdentity(schema_version, owner_id, companion_id, device_id, memory_realm_id, genome_id, genome_hash, realizer_version)`。
+`AuthInterceptor` 在每个 RPC 上校验 `Bearer <runtime_token>`（V5，当前部署为 HS256）。
+Token 只携带 `owner_id`、`companion_id`、可选 `device_id/session_id/scopes`；它不再搬运
+Realm、Genome、hash 或 realizer 等兄弟权威事实。
 
 Agent 是 Companion runtime，不负责 Owner 注册、Device pairing/Mount 或 Companion
-选择。外部调用方必须在进入 Agent 前选择并校验一个具体 Companion，再签发包含
-Owner/Companion/genome/realm 的 runtime token；Device 只是可选来源。无 Device 的虚拟
-Companion 可以正常进入，未选择 Companion 的 Device 则停留在 Channel 的 Device/data
-路径。对话热路径不会按 Owner 猜测 active Companion；session/turn metadata 会锁定
+选择。外部调用方必须在进入 Agent 前选择并校验一个具体 Companion。Agent 收到 token
+后通过 System Data Runtime Authority 解析 active Realm/Genome，并再次验证 Owner scope。
+Device 只是可选来源；无 Device 的虚拟 Companion 可以正常进入，未选择 Companion 的
+Device 则停留在 Channel 的 Device/data 路径。一次 Agent session 会锁定解析出的
 `genome_id + genome_hash`，会话中不热切换人格。
 
 ### HTTP（`:8180`）—— 健康探针
@@ -347,10 +356,8 @@ Companion 可以正常进入，未选择 Companion 的 Device 则停留在 Chann
 
 ### Admin HTTP（`:8081`）—— 控制面
 
-- `GET  /api/admin/devices` —— 设备列表
-- `DELETE /api/admin/devices/{id}` —— 吊销设备
 - `POST /api/admin/owners/{owner_id}/revoke-sessions` —— 吊销 owner 下 runtime token
-- `GET  /api/admin/personas/templates` —— 模板列表
+- `DELETE /api/admin/owners/{owner_id}/data` —— 删除 Agent 自有 runtime 数据
 - `POST /api/admin/chat/test` —— owner/companion runtime chat dogfood 端点
 - `GET  /api/admin/conversations/turns` —— 对话/消息/turn 检查入口
 
@@ -370,28 +377,27 @@ Pydantic settings 顶层段：
 | `http` | 健康 HTTP + admin port + CORS |
 | `nats` | URL + creds + kv bucket 列表 |
 | `memory` | endpoints / discovery_url / recall_timeout_s |
-| `sqlite` | path / WAL / busy_timeout / synchronous |
+| `persistence` | Agent 独占 SQLite path / WAL checkpoint / busy timeout |
 | `llm` | models 列表 + default_model（LiteLLM 命名） |
 | `long_task` | mementos_base_url / 队列 / worker 超时 |
-| `persona` | templates_dir / instances_dir |
+| `system_data` | Companion Runtime Authority URL / service token env |
 | `observability` | log_level / log_dir |
-| `pairing` | jwt_secret / 算法 / TTL |
+| `runtime_token` | Channel→Agent token 校验 secret / 算法 |
 | `runtime` | log_dir / run_dir / debug_dir / 关停超时 |
 | `turn` | 各阶段 SLO（compile/recall/first_delta）+ tool 最大轮数 + token 预算 |
 
-### SQLite 表（5 张，定义在 `infra/persistence/models.py`）
+### Agent SQLite 表（6 张，定义在 `infra/persistence/runtime_store.py`）
 
 | 表 | 用途 |
 |---|---|
-| `conversations` | 会话 (tenant/user/instance) |
+| `runtime_sessions` | Owner/Companion session 生命周期 |
+| `conversations` | Owner/Companion 对话索引 |
 | `turns` | 对话轮（含 latency、token、status） |
-| `chat_messages` | 消息（FK 到 turn） |
-| `devices` | 配对设备 + token hash + 吊销时间戳 |
-| `evolution_history` | 演化审计（rationale + delta） |
+| `messages` | 用户/助手消息（FK 到 turn） |
+| `jobs` | Agent 本地长任务状态 |
+| `audit_outbox` | Agent 终态审计发布意图 |
 
-Alembic 在 `infra/persistence/migrations/versions/`：
-- `0001_initial` —— 初始 5 表（原 11 表）
-- `0002_drop_unused_tables` —— Phase 4 drop 掉 tenants/users/agent_instances/pairing_codes/audit_log/publish_outbox
+当前开发基线直接校验 clean schema，不为旧开发数据库保留 migration/兼容读取。
 
 ---
 
@@ -405,7 +411,8 @@ uv sync --extra dev
 # 配置（若尚不存在）
 cp -n config/settings.example.yaml config/settings.yaml
 cp -n config/.env.example config/.env
-# 编辑 config/.env：EIDOLON_AGENT_LLM_API_KEY、PAIRING_JWT_SECRET
+# 编辑 config/.env：EIDOLON_AGENT_LLM_API_KEY、PAIRING_JWT_SECRET、
+# EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN
 
 # gRPC stub 重生成
 .venv/bin/python -m grpc_tools.protoc \

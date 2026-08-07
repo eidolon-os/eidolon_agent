@@ -20,17 +20,16 @@ cross-database foreign keys and no Data lookup in the terminal-turn write.
 
 The implementation is in `infra/persistence/runtime_store.py` and
 `infra/persistence/agent_runtime.py`. Production bootstrap opens the Agent
-runtime store directly. Data remains temporarily as a low-frequency catalog
-dependency for Owner/Companion/Persona/Realm reads, but the production
-connection is forced to SQLite `mode=ro` and `query_only=ON`: Agent cannot run
-Data migrations or perform Data mutations. Terminal-turn persistence imports
-no Data model or session factory and never waits on the System Data writer.
+runtime store directly. Production no longer opens System Data SQLite. It
+consumes the authenticated, versioned Companion Runtime Snapshot HTTP contract
+through the `CompanionRuntimeAuthority` Port. The adapter explicitly maps wire
+DTOs into Agent domain facts and validates Owner scope, lifecycle, Persona
+schema, realizer version, and Genome hash. Terminal-turn persistence imports no
+Data model or session factory and never waits on the System Data writer.
 
-That query-only connection is an explicit transition debt, not the final OS
-boundary. Agent is still compiled against the System Data read schema. It must
-eventually consume a narrow authenticated Companion/Persona runtime snapshot
-contract (including schema version and genome hash) so the authority can evolve
-its persistence without coordinating Agent SQL changes.
+Direct `DataStore` composition exists only in the explicit standalone profile,
+where it is named `local_system_data` and uses current Data V2 commands. It is
+not a production fallback or compatibility reader.
 
 ## Frequency policy
 
@@ -66,8 +65,8 @@ The activation gate landed as one release boundary:
    failure leaves request handling available.
 6. Cross-repository acceptance proves new turns appear only in
    `eidolon-agent.sqlite3` and no runtime write reaches `eidolon-system.sqlite3`.
-7. Production Agent opens `eidolon-system.sqlite3` as a query-only transitional
-   reader; Admin remains its sole writer.
+7. Production Agent resolves Companion runtime facts through System Data HTTP;
+   there is no cross-project SQLite reader.
 
 Activation creates or validates a clean Agent runtime database. Agent writes
 revocation tombstones before owner-runtime deletion, so a partial failure stays

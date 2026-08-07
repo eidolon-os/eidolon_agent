@@ -209,6 +209,17 @@ class ObservabilitySettings(BaseModel):
     debug_snapshot_sample_rate: float = 0.01  # 1% turn snapshots dumped to debug/
 
 
+class SystemDataSettings(BaseModel):
+    """Narrow Companion Runtime Authority endpoint; secrets stay in the environment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_url: str = "http://127.0.0.1:8084"
+    service_token_env: str = "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN"
+    timeout_s: float = Field(default=5.0, gt=0.0, le=30.0)
+    connect_timeout_s: float = Field(default=2.0, gt=0.0, le=10.0)
+
+
 class RuntimeTokenSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -228,9 +239,6 @@ class RuntimeTokenSettings(BaseModel):
             if val == "PAIRING_JWT_SECRET":
                 data["jwt_secret"] = ""
         return data
-
-    device_token_ttl_days: int = 30
-    trusted_mtls_cn_whitelist: list[str] = Field(default_factory=list)
 
 
 class RuntimeSettings(BaseModel):
@@ -342,6 +350,7 @@ class Settings(BaseSettings):
     body_control: BodyControlSettings = Field(default_factory=BodyControlSettings)
     persona: PersonaSettings = Field(default_factory=PersonaSettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    system_data: SystemDataSettings = Field(default_factory=SystemDataSettings)
     runtime_token: RuntimeTokenSettings = Field(default_factory=RuntimeTokenSettings)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
     persistence: PersistenceSettings = Field(default_factory=PersistenceSettings)

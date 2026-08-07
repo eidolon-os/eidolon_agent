@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import importlib
 import json
 import os
 import socket
-import sys
 import time
 from contextlib import suppress
 from dataclasses import asdict, dataclass
@@ -17,7 +15,6 @@ from typing import Any
 
 import httpx
 from eidolon_data import DataSettings, DataStore
-from fastapi import FastAPI
 
 # Product acceptance is a local deterministic profile; importing the runtime
 # should not attempt to refresh LiteLLM's remote cost map.
@@ -54,10 +51,6 @@ class ProductAcceptanceResult:
     elapsed_ms: float
 
 
-class ProductAcceptanceUnavailable(RuntimeError):
-    """Raised when optional cross-repo Admin imports are unavailable."""
-
-
 async def run_product_acceptance_profile(
     *,
     work_dir: Path,
@@ -65,12 +58,12 @@ async def run_product_acceptance_profile(
     owner_id: str = "owner_acceptance",
     companion_id: str = "c_acceptance_companion",
 ) -> ProductAcceptanceResult:
-    """Exercise the Admin onboarding API and Agent admin chat-test gRPC path.
+    """Exercise local System Data provisioning and Agent's chat-test gRPC path.
 
     This is the PR-safe deterministic profile: no Hub, Channel, device, NATS, or
-    real memory service. It still uses the formal Admin/Onboarding HTTP API via
-    ASGI, the real Agent gRPC Chat servicer, SQLite persistence, and the runtime
-    token contract.
+    real memory service. It uses current System Data V2 commands only as a local
+    fixture, then exercises the real Agent gRPC servicer, SQLite persistence,
+    and slim runtime-token contract.
     """
 
     started = time.perf_counter()
@@ -85,7 +78,7 @@ async def run_product_acceptance_profile(
 
     container = None
     try:
-        provisioned = await _initialize_via_admin_onboarding_api(
+        provisioned = await _initialize_local_system_data(
             sqlite_path=sqlite_path,
             owner_id=owner_id,
             companion_id=companion_id,
@@ -97,10 +90,10 @@ async def run_product_acceptance_profile(
         container = await build_application(settings=settings)
         await container.grpc_server.start()
 
-        store = container.data_store
+        store = container.local_system_data
         companion = await store.companions.get(companion_id)
         assert companion is not None
-        genome = await store.persona_repo.get_genome(companion.current_genome_id)
+        genome = await store.persona_genomes.get(companion.current_genome_id)
         assert genome is not None
 
         chat_events = await _run_admin_chat_test(
@@ -138,9 +131,7 @@ async def run_product_acceptance_profile(
                 )
 
         audit_events = await store.audit_outbox.list_pending(limit=100)
-        event_types = [
-            event.action for event in audit_events if event.owner_id == owner_id
-        ]
+        event_types = [event.action for event in audit_events if event.owner_id == owner_id]
         required_events = {
             "owner.created",
             "companion.workspace.initialized",
@@ -150,11 +141,15 @@ async def run_product_acceptance_profile(
             raise AssertionError(f"missing event timeline entries: {sorted(missing)}")
 
         runtime_cleanup = await container.runtime_store.delete_owner_runtime(owner_id)
-        system_cleanup = await store.dev_maintenance.delete_owner_tree(owner_id)
+        system_cleanup = await store.owner_deletion.delete_owner(owner_id)
         if not system_cleanup.deleted:
             raise AssertionError("cleanup did not delete acceptance owner")
         cleanup_done = True
-        cleanup_counts = {**asdict(system_cleanup), **runtime_cleanup}
+        cleanup_counts = {
+            "deleted": system_cleanup.deleted,
+            **system_cleanup.deleted_rows,
+            **runtime_cleanup,
+        }
 
         return ProductAcceptanceResult(
             passed=True,
@@ -184,86 +179,33 @@ async def run_product_acceptance_profile(
         _restore_env("PAIRING_JWT_SECRET", old_jwt_secret)
 
 
-async def _initialize_via_admin_onboarding_api(
+async def _initialize_local_system_data(
     *,
     sqlite_path: Path,
     owner_id: str,
     companion_id: str,
 ) -> dict[str, str]:
-    try:
-        onboarding_router = _import_admin_module(
-            "eidolon_admin_server.app.onboarding.router"
-        ).router
-    except ImportError as exc:
-        raise ProductAcceptanceUnavailable(
-            "eidolon_admin_server is not importable; install/link eidolon_admin to run "
-            "the product acceptance profile"
-        ) from exc
-
     store = DataStore.open(DataSettings(sqlite_path=str(sqlite_path)))
     await store.init_schema()
-    app = FastAPI()
-    app.state.data_store = store
-    app.state.memory_supervisor_client = None
-    app.include_router(onboarding_router, prefix="/api")
     try:
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://admin-asgi",
-        ) as client:
-            response = await client.post(
-                "/api/onboarding/initialize",
-                json={
-                    "owner_id": owner_id,
-                    "owner_display_name": "Acceptance Owner",
-                    "companion_id": companion_id,
-                    "companion_display_name": "Acceptance Companion",
-                    "character_portrait": "A calm local product acceptance companion.",
-                    "relationship_narrative": "Trusted local E2E acceptance partner.",
-                    "voice_portrait": "Brief, grounded, and concrete.",
-                    "values": ["clarity", "continuity"],
-                    "boundaries": ["Never invent runtime identity."],
-                },
-            )
-            response.raise_for_status()
-
-            state = response.json()["state"]
-            if state["master_companion"]["companion_id"] != companion_id:
-                raise AssertionError("onboarding did not create the requested companion")
-            companion = await store.companions.get(companion_id)
-            if companion is None:
-                raise AssertionError("onboarding companion missing from database")
-            if not companion.current_genome_id or not companion.default_memory_realm_id:
-                raise AssertionError("onboarding did not pin genome and memory realm")
-            genome = await store.persona_repo.get_genome(companion.current_genome_id)
-            if genome is None:
-                raise AssertionError("onboarding current genome missing from database")
-            return {
-                "companion_id": companion.companion_id,
-                "memory_realm_id": companion.default_memory_realm_id,
-                "genome_id": genome.genome_id,
-                "genome_hash": genome.genome_hash,
-            }
+        await store.owner_commands.create_owner(
+            owner_id=owner_id,
+            display_name="Acceptance Owner",
+        )
+        workspace = await store.companion_workspaces.provision_workspace(
+            owner_id=owner_id,
+            companion_id=companion_id,
+            companion_display_name="Acceptance Companion",
+            role="primary",
+        )
+        return {
+            "companion_id": workspace.companion.companion_id,
+            "memory_realm_id": workspace.memory_realm.realm_id,
+            "genome_id": workspace.persona_genome.genome_id,
+            "genome_hash": workspace.persona_genome.genome_hash,
+        }
     finally:
         await store.close()
-
-
-def _import_admin_module(module_name: str):
-    try:
-        return importlib.import_module(module_name)
-    except ImportError:
-        monorepo = Path(__file__).resolve().parents[4]
-        admin_server = monorepo / "eidolon_admin" / "server"
-        inserted = False
-        if admin_server.is_dir() and str(admin_server) not in sys.path:
-            sys.path.insert(0, str(admin_server))
-            inserted = True
-        try:
-            return importlib.import_module(module_name)
-        finally:
-            if inserted:
-                with suppress(ValueError):
-                    sys.path.remove(str(admin_server))
 
 
 async def _run_admin_chat_test(
@@ -395,8 +337,11 @@ async def _close_container(container) -> None:  # type: ignore[no-untyped-def]
             audit_dispatch_task.cancel()
             await audit_dispatch_task
     with suppress(Exception):
-        if container.data_store is not None and hasattr(container.data_store, "close"):
-            await container.data_store.close()
+        if container.local_system_data is not None and hasattr(
+            container.local_system_data,
+            "close",
+        ):
+            await container.local_system_data.close()
     with suppress(Exception):
         if container.runtime_store is not None and hasattr(container.runtime_store, "close"):
             await container.runtime_store.close()
@@ -413,8 +358,8 @@ async def _cleanup_owner_best_effort(
         if container is not None and container.runtime_store is not None:
             await container.runtime_store.delete_owner_runtime(owner_id)
     with suppress(Exception):
-        if container is not None and container.data_store is not None:
-            await container.data_store.dev_maintenance.delete_owner_tree(owner_id)
+        if container is not None and container.local_system_data is not None:
+            await container.local_system_data.owner_deletion.delete_owner(owner_id)
             return
     with suppress(Exception):
         runtime_store = AgentRuntimeStore.open(runtime_sqlite_path)
@@ -426,7 +371,7 @@ async def _cleanup_owner_best_effort(
     with suppress(Exception):
         store = DataStore.open(DataSettings(sqlite_path=str(system_sqlite_path)))
         try:
-            await store.dev_maintenance.delete_owner_tree(owner_id)
+            await store.owner_deletion.delete_owner(owner_id)
         finally:
             await store.close()
 

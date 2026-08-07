@@ -6,12 +6,13 @@ defined by `eidolon_sdk` and stored by `eidolon_data`.
 ## Runtime boundary
 
 `PersonasService` is the public facade. Production wiring provides one
-`EidolonDataPersonaGenomeStore`; there is no template registry, YAML instance,
+`RuntimeAuthorityPersonaGenomeStore`; there is no template registry, YAML instance,
 behavioral-knob model, compiler DSL, or fallback persona.
 
-A runtime identity must pin both `genome_id` and `genome_hash`. New sessions
-resolve the companion's current committed snapshot. Existing sessions continue
-to load their pinned snapshot after a later evolution commit.
+The transport identity contains only Owner, Companion, and optional Device.
+Agent resolves and validates `genome_id`, `genome_hash`, and Memory Realm from
+the System Data Runtime Authority before every session. Existing sessions pin
+that immutable snapshot after a later evolution commit.
 
 ## Realization
 
@@ -26,6 +27,11 @@ evidence, are routed by `memory_realm_id`, and may add genome-owned relationship
 guidance through `PersonaMemoryAdapter`. Memory never mutates a genome.
 
 ## Evolution
+
+The domain contract and standalone profile retain the complete workflow below. Production
+Agent currently has a read-only Runtime Authority adapter only; a separate, Owner-scoped and
+idempotent System Data command contract is required before these mutations are enabled across
+processes. Agent does not open System Data SQLite as a workaround.
 
 Long-term changes use typed SDK events and complete candidate snapshots:
 

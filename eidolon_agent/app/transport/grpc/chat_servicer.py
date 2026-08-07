@@ -18,7 +18,7 @@ from eidolon_sdk.biz.chat_stream import TerminationCause
 from eidolon_agent.app.transport.grpc.codec import struct_to_dict, turn_event_to_proto
 from eidolon_agent.app.transport.grpc.interceptors import current_identity
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
-from eidolon_agent.core.errors import EidolonError, NotFoundError
+from eidolon_agent.core.errors import DependencyError, EidolonError, NotFoundError
 from eidolon_agent.core.types.signal import SignalDigest
 from eidolon_agent.core.types.turn import (
     TurnEvent,
@@ -40,11 +40,13 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         signals_bus,
         proactive_bus,  # EventBus
         personas_service=None,
+        runtime_authority=None,
     ) -> None:
         self._registry = agent_registry
         self._signals = signals_bus
         self._bus = proactive_bus
         self._personas = personas_service
+        self._runtime_authority = runtime_authority
 
     # ---- Chat bidi stream ---------------------------------------------------
 
@@ -56,6 +58,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         identity = current_identity()
         if identity is None:
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "no identity")
+        runtime = await self._resolve_runtime_facts(identity, context)
         active_turns: set[asyncio.Task] = set()
         active_by_conversation: dict[str, asyncio.Task] = {}
         conversation_by_turn: dict[str, str] = {}
@@ -150,9 +153,9 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 generation_by_conversation[conversation_id] = generation
                 try:
                     inst = await self._registry.resolve_runtime(
-                        owner_id=identity.owner_id,
-                        companion_id=identity.companion_id,
-                        genome_id=identity.genome_id,
+                        owner_id=runtime.owner_id,
+                        companion_id=runtime.companion_id,
+                        genome_id=runtime.genome_id,
                     )
                     agent = inst.agent
                 except NotFoundError as exc:
@@ -195,15 +198,15 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                         owner_id=identity.owner_id,
                         companion_id=inst.companion_id,
                         device_id=identity.device_id,
-                        memory_realm_id=identity.memory_realm_id,
+                        memory_realm_id=runtime.memory_realm_id,
                         genome_id=inst.genome_id,
                         trace_id=trace_id,
                         request_id=dict(context.invocation_metadata()).get(
                             "x-request-id", uuid.uuid4().hex
                         ),
-                        schema_version=identity.schema_version,
-                        genome_hash=identity.genome_hash,
-                        realizer_version=identity.realizer_version,
+                        schema_version=runtime.schema_version,
+                        genome_hash=runtime.genome_hash,
+                        realizer_version=runtime.realizer_version,
                     ),
                     input_modality=input_modality,
                     trigger=TurnTrigger.USER_UTTERANCE,
@@ -215,13 +218,10 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 async def _emit_turn(_agent=agent, _ti=ti, _generation=generation) -> None:
                     try:
                         async for ev in _agent.run_turn(_ti):
-                            if (
-                                generation_by_conversation.get(_ti.conversation_id)
-                                != _generation
-                            ):
-                                _ti.metadata["stale_generation_dropped"] = int(
-                                    _ti.metadata.get("stale_generation_dropped") or 0
-                                ) + 1
+                            if generation_by_conversation.get(_ti.conversation_id) != _generation:
+                                _ti.metadata["stale_generation_dropped"] = (
+                                    int(_ti.metadata.get("stale_generation_dropped") or 0) + 1
+                                )
                                 continue
                             async with write_lock:
                                 await context.write(turn_event_to_proto(ev))
@@ -289,10 +289,11 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         await self._signals.publish(request.session_id, sig)
         if self._personas is not None and identity is not None:
             try:
+                runtime = await self._resolve_runtime_facts(identity, context)
                 inst = await self._registry.resolve_runtime(
-                    owner_id=identity.owner_id,
-                    companion_id=identity.companion_id,
-                    genome_id=identity.genome_id,
+                    owner_id=runtime.owner_id,
+                    companion_id=runtime.companion_id,
+                    genome_id=runtime.genome_id,
                 )
                 from eidolon_agent.domain.personas.types import PersonaSignalInput
 
@@ -302,13 +303,31 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                         companion_id=inst.companion_id,
                         dominant_emotion=request.signal.label,
                         emotion_confidence=float(request.signal.confidence),
-                        presence=_presence_from_signal(request.signal.modality, request.signal.label),
+                        presence=_presence_from_signal(
+                            request.signal.modality, request.signal.label
+                        ),
                         confidence_overall=float(request.signal.confidence),
                     )
                 )
             except Exception:
                 _log.exception("submit persona signal failed")
         return pb.Ack(accepted=True)
+
+    async def _resolve_runtime_facts(self, identity, context):  # type: ignore[no-untyped-def]
+        if self._runtime_authority is None:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Companion Runtime Authority is not configured",
+            )
+        try:
+            return await self._runtime_authority.resolve(
+                owner_id=identity.owner_id,
+                companion_id=identity.companion_id,
+            )
+        except DependencyError as exc:
+            await context.abort(grpc.StatusCode.UNAVAILABLE, exc.message)
+        except EidolonError as exc:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, exc.message)
 
     # ---- SubscribeProactive ------------------------------------------------
 

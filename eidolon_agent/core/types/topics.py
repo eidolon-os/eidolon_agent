@@ -39,10 +39,6 @@ class Topics:
     def system_config_updated() -> str:
         return "agent.system.config.updated"
 
-    @staticmethod
-    def pairing_revoked() -> str:
-        return "agent.pairing.revoked"
-
     # --- External outbound ----------------------------------------------------
 
     @staticmethod
@@ -70,6 +66,7 @@ class Topics:
     @staticmethod
     def memory_event_pattern() -> str:
         return "eidolon.memory.event.*"
+
 
 # JetStream-persistent subjects (these go through JetStream, others are core NATS).
 PERSISTENT_PREFIXES = (

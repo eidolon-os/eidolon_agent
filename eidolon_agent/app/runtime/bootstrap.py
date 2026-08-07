@@ -18,12 +18,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import secrets
 from pathlib import Path
 
-from eidolon_data import DataStore
-from eidolon_data import load_settings as load_data_settings
+import httpx
 from eidolon_sdk.biz.runtime import RuntimeTokenVerifier
+from eidolon_sdk.biz.system_data import SystemDataRuntimeClient
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
 from eidolon_agent.app.admin import build_admin_app
@@ -79,9 +80,13 @@ from eidolon_agent.infra.persistence.agent_runtime import (
 )
 from eidolon_agent.infra.persistence.audit_dispatch import run_agent_audit_dispatcher
 from eidolon_agent.infra.persistence.eidolon_data_persona import (
-    EidolonDataPersonaGenomeStore,
+    RuntimeAuthorityPersonaGenomeStore,
 )
 from eidolon_agent.infra.persistence.runtime_store import AgentRuntimeStore
+from eidolon_agent.infra.system_data import (
+    LocalCompanionRuntimeAuthority,
+    SystemDataCompanionRuntimeAuthority,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -115,19 +120,41 @@ async def build_application(
     await runtime_store.init_schema()
     container.runtime_store = runtime_store
 
-    # System Data is opened separately for low-frequency Companion/Persona
-    # authority. It must never receive session/turn/message/job writes.
-    data_settings = load_data_settings()
-    if not standalone:
-        data_settings = data_settings.model_copy(update={"sqlite_read_only": True})
-    data_store = DataStore.open(data_settings)
+    # Production consumes the narrow versioned Companion Runtime Authority.
+    # The direct Data composition root exists only in the self-contained dev
+    # profile, where all sibling processes intentionally run in one process.
+    local_system_data = None
     if standalone:
-        await data_store.init_schema()
+        from eidolon_data import DataStore
+        from eidolon_data import load_settings as load_data_settings
+
+        local_system_data = DataStore.open(load_data_settings())
+        await local_system_data.init_schema()
+        runtime_authority = LocalCompanionRuntimeAuthority(local_system_data)
     else:
-        # System Data is a sibling authority. Deployment owns its Alembic
-        # lifecycle; Agent may validate but must never create or repair it.
-        await data_store.validate_schema()
-    container.data_store = data_store
+        token = os.environ.get(settings.system_data.service_token_env, "").strip()
+        if not token:
+            raise RuntimeError(
+                f"{settings.system_data.service_token_env} is required for "
+                "the System Data Companion Runtime Authority"
+            )
+        system_data_http = httpx.AsyncClient(
+            timeout=httpx.Timeout(
+                settings.system_data.timeout_s,
+                connect=settings.system_data.connect_timeout_s,
+            ),
+            trust_env=False,
+        )
+        runtime_authority = SystemDataCompanionRuntimeAuthority(
+            SystemDataRuntimeClient(
+                system_data_http,
+                settings.system_data.base_url,
+                service_token=token,
+            )
+        )
+        container.extras["system_data_http_client"] = system_data_http
+    container.local_system_data = local_system_data
+    container.runtime_authority = runtime_authority
 
     memory_refresher = None
     if standalone:
@@ -144,11 +171,9 @@ async def build_application(
         memory_port: object = NullMemoryPort()
         container.memory_port = memory_port
     else:
-        memory_routes, effective_nats_url, memory_refresher = (
-            await build_initial_memory_routes(
-                memory=settings.memory,
-                nats=settings.nats,
-            )
+        memory_routes, effective_nats_url, memory_refresher = await build_initial_memory_routes(
+            memory=settings.memory,
+            nats=settings.nats,
         )
         container.extras["memory_routes"] = memory_routes
 
@@ -186,7 +211,17 @@ async def build_application(
     # 5 + 6. Persona snapshots -------------------------------------------------
     # The database is the sole persona source of truth. Runtime sessions pin an
     # immutable genome id/hash and never select a template or fallback persona.
-    persona_store = EidolonDataPersonaGenomeStore(data_store)
+    persona_store = RuntimeAuthorityPersonaGenomeStore(
+        runtime_authority,
+        evolution_commands=(
+            local_system_data.persona_commands if local_system_data is not None else None
+        ),
+        observation_sink=(
+            local_system_data.persona_commands.record_observation
+            if local_system_data is not None
+            else None
+        ),
+    )
     personas_service = PersonasService(store=persona_store)
     await personas_service.start()
     container.persona_genome_store = persona_store
@@ -265,9 +300,7 @@ async def build_application(
     pending_memory_candidates = PendingMemoryCandidateStore()
     container.extras["pending_memory_candidates"] = pending_memory_candidates
     tool_registry.register(MemoryStageCandidateTool(pending_memory_candidates))
-    tool_registry.register(
-        MemoryConfirmPendingTool(memory_port, pending_memory_candidates)
-    )
+    tool_registry.register(MemoryConfirmPendingTool(memory_port, pending_memory_candidates))
     tool_registry.register(MemoryForgetTool(memory_port))
     tool_registry.register(EmitEventTool(event_bus=container.event_bus))
     delegate_tool = SubmitLongTaskTool(
@@ -287,11 +320,9 @@ async def build_application(
     container.tool_dispatcher = tool_dispatcher
     # Per-companion operational config (model routing / tool allow-deny / policy),
     # read from companions.runtime_config_json, resolved per-turn off a TTL cache.
-    container.extras["companion_config_resolver"] = CompanionConfigResolver(data_store)
+    container.extras["companion_config_resolver"] = CompanionConfigResolver(runtime_authority)
     # Empty until a stable Channel Provider adapter implements the domain ports.
-    container.extras["body_capability_tool_provider"] = RuntimeCapabilityToolProvider(
-        None
-    )
+    container.extras["body_capability_tool_provider"] = RuntimeCapabilityToolProvider(None)
 
     # 8. Runtime token verification ------------------------------------------
     jwt_secret = settings.runtime_token.jwt_secret
@@ -322,6 +353,7 @@ async def build_application(
         signals_bus=sig_bus,
         proactive_bus=container.event_bus,
         personas_service=personas_service,
+        runtime_authority=runtime_authority,
     )
     grpc_server = GrpcServer(
         servicer=servicer,
@@ -345,7 +377,7 @@ async def build_application(
         revocation_kv=revocation_kv,
         memory_routes=memory_routes,
         memory_discovery_refresher=memory_refresher,
-        data_store=data_store,
+        runtime_authority=runtime_authority,
         runtime_store=runtime_store,
     )
     container.http_app = http_app

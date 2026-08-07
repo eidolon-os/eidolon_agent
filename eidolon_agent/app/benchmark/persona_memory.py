@@ -23,7 +23,8 @@ from eidolon_sdk.biz.persona import (
 from eidolon_agent.core.types.memory import MemoryHit, MemoryKind
 from eidolon_agent.domain.personas import PersonasService
 from eidolon_agent.infra.benchmark import write_standard_benchmark_run
-from eidolon_agent.infra.persistence import EidolonDataPersonaGenomeStore
+from eidolon_agent.infra.persistence import RuntimeAuthorityPersonaGenomeStore
+from eidolon_agent.infra.system_data import LocalCompanionRuntimeAuthority
 
 SUITE = "persona_memory"
 
@@ -43,7 +44,10 @@ async def run_persona_memory_benchmark(
         await store.init_schema()
         try:
             provision_started = time.perf_counter()
-            await store.owner_service.create_owner(owner_id="benchmark-owner", display_name="Owner")
+            await store.owner_commands.create_owner(
+                owner_id="benchmark-owner",
+                display_name="Owner",
+            )
             genome = build_default_persona_genome(
                 name="Benchmark Companion", origin="owner_authored"
             )
@@ -59,7 +63,7 @@ async def run_persona_memory_benchmark(
                     )
                 }
             )
-            workspace = await store.workspace_provisioning.provision_workspace(
+            workspace = await store.companion_workspaces.provision_workspace(
                 owner_id="benchmark-owner",
                 companion_id="benchmark-companion",
                 companion_display_name="Benchmark Companion",
@@ -68,7 +72,18 @@ async def run_persona_memory_benchmark(
                 realm_id="benchmark-realm",
             )
             provision_ms = _elapsed_ms(provision_started)
-            service = PersonasService(store=EidolonDataPersonaGenomeStore(store))
+            observations: list[PersonaObservationEvent] = []
+
+            async def _record_observation(event: PersonaObservationEvent) -> None:
+                observations.append(event)
+
+            service = PersonasService(
+                store=RuntimeAuthorityPersonaGenomeStore(
+                    LocalCompanionRuntimeAuthority(store),
+                    evolution_commands=store.persona_commands,
+                    observation_sink=_record_observation,
+                )
+            )
             cases.append(
                 _case(
                     "workspace_integrity",

@@ -29,18 +29,17 @@ from eidolon_agent.core.types.turn_context import TurnContext
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.history import HistoryManager
 from eidolon_agent.domain.personas import PersonasService
-from eidolon_agent.infra.persistence import EidolonDataPersonaGenomeStore
+from eidolon_agent.infra.persistence import RuntimeAuthorityPersonaGenomeStore
+from eidolon_agent.infra.system_data import LocalCompanionRuntimeAuthority
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
 async def persona_stack(tmp_path):
-    store = DataStore.open(
-        DataSettings(sqlite_path=str(tmp_path / "persona-memory-e2e.sqlite3"))
-    )
+    store = DataStore.open(DataSettings(sqlite_path=str(tmp_path / "persona-memory-e2e.sqlite3")))
     await store.init_schema()
-    await store.owner_service.create_owner(owner_id="owner-e2e", display_name="Owner")
+    await store.owner_commands.create_owner(owner_id="owner-e2e", display_name="Owner")
 
     genome = build_default_persona_genome(name="Annie", origin="owner_authored")
     genome = genome.model_copy(
@@ -61,7 +60,7 @@ async def persona_stack(tmp_path):
             ),
         }
     )
-    workspace = await store.workspace_provisioning.provision_workspace(
+    workspace = await store.companion_workspaces.provision_workspace(
         owner_id="owner-e2e",
         companion_id="companion-e2e",
         companion_display_name="Annie",
@@ -69,15 +68,26 @@ async def persona_stack(tmp_path):
         genome_json=persona_genome_to_json(genome),
         realm_id="realm-e2e",
     )
-    service = PersonasService(store=EidolonDataPersonaGenomeStore(store))
+    observations: list[PersonaObservationEvent] = []
+
+    async def _record_observation(event: PersonaObservationEvent) -> None:
+        observations.append(event)
+
+    service = PersonasService(
+        store=RuntimeAuthorityPersonaGenomeStore(
+            LocalCompanionRuntimeAuthority(store),
+            evolution_commands=store.persona_commands,
+            observation_sink=_record_observation,
+        )
+    )
     try:
-        yield store, workspace, service
+        yield store, workspace, service, observations
     finally:
         await store.close()
 
 
 async def test_real_turn_context_uses_pinned_genome_and_memory_evidence(persona_stack):
-    _store, workspace, service = persona_stack
+    _store, workspace, service, _observations = persona_stack
     memory = _MemoryPort(workspace.memory_realm.realm_id)
     compiler = ContextCompiler(
         personas_service=service,
@@ -115,7 +125,7 @@ async def test_real_turn_context_uses_pinned_genome_and_memory_evidence(persona_
 
 
 async def test_observation_proposal_approval_session_pin_reject_and_rollback(persona_stack):
-    store, workspace, service = persona_stack
+    store, workspace, service, observations = persona_stack
     base = await service.get_snapshot(
         owner_id="owner-e2e",
         companion_id=workspace.companion.companion_id,
@@ -138,6 +148,7 @@ async def test_observation_proposal_approval_session_pin_reject_and_rollback(per
         evidence_refs=[evidence],
     )
     await service.record_observation(observation)
+    assert observations == [observation]
 
     proposal = _proposal(
         base=base.stored,
@@ -148,9 +159,11 @@ async def test_observation_proposal_approval_session_pin_reject_and_rollback(per
     )
     proposed = await service.create_evolution_proposal(proposal)
     assert proposed.status == "proposed"
-    assert (await service.get_snapshot(
-        owner_id="owner-e2e", companion_id=workspace.companion.companion_id
-    )).stored.genome_id == base.stored.genome_id
+    assert (
+        await service.get_snapshot(
+            owner_id="owner-e2e", companion_id=workspace.companion.companion_id
+        )
+    ).stored.genome_id == base.stored.genome_id
 
     committed = await service.approve_evolution(
         owner_id="owner-e2e",
@@ -187,10 +200,12 @@ async def test_observation_proposal_approval_session_pin_reject_and_rollback(per
         proposed_genome_id=rejected.genome_id,
         reason="Owner chose not to apply this change.",
     )
-    assert (await store.persona_repo.get_genome(rejected.genome_id)).status == "rejected"
-    assert (await service.get_snapshot(
-        owner_id="owner-e2e", companion_id=workspace.companion.companion_id
-    )).stored.genome_id == committed.genome_id
+    assert (await store.persona_genomes.get(rejected.genome_id)).status == "rejected"
+    assert (
+        await service.get_snapshot(
+            owner_id="owner-e2e", companion_id=workspace.companion.companion_id
+        )
+    ).stored.genome_id == committed.genome_id
 
     rolled_back = await service.rollback(
         owner_id="owner-e2e",
@@ -199,11 +214,8 @@ async def test_observation_proposal_approval_session_pin_reject_and_rollback(per
     )
     assert rolled_back.genome_id == base.stored.genome_id
 
-    event_types = {
-        event.event_type for event in await store.events.list_for_owner("owner-e2e")
-    }
+    event_types = {event.action for event in await store.audit_outbox.list_pending(limit=100)}
     assert {
-        "persona.observation.created",
         "persona.evolution.proposed",
         "persona.evolution.approved",
         "persona.evolution.rejected",
@@ -213,10 +225,12 @@ async def test_observation_proposal_approval_session_pin_reject_and_rollback(per
 
 
 async def test_evolution_rejects_semantic_rewrite_before_persistence(persona_stack):
-    store, workspace, service = persona_stack
-    base = (await service.get_snapshot(
-        owner_id="owner-e2e", companion_id=workspace.companion.companion_id
-    )).stored
+    store, workspace, service, _observations = persona_stack
+    base = (
+        await service.get_snapshot(
+            owner_id="owner-e2e", companion_id=workspace.companion.companion_id
+        )
+    ).stored
     evidence = PersonaEvidenceRef(
         kind="memory_fragment",
         ref_id="memory-boundary",
@@ -253,7 +267,7 @@ async def test_evolution_rejects_semantic_rewrite_before_persistence(persona_sta
 
     with pytest.raises(ValidationError, match="constitution"):
         await service.create_evolution_proposal(proposal)
-    assert await store.persona_repo.get_genome("genome-invalid-rewrite") is None
+    assert await store.persona_genomes.get("genome-invalid-rewrite") is None
 
 
 def _proposal(*, base, evidence, proposal_id: str, genome_id: str, trait_delta: float):

@@ -7,7 +7,7 @@ from eidolon_agent.infra.persistence.agent_runtime import (
     build_agent_turn_persister,
 )
 from eidolon_agent.infra.persistence.eidolon_data_persona import (
-    EidolonDataPersonaGenomeStore,
+    RuntimeAuthorityPersonaGenomeStore,
 )
 from eidolon_agent.infra.persistence.runtime_store import AgentRuntimeStore
 
@@ -15,7 +15,7 @@ __all__ = [
     "AgentConversationReader",
     "AgentLongTaskStore",
     "AgentRuntimeStore",
-    "EidolonDataPersonaGenomeStore",
+    "RuntimeAuthorityPersonaGenomeStore",
     "build_agent_history_hydrator",
     "build_agent_turn_persister",
 ]
