@@ -35,7 +35,6 @@ from eidolon_agent.app.transport.http import build_http_app
 from eidolon_agent.config.settings import Settings, load_settings
 from eidolon_agent.core.types.tool import Permission
 from eidolon_agent.domain.agent.companion import CompanionAgent
-from eidolon_agent.domain.agent.companion_config import CompanionConfigResolver
 from eidolon_agent.domain.agent.registry import AgentRegistry
 from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.agent.turn import ToolLatencyPolicy, TurnEngine
@@ -45,6 +44,7 @@ from eidolon_agent.domain.harness import HarnessBudget, RealtimeAgentHarness
 from eidolon_agent.domain.history import HistoryFanout, HistoryManager
 from eidolon_agent.domain.long_tasks import LongTaskResultSummarizer
 from eidolon_agent.domain.personas import PersonasService, PersonaVoice
+from eidolon_agent.domain.runtime_session import RuntimeSessionAuthorizer
 from eidolon_agent.domain.signals import SignalBus
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.body_capability_provider import RuntimeCapabilityToolProvider
@@ -155,6 +155,8 @@ async def build_application(
         container.extras["system_data_http_client"] = system_data_http
     container.local_system_data = local_system_data
     container.runtime_authority = runtime_authority
+    runtime_session_authorizer = RuntimeSessionAuthorizer(runtime_authority)
+    container.runtime_session_authorizer = runtime_session_authorizer
 
     memory_refresher = None
     if standalone:
@@ -318,9 +320,6 @@ async def build_application(
     )
     container.tool_registry = tool_registry
     container.tool_dispatcher = tool_dispatcher
-    # Per-companion operational config (model routing / tool allow-deny / policy),
-    # read from companions.runtime_config_json, resolved per-turn off a TTL cache.
-    container.extras["companion_config_resolver"] = CompanionConfigResolver(runtime_authority)
     # Empty until a stable Channel Provider adapter implements the domain ports.
     container.extras["body_capability_tool_provider"] = RuntimeCapabilityToolProvider(None)
 
@@ -353,7 +352,7 @@ async def build_application(
         signals_bus=sig_bus,
         proactive_bus=container.event_bus,
         personas_service=personas_service,
-        runtime_authority=runtime_authority,
+        runtime_sessions=runtime_session_authorizer,
     )
     grpc_server = GrpcServer(
         servicer=servicer,
@@ -483,7 +482,6 @@ def _build_turn_engine(
         tool_schema_strict=container.settings.turn.tool_schema_strict,
         require_idempotency_for_side_effect_tools=container.settings.turn.require_idempotency_for_side_effect_tools,
         taboos_provider=lambda: tuple(),
-        companion_config_resolver=container.extras.get("companion_config_resolver"),
         body_capability_provider=container.extras.get("body_capability_tool_provider"),
         turn_persister=build_agent_turn_persister(
             container.runtime_store,

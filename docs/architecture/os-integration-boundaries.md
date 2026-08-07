@@ -34,6 +34,9 @@ authority.
 Production Companion/Realm/Genome reads cross a narrow
 `CompanionRuntimeAuthority` Port backed by System Data's versioned HTTP snapshot contract.
 The Channel token does not carry those facts, and Agent does not read a sibling database.
+The token's required `session_id` is a signed connection boundary, not another principal.
+Signal and proactive RPCs derive their target from that authenticated scope rather than
+accepting a caller-selected Session or Companion namespace.
 
 ## Removed legacy path
 

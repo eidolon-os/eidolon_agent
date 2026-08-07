@@ -10,6 +10,7 @@ import pytest
 from eidolon_memory_contracts import conversation_turn_subject, unwrap_memory_payload
 from sqlalchemy import select
 
+from eidolon_agent.core.types.companion_runtime import CompanionRuntimeConfig
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
 from eidolon_agent.core.types.memory import (
     MemoryForgetCandidate,
@@ -19,7 +20,6 @@ from eidolon_agent.core.types.memory import (
 )
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEventKind
-from eidolon_agent.domain.agent.companion_config import CompanionRuntimeConfig
 from eidolon_agent.domain.history import HistoryManager
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import EmitEventTool, GetWeatherTool

@@ -12,6 +12,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
+from eidolon_agent.core.types.companion_runtime import CompanionRuntimeConfig
 from eidolon_agent.core.types.signal import SignalDigest
 from eidolon_agent.core.types.turn_context import InputModality, TurnContext
 
@@ -84,6 +85,7 @@ class TurnInput:
     context: TurnContext
     input_modality: InputModality
     trigger: TurnTrigger
+    runtime_config: CompanionRuntimeConfig = field(default_factory=CompanionRuntimeConfig)
     text: str | None = None
     realtime: SignalDigest | None = None
     attachments: tuple[dict, ...] = ()  # opaque; modality-specific

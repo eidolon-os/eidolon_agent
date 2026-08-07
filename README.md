@@ -58,9 +58,10 @@
   没有稳定的 Channel Provider directory/command 契约。旧 Hub HTTP command 与 NATS
   runtime-device blackboard adapter 已删除，`body_control.enabled` 默认关闭且误开启会
   fail closed。详见 `docs/architecture/os-integration-boundaries.md`。
-- Channel→Agent 的 V5 runtime token 只做进程边界认证，携带 Owner、Companion 和可选
-  Device/Session。Agent 通过 `CompanionRuntimeAuthority` Port 从 System Data HTTP
-  重新解析 Realm/Genome 并校验 owner scope、schema 和 hash；生产不直读兄弟 SQLite。
+- Channel→Agent 的 V5 runtime token 只做进程边界认证，携带 Owner、Companion、必需的
+  Session 和可选 Device。Agent 通过 `CompanionRuntimeAuthority` Port 从 System Data HTTP
+  重新解析 Realm/Genome/运行策略并校验 owner scope、schema 和 hash；生产不直读兄弟
+  SQLite。会话授权模型见 `docs/architecture/runtime-session-boundary.md`。
 
 ---
 
@@ -340,15 +341,21 @@ service EidolonAgent {
 ```
 
 `AuthInterceptor` 在每个 RPC 上校验 `Bearer <runtime_token>`（V5，当前部署为 HS256）。
-Token 只携带 `owner_id`、`companion_id`、可选 `device_id/session_id/scopes`；它不再搬运
+Token 只携带 `owner_id`、`companion_id`、必需 `session_id` 及可选
+`device_id/scopes`；它不再搬运
 Realm、Genome、hash 或 realizer 等兄弟权威事实。
 
 Agent 是 Companion runtime，不负责 Owner 注册、Device pairing/Mount 或 Companion
 选择。外部调用方必须在进入 Agent 前选择并校验一个具体 Companion。Agent 收到 token
-后通过 System Data Runtime Authority 解析 active Realm/Genome，并再次验证 Owner scope。
+后通过 System Data Runtime Authority 解析 active Realm/Genome/运行策略，并再次验证
+Owner scope。
 Device 只是可选来源；无 Device 的虚拟 Companion 可以正常进入，未选择 Companion 的
 Device 则停留在 Channel 的 Device/data 路径。一次 Agent session 会锁定解析出的
-`genome_id + genome_hash`，会话中不热切换人格。
+`genome_id + genome_hash + runtime_config`，会话中不热切换人格或工具策略。
+
+`session_id` 是已签名的当前连接边界，`conversation_id` 是 Owner/Companion 内的历史上下文
+键，二者不互相替代。`PushSignal` 的目标 Session 和 `SubscribeProactive` 的目标 Companion
+都只从认证作用域派生，客户端请求不再携带可选择其他命名空间的字段。
 
 ### HTTP（`:8180`）—— 健康探针
 

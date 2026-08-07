@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 
+from eidolon_agent.core.types.companion_runtime import CompanionRuntimeConfig
 from eidolon_agent.core.types.messages import MessageRole
-from eidolon_agent.domain.agent.companion_config import CompanionRuntimeConfig
 from eidolon_agent.infra.llm.providers.fake import FakeLLM
 from tests.helpers import make_turn_input
 

@@ -51,6 +51,7 @@ from eidolon_agent.core.types import (
     TurnTrace,
     classify_memory_write,
 )
+from eidolon_agent.core.types.companion_runtime import CompanionRuntimeConfig
 from eidolon_agent.core.types.topics import Topics
 from eidolon_agent.core.types.turn import (
     FSMState,
@@ -59,10 +60,6 @@ from eidolon_agent.core.types.turn import (
     TurnEventKind,
     TurnInput,
     TurnStatus,
-)
-from eidolon_agent.domain.agent.companion_config import (
-    CompanionConfigResolver,
-    CompanionRuntimeConfig,
 )
 from eidolon_agent.domain.agent.control_intent import ControlIntentClassifier
 from eidolon_agent.domain.agent.triage import TaskClassifier
@@ -139,7 +136,6 @@ class TurnEngine:
         harness: RealtimeAgentHarness | None = None,
         background_tasks: BackgroundTaskRunner | None = None,
         tool_latency_policy: ToolLatencyPolicy | None = None,
-        companion_config_resolver: CompanionConfigResolver | None = None,
         body_capability_provider: RuntimeCapabilityToolProvider | None = None,
     ) -> None:
         self._compiler = compiler
@@ -165,7 +161,6 @@ class TurnEngine:
         self._harness = harness or RealtimeAgentHarness()
         self._background = background_tasks or BackgroundTaskRunner()
         self._tool_latency_policy = tool_latency_policy or ToolLatencyPolicy()
-        self._companion_config = companion_config_resolver
         self._body_capability_provider = body_capability_provider
         # Ephemeral UX state only: the memory service token remains the signed
         # authority. A restart merely requires the user to preview again.
@@ -456,7 +451,7 @@ class TurnEngine:
             # ---- Per-companion runtime config (model / tools / policy) -----
             # Same code, differentiated per companion: model routing + tool
             # allow/deny + policy toggles come from companions.runtime_config_json.
-            cfg = await self._resolve_companion_config(ti)
+            cfg = ti.runtime_config
 
             # ---- LLM stream (with tool loop) -------------------------------
             tools, extra_tools = await self._tool_schemas(ti, cfg)
@@ -940,19 +935,6 @@ class TurnEngine:
                 )
 
     # ---- helpers -------------------------------------------------------------
-
-    async def _resolve_companion_config(self, ti: TurnInput) -> CompanionRuntimeConfig:
-        """Resolve this companion's operational config; never break a turn."""
-        if self._companion_config is None:
-            return CompanionRuntimeConfig()
-        try:
-            return await self._companion_config.resolve(
-                ti.context.owner_id,
-                ti.context.companion_id,
-            )
-        except Exception as exc:
-            _log.warning("companion config resolve failed: %s", exc)
-            return CompanionRuntimeConfig()
 
     async def _tool_schemas(
         self, ti: TurnInput, cfg: CompanionRuntimeConfig

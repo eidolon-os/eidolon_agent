@@ -8,18 +8,25 @@ Production Agent does not import the System Data composition root, ORM rows, or 
 path. It consumes the versioned Companion Runtime Snapshot HTTP contract through the
 domain-facing `CompanionRuntimeAuthority` Port.
 
-Channel's V5 runtime token authenticates only the selected Owner/Companion boundary and
-optional Device/Session source. On the first gRPC call, Agent resolves the Companion from
-System Data and validates:
+Channel's V5 runtime token authenticates only the selected Owner/Companion boundary, a
+required Session, and an optional Device source. When a gRPC call enters the application
+boundary, Agent resolves the Companion from System Data and validates:
 
 - token Owner equals snapshot Owner;
 - Companion and Memory Realm are active;
 - Persona Genome is committed;
 - schema and realizer versions are supported;
 - the normalized Genome content matches its declared hash.
+- known Companion runtime policy fields have valid types.
 
 Transport failures map to `UNAVAILABLE`; missing, inactive, cross-Owner, or invalid runtime
 facts fail closed before an Agent instance or TurnContext is created.
+
+The resolved facts and typed runtime policy form one immutable
+`AuthorizedRuntimeSession`. A long-lived Chat stream reuses that snapshot for every Turn;
+there is no per-Turn HTTP lookup and no permissive fallback when Data is unavailable.
+Authority changes take effect on the next authenticated session/stream. See
+`runtime-session-boundary.md` for the transport and namespace invariants.
 
 ## Composition
 

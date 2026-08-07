@@ -18,7 +18,12 @@ from eidolon_sdk.biz.chat_stream import TerminationCause
 from eidolon_agent.app.transport.grpc.codec import struct_to_dict, turn_event_to_proto
 from eidolon_agent.app.transport.grpc.interceptors import current_identity
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
-from eidolon_agent.core.errors import DependencyError, EidolonError, NotFoundError
+from eidolon_agent.core.errors import (
+    DependencyError,
+    EidolonError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from eidolon_agent.core.types.signal import SignalDigest
 from eidolon_agent.core.types.turn import (
     TurnEvent,
@@ -39,14 +44,14 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         agent_registry,
         signals_bus,
         proactive_bus,  # EventBus
+        runtime_sessions,
         personas_service=None,
-        runtime_authority=None,
     ) -> None:
         self._registry = agent_registry
         self._signals = signals_bus
         self._bus = proactive_bus
         self._personas = personas_service
-        self._runtime_authority = runtime_authority
+        self._runtime_sessions = runtime_sessions
 
     # ---- Chat bidi stream ---------------------------------------------------
 
@@ -58,14 +63,14 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         identity = current_identity()
         if identity is None:
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "no identity")
-        runtime = await self._resolve_runtime_facts(identity, context)
+        scope = await self._authorize_runtime(identity, context)
+        runtime = scope.runtime
         active_turns: set[asyncio.Task] = set()
         active_by_conversation: dict[str, asyncio.Task] = {}
         conversation_by_turn: dict[str, str] = {}
         input_by_turn: dict[str, TurnInput] = {}
         generation_by_conversation: dict[str, int] = {}
         write_lock = asyncio.Lock()
-        last_session_id: str | None = None
         signal_fuser = SignalFuser()
 
         # Watch the gRPC context for cancellation (raw TCP close, RPC cancel
@@ -134,17 +139,15 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                         )
                     continue
                 if payload == "signal":
-                    if last_session_id:
-                        await self._signals.publish(
-                            last_session_id,
-                            _signal_from_proto(frame.signal),
-                        )
+                    await self._signals.publish(
+                        scope.session_id,
+                        _signal_from_proto(frame.signal),
+                    )
                     continue
                 if payload != "start":
                     continue
 
                 start = frame.start
-                last_session_id = start.conversation_id
                 conversation_id = start.conversation_id
                 previous = active_by_conversation.get(conversation_id)
                 if previous is not None and not previous.done():
@@ -170,13 +173,10 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 realtime = _digest_from_dict(struct_to_dict(start.realtime))
                 if realtime is None:
                     recent_signals = await self._signals.recent(
-                        start.conversation_id,
+                        scope.session_id,
                         window_ms=signal_fuser.window_ms,
                     )
                     realtime = signal_fuser.fuse(recent_signals)
-                runtime_session_id = str(
-                    getattr(identity, "session_id", None) or conversation_id
-                ).strip()
                 try:
                     input_modality = _input_modality(start.input_modality)
                 except ValueError as exc:
@@ -193,11 +193,11 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 ti = TurnInput(
                     turn_id=start.turn_id or uuid.uuid4().hex,
                     conversation_id=conversation_id,
-                    session_id=runtime_session_id,
+                    session_id=scope.session_id,
                     context=TurnContext(
-                        owner_id=identity.owner_id,
+                        owner_id=scope.owner_id,
                         companion_id=inst.companion_id,
-                        device_id=identity.device_id,
+                        device_id=scope.device_id,
                         memory_realm_id=runtime.memory_realm_id,
                         genome_id=inst.genome_id,
                         trace_id=trace_id,
@@ -210,6 +210,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     ),
                     input_modality=input_modality,
                     trigger=TurnTrigger.USER_UTTERANCE,
+                    runtime_config=scope.config,
                     text=start.text,
                     realtime=realtime,
                     metadata=start_metadata,
@@ -275,6 +276,9 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         from eidolon_agent.core.types.signal import RealtimeSignal, SignalModality
 
         identity = current_identity()
+        if identity is None:
+            await context.abort(grpc.StatusCode.UNAUTHENTICATED, "no identity")
+        scope = await self._authorize_runtime(identity, context)
         try:
             modality = SignalModality(request.signal.modality)
         except ValueError:
@@ -286,20 +290,19 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
             confidence=float(request.signal.confidence),
             raw=struct_to_dict(request.signal.raw),
         )
-        await self._signals.publish(request.session_id, sig)
-        if self._personas is not None and identity is not None:
+        await self._signals.publish(scope.session_id, sig)
+        if self._personas is not None:
             try:
-                runtime = await self._resolve_runtime_facts(identity, context)
                 inst = await self._registry.resolve_runtime(
-                    owner_id=runtime.owner_id,
-                    companion_id=runtime.companion_id,
-                    genome_id=runtime.genome_id,
+                    owner_id=scope.runtime.owner_id,
+                    companion_id=scope.runtime.companion_id,
+                    genome_id=scope.runtime.genome_id,
                 )
                 from eidolon_agent.domain.personas.types import PersonaSignalInput
 
                 await self._personas.submit_signal(
                     PersonaSignalInput(
-                        owner_id=identity.owner_id,
+                        owner_id=scope.owner_id,
                         companion_id=inst.companion_id,
                         dominant_emotion=request.signal.label,
                         emotion_confidence=float(request.signal.confidence),
@@ -313,19 +316,18 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 _log.exception("submit persona signal failed")
         return pb.Ack(accepted=True)
 
-    async def _resolve_runtime_facts(self, identity, context):  # type: ignore[no-untyped-def]
-        if self._runtime_authority is None:
-            await context.abort(
-                grpc.StatusCode.FAILED_PRECONDITION,
-                "Companion Runtime Authority is not configured",
-            )
+    async def _authorize_runtime(self, identity, context):  # type: ignore[no-untyped-def]
         try:
-            return await self._runtime_authority.resolve(
+            return await self._runtime_sessions.authorize(
                 owner_id=identity.owner_id,
                 companion_id=identity.companion_id,
+                device_id=identity.device_id,
+                session_id=identity.session_id,
             )
         except DependencyError as exc:
             await context.abort(grpc.StatusCode.UNAVAILABLE, exc.message)
+        except PermissionDeniedError as exc:
+            await context.abort(grpc.StatusCode.PERMISSION_DENIED, exc.message)
         except EidolonError as exc:
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, exc.message)
 
@@ -334,20 +336,19 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
     async def SubscribeProactive(
         self, request: pb.SubscribeRequest, context: grpc.aio.ServicerContext
     ):
+        del request
         identity = current_identity()
         if identity is None:
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "no identity")
+        scope = await self._authorize_runtime(identity, context)
         queue: asyncio.Queue = asyncio.Queue()
 
         async def _handler(event):  # type: ignore[no-untyped-def]
             await queue.put(event.payload)
 
-        # Subject pattern: agent.proactive.triggered.<instance_id>
-        pattern = (
-            f"agent.proactive.triggered.{request.instance_id}"
-            if request.instance_id
-            else "agent.proactive.triggered.>"
-        )
+        # The authenticated Companion is the only subscription target. The
+        # request carries no namespace selector.
+        pattern = f"agent.proactive.triggered.{scope.companion_id}"
         unsub = await self._bus.subscribe(pattern, _handler)
         try:
             while True:

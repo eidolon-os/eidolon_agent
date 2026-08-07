@@ -97,12 +97,14 @@ async def issue_runtime_token(
             )
         secret = secret_path.read_text(encoding="utf-8").strip()
     device_id = f"{device_name}-{uuid.uuid4().hex[:8]}"
+    session_id = f"benchmark-{uuid.uuid4().hex}"
     token, _ = sign_runtime_token(
         secret=secret,
         algorithm=settings.runtime_token.jwt_algorithm,
         device_id=device_id,
         owner_id=user_id,
         companion_id=companion_id,
+        session_id=session_id,
         scopes=["benchmark"],
         ttl_seconds=ttl_seconds,
     )

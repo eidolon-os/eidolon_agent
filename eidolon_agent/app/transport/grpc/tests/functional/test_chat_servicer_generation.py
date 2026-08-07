@@ -11,6 +11,7 @@ from eidolon_agent.app.transport.grpc import chat_servicer
 from eidolon_agent.app.transport.grpc.chat_servicer import EidolonAgentServicer
 from eidolon_agent.app.transport.grpc.proto import pb
 from eidolon_agent.core.types.turn import TurnEvent, TurnStatus
+from eidolon_agent.domain.runtime_session import RuntimeSessionAuthorizer
 
 pytestmark = pytest.mark.functional
 
@@ -35,9 +36,14 @@ def _runtime_authority() -> SimpleNamespace:
                 schema_version="schema-v1",
                 genome_hash="hash-v1",
                 realizer_version="realizer-v1",
+                runtime_config={},
             )
         )
     )
+
+
+def _runtime_sessions() -> RuntimeSessionAuthorizer:
+    return RuntimeSessionAuthorizer(_runtime_authority())
 
 
 def _async_value(value):
@@ -58,7 +64,7 @@ async def test_new_start_supersedes_old_turn_and_drops_late_events(monkeypatch) 
         agent_registry=registry,
         signals_bus=_Signals(),
         proactive_bus=None,
-        runtime_authority=_runtime_authority(),
+        runtime_sessions=_runtime_sessions(),
     )
 
     await servicer.Chat(
@@ -104,7 +110,7 @@ async def test_explicit_cancel_drops_late_events(monkeypatch) -> None:
         agent_registry=registry,
         signals_bus=_Signals(),
         proactive_bus=None,
-        runtime_authority=_runtime_authority(),
+        runtime_sessions=_runtime_sessions(),
     )
 
     await servicer.Chat(
@@ -140,7 +146,7 @@ async def test_cancel_of_finished_turn_acks_already_done(monkeypatch) -> None:
         agent_registry=_Registry([_ImmediateAgent("hi")]),
         signals_bus=_Signals(),
         proactive_bus=None,
-        runtime_authority=_runtime_authority(),
+        runtime_sessions=_runtime_sessions(),
     )
 
     await servicer.Chat(
@@ -164,7 +170,7 @@ async def test_cancel_played_chars_stashed_on_turn_input(monkeypatch) -> None:
         agent_registry=_Registry([agent]),
         signals_bus=_Signals(),
         proactive_bus=None,
-        runtime_authority=_runtime_authority(),
+        runtime_sessions=_runtime_sessions(),
     )
 
     await servicer.Chat(
@@ -205,7 +211,7 @@ async def test_start_turn_trace_id_reaches_turn_input(monkeypatch) -> None:
         agent_registry=_Registry([agent]),
         signals_bus=_Signals(),
         proactive_bus=None,
-        runtime_authority=_runtime_authority(),
+        runtime_sessions=_runtime_sessions(),
     )
 
     await servicer.Chat(
@@ -241,7 +247,7 @@ async def test_parallel_conversations_do_not_supersede_each_other(monkeypatch) -
         agent_registry=registry,
         signals_bus=_Signals(),
         proactive_bus=None,
-        runtime_authority=_runtime_authority(),
+        runtime_sessions=_runtime_sessions(),
     )
 
     await servicer.Chat(

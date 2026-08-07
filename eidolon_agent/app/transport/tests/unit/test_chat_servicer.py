@@ -6,7 +6,7 @@ drive the servicer directly without spinning up a real gRPC server.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -18,6 +18,7 @@ from eidolon_agent.app.transport.grpc.chat_servicer import EidolonAgentServicer
 from eidolon_agent.app.transport.grpc.interceptors import _current_identity
 from eidolon_agent.app.transport.grpc.proto import pb
 from eidolon_agent.core.types.turn import TurnEventKind
+from eidolon_agent.domain.runtime_session import RuntimeSessionAuthorizer
 
 pytestmark = pytest.mark.unit
 
@@ -25,12 +26,21 @@ pytestmark = pytest.mark.unit
 # ---- helpers --------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _authenticated_identity():
+    token = _current_identity.set(_StubIdentity())
+    try:
+        yield
+    finally:
+        _current_identity.reset(token)
+
+
 @dataclass
 class _StubIdentity:
     owner_id: str = "owner-1"
     companion_id: str = "companion-1"
     device_id: str | None = "dev-1"
-    session_id: str | None = None
+    session_id: str | None = "sess-1"
 
 
 @dataclass
@@ -42,10 +52,15 @@ class _RuntimeFacts:
     schema_version: str = "eidolon.persona_genome"
     genome_hash: str = "pg_stub"
     realizer_version: str = "eidolon.persona_realizer"
+    runtime_config: dict = field(default_factory=dict)
 
 
 def _runtime_authority() -> SimpleNamespace:
     return SimpleNamespace(resolve=AsyncMock(return_value=_RuntimeFacts()))
+
+
+def _runtime_sessions() -> RuntimeSessionAuthorizer:
+    return RuntimeSessionAuthorizer(_runtime_authority())
 
 
 def _make_context() -> MagicMock:
@@ -86,10 +101,9 @@ async def test_push_signal_publishes_to_signal_bus() -> None:
         agent_registry=MagicMock(),
         signals_bus=signals,
         proactive_bus=MagicMock(),
-        runtime_authority=_runtime_authority(),
+        runtime_sessions=_runtime_sessions(),
     )
     req = pb.SignalRequest(
-        session_id="sess-1",
         signal=pb.PushSignalInline(modality="face", label="smile", confidence=0.91),
     )
     ack = await svc.PushSignal(req, _make_context())
@@ -99,6 +113,70 @@ async def test_push_signal_publishes_to_signal_bus() -> None:
     assert sess == "sess-1"
     assert sig.label == "smile"
     assert 0.9 < sig.confidence <= 1.0
+
+
+async def test_push_signal_rejects_token_without_session_before_bus_access() -> None:
+    signals = MagicMock()
+    signals.publish = AsyncMock()
+    svc = EidolonAgentServicer(
+        agent_registry=MagicMock(),
+        signals_bus=signals,
+        proactive_bus=MagicMock(),
+        runtime_sessions=_runtime_sessions(),
+    )
+    context = _make_context()
+    token = _current_identity.set(_StubIdentity(session_id=None))
+    try:
+        with pytest.raises(grpc.RpcError):
+            await svc.PushSignal(
+                pb.SignalRequest(signal=pb.PushSignalInline(label="smile")),
+                context,
+            )
+    finally:
+        _current_identity.reset(token)
+
+    context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "runtime token is not bound to a session",
+    )
+    signals.publish.assert_not_awaited()
+
+
+async def test_proactive_subscription_is_fixed_to_authenticated_companion() -> None:
+    captured: dict[str, object] = {}
+
+    async def _subscribe(pattern, handler):
+        captured["pattern"] = pattern
+        await handler(
+            SimpleNamespace(
+                payload={
+                    "instance_id": "companion-1",
+                    "intent": "ready",
+                    "text": "done",
+                }
+            )
+        )
+
+        async def _unsubscribe():
+            captured["unsubscribed"] = True
+
+        return _unsubscribe
+
+    svc = EidolonAgentServicer(
+        agent_registry=MagicMock(),
+        signals_bus=MagicMock(),
+        proactive_bus=SimpleNamespace(subscribe=_subscribe),
+        runtime_sessions=_runtime_sessions(),
+    )
+    stream = svc.SubscribeProactive(pb.SubscribeRequest(), _make_context())
+    event = await anext(stream)
+    await stream.aclose()
+
+    assert event.text == "done"
+    assert captured == {
+        "pattern": "agent.proactive.triggered.companion-1",
+        "unsubscribed": True,
+    }
 
 
 async def test_chat_cancels_active_turn_when_context_is_cancelled() -> None:
@@ -132,7 +210,7 @@ async def test_chat_cancels_active_turn_when_context_is_cancelled() -> None:
         agent_registry=registry,
         signals_bus=SimpleNamespace(recent=AsyncMock(return_value=[])),
         proactive_bus=MagicMock(),
-        runtime_authority=_runtime_authority(),
+        runtime_sessions=_runtime_sessions(),
     )
 
     # Build a request iterator that yields one start frame and then blocks,
@@ -205,7 +283,7 @@ async def test_chat_does_not_cancel_active_turn_when_context_is_done_but_not_can
         agent_registry=registry,
         signals_bus=SimpleNamespace(recent=AsyncMock(return_value=[])),
         proactive_bus=MagicMock(),
-        runtime_authority=_runtime_authority(),
+        runtime_sessions=_runtime_sessions(),
     )
 
     async def _req_iter():
@@ -236,6 +314,7 @@ async def test_chat_start_inline_realtime_reaches_turn_input() -> None:
 
     async def _turn(ti):
         captured["realtime"] = ti.realtime
+        captured["session_id"] = ti.session_id
         yield TurnEvent(turn_id=ti.turn_id, seq=0, kind=TurnEventKind.DONE, data={})
 
     agent = MagicMock()
@@ -248,7 +327,7 @@ async def test_chat_start_inline_realtime_reaches_turn_input() -> None:
         agent_registry=registry,
         signals_bus=signals,
         proactive_bus=MagicMock(),
-        runtime_authority=_runtime_authority(),
+        runtime_sessions=_runtime_sessions(),
     )
 
     async def _req_iter():
@@ -300,7 +379,7 @@ async def test_chat_start_uses_explicit_text_input_modality() -> None:
         agent_registry=registry,
         signals_bus=signals,
         proactive_bus=MagicMock(),
-        runtime_authority=_runtime_authority(),
+        runtime_sessions=_runtime_sessions(),
     )
 
     async def _req_iter():
@@ -337,6 +416,7 @@ async def test_chat_fuses_recent_signals_when_start_has_no_realtime() -> None:
 
     async def _turn(ti):
         captured["realtime"] = ti.realtime
+        captured["session_id"] = ti.session_id
         yield TurnEvent(turn_id=ti.turn_id, seq=0, kind=TurnEventKind.DONE, data={})
 
     agent = MagicMock()
@@ -359,7 +439,7 @@ async def test_chat_fuses_recent_signals_when_start_has_no_realtime() -> None:
         agent_registry=registry,
         signals_bus=signals,
         proactive_bus=MagicMock(),
-        runtime_authority=_runtime_authority(),
+        runtime_sessions=_runtime_sessions(),
     )
 
     async def _req_iter():
@@ -377,7 +457,9 @@ async def test_chat_fuses_recent_signals_when_start_has_no_realtime() -> None:
         _current_identity.reset(token)
 
     assert captured["realtime"].dominant_emotion == "calm"
+    assert captured["session_id"] == "sess-1"
     signals.recent.assert_awaited_once()
+    assert signals.recent.await_args.args[0] == "sess-1"
 
 
 async def test_push_signal_unknown_modality_falls_back_to_ambient() -> None:
@@ -387,12 +469,11 @@ async def test_push_signal_unknown_modality_falls_back_to_ambient() -> None:
         agent_registry=MagicMock(),
         signals_bus=signals,
         proactive_bus=MagicMock(),
-        runtime_authority=_runtime_authority(),
+        runtime_sessions=_runtime_sessions(),
     )
     from eidolon_agent.core.types.signal import SignalModality
 
     req = pb.SignalRequest(
-        session_id="s",
         signal=pb.PushSignalInline(modality="invalid_modality", label="x", confidence=0.5),
     )
     await svc.PushSignal(req, _make_context())

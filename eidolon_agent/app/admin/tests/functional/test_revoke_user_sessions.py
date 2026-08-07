@@ -41,6 +41,7 @@ def _sign_device_token(*, device_id: str, **kwargs):
     return sign_runtime_token(
         secret=SECRET,
         device_id=device_id,
+        session_id=kwargs.pop("session_id", "test-session"),
         ttl_seconds=kwargs.pop("ttl_seconds", 3600),
         **kwargs,
     )

@@ -49,11 +49,14 @@ async def chat_test(body: ChatTestRequest, request: Request):
     jwt_secret = resolve_shared_secret(settings.runtime_token.jwt_secret)
     if not jwt_secret:
         raise RuntimeError("runtime token secret not configured")
+    session_id = f"admin-chat-{uuid.uuid4().hex}"
+    conversation_id = f"admin-test-{uuid.uuid4().hex[:8]}"
     runtime_token, _ = sign_runtime_token(
         secret=jwt_secret,
         algorithm=settings.runtime_token.jwt_algorithm,
         owner_id=body.owner_id,
         companion_id=body.companion_id,
+        session_id=session_id,
         scopes=["admin-chat-test"],
         ttl_seconds=600,
     )
@@ -75,7 +78,7 @@ async def chat_test(body: ChatTestRequest, request: Request):
                 yield pb.ChatRequest(
                     start=pb.StartTurn(
                         turn_id=uuid.uuid4().hex,
-                        conversation_id=f"admin-test-{uuid.uuid4().hex[:8]}",
+                        conversation_id=conversation_id,
                         text=body.text,
                         input_modality="text",
                         metadata=metadata,

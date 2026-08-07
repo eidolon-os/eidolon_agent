@@ -22,6 +22,7 @@ class Container:
     session_factory: object | None = None
     local_system_data: object | None = None
     runtime_authority: object | None = None
+    runtime_session_authorizer: object | None = None
     runtime_store: object | None = None
 
     persona_genome_store: object | None = None
