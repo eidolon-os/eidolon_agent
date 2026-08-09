@@ -45,6 +45,18 @@ or permissive fallback. Changes to Companion policy apply to the next authentica
 an orchestrated reconnect/revocation is required when a control-plane change must take effect
 immediately.
 
+## Contract verification
+
+The integration contract test composes a real System Data SQLite store and versioned ASGI HTTP
+app with the SDK V5 signer/verifier and Agent's production HTTP authority adapter. It proves
+that a session-bound token resolves to one immutable Owner/Companion scope and that the same
+Companion cannot be authorized through another Owner token.
+
+Agent intentionally does not import Channel for this test. Channel and Agent meet at the shared
+SDK token contract, while Agent and Data meet at the versioned Runtime Snapshot HTTP contract.
+This keeps the dependency direction identical to production instead of creating a test-only
+reverse dependency.
+
 ## Deployment assumption
 
 Channel signs the Agent token after resolving Kernel Mount and System Data facts. The token's
