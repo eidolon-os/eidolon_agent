@@ -19,6 +19,7 @@ _OWNER_ID = "owner-session-integration"
 _COMPANION_ID = "companion-session-integration"
 _SESSION_ID = "livekit-room-session-integration"
 _DATA_TOKEN = "data-authority-session-integration-token"
+_ROSTER_TOKEN = "agent-integration-memory-runtime-roster-token-0001"
 _RUNTIME_SECRET = "runtime-session-integration-secret"
 
 
@@ -55,7 +56,9 @@ async def _verified_identity(*, owner_id: str):
 
 async def test_verified_session_resolves_real_system_data_authority(tmp_path) -> None:
     settings = await _seed_system_data(tmp_path)
-    app = create_app(settings, service_token=_DATA_TOKEN)
+    app = create_app(
+        settings, service_token=_DATA_TOKEN, memory_roster_token=_ROSTER_TOKEN
+    )
 
     async with (
         app.router.lifespan_context(app),
@@ -90,7 +93,9 @@ async def test_verified_session_resolves_real_system_data_authority(tmp_path) ->
 
 async def test_cross_owner_token_cannot_authorize_existing_companion(tmp_path) -> None:
     settings = await _seed_system_data(tmp_path)
-    app = create_app(settings, service_token=_DATA_TOKEN)
+    app = create_app(
+        settings, service_token=_DATA_TOKEN, memory_roster_token=_ROSTER_TOKEN
+    )
 
     async with (
         app.router.lifespan_context(app),
