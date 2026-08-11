@@ -31,13 +31,13 @@ def is_env_placeholder(value: str) -> bool:
 
 
 def _expand_all_paths(obj: object) -> None:
-    """Recursively expand ``~`` in all Path fields of a pydantic model tree."""
+    """Resolve host-profile variables and ``~`` in every Path field."""
     if not isinstance(obj, BaseModel):
         return
     for name in type(obj).model_fields:
         v = getattr(obj, name, None)
         if isinstance(v, Path):
-            object.__setattr__(obj, name, v.expanduser())
+            object.__setattr__(obj, name, Path(os.path.expandvars(str(v))).expanduser())
         elif isinstance(v, BaseModel):
             _expand_all_paths(v)
 
@@ -200,7 +200,12 @@ class ObservabilitySettings(BaseModel):
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_json: bool = True
-    log_dir: Path = Path("~/eidolon/logs/agent")
+    log_dir: Path = Field(
+        default_factory=lambda: Path(
+            os.environ.get("EIDOLON_LOG_ROOT", "~/eidolon/logs")
+        ).expanduser()
+        / "agent"
+    )
     metrics_enabled: bool = True
     metrics_path: str = "/metrics"
     otel_enabled: bool = False
@@ -244,9 +249,24 @@ class RuntimeTokenSettings(BaseModel):
 class RuntimeSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    log_dir: Path = Path("~/eidolon/logs/agent")
-    run_dir: Path = Path("~/eidolon/run")
-    debug_dir: Path = Path("~/eidolon/debug")
+    log_dir: Path = Field(
+        default_factory=lambda: Path(
+            os.environ.get("EIDOLON_LOG_ROOT", "~/eidolon/logs")
+        ).expanduser()
+        / "agent"
+    )
+    run_dir: Path = Field(
+        default_factory=lambda: Path(
+            os.environ.get("EIDOLON_RUNTIME_ROOT", "~/eidolon/run")
+        ).expanduser()
+        / "agent"
+    )
+    debug_dir: Path = Field(
+        default_factory=lambda: Path(
+            os.environ.get("EIDOLON_CACHE_ROOT", "~/eidolon/cache")
+        ).expanduser()
+        / "debug/agent"
+    )
     warmup_enabled: bool = True
     recover_active_instances: bool = True
     drain_timeout_s: int = 30
@@ -262,7 +282,12 @@ class PersistenceSettings(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    sqlite_path: Path = Path("~/eidolon/data/eidolon-agent.sqlite3")
+    sqlite_path: Path = Field(
+        default_factory=lambda: Path(
+            os.environ.get("EIDOLON_STATE_ROOT", "~/eidolon/data")
+        ).expanduser()
+        / "agent/eidolon-agent.sqlite3"
+    )
     busy_timeout_ms: int = Field(default=5_000, ge=100, le=60_000)
     wal_autocheckpoint_pages: int = Field(default=1_000, ge=100, le=100_000)
 
@@ -430,17 +455,25 @@ def _resolve_yaml_path() -> Path:
     )
 
 
-def _resolve_env_path() -> Path:
+def _resolve_env_path() -> Path | None:
+    """Locate the dotenv, or report that this process was handed its environment.
+
+    A dotenv is how a developer populates the environment; it is not the only
+    way one gets populated.  Under systemd the secrets arrive through
+    ``EnvironmentFile``, read by pid 1 rather than by the service user, so the
+    file is deliberately unreadable here and there is nothing left to load.
+    Demanding it anyway is what kept the Agent from starting on a Host.
+
+    An explicitly named file is still a promise, so a missing one is an error.
+    """
+
     explicit = os.environ.get("EIDOLON_AGENT_ENV_FILE", "").strip()
     if explicit:
         p = Path(explicit).expanduser()
         if not p.is_file():
             raise FileNotFoundError(f"EIDOLON_AGENT_ENV_FILE points to missing file: {p}")
         return p.resolve()
-    p = _DEFAULT_ENV
-    if not p.is_file():
-        raise FileNotFoundError(f"env file not found: {p}. Copy config/.env.example to config/.env")
-    return p.resolve()
+    return _DEFAULT_ENV.resolve() if _DEFAULT_ENV.is_file() else None
 
 
 def load_settings(*, yaml_path: Path | None = None) -> Settings:
@@ -451,9 +484,11 @@ def load_settings(*, yaml_path: Path | None = None) -> Settings:
     """
     if yaml_path is not None:
         os.environ["EIDOLON_AGENT_SETTINGS_YAML"] = str(yaml_path)
-    from dotenv import load_dotenv
+    env_path = _resolve_env_path()
+    if env_path is not None:
+        from dotenv import load_dotenv
 
-    load_dotenv(_resolve_env_path(), override=False)
+        load_dotenv(env_path, override=False)
     return Settings()
 
 
