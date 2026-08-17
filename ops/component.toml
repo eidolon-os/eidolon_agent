@@ -1,0 +1,72 @@
+# How Agent is operated, stated by Agent.
+#
+# The schema is eidolon_ops's contracts/component-ops/v1.schema.json;
+# tests/test_operations_contract.py checks these claims against this
+# repository's own configuration.
+
+schema_version = 1
+component_id = "eidolon_agent"
+contract_version = "1"
+
+[[units]]
+id = "eidolon-agent"
+kind = "service"
+exec = ".venv/bin/eidolon-agent"
+user = "eidolon"
+serves = ["agent_http", "agent_admin"]
+requires = ["eidolon-nats", "eidolon-memory-discovery"]
+after = ["local-fs.target", "eidolon-data"]
+# Memory discovery rather than the memory supervisor: Agent asks discovery
+# where the palace for a memory space is, and starting before it is up means
+# an Eidolon that answers with no recollection of anyone.
+
+[ports.agent_http]
+default = 8180
+bind = "loopback"
+purpose = "agent HTTP"
+
+[ports.agent_admin]
+default = 8081
+bind = "loopback"
+purpose = "agent administration"
+
+[[inputs]]
+name = "agent_env"
+install_path = "/etc/eidolon/agent.env"
+kind = "secret"
+source = "operator"
+owner = "root"
+group = "root"
+mode = "0600"
+required_by = ["eidolon-agent"]
+
+[[inputs]]
+name = "agent_settings"
+install_path = "/etc/eidolon/agent.yaml"
+kind = "settings"
+source = "operator"
+owner = "root"
+group = "eidolon"
+mode = "0640"
+required_by = ["eidolon-agent"]
+# Operator-supplied rather than derived: it carries model choices and endpoint
+# addresses that differ per deployment, and Ops has no basis to invent them.
+
+# No [schema]: Agent has an alembic.ini and a migrations directory with no
+# revisions in it. The runtime store is created with create_all at startup, so
+# there is no gate for Ops to run — stated here because an alembic.ini in the
+# tree reads like there is one.
+
+[[state.authority]]
+path = "/var/lib/eidolon/agent/eidolon-agent.sqlite3"
+owner = "eidolon"
+group = "eidolon"
+backup = "sqlite-online"
+# Agent's own hot runtime store. Deliberately not eidolon-system.sqlite3:
+# what Data holds is who someone is, what this holds is what was happening.
+
+[state]
+runtime = ["/run/eidolon/agent"]
+
+[reset]
+factory = ["/var/lib/eidolon/agent"]
