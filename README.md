@@ -433,14 +433,14 @@ sed -i.bak 's/^import eidolon_pb2 as eidolon__pb2/from . import eidolon_pb2 as e
 rm -f eidolon_agent/app/transport/grpc/proto/eidolon_pb2_grpc.py.bak
 
 .venv/bin/alembic upgrade head
-mkdir -p ~/eidolon/{run,logs,debug,history}
+mkdir -p ~/eidolon/{data,run,logs,cache}
 ```
 
 ### 启动
 
 ```bash
 # NATS（JetStream，另开终端或 systemd）
-nats-server -js -sd ~/eidolon/nats-jetstream --port 4222 --http_port 8222
+nats-server -js -sd ~/eidolon/data/nats/jetstream --port 4222 --http_port 8222
 
 # agent（前台）
 .venv/bin/eidolon-agent
@@ -529,4 +529,12 @@ README.md                  ← 本文件
 
 ## License
 
-MIT.
+Copyright © 2026 Li Jinsong.
+
+This project is available under the
+[PolyForm Noncommercial License 1.0.0](LICENSE) for permitted noncommercial
+use. Commercial use requires a separate written license; contact
+[lijinsong@aimanthor.com](mailto:lijinsong@aimanthor.com).
+
+See [LICENSING.md](LICENSING.md) and [NOTICE](NOTICE) for scope, exceptions,
+and required notices.

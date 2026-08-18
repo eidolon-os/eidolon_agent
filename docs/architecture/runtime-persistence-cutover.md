@@ -2,7 +2,7 @@
 
 - Status: atomically activated in production composition
 - Legacy data: no migration or compatibility reader
-- Target file: `~/eidolon/data/eidolon-agent.sqlite3`
+- Target file: `$EIDOLON_STATE_ROOT/agent/eidolon-agent.sqlite3`
 
 ## Authority boundary
 

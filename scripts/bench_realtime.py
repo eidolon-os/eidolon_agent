@@ -65,7 +65,10 @@ from eidolon_agent.infra.benchmark.users import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUT_DIR = Path("~/eidolon/debug/reports/realtime")
+DEFAULT_OUTPUT_DIR = (
+    Path(os.environ.get("EIDOLON_CACHE_ROOT", "~/eidolon/cache")).expanduser()
+    / "debug/reports/realtime"
+)
 DEFAULT_BENCHMARK_RUNS_DIR = REPO_ROOT / "benchmarks" / "runs"
 DEFAULT_IN_PROCESS_FIXTURE = Path("tests/benchmark/fixtures/core_experience.jsonl")
 DEFAULT_LIVE_SERVICE_FIXTURE = Path("tests/benchmark/fixtures/live_service_smoke.jsonl")
