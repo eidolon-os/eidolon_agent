@@ -65,13 +65,12 @@ class LocalCompanionRuntimeAuthority:
         if companion is None or companion.owner_id != owner_id or companion.status != "active":
             raise NotFoundError(f"active companion not found for owner: {companion_id}")
         realm = await self._store.memory_realms.get(companion.default_memory_realm_id or "")
-        if (
-            realm is None
-            or realm.owner_id != owner_id
-            or realm.companion_id != companion_id
-            or realm.status != "active"
-        ):
-            raise NotFoundError(f"active memory realm not found: {companion_id}")
+        # The realm belongs to the Owner, not to this Companion: one memory,
+        # read by every Companion the Owner has. So what has to hold is that
+        # the Companion points at its own Owner's realm — asserting it pointed
+        # at a realm of its own would now reject every valid case.
+        if realm is None or realm.owner_id != owner_id or realm.status != "active":
+            raise NotFoundError(f"active memory realm not found for owner: {owner_id}")
         selected_genome_id = genome_id or companion.current_genome_id
         genome = await self._store.persona_genomes.get(selected_genome_id or "")
         if genome is None or genome.companion_id != companion_id or genome.status != "committed":

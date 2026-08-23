@@ -72,7 +72,6 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
                     "memory_space_id": "r_benchmark_default",
                     "memory_realm_id": "r_benchmark_default",
                     "owner_id": "benchmark",
-                    "companion_id": "mochi",
                     "enabled": True,
                     "mcp_http_url": "http://127.0.0.1:8031/mcp",
                     "mcp_auth": {
@@ -85,7 +84,6 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
                     "memory_space_id": "r_benchmark_disabled",
                     "memory_realm_id": "r_benchmark_disabled",
                     "owner_id": "benchmark",
-                    "companion_id": "disabled",
                     "enabled": False,
                     "mcp_http_url": "http://127.0.0.1:8032/mcp",
                     "agent_reachable": True,
@@ -94,7 +92,6 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
                     "memory_space_id": "r_benchmark_unreachable",
                     "memory_realm_id": "r_benchmark_unreachable",
                     "owner_id": "benchmark",
-                    "companion_id": "unreachable",
                     "enabled": True,
                     "mcp_http_url": "http://127.0.0.1:8033/mcp",
                     "agent_reachable": False,

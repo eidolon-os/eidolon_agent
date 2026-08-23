@@ -89,7 +89,9 @@ async def run_persona_memory_benchmark(
                     "workspace_integrity",
                     provision_ms,
                     workspace.companion.current_genome_id == workspace.persona_genome.genome_id
-                    and workspace.memory_realm.companion_id == workspace.companion.companion_id,
+                    and workspace.memory_realm.owner_id == workspace.companion.owner_id
+                    and workspace.companion.default_memory_realm_id
+                    == workspace.memory_realm.realm_id,
                     "Owner, companion, genome, and memory realm are atomically provisioned.",
                 )
             )

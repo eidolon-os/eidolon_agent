@@ -34,7 +34,6 @@ class DiscoveryMemoryRealm(BaseModel):
     memory_space_id: str
     memory_realm_id: str | None = None
     owner_id: str | None = None
-    companion_id: str | None = None
     enabled: bool = True
     mcp_http_url: str
     mcp_auth: DiscoveryMcpAuth | None = None
