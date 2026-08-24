@@ -52,6 +52,8 @@ def test_there_are_routes_to_check_so_this_gate_cannot_pass_vacuously() -> None:
     assert len(paths) >= 8, paths
     # The ones that would hurt most if they were ever unguarded.
     assert "/api/admin/conversations/turns/{turn_id}" in paths
+    # The one that carries message bodies.
+    assert "/api/admin/conversations/{conversation_id}/turns" in paths
     assert "/api/admin/long-tasks/{task_id}/cancel" in paths
     assert "/api/admin/owners/{owner_id}/data" in paths
 
@@ -69,6 +71,7 @@ async def test_no_route_answers_without_the_credential(monkeypatch) -> None:
                 task_id="j-1",
                 owner_id="owner-1",
                 companion_id="c-1",
+                conversation_id="conv-1",
                 kind="replay",
                 filename="x.json",
             )

@@ -627,6 +627,42 @@ class AgentConversationReader:
             rows = (await session.execute(stmt)).all()
             return [_turn_row_to_admin_dict(turn, conversation) for turn, conversation in rows]
 
+    async def list_turns_for_conversation(
+        self,
+        conversation_id: str,
+        *,
+        owner_id: str,
+        limit: int = 20,
+        before: datetime | None = None,
+    ) -> list[dict] | None:
+        """One conversation's turns, newest first, or ``None`` if it is not this
+        Owner's.
+
+        ``None`` rather than an empty list, because those are different answers:
+        a conversation with no turns yet is a real state, and "that is not yours"
+        must not be reported as one — an id would then be probeable for
+        existence.
+
+        Newest first, matching the cursor the other list uses. A transcript reads
+        forward, but "load earlier" is the gesture, so the order a person sees is
+        the client's business.
+        """
+
+        async with self._runtime_store.session_factory() as session:
+            conversation = await session.get(ConversationRow, conversation_id)
+            if conversation is None or conversation.owner_id != owner_id:
+                return None
+            stmt = (
+                select(TurnRow)
+                .where(TurnRow.conversation_id == conversation_id)
+                .order_by(TurnRow.started_at.desc())
+                .limit(limit)
+            )
+            if before is not None:
+                stmt = stmt.where(TurnRow.started_at < before)
+            turns = (await session.execute(stmt)).scalars().all()
+            return [_turn_row_to_admin_dict(turn, conversation) for turn in turns]
+
     async def get_turn(self, turn_id: str) -> dict | None:
         async with self._runtime_store.session_factory() as session:
             row = (
@@ -642,6 +678,33 @@ class AgentConversationReader:
                 return None
             turn, conversation = row
             return _turn_row_to_admin_dict(turn, conversation)
+
+    async def list_for_turns(self, turn_ids: list[str]) -> dict[str, list[ChatMessage]]:
+        """Messages for a page of turns, in one query.
+
+        One query rather than one per turn: a transcript page is twenty turns,
+        and twenty round trips to the same SQLite file for something a single
+        ``IN`` answers is the kind of cost that only shows up on the Host.
+        """
+
+        if not turn_ids:
+            return {}
+        async with self._runtime_store.session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(MessageRow)
+                        .where(MessageRow.turn_id.in_(turn_ids))
+                        .order_by(MessageRow.turn_id, MessageRow.seq)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        grouped: dict[str, list[ChatMessage]] = {turn_id: [] for turn_id in turn_ids}
+        for row in rows:
+            grouped.setdefault(row.turn_id, []).append(_row_to_message(row))
+        return grouped
 
     async def list_for_turn(self, turn_id: str) -> list[ChatMessage]:
         async with self._runtime_store.session_factory() as session:

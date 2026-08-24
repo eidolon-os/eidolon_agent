@@ -16,13 +16,24 @@ Endpoints:
        calls) ordered by created_at. Returns 404 if the turn doesn't
        exist.
 
+  GET  /api/admin/conversations/{conversation_id}/turns
+       One conversation's turns *with* their messages, newest first,
+       owner-scoped and cursor-paginated. This is what a transcript is
+       read from: the list endpoint above deliberately carries no bodies,
+       and reading one turn at a time is twenty round trips for one
+       screen. Bounded by a small page rather than by trimming anyone's
+       words — see the note below.
+
 Two practical notes:
   - ``owner_id`` is the data ownership boundary and ``companion_id`` is the
     runtime agent boundary.
-  - We deliberately don't expose message bodies on the list endpoint;
-    that would balloon a page-of-50 to many MB once realistic
-    conversations exist. The detail endpoint is the only place that
-    returns raw message text.
+  - We deliberately don't expose message bodies on the owner-wide list
+    endpoint; that would balloon a page-of-50 to many MB once realistic
+    conversations exist. The per-conversation route carries them because
+    that is the only way to read a transcript, and it pays for that with a
+    smaller page (20, max 50) rather than by truncating messages — a
+    transcript that clipped someone's own words would be losing exactly
+    what they opened it for.
 """
 
 # ruff: noqa: B008
@@ -326,6 +337,90 @@ async def list_memory_audit(
     return MemoryAuditResponse(rows=out, next_before=next_before)
 
 
+class ConversationTurn(BaseModel):
+    """One exchange, with what was said in it."""
+
+    turn_id: str
+    seq: int
+    started_at: datetime
+    finished_at: datetime | None
+    status: str
+    messages: list[ChatMessageView]
+
+
+class ConversationTurnsResponse(BaseModel):
+    conversation_id: str
+    turns: list[ConversationTurn]
+    next_before: datetime | None = None
+
+
+@router.get(
+    "/conversations/{conversation_id}/turns",
+    response_model=ConversationTurnsResponse,
+)
+async def list_conversation_turns(
+    conversation_id: str,
+    request: Request,
+    owner_id: str = Query(...),
+    limit: int = Query(20, ge=1, le=50),
+    before: datetime | None = None,
+) -> ConversationTurnsResponse:
+    """One conversation's turns, with their messages.
+
+    ``owner_id`` is required rather than an optional filter, unlike the
+    owner-wide list: this route carries message bodies, so answering without a
+    scope would hand one caller everyone's words. A conversation that is not this
+    Owner's is 404 — the same answer as one that does not exist, so an id cannot
+    be probed.
+
+    Newest first, so ``before`` walks backwards through the conversation the way
+    "load earlier" does. A transcript reads forward; which direction a person
+    sees is the client's business, and reversing a page of twenty is cheap.
+    """
+
+    reader = _runtime_reader(request)
+    rows = await reader.list_turns_for_conversation(
+        conversation_id, owner_id=owner_id, limit=limit, before=before
+    )
+    if rows is None:
+        raise HTTPException(404, f"conversation {conversation_id!r} not found")
+    messages = await reader.list_for_turns([row["id"] for row in rows])
+    turns = [
+        ConversationTurn(
+            turn_id=row["id"],
+            seq=row["seq"],
+            started_at=row["started_at"],
+            finished_at=row["finished_at"],
+            status=row["status"],
+            messages=[_message_view(message) for message in messages.get(row["id"], [])],
+        )
+        for row in rows
+    ]
+    return ConversationTurnsResponse(
+        conversation_id=conversation_id,
+        turns=turns,
+        # Only when the page was full: a short page is the end of the
+        # conversation, and a cursor there would make a client ask again for
+        # nothing.
+        next_before=turns[-1].started_at if len(turns) == limit and turns else None,
+    )
+
+
+def _message_view(message) -> ChatMessageView:
+    return ChatMessageView(
+        id=message.id,
+        role=message.role.value,
+        content=message.content,
+        content_type=message.content_type,
+        tokens=message.tokens,
+        model=message.model,
+        tool_call_id=message.tool_call_id,
+        tool_name=message.tool_name,
+        tool_arguments=message.tool_arguments,
+        created_at=message.created_at,
+    )
+
+
 @router.get("/conversations/turns/{turn_id}", response_model=TurnDetail)
 async def get_turn(turn_id: str, request: Request) -> TurnDetail:
     """One turn + its chat messages."""
@@ -370,18 +465,6 @@ async def get_turn(turn_id: str, request: Request) -> TurnDetail:
             total_latency_ms=row["total_latency_ms"],
         ),
         messages=[
-            ChatMessageView(
-                id=m.id,
-                role=m.role.value,
-                content=m.content,
-                content_type=m.content_type,
-                tokens=m.tokens,
-                model=m.model,
-                tool_call_id=m.tool_call_id,
-                tool_name=m.tool_name,
-                tool_arguments=m.tool_arguments,
-                created_at=m.created_at,
-            )
-            for m in messages
+            _message_view(m) for m in messages
         ],
     )
