@@ -28,6 +28,32 @@ class LongTaskStatus(str, Enum):
     TIMED_OUT = "timed_out"
 
 
+#: A task in one of these has stopped for good, in the sense that nothing this
+#: process is running will move it again. Named once rather than spelled out at
+#: each call site: "is it over" is asked by the cancel guard, the retry guard and
+#: the store's own ``completed_at`` bookkeeping, and three copies of a set of
+#: strings is how one of them comes to disagree.
+TERMINAL_LONG_TASK_STATUSES = frozenset(
+    {
+        LongTaskStatus.SUCCEEDED,
+        LongTaskStatus.FAILED,
+        LongTaskStatus.CANCELLED,
+        LongTaskStatus.TIMED_OUT,
+    }
+)
+
+#: What a retry may start from. Not ``SUCCEEDED``: retrying the same record would
+#: throw away a result nobody asked to lose, and "do it again" is a new task
+#: rather than a second run of an old one.
+RETRYABLE_LONG_TASK_STATUSES = frozenset(
+    {
+        LongTaskStatus.FAILED,
+        LongTaskStatus.CANCELLED,
+        LongTaskStatus.TIMED_OUT,
+    }
+)
+
+
 class CallbackStatus(str, Enum):
     PENDING = "pending"
     DELIVERED = "delivered"

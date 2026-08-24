@@ -9,8 +9,8 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from eidolon_agent.app.admin.tests.conftest import AUTHORITY_HEADERS
 from eidolon_agent.app.admin.routers import reports as reports_router
+from eidolon_agent.app.admin.tests.conftest import AUTHORITY_HEADERS
 
 pytestmark = pytest.mark.functional
 

@@ -15,6 +15,7 @@ import grpc
 import httpx
 from eidolon_sdk.biz.runtime import resolve_shared_secret, sign_runtime_token
 
+from eidolon_agent.app.admin.authority import expected_token
 from eidolon_agent.app.transport.grpc.codec import struct_to_dict
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
 from eidolon_agent.config import load_settings
@@ -389,6 +390,12 @@ async def _fetch_turn_detail(
                 http,
                 "GET",
                 f"{http_base}/api/admin/conversations/turns/{turn_id}",
+                # The admin surface requires the Host's credential. Read from the
+                # environment rather than added to this tool's arguments: the
+                # operator running a live benchmark already has the Host's
+                # ``agent.env`` in front of them, and a flag would be a second
+                # place to keep the same secret.
+                headers={"Authorization": f"Bearer {expected_token()}"},
             )
             if resp.status_code == 200:
                 return resp.json()

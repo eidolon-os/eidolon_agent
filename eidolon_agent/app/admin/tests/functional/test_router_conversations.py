@@ -15,8 +15,8 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from eidolon_agent.app.admin.tests.conftest import AUTHORITY_HEADERS
 from eidolon_agent.app.admin.routers import conversations as conv_router
+from eidolon_agent.app.admin.tests.conftest import AUTHORITY_HEADERS
 from eidolon_agent.core.types.turn import TriageKind, TurnInput, TurnStatus, TurnTrigger
 from eidolon_agent.core.types.turn_context import TurnContext
 from eidolon_agent.infra.persistence.agent_runtime import build_agent_turn_persister

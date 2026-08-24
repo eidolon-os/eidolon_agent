@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import os
+import secrets
 import socket
 import time
 from contextlib import suppress
@@ -20,6 +21,7 @@ from eidolon_data import DataSettings, DataStore
 # should not attempt to refresh LiteLLM's remote cost map.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
+from eidolon_agent.app.admin.authority import SERVICE_TOKEN_ENV, expected_token
 from eidolon_agent.app.runtime.bootstrap import build_application
 from eidolon_agent.config.settings import (
     BodyControlSettings,
@@ -85,6 +87,10 @@ async def run_product_acceptance_profile(
         )
         os.environ["EIDOLON_DATA_SQLITE_PATH"] = str(sqlite_path)
         os.environ["PAIRING_JWT_SECRET"] = secret
+        # The admin surface requires this Host's credential now, and this profile
+        # is both sides of the call: it stands up the app and then drives it. So
+        # it mints one, exactly as it already mints the pairing secret.
+        os.environ.setdefault(SERVICE_TOKEN_ENV, secrets.token_urlsafe(32))
 
         settings = _profile_settings(work_dir, runtime_sqlite_path=runtime_sqlite_path)
         container = await build_application(settings=settings)
@@ -196,7 +202,12 @@ async def _initialize_local_system_data(
             owner_id=owner_id,
             companion_id=companion_id,
             companion_display_name="Acceptance Companion",
-            role="primary",
+            # ``kind``, not ``role``: the Companion authority split that column
+            # into a product type and a default pointer (eidolon_data@48dcb41),
+            # and "primary" was the value that meant both. Which Companion is the
+            # Owner's default is a field on the Owner, and provisioning the first
+            # one sets it there in the same transaction — nothing to pass here.
+            kind="conversational",
         )
         return {
             "companion_id": workspace.companion.companion_id,
@@ -221,6 +232,7 @@ async def _run_admin_chat_test(
             transport=httpx.ASGITransport(app=admin_app),
             base_url="http://agent-admin-asgi",
             timeout=20.0,
+            headers={"Authorization": f"Bearer {expected_token()}"},
         ) as client,
         client.stream(
             "POST",

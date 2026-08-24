@@ -35,6 +35,7 @@ def build_admin_app(
     revocation_kv=None,
     runtime_authority=None,
     runtime_store=None,
+    long_task_submitter=None,
     memory_routes=None,
     memory_discovery_refresher=None,
 ) -> FastAPI:
@@ -62,6 +63,10 @@ def build_admin_app(
     app.state.revocation_kv = revocation_kv
     app.state.runtime_authority = runtime_authority
     app.state.runtime_store = runtime_store
+    # The same worker the delegate tool submits to. Retry hands the task back to
+    # it rather than editing a row: nothing polls the store for accepted tasks,
+    # so a retry that only wrote ``accepted`` never ran.
+    app.state.long_task_submitter = long_task_submitter
     app.state.memory_routes = memory_routes
     app.state.memory_discovery_refresher = memory_discovery_refresher
 

@@ -22,8 +22,8 @@ from eidolon_sdk.biz.runtime import (
 )
 from fastapi import FastAPI
 
-from eidolon_agent.app.admin.tests.conftest import AUTHORITY_HEADERS
 from eidolon_agent.app.admin.routers import owner_runtime as owner_runtime_router
+from eidolon_agent.app.admin.tests.conftest import AUTHORITY_HEADERS
 from eidolon_agent.infra.persistence.runtime_store import (
     AgentRuntimeStore,
     ConversationRow,

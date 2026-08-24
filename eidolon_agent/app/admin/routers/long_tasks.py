@@ -11,7 +11,13 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from eidolon_agent.app.admin.authority import AUTHORITY_DEPENDENCIES
-from eidolon_agent.core.types.long_task import LongTaskRecord, LongTaskStatus
+from eidolon_agent.core.ports.long_tasks import LongTaskQueueFullError
+from eidolon_agent.core.types.long_task import (
+    RETRYABLE_LONG_TASK_STATUSES,
+    TERMINAL_LONG_TASK_STATUSES,
+    LongTaskRecord,
+    LongTaskStatus,
+)
 from eidolon_agent.infra.persistence import AgentLongTaskStore
 
 router = APIRouter(dependencies=AUTHORITY_DEPENDENCIES)
@@ -133,10 +139,29 @@ async def cancel_long_task(
     task_id: str,
     owner_id: str = Query(...),
 ) -> LongTaskDetail:
+    """Stop a task that has not finished, or say why that cannot be done.
+
+    Cancelling something already **cancelled** is a success: the state the caller
+    asked for is the state it is in, and a client retrying a request whose answer
+    it never saw deserves that answer.
+
+    Cancelling something **finished** is a conflict, not a success. Overwriting a
+    succeeded task's status left a record that was simultaneously cancelled and
+    holding a result — a shape nothing downstream could interpret, and the sort a
+    person reads as "it lost my answer".
+    """
+
     store = _runtime_store(request)
     current = await store.get(task_id)
     if current is None or current.owner_id != owner_id:
         raise HTTPException(404, "long task not found")
+    if current.status is LongTaskStatus.CANCELLED:
+        return _detail(current)
+    if current.status in TERMINAL_LONG_TASK_STATUSES:
+        raise HTTPException(
+            409,
+            f"long task already finished as {current.status.value}",
+        )
     record = await store.mark_failed(
         task_id,
         error_code="admin_cancelled",
@@ -154,14 +179,53 @@ async def retry_long_task(
     task_id: str,
     owner_id: str = Query(...),
 ) -> LongTaskDetail:
+    """Run a task that ended without doing the job, again.
+
+    Three refusals, each because the alternative was a lie:
+
+    - **A task still going** cannot be retried. It used to clear ``worker_id``
+      and ``lease_until`` out from under the worker that was holding them.
+    - **A task that succeeded** cannot be retried. Its result is not this
+      route's to discard; asking for the work again is a new task.
+    - **A Host with no worker wired** refuses. Returning the record at
+      ``accepted`` is what this route used to do, and nothing polls for
+      ``accepted`` rows — so the task sat there forever while the answer said it
+      had been re-queued.
+
+    Otherwise the previous run is cleared from the record and the task is handed
+    back to the worker, which is what makes "retry" mean it.
+    """
+
     store = _runtime_store(request)
+    submitter = getattr(request.app.state, "long_task_submitter", None)
     current = await store.get(task_id)
     if current is None or current.owner_id != owner_id:
         raise HTTPException(404, "long task not found")
+    if current.status not in RETRYABLE_LONG_TASK_STATUSES:
+        raise HTTPException(
+            409,
+            f"long task cannot be retried from {current.status.value}",
+        )
+    if submitter is None:
+        raise HTTPException(
+            503,
+            "this Host has no long-task worker, so a retry would never run",
+        )
     record = await store.retry_from_admin(task_id)
     if record is None:
         raise HTTPException(404, "long task not found")
-    return _detail(record)
+    try:
+        # ``submit`` writes the accepted state itself and then queues the record,
+        # which is the same path a task takes when it is first delegated. Going
+        # through it rather than around it is why a retry behaves like the
+        # original attempt instead of like a row edit.
+        await submitter.submit(record)
+    except LongTaskQueueFullError as exc:
+        # The store has already recorded the failure; say so rather than
+        # reporting a queued task the queue refused.
+        raise HTTPException(503, "long-task queue is full; try again shortly") from exc
+    refreshed = await store.get(task_id)
+    return _detail(refreshed or record)
 
 
 def _summary(record: LongTaskRecord) -> LongTaskSummary:

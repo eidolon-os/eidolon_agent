@@ -527,7 +527,18 @@ class AgentLongTaskStore:
         )
 
     async def retry_from_admin(self, task_id: str) -> LongTaskRecord | None:
-        """Return a terminal task to the accepted queue state."""
+        """Return a terminal task to the accepted queue state.
+
+        Clears the whole of the previous run, not only its error. A record left
+        at ``accepted`` still carrying the last attempt's ``result_text`` and
+        artifacts is a task that reads as "starting" and answers as "finished" —
+        and the answer is the one a person would be shown.
+
+        ``attempt_count`` is deliberately *not* cleared: this is the same task
+        being tried again, and how many times it has been tried is the fact a
+        retry adds to the record rather than erases from it.
+        """
+
         return await self._update(
             task_id,
             lambda record, now: replace(
@@ -535,6 +546,11 @@ class AgentLongTaskStore:
                 status=LongTaskStatus.ACCEPTED,
                 external_status=None,
                 progress_summary=None,
+                progress_events=[],
+                result_text=None,
+                result_tts_summary=None,
+                result_payload=None,
+                artifact_paths=[],
                 error_code=None,
                 error_message=None,
                 error_payload=None,

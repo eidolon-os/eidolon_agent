@@ -62,7 +62,16 @@ class LocalCompanionRuntimeAuthority:
         genome_id: str | None = None,
     ) -> CompanionRuntimeFacts:
         companion = await self._store.companions.get(companion_id)
-        if companion is None or companion.owner_id != owner_id or companion.status != "active":
+        # ``lifecycle_state``, not ``status``: the Companion authority split that
+        # column when "the Owner archived it" and "it cannot run right now"
+        # stopped being the same fact (eidolon_data@48dcb41). This read was left
+        # on the old name and raised AttributeError on every resolve — a local
+        # runtime that could not start a Companion at all.
+        if (
+            companion is None
+            or companion.owner_id != owner_id
+            or companion.lifecycle_state != "active"
+        ):
             raise NotFoundError(f"active companion not found for owner: {companion_id}")
         realm = await self._store.memory_realms.get(companion.default_memory_realm_id or "")
         # The realm belongs to the Owner, not to this Companion: one memory,

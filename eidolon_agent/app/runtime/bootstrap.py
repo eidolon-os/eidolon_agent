@@ -378,6 +378,7 @@ async def build_application(
         memory_discovery_refresher=memory_refresher,
         runtime_authority=runtime_authority,
         runtime_store=runtime_store,
+        long_task_submitter=long_task_worker,
     )
     container.http_app = http_app
     container.admin_app = admin_app
