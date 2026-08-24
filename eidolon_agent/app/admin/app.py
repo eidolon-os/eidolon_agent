@@ -5,6 +5,11 @@ Mounts all admin routers under ``/api/admin`` and exposes OpenAPI docs at
 
 This app is independent of the core transport layer and can be mounted on its
 own uvicorn instance or composed into a larger ASGI app.
+
+Every router it mounts carries this Host's Agent credential requirement — on the
+router rather than here, so the routes are guarded in the tests that mount them
+directly too. See ``admin/authority.py`` for why, and for why liveness stopped
+being a conversation read.
 """
 
 from __future__ import annotations

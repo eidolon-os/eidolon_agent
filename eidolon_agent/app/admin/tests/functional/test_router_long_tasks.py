@@ -8,6 +8,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
+from eidolon_agent.app.admin.tests.conftest import AUTHORITY_HEADERS
 from eidolon_agent.app.admin.routers import long_tasks as long_tasks_router
 from eidolon_agent.core.types.long_task import LongTaskRecord, LongTaskStatus
 from eidolon_agent.infra.persistence import AgentLongTaskStore, AgentRuntimeStore
@@ -23,7 +24,7 @@ async def _fresh_app(
     app = FastAPI()
     app.state.runtime_store = store
     app.include_router(long_tasks_router.router, prefix="/api/admin")
-    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t")
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t", headers=AUTHORITY_HEADERS)
     return client, store
 
 
@@ -139,6 +140,8 @@ async def test_list_long_tasks_503_when_runtime_store_missing() -> None:
     app = FastAPI()
     app.include_router(long_tasks_router.router, prefix="/api/admin")
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://t", headers=AUTHORITY_HEADERS
+    ) as client:
         r = await client.get("/api/admin/long-tasks")
     assert r.status_code == 503

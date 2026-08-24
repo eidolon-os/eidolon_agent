@@ -35,10 +35,11 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from eidolon_agent.app.admin.authority import AUTHORITY_DEPENDENCIES
 from eidolon_agent.infra.observability import build_turn_observability_summary
 from eidolon_agent.infra.persistence import AgentConversationReader
 
-router = APIRouter()
+router = APIRouter(dependencies=AUTHORITY_DEPENDENCIES)
 
 
 # ── schemas ────────────────────────────────────────────────────────────────

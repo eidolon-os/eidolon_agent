@@ -22,6 +22,7 @@ from eidolon_sdk.biz.runtime import (
 )
 from fastapi import FastAPI
 
+from eidolon_agent.app.admin.tests.conftest import AUTHORITY_HEADERS
 from eidolon_agent.app.admin.routers import owner_runtime as owner_runtime_router
 from eidolon_agent.infra.persistence.runtime_store import (
     AgentRuntimeStore,
@@ -83,9 +84,7 @@ async def test_revoke_owner_sessions_writes_revocation_key() -> None:
     kv = _FakeKV()
     app = _build_test_app(kv)
 
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", headers=AUTHORITY_HEADERS) as client:
         r = await client.post("/api/admin/owners/manson/revoke-sessions")
 
     assert r.status_code == 200
@@ -99,9 +98,7 @@ async def test_revoke_owner_sessions_writes_revocation_key() -> None:
 async def test_delete_owner_data_503_when_runtime_store_missing() -> None:
     kv = _FakeKV()
     app = _build_test_app(kv)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", headers=AUTHORITY_HEADERS) as client:
         r = await client.delete("/api/admin/owners/alice/data")
 
     assert r.status_code == 503
@@ -155,9 +152,7 @@ async def test_delete_owner_data_prefers_agent_runtime_authority(tmp_path) -> No
 
         app = _build_test_app(kv)
         app.state.runtime_store = store
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", headers=AUTHORITY_HEADERS) as client:
             response = await client.delete("/api/admin/owners/alice/data")
 
         assert response.status_code == 200
@@ -181,9 +176,7 @@ async def test_revoke_owner_sessions_503_when_kv_missing() -> None:
     app.include_router(owner_runtime_router.router, prefix="/api/admin")
     # NOT setting app.state.revocation_kv on purpose
 
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", headers=AUTHORITY_HEADERS) as client:
         r = await client.post("/api/admin/owners/manson/revoke-sessions")
 
     assert r.status_code == 503
@@ -209,9 +202,7 @@ async def test_verifier_rejects_token_after_owner_revoke() -> None:
 
     # Operator revokes manson via the endpoint.
     app = _build_test_app(kv)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", headers=AUTHORITY_HEADERS) as client:
         r = await client.post("/api/admin/owners/manson/revoke-sessions")
     assert r.status_code == 200
 
@@ -240,9 +231,7 @@ async def test_verifier_owner_revoke_does_not_affect_other_owners() -> None:
 
     # Revoke just manson via the endpoint.
     app = _build_test_app(kv)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", headers=AUTHORITY_HEADERS) as client:
         await client.post("/api/admin/owners/manson/revoke-sessions")
 
     with pytest.raises(RuntimeTokenRevokedError):

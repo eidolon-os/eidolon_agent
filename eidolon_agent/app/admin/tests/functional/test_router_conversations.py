@@ -15,6 +15,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
+from eidolon_agent.app.admin.tests.conftest import AUTHORITY_HEADERS
 from eidolon_agent.app.admin.routers import conversations as conv_router
 from eidolon_agent.core.types.turn import TriageKind, TurnInput, TurnStatus, TurnTrigger
 from eidolon_agent.core.types.turn_context import TurnContext
@@ -30,7 +31,7 @@ async def _fresh_app(tmp_path) -> tuple[httpx.AsyncClient, AgentRuntimeStore]:
     app = FastAPI()
     app.state.runtime_store = store
     app.include_router(conv_router.router, prefix="/api/admin")
-    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t")
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t", headers=AUTHORITY_HEADERS)
     return client, store
 
 
@@ -390,6 +391,8 @@ async def test_list_turns_503_when_runtime_store_missing(tmp_path) -> None:
     app = FastAPI()
     app.include_router(conv_router.router, prefix="/api/admin")
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://t", headers=AUTHORITY_HEADERS
+    ) as c:
         r = await c.get("/api/admin/conversations/turns")
     assert r.status_code == 503

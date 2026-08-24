@@ -9,6 +9,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from eidolon_agent.app.admin.tests.conftest import AUTHORITY_HEADERS
 from eidolon_agent.app.admin.routers import reports as reports_router
 
 pytestmark = pytest.mark.functional
@@ -48,8 +49,7 @@ def app(tmp_path: Path) -> FastAPI:
 
 async def test_list_reports_returns_replay_and_realtime(app: FastAPI) -> None:
     async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
+        transport=ASGITransport(app=app), base_url="http://test", headers=AUTHORITY_HEADERS
     ) as client:
         resp = await client.get("/api/admin/reports")
 
@@ -63,8 +63,7 @@ async def test_list_reports_returns_replay_and_realtime(app: FastAPI) -> None:
 
 async def test_get_report_returns_payload(app: FastAPI) -> None:
     async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
+        transport=ASGITransport(app=app), base_url="http://test", headers=AUTHORITY_HEADERS
     ) as client:
         resp = await client.get("/api/admin/reports/replay/latest.json")
 
@@ -76,8 +75,7 @@ async def test_get_report_returns_payload(app: FastAPI) -> None:
 
 async def test_report_filename_rejects_path_traversal(app: FastAPI) -> None:
     async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
+        transport=ASGITransport(app=app), base_url="http://test", headers=AUTHORITY_HEADERS
     ) as client:
         resp = await client.get("/api/admin/reports/replay/../secret.json")
 

@@ -13,12 +13,13 @@ from fastapi.responses import StreamingResponse
 from google.protobuf import struct_pb2
 from pydantic import BaseModel
 
+from eidolon_agent.app.admin.authority import AUTHORITY_DEPENDENCIES
 from eidolon_agent.app.transport.grpc.codec import struct_to_dict
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
 
 _log = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=AUTHORITY_DEPENDENCIES)
 
 
 class ChatTestRequest(BaseModel):

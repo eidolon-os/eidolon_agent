@@ -10,7 +10,9 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-router = APIRouter()
+from eidolon_agent.app.admin.authority import AUTHORITY_DEPENDENCIES
+
+router = APIRouter(dependencies=AUTHORITY_DEPENDENCIES)
 
 ReportKind = Literal["replay", "realtime"]
 _KINDS: set[str] = {"replay", "realtime"}

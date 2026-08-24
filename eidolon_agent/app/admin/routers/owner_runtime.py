@@ -8,7 +8,9 @@ from eidolon_sdk.biz.runtime import owner_revocation_keys
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
-router = APIRouter()
+from eidolon_agent.app.admin.authority import AUTHORITY_DEPENDENCIES
+
+router = APIRouter(dependencies=AUTHORITY_DEPENDENCIES)
 
 
 class RevokeOwnerSessionsResponse(BaseModel):

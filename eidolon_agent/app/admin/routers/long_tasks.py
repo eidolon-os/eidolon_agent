@@ -10,10 +10,11 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from eidolon_agent.app.admin.authority import AUTHORITY_DEPENDENCIES
 from eidolon_agent.core.types.long_task import LongTaskRecord, LongTaskStatus
 from eidolon_agent.infra.persistence import AgentLongTaskStore
 
-router = APIRouter()
+router = APIRouter(dependencies=AUTHORITY_DEPENDENCIES)
 
 
 class LongTaskSummary(BaseModel):
