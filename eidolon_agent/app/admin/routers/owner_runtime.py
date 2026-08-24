@@ -16,6 +16,12 @@ router = APIRouter(dependencies=AUTHORITY_DEPENDENCIES)
 class RevokeOwnerSessionsResponse(BaseModel):
     owner_id: str
     revoked: bool
+    #: The instant everything before it stopped being valid. Returned because a
+    #: caller relaying this to a person needs to be able to say *when*, and
+    #: because the watermark is the whole mechanism: tokens issued after it work,
+    #: which is what makes signing every device out something one can recover
+    #: from (``eidolon_sdk.biz.runtime.owner_revocation_keys``).
+    revoked_at: str
 
 
 class DeleteOwnerDataResponse(BaseModel):
@@ -34,7 +40,17 @@ async def revoke_owner_sessions(
     owner_id: str,
     request: Request,
 ) -> RevokeOwnerSessionsResponse:
-    """Invalidate active Agent runtime tokens for one Owner namespace."""
+    """Stop every runtime token this Owner had until now.
+
+    A watermark rather than a switch: the instant is stored and the verifier
+    refuses tokens issued before it, so devices come back with a fresh token
+    instead of being locked out for good.
+
+    Token ``iat`` is a whole number of seconds and this instant carries
+    microseconds, so a token minted in the same second as the revoke is refused
+    too. That is the side to err on — the device retries — and it is why a caller
+    should not treat one refusal right afterwards as the revoke having failed.
+    """
     kv = getattr(request.app.state, "revocation_kv", None)
     if kv is None:
         raise HTTPException(
@@ -47,7 +63,9 @@ async def revoke_owner_sessions(
     timestamp = datetime.now(timezone.utc).isoformat()
     for key in owner_revocation_keys(owner_id):
         await kv.put(key, timestamp.encode("utf-8"))
-    return RevokeOwnerSessionsResponse(owner_id=owner_id, revoked=True)
+    return RevokeOwnerSessionsResponse(
+        owner_id=owner_id, revoked=True, revoked_at=timestamp
+    )
 
 
 @router.delete(

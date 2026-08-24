@@ -4,12 +4,15 @@ Two layers under test:
 
 1. Endpoint: ``POST /api/admin/owners/{owner_id}/revoke-sessions`` writes
    owner revocation keys to the DEVICE_REVOCATIONS KV.
-2. Verifier: ``RuntimeTokenVerifier.verify`` checks this key on every
-   call and raises ``RuntimeTokenRevokedError`` when present — regardless of
-   how recently the token was minted.
+2. Verifier: ``RuntimeTokenVerifier.verify`` reads the instant stored there and
+   refuses tokens issued **before** it. A token minted afterwards works, which
+   is what makes "sign every device out" recoverable: the devices come back with
+   a fresh token instead of being locked out of the namespace for good.
 """
 
 from __future__ import annotations
+
+from datetime import datetime
 
 import httpx
 import pytest
@@ -89,10 +92,15 @@ async def test_revoke_owner_sessions_writes_revocation_key() -> None:
 
     assert r.status_code == 200
     body = r.json()
-    assert body == {"owner_id": "manson", "revoked": True}
+    assert body["owner_id"] == "manson"
+    assert body["revoked"] is True
     val = await kv.get(owner_revocation_keys("manson")[0])
     assert val is not None
-    assert b"T" in val and b":" in val  # ISO format roughly
+    # The stored value is the watermark itself: the verifier refuses tokens
+    # issued before this instant and accepts ones issued after, which is what
+    # makes signing every device out recoverable rather than a lockout.
+    assert val.decode("utf-8") == body["revoked_at"]
+    assert datetime.fromisoformat(body["revoked_at"]).tzinfo is not None
 
 
 async def test_delete_owner_data_503_when_runtime_store_missing() -> None:
@@ -293,3 +301,45 @@ async def test_verifier_rejects_mac_device_id_with_encoded_revocation_key() -> N
     with pytest.raises(RuntimeTokenRevokedError) as exc_info:
         await verifier.verify(token)
     assert device_id in str(exc_info.value)
+
+
+async def test_a_token_minted_after_the_revoke_works_again() -> None:
+    """The half that makes this offerable to a person.
+
+    Waiting a second is the point rather than an accident: ``iat`` is a whole
+    number of seconds and the mark carries microseconds, so a token minted in the
+    *same* second as the revoke is refused. That is the safe side to err on — a
+    device retries — and this test pins which side it is.
+    """
+
+    import asyncio
+
+    kv = _FakeKV()
+    verifier = RuntimeTokenVerifier(secret=SECRET, revocation_kv=kv)
+    app = _build_test_app(kv)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test", headers=AUTHORITY_HEADERS
+    ) as client:
+        revoked = await client.post("/api/admin/owners/manson/revoke-sessions")
+    assert revoked.status_code == 200
+
+    same_second, _ = _sign_device_token(
+        device_id="web-abc12345",
+        owner_id="manson",
+        companion_id="companion-a",
+        scopes=["device"],
+    )
+    with pytest.raises(RuntimeTokenRevokedError):
+        await verifier.verify(same_second)
+
+    await asyncio.sleep(1.1)
+    afterwards, _ = _sign_device_token(
+        device_id="web-abc12345",
+        owner_id="manson",
+        companion_id="companion-a",
+        scopes=["device"],
+    )
+
+    identity = await verifier.verify(afterwards)
+
+    assert identity.owner_id == "manson"
