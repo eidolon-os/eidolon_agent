@@ -31,6 +31,79 @@ class DeleteOwnerDataResponse(BaseModel):
     revocation_keys_written: int = 0
 
 
+class RuntimeCompanionResponse(BaseModel):
+    """One Companion this Host currently has a live runtime for."""
+
+    companion_id: str
+    genome_id: str
+    #: When this runtime was first resolved on this Host, and when anything last
+    #: addressed it. Both are needed to say something true: the first alone
+    #: cannot tell a Companion used a minute ago from one used at boot.
+    started_at: str
+    last_active_at: str
+
+
+class OwnerRuntimeCompanionsResponse(BaseModel):
+    """Which of this Owner's Companions are live here, newest use first.
+
+    **Several at once is the normal case**, which is the whole reason this exists:
+    a Host runs one set of services and keeps runtime context per Companion
+    (plan §4.6), so "which one is active" was never a question with one answer.
+    Consumers were inferring it from whether the Owner had a default — that is,
+    from a routing fallback — and calling the result "running".
+
+    What this is not: presence. Nothing on this Host tracks whether a body is
+    connected, so a Companion listed here is one this Host can run, not one
+    somebody can necessarily reach. A consumer that renders this as 在线 has
+    replaced one guess with another.
+
+    Absence from this list is meaningful *when this answer arrived*: no live
+    runtime means no session is running. It says nothing at all when the Agent
+    could not be asked, and a caller that cannot reach this route must report
+    unknown rather than none.
+    """
+
+    owner_id: str
+    companions: list[RuntimeCompanionResponse]
+
+
+@router.get(
+    "/owners/{owner_id}/runtime-companions",
+    response_model=OwnerRuntimeCompanionsResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def list_owner_runtime_companions(
+    owner_id: str,
+    request: Request,
+) -> OwnerRuntimeCompanionsResponse:
+    """Read the runtime registry, scoped to one Owner.
+
+    A read of live process state, not of a store: it is true for this Agent
+    process and this run. That is the honest scope — the question "is my Eidolon
+    running" is about right now, and a persisted answer would be a record of
+    something that has since stopped.
+    """
+
+    registry = getattr(request.app.state, "agent_registry", None)
+    if registry is None:
+        raise HTTPException(
+            status_code=503,
+            detail="agent registry not configured; runtime state cannot be read",
+        )
+    return OwnerRuntimeCompanionsResponse(
+        owner_id=owner_id,
+        companions=[
+            RuntimeCompanionResponse(
+                companion_id=inst.companion_id,
+                genome_id=inst.genome_id,
+                started_at=inst.created_at.isoformat(),
+                last_active_at=(inst.last_active_at or inst.created_at).isoformat(),
+            )
+            for inst in registry.for_owner(owner_id)
+        ],
+    )
+
+
 @router.post(
     "/owners/{owner_id}/revoke-sessions",
     response_model=RevokeOwnerSessionsResponse,

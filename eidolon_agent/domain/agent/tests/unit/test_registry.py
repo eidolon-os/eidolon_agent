@@ -161,3 +161,94 @@ async def test_owners_do_not_collide_through_a_shared_companion_id() -> None:
     )
 
     assert mine is not theirs
+
+
+async def test_a_hosts_runtimes_are_per_owner_not_per_host() -> None:
+    """The filter that keeps one person's Eidolons out of another's list.
+
+    The registry holds every Owner on this Host. Filtering lives in it rather
+    than at each caller because a caller writing its own comprehension over
+    ``list_instances`` is one typo away from showing somebody else's Companions
+    — and that mistake would look right in every test that only ever set up one
+    Owner.
+    """
+
+    async def _factory(instance):
+        return object()
+
+    registry = AgentRegistry(instance_factory=_factory)
+    for owner, companion in [
+        ("owner-1", "c-a"),
+        ("owner-1", "c-b"),
+        ("owner-2", "c-c"),
+    ]:
+        await registry.resolve_runtime(
+            owner_id=owner, companion_id=companion, genome_id=f"g-{companion}"
+        )
+
+    assert {inst.companion_id for inst in registry.for_owner("owner-1")} == {
+        "c-a",
+        "c-b",
+    }
+    assert [inst.companion_id for inst in registry.for_owner("owner-2")] == ["c-c"]
+    assert registry.for_owner("owner-3") == []
+
+
+async def test_several_companions_are_live_at_once() -> None:
+    """The case the product was pretending did not exist.
+
+    A Host keeps runtime context per Companion (plan §4.6), so more than one
+    being live is ordinary rather than exotic. Screens were deriving "which one
+    is running" from whether the Owner had a default — a routing fallback — and
+    could therefore only ever show one.
+    """
+
+    async def _factory(instance):
+        return object()
+
+    registry = AgentRegistry(instance_factory=_factory)
+    await registry.resolve_runtime(
+        owner_id="owner-1", companion_id="c-a", genome_id="g-a"
+    )
+    await registry.resolve_runtime(
+        owner_id="owner-1", companion_id="c-b", genome_id="g-b"
+    )
+
+    assert len(registry.for_owner("owner-1")) == 2
+
+
+async def test_being_addressed_is_what_makes_a_runtime_recent() -> None:
+    """Newest use first, and use is what moves it.
+
+    ``last_active_at`` was a field nobody wrote for as long as nobody read it,
+    so a list ordered by it would have been ordered by nothing. It is touched
+    inside ``resolve_runtime`` rather than at the call sites, so a new way of
+    addressing a Companion cannot forget to keep it true.
+    """
+
+    async def _factory(instance):
+        return object()
+
+    registry = AgentRegistry(instance_factory=_factory)
+    first = await registry.resolve_runtime(
+        owner_id="owner-1", companion_id="c-a", genome_id="g-a"
+    )
+    second = await registry.resolve_runtime(
+        owner_id="owner-1", companion_id="c-b", genome_id="g-b"
+    )
+    assert [inst.companion_id for inst in registry.for_owner("owner-1")] == [
+        "c-b",
+        "c-a",
+    ]
+
+    # Addressing the older one again moves it to the front, because it is now
+    # the one in use.
+    await registry.resolve_runtime(
+        owner_id="owner-1", companion_id="c-a", genome_id="g-a"
+    )
+    assert [inst.companion_id for inst in registry.for_owner("owner-1")] == [
+        "c-a",
+        "c-b",
+    ]
+    assert first.last_active_at is not None
+    assert second.last_active_at is not None
