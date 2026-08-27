@@ -80,6 +80,46 @@ def build_turn_observability_summary(
     }
 
 
+def build_live_turn_observability_summary(
+    *,
+    tool_count: int,
+    tool_completed: int,
+    tool_error_count: int,
+    tool_names: list[str],
+    first_delta_ms: int | None,
+) -> dict[str, Any]:
+    """The same summary for a turn that has not finished.
+
+    Deliberately **partial**. A trace exists only once a turn ends, so the only
+    facts available while one is running are the ones its event stream carried:
+    which tools it asked for, how many have come back, and whether the answer
+    has started. Everything else is left *absent* rather than filled with a
+    zero — ``memory: {attempted: false}`` would assert that recall did not
+    happen, when the truth is that this turn has not said yet. A consumer that
+    reads a missing block as "not known" gets the right answer; one that reads a
+    fabricated ``false`` as "did not happen" gets a wrong one.
+
+    ``tool_completed`` has no counterpart in the finished summary for the same
+    reason it is needed here: a finished turn's tool calls have all returned, so
+    only a running one can have an open call, and only this field can say so.
+    """
+
+    return {
+        "live": True,
+        "tools": {
+            "count": tool_count,
+            "completed": tool_completed,
+            "names": list(tool_names),
+            "error_count": tool_error_count,
+            "total_latency_ms": None,
+        },
+        "latency": {
+            "first_delta_ms": first_delta_ms,
+            "total_ms": None,
+        },
+    }
+
+
 def _context_summary(ledger: dict[str, Any]) -> dict[str, Any]:
     segments = ledger.get("segments") or []
     dropped = ledger.get("dropped_segments") or []

@@ -47,7 +47,11 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from eidolon_agent.app.admin.authority import AUTHORITY_DEPENDENCIES
-from eidolon_agent.infra.observability import build_turn_observability_summary
+from eidolon_agent.infra.observability import (
+    build_live_turn_observability_summary,
+    build_turn_observability_summary,
+)
+from eidolon_agent.infra.observability.live_turns import RUNNING, LiveTurnView
 from eidolon_agent.infra.persistence import AgentConversationReader
 
 router = APIRouter(dependencies=AUTHORITY_DEPENDENCIES)
@@ -283,10 +287,87 @@ async def list_turns(
         )
         for r in rows
     ]
-    # Cursor for the next page is the oldest started_at we just returned;
-    # null when this page wasn't full (means we hit the tail).
-    next_before = turns[-1].started_at if len(turns) == limit else None
+    # The turns still running belong at the head of the newest page, and only
+    # there. They are the newest thing this Agent knows and they are not
+    # history: a caller walking backwards with ``before`` is reading what
+    # happened, and a row that is still changing does not belong in that walk.
+    #
+    # Without this the map could never draw a conversation while it was
+    # happening — the durable row is written when a turn ends, so every
+    # consumer downstream was built for a ``running`` turn that no producer
+    # emitted.
+    live = _live_turns(request, owner_id=owner_id, companion_id=companion_id) if before is None else []
+    if live:
+        known = {turn.turn_id for turn in turns}
+        # A turn that finished between the two reads is in both. The durable row
+        # wins: it is the final state, and this one is already stale.
+        turns = [*(row for row in live if row.turn_id not in known), *turns]
+
+    # Cursor for the next page is the oldest started_at we just returned; null
+    # when this page wasn't full (means we hit the tail). Deriving it from what
+    # was *returned* rather than from what was read is what keeps the walk
+    # lossless when live turns push history off the end of the page.
+    dropped = len(turns) > limit
+    turns = turns[:limit]
+    next_before = turns[-1].started_at if turns and (dropped or len(rows) == limit) else None
     return ListTurnsResponse(turns=turns, next_before=next_before)
+
+
+def _live_turns(
+    request: Request, *, owner_id: str | None, companion_id: str | None
+) -> list[TurnSummary]:
+    """In-flight turns, in the same row shape as the durable ones.
+
+    One shape, so a consumer has one thing to read and cannot end up with two
+    code paths that drift. What a live row does *not* do is guess the columns it
+    cannot know: ``seq`` is assigned when the row is written, a triage kind is
+    decided inside the turn, and a total latency does not exist until there is
+    an end to measure to. Those stay at their empty values rather than being
+    invented, and ``status`` says why.
+    """
+
+    board = getattr(request.app.state, "live_turns", None)
+    if board is None:
+        return []
+    return [
+        _live_turn_summary(view)
+        for view in board.snapshot(owner_id=owner_id, companion_id=companion_id)
+    ]
+
+
+def _live_turn_summary(view: LiveTurnView) -> TurnSummary:
+    return TurnSummary(
+        turn_id=view.turn_id,
+        trace_id=view.trace_id,
+        conversation_id=view.conversation_id,
+        seq=0,
+        owner_id=view.owner_id,
+        companion_id=view.companion_id,
+        memory_realm_id=view.memory_realm_id,
+        genome_id=view.genome_id,
+        genome_hash=view.genome_hash,
+        trigger=view.trigger,
+        input_modality=view.input_modality,
+        runtime_session_id=view.runtime_session_id,
+        device_id=view.device_id,
+        started_at=view.started_at,
+        finished_at=None,
+        status=RUNNING,
+        triage_kind=None,
+        latency_first_delta_ms=view.latency_first_delta_ms,
+        total_latency_ms=None,
+        tokens_in=0,
+        tokens_out=0,
+        model=None,
+        error_code=None,
+        observability_summary=build_live_turn_observability_summary(
+            tool_count=view.tools.count,
+            tool_completed=view.tools.completed,
+            tool_error_count=view.tools.error_count,
+            tool_names=list(view.tools.names),
+            first_delta_ms=view.latency_first_delta_ms,
+        ),
+    )
 
 
 @router.get("/conversations/memory-audit", response_model=MemoryAuditResponse)

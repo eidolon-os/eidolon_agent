@@ -28,6 +28,7 @@ from eidolon_sdk.biz.system_data import SystemDataRuntimeClient
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
 from eidolon_agent.app.admin import build_admin_app
+from eidolon_agent.infra.observability.live_turns import LiveTurnBoard
 from eidolon_agent.app.runtime.container import Container
 from eidolon_agent.app.transport.grpc import GrpcServer
 from eidolon_agent.app.transport.grpc.chat_servicer import EidolonAgentServicer
@@ -335,13 +336,23 @@ async def build_application(
     container.runtime_token_verifier = verifier
 
     # 14. AgentRegistry with instance factory closure ------------------------
+    # One board for the process, not one per Companion: "what is happening right
+    # now" is a question about this Agent, and a reader asking it should not have
+    # to enumerate Companions to get a whole answer.
+    live_turns = LiveTurnBoard()
+    container.extras["live_turns"] = live_turns
+
     async def _build_companion(inst):  # type: ignore[no-untyped-def]
         engine = _build_turn_engine(
             container=container,
             companion_id=inst.companion_id,
             genome_id=inst.genome_id,
         )
-        return CompanionAgent(companion_id=inst.companion_id, turn_engine=engine)
+        return CompanionAgent(
+            companion_id=inst.companion_id,
+            turn_engine=engine,
+            live_turns=live_turns,
+        )
 
     agent_registry = AgentRegistry(instance_factory=_build_companion)
     container.agent_registry = agent_registry
@@ -379,6 +390,7 @@ async def build_application(
         runtime_authority=runtime_authority,
         runtime_store=runtime_store,
         long_task_submitter=long_task_worker,
+        live_turns=live_turns,
     )
     container.http_app = http_app
     container.admin_app = admin_app

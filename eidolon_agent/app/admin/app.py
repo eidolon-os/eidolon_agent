@@ -38,6 +38,7 @@ def build_admin_app(
     long_task_submitter=None,
     memory_routes=None,
     memory_discovery_refresher=None,
+    live_turns=None,
 ) -> FastAPI:
     app = FastAPI(
         title="eidolon-agent admin",
@@ -69,6 +70,10 @@ def build_admin_app(
     app.state.long_task_submitter = long_task_submitter
     app.state.memory_routes = memory_routes
     app.state.memory_discovery_refresher = memory_discovery_refresher
+    # The turns this process is running right now. Absent when nothing observes
+    # them, which is why every read of it is optional: the durable rows are the
+    # answer either way, and a live turn is an addition to them.
+    app.state.live_turns = live_turns
 
     app.include_router(
         owner_runtime.router,
