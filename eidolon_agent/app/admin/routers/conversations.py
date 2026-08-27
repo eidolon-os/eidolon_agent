@@ -11,6 +11,13 @@ Endpoints:
        back ``next_before`` so the UI doesn't need to know the cursor
        column).
 
+       Also carries the turns **still running**, at the head of the newest
+       page. They come from the in-process live board rather than the log —
+       the log's row is written when a turn ends, so without them nothing
+       could ever be told that a conversation is happening right now. Same
+       row shape, ``status: "running"``, and never on a ``before`` page:
+       that is a walk through history and a running turn is not history.
+
   GET  /api/admin/conversations/turns/{turn_id}
        One turn with all its chat messages (user / assistant / tool
        calls) ordered by created_at. Returns 404 if the turn doesn't
