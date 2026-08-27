@@ -81,21 +81,37 @@ async def _events(*events: TurnEvent) -> AsyncIterator[TurnEvent]:
         yield event
 
 
-async def test_a_turn_is_visible_while_it_runs_and_gone_when_it_ends() -> None:
-    board = _board()
-    seen: list[int] = []
+async def test_a_turn_is_visible_while_it_runs_and_hands_over_when_it_ends() -> None:
+    """The hand-over, which is the whole reason the entry is not just deleted.
+
+    The engine schedules the durable write as background work *after* DONE is
+    yielded, so the stream closes before that row exists. An entry dropped at
+    close leaves the turn in neither place, and a map sampling that instant
+    shows the conversation blink out. So it stays — with the status its own DONE
+    event carried, never a stale ``running`` — until the row takes over.
+    """
+
+    clock = _Clock()
+    board = _board(clock, handover_seconds=10.0)
+    seen: list[str] = []
 
     async def stream() -> AsyncIterator[TurnEvent]:
         yield TurnEvent.state("turn-1", 1, FSMState.THINKING, 0.0)
         # Mid-stream is the only moment a *live* turn can be observed at all.
-        seen.append(len(board.snapshot()))
+        seen.append(board.snapshot()[0].status)
         yield TurnEvent.done("turn-1", 2, TurnStatus.OK, 0.0)
 
     await _drain(board.observe(_input(), stream()))
 
-    assert seen == [1]
-    # The durable row is written by the turn itself; keeping the entry would
-    # only offer a second, staler answer to the same question.
+    assert seen == ["running"]
+    handed_over = board.snapshot()
+    assert [view.status for view in handed_over] == ["ok"]
+    assert handed_over[0].finished_at is not None
+
+    clock.now += 11.0
+
+    # By now the written row is the answer, and a second, staler copy of it
+    # would only be something to disagree with.
     assert board.snapshot() == []
 
 

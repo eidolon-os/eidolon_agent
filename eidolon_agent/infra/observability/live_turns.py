@@ -47,6 +47,16 @@ logger = logging.getLogger("agent.observability.live_turns")
 #: it exists so a leak cannot grow without bound.
 _MAX_TURNS = 64
 
+#: How long a turn stays readable after it ends. The durable row is written by
+#: a **background** task the engine schedules in its ``finally`` — "post-turn
+#: work that runs after DONE was yielded" — so the stream closes before that row
+#: exists. Dropping the entry at close leaves a window in which the turn is in
+#: neither place, and a map sampling it then shows the conversation blink out of
+#: existence. So a finished turn is handed over rather than deleted: it keeps
+#: being served, with the final status its own DONE event carried, until the
+#: written row takes over (the reader prefers that one) or this expires.
+_HANDOVER_SECONDS = 10.0
+
 #: A turn nobody has said anything about for this long is not running any more,
 #: whatever the reason (the stream was abandoned, the process was paused, a bug
 #: skipped the ``finally``). Reporting it as live forever is the failure mode
@@ -91,6 +101,11 @@ class LiveTurnView:
     trigger: str
     input_modality: str | None
     started_at: datetime
+    #: ``running`` until this turn's own DONE event says otherwise. A settled
+    #: entry keeps being served through the hand-over window above, and saying
+    #: ``running`` then would be the one lie this board could tell.
+    status: str
+    finished_at: datetime | None
     latency_first_delta_ms: int | None
     tools: LiveToolUse
 
@@ -100,6 +115,9 @@ class _Entry:
     view: LiveTurnView
     touched_at: float
     started_monotonic: float
+    #: When this turn ended, if it has. Set from its DONE event, which is also
+    #: what starts the hand-over clock.
+    settled_at: float | None = None
     tool_names: list[str] = field(default_factory=list)
     tool_calls: int = 0
     tool_results: int = 0
@@ -114,12 +132,14 @@ class LiveTurnBoard:
         *,
         max_turns: int = _MAX_TURNS,
         ttl_seconds: float = _TTL_SECONDS,
+        handover_seconds: float = _HANDOVER_SECONDS,
         monotonic: Any = time.monotonic,
         wall_clock: Any = None,
     ) -> None:
         self._entries: dict[str, _Entry] = {}
         self._max_turns = max_turns
         self._ttl_seconds = ttl_seconds
+        self._handover_seconds = handover_seconds
         self._monotonic = monotonic
         self._wall_clock = wall_clock or (lambda: datetime.now(UTC))
 
@@ -203,6 +223,8 @@ class LiveTurnBoard:
                 trigger=_enum_value(turn_input.trigger),
                 input_modality=_enum_value(turn_input.input_modality) or None,
                 started_at=self._wall_clock(),
+                status=RUNNING,
+                finished_at=None,
                 latency_first_delta_ms=None,
                 tools=_no_tools(),
             ),
@@ -215,6 +237,20 @@ class LiveTurnBoard:
         if entry is None:
             return
         entry.touched_at = self._monotonic()
+        if event.kind in (TurnEventKind.DONE, TurnEventKind.ERROR):
+            # The turn said how it went. That is the only place this board ever
+            # learns a final status, and it is why the hand-over row is truthful
+            # rather than a stale "running".
+            status = str((event.data or {}).get("status") or "")
+            if event.kind is TurnEventKind.ERROR and not status:
+                status = "errored"
+            entry.settled_at = entry.touched_at
+            entry.view = _with(
+                entry.view,
+                status=status or "unknown",
+                finished_at=self._wall_clock(),
+            )
+            return
         if event.kind is TurnEventKind.DELTA:
             if entry.view.latency_first_delta_ms is None:
                 elapsed = int((entry.touched_at - entry.started_monotonic) * 1000)
@@ -242,22 +278,29 @@ class LiveTurnBoard:
         )
 
     def _end(self, turn_id: str) -> None:
-        # The durable row is written by the turn itself; from here on that row
-        # is the answer and this entry would only be a second, staler one.
+        entry = self._entries.get(turn_id)
+        if entry is not None and entry.settled_at is not None:
+            # Ended and said so: hand over to the row being written, rather than
+            # leaving a gap where this turn is nowhere at all.
+            return
+        # No DONE reached this board, so it does not know how the turn went — the
+        # consumer hung up, or the process is going down. Keeping the entry would
+        # report it as still running, which is worse than not reporting it: the
+        # engine persists a cancelled row on this path and that row is the answer.
         self._entries.pop(turn_id, None)
 
     def _sweep(self) -> None:
         if not self._entries:
             return
-        deadline = self._monotonic() - self._ttl_seconds
-        stale = [
-            turn_id
-            for turn_id, entry in self._entries.items()
-            if entry.touched_at < deadline
-        ]
-        for turn_id in stale:
-            logger.warning("live turn %s expired without ending; dropping", turn_id)
-            self._entries.pop(turn_id, None)
+        now = self._monotonic()
+        for turn_id, entry in list(self._entries.items()):
+            if entry.settled_at is not None:
+                if now - entry.settled_at >= self._handover_seconds:
+                    self._entries.pop(turn_id, None)
+                continue
+            if entry.touched_at < now - self._ttl_seconds:
+                logger.warning("live turn %s expired without ending; dropping", turn_id)
+                self._entries.pop(turn_id, None)
 
 
 def _no_tools() -> LiveToolUse:

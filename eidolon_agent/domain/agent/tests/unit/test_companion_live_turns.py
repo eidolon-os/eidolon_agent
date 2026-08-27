@@ -67,7 +67,9 @@ async def test_a_turn_run_through_the_facade_is_observable_while_it_runs() -> No
 
     assert engine.mid_flight == [1]
     assert len(events) == 2
-    assert board.snapshot() == []
+    # Still readable, and no longer claiming to be running: the durable row is
+    # written in the background after DONE, and this is the hand-over.
+    assert [view.status for view in board.snapshot()] == ["ok"]
 
 
 async def test_without_a_board_the_turn_runs_exactly_as_before() -> None:

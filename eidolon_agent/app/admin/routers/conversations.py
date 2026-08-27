@@ -51,7 +51,7 @@ from eidolon_agent.infra.observability import (
     build_live_turn_observability_summary,
     build_turn_observability_summary,
 )
-from eidolon_agent.infra.observability.live_turns import RUNNING, LiveTurnView
+from eidolon_agent.infra.observability.live_turns import LiveTurnView
 from eidolon_agent.infra.persistence import AgentConversationReader
 
 router = APIRouter(dependencies=AUTHORITY_DEPENDENCIES)
@@ -351,8 +351,8 @@ def _live_turn_summary(view: LiveTurnView) -> TurnSummary:
         runtime_session_id=view.runtime_session_id,
         device_id=view.device_id,
         started_at=view.started_at,
-        finished_at=None,
-        status=RUNNING,
+        finished_at=view.finished_at,
+        status=view.status,
         triage_kind=None,
         latency_first_delta_ms=view.latency_first_delta_ms,
         total_latency_ms=None,
