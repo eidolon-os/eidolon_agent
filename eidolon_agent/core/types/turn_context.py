@@ -26,6 +26,7 @@ def build_memory_actor_context(
     memory_realm_id: str,
     owner_id: str | None = None,
     companion_id: str | None = None,
+    council_id: str | None = None,
     device_id: str | None = None,
     session_id: str | None = None,
 ) -> MemoryActorContext:
@@ -34,6 +35,7 @@ def build_memory_actor_context(
     return MemoryActorContext(
         owner_id=owner_id,
         companion_id=companion_id,
+        council_id=council_id,
         memory_realm_id=memory_realm_id,
         device_id=device_id,
         session_id=session_id,
