@@ -3,8 +3,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from eidolon_agent.app.benchmark.suites import live_agent_memory_experience_scenarios
 from eidolon_agent.app.benchmark import live_service as replay_live_service
+from eidolon_agent.app.benchmark.suites import live_agent_memory_experience_scenarios
 
 
 def test_live_turn_checks_read_admin_observability_summary() -> None:
@@ -143,6 +143,32 @@ def test_live_report_category_metrics() -> None:
     }
     assert replay_live_service._check_count(scenarios) == 2
     assert replay_live_service._check_pass_rate(scenarios) == 0.5
+
+
+@pytest.mark.parametrize(
+    ("progress", "tool", "visible", "error", "expected"),
+    [
+        (120, None, 12_000, None, "visible_after_progress"),
+        (None, 300, 20_000, None, "visible_after_tool"),
+        (None, None, 500, None, "visible_direct"),
+        (120, None, None, "provider failed", "progress_without_visible_output"),
+        (None, None, None, "provider silent", "silent_error"),
+        (None, None, None, None, "empty_completion"),
+    ],
+)
+def test_output_path_latency_matrix_classification(
+    progress: int | None,
+    tool: int | None,
+    visible: int | None,
+    error: str | None,
+    expected: str,
+) -> None:
+    assert replay_live_service._classify_output_path(
+        first_progress_ms=progress,
+        first_tool_call_ms=tool,
+        first_delta_ms=visible,
+        error=error,
+    ) == expected
 
 
 def test_live_turn_checks_detects_missing_admin_trace() -> None:

@@ -17,7 +17,7 @@ import litellm
 import pytest
 
 from eidolon_agent.core.errors import LLMUnavailableError
-from eidolon_agent.core.types.llm import LLMFinishReason
+from eidolon_agent.core.types.llm import LLMActivityKind, LLMFinishReason
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.tool import ToolCall
 from eidolon_agent.infra.llm.providers.litellm_provider import LiteLLMProvider, _to_msg
@@ -44,6 +44,8 @@ class _ToolCallChunk:
 @dataclass
 class _Delta:
     content: str | None = None
+    reasoning_content: str | None = None
+    provider_specific_fields: dict | None = None
     tool_calls: list[_ToolCallChunk] | None = None
 
 
@@ -170,6 +172,39 @@ async def test_ttft_ignores_empty_raw_chunks(
     assert len(effective) == 1
     assert "raw_chunks_before_effective=3" in effective[0]
     assert "kind=text" in effective[0]
+
+
+@pytest.mark.parametrize(
+    "reasoning_delta",
+    [
+        _Delta(reasoning_content="private chain of thought"),
+        _Delta(provider_specific_fields={"reasoning_content": "private chain of thought"}),
+    ],
+)
+async def test_reasoning_is_progress_activity_but_never_text(
+    monkeypatch: pytest.MonkeyPatch,
+    provider,
+    reasoning_delta: _Delta,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    chunks = [
+        _Chunk(choices=[_Choice(delta=reasoning_delta)]),
+        _Chunk(choices=[_Choice(delta=_Delta(content="869"))]),
+        _Chunk(choices=[_Choice(delta=_Delta(), finish_reason="stop")]),
+    ]
+
+    async def _fake(**kwargs):
+        return _aiter(chunks)
+
+    monkeypatch.setattr(litellm, "acompletion", _fake)
+    with caplog.at_level("INFO"):
+        out = [d async for d in provider.stream([_msg("只回答869")], request_id="reasoning")]
+
+    assert [d.activity for d in out if d.activity] == [LLMActivityKind.REASONING]
+    assert [d.text_delta for d in out if d.text_delta] == ["869"]
+    assert all("private chain of thought" not in record.message for record in caplog.records)
+    assert any("litellm_reasoning_activity" in record.message for record in caplog.records)
+    assert any("reasoning_chunks=1" in record.message for record in caplog.records)
 
 
 async def test_tool_call_fragment_counts_as_effective_delta(

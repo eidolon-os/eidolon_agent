@@ -18,7 +18,7 @@ import litellm
 from eidolon_sdk.integrations.llm import render_openai_tool_calls, validate_openai_tool_transcript
 
 from eidolon_agent.core.errors import LLMUnavailableError
-from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason, LLMUsage
+from eidolon_agent.core.types.llm import LLMActivityKind, LLMDelta, LLMFinishReason, LLMUsage
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.tool import ToolCall, ToolSchema
 
@@ -33,6 +33,7 @@ _shared_http_client: httpx.AsyncClient | None = None
 # connect after a short idle). Concurrency races are acceptable for a
 # diagnostic gauge.
 _last_call_monotonic: float | None = None
+_ACTIVITY_HEARTBEAT_S = 1.0
 
 
 def _idle_ms_and_mark() -> int:
@@ -42,6 +43,32 @@ def _idle_ms_and_mark() -> int:
     idle_ms = -1 if _last_call_monotonic is None else int((now - _last_call_monotonic) * 1000)
     _last_call_monotonic = now
     return idle_ms
+
+
+def _reasoning_content(delta) -> str | None:
+    """Read OpenAI-compatible reasoning fields without exposing their text.
+
+    LiteLLM providers have used both a direct ``reasoning_content`` attribute
+    and ``provider_specific_fields``/``model_extra`` dictionaries. Returning
+    the value only lets this adapter classify activity; callers receive only
+    :class:`LLMActivityKind`, never the private chain-of-thought text.
+    """
+
+    if delta is None:
+        return None
+    if isinstance(delta, dict):
+        value = delta.get("reasoning_content") or delta.get("reasoning")
+        return value if isinstance(value, str) and value else None
+    direct = getattr(delta, "reasoning_content", None)
+    if isinstance(direct, str) and direct:
+        return direct
+    for attr in ("provider_specific_fields", "model_extra"):
+        extra = getattr(delta, attr, None)
+        if isinstance(extra, dict):
+            value = extra.get("reasoning_content") or extra.get("reasoning")
+            if isinstance(value, str) and value:
+                return value
+    return None
 
 
 class LiteLLMProvider:
@@ -107,6 +134,9 @@ class LiteLLMProvider:
         connect_ms = int((time.monotonic() - t0) * 1000)
         first_raw_chunk_ms: int | None = None
         first_effective_delta_logged = False
+        first_reasoning_ms: int | None = None
+        reasoning_chunk_count = 0
+        last_activity_emit_at: float | None = None
         raw_chunk_count = 0
         last_finish_reason: str | None = None
         stream_outcome = "interrupted"
@@ -135,7 +165,27 @@ class LiteLLMProvider:
                         last_finish_reason = str(choice.finish_reason)
 
                     content = getattr(delta, "content", None) if delta else None
+                    reasoning_content = _reasoning_content(delta)
                     tool_call_deltas = getattr(delta, "tool_calls", None) if delta else None
+                    if reasoning_content:
+                        reasoning_chunk_count += 1
+                        if first_reasoning_ms is None:
+                            first_reasoning_ms = int((time.monotonic() - t0) * 1000)
+                            _log.info(
+                                "litellm_reasoning_activity req=%s model=%s reasoning_ttft_ms=%d "
+                                "raw_ttft_ms=%d",
+                                request_id,
+                                kwargs["model"],
+                                first_reasoning_ms,
+                                first_raw_chunk_ms,
+                            )
+                        now = time.monotonic()
+                        if (
+                            last_activity_emit_at is None
+                            or now - last_activity_emit_at >= _ACTIVITY_HEARTBEAT_S
+                        ):
+                            last_activity_emit_at = now
+                            yield LLMDelta(activity=LLMActivityKind.REASONING)
                     has_text = bool(content and content.strip())
                     has_tool_call_fragment = bool(
                         tool_call_deltas
@@ -171,6 +221,16 @@ class LiteLLMProvider:
                         yield LLMDelta(text_delta=content)
 
                     if tool_call_deltas:
+                        now = time.monotonic()
+                        if (
+                            has_tool_call_fragment
+                            and (
+                                last_activity_emit_at is None
+                                or now - last_activity_emit_at >= _ACTIVITY_HEARTBEAT_S
+                            )
+                        ):
+                            last_activity_emit_at = now
+                            yield LLMDelta(activity=LLMActivityKind.TOOL_CALL)
                         for tc in tool_call_deltas:
                             idx = tc.index if hasattr(tc, "index") else 0
                             buf = tool_buf.setdefault(idx, {"id": None, "name": None, "args": ""})
@@ -223,6 +283,16 @@ class LiteLLMProvider:
                     -1 if first_raw_chunk_ms is None else first_raw_chunk_ms,
                     raw_chunk_count,
                     last_finish_reason or "none",
+                    stream_outcome,
+                )
+            if reasoning_chunk_count:
+                _log.info(
+                    "litellm_reasoning_summary req=%s model=%s first_reasoning_ms=%d "
+                    "reasoning_chunks=%d outcome=%s",
+                    request_id,
+                    kwargs["model"],
+                    -1 if first_reasoning_ms is None else first_reasoning_ms,
+                    reasoning_chunk_count,
                     stream_outcome,
                 )
             # When the caller cancels mid-stream (TCP close, RPC cancel, …),

@@ -182,6 +182,9 @@ def normalize_live_service_report(
                     "logical_turn_id": normalized["logical_turn_id"],
                     "passed": normalized["passed"],
                     "first_delta_ms": normalized["first_delta_ms"],
+                    "first_progress_ms": normalized["first_progress_ms"],
+                    "first_model_activity_ms": normalized["first_model_activity_ms"],
+                    "output_path": normalized["output_path"],
                     "total_ms": normalized["total_ms"],
                 }
             )
@@ -977,6 +980,10 @@ def _normalize_turn(
         "input_preview": turn.get("input_preview") or turn.get("input_text", "")[:120],
         "assistant_preview": turn.get("assistant_preview") or turn.get("assistant_text", "")[:240],
         "first_delta_ms": _int_or_none(turn.get("first_delta_ms")),
+        "first_progress_ms": _int_or_none(turn.get("first_progress_ms")),
+        "first_tool_call_ms": _int_or_none(turn.get("first_tool_call_ms")),
+        "first_model_activity_ms": _int_or_none(turn.get("first_model_activity_ms")),
+        "output_path": turn.get("output_path"),
         "total_ms": _int_or_none(turn.get("total_ms")),
         "passed": bool(turn.get("passed", not failed_checks)) and not failed_checks,
         "error": turn.get("error"),

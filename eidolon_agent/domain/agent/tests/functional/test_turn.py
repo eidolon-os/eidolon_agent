@@ -27,6 +27,40 @@ async def test_simple_turn_emits_state_delta_done(turn_engine_factory):
 
 
 @pytest.mark.asyncio
+async def test_reasoning_activity_emits_progress_without_leaking_to_answer(
+    turn_engine_factory,
+) -> None:
+    from eidolon_agent.core.types.llm import (
+        LLMActivityKind,
+        LLMDelta,
+        LLMFinishReason,
+    )
+
+    class _ReasoningLLM:
+        model_id = "fake:reasoning"
+
+        async def stream(self, *_args, **_kwargs):
+            yield LLMDelta(activity=LLMActivityKind.REASONING)
+            yield LLMDelta(activity=LLMActivityKind.REASONING)
+            yield LLMDelta(text_delta="869")
+            yield LLMDelta(finish=LLMFinishReason.STOP)
+
+    engine = turn_engine_factory(llm=_ReasoningLLM())
+    events = [ev async for ev in engine.run(make_turn_input("只回答869"))]
+
+    progress = [event for event in events if event.kind.value == "progress"]
+    answer = [event.data["text"] for event in events if event.kind.value == "delta"]
+    assert [event.data for event in progress] == [
+        {"phase": "model", "kind": "reasoning"},
+        {"phase": "model", "kind": "reasoning"},
+    ]
+    assert answer == ["869"]
+    assert max(event.seq for event in progress) < next(
+        event.seq for event in events if event.kind.value == "delta"
+    )
+
+
+@pytest.mark.asyncio
 async def test_done_turn_has_recent_history_even_if_stream_closes(turn_engine_factory):
     engine = turn_engine_factory()
     ti = make_turn_input("以后请叫我小满")

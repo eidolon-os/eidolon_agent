@@ -301,6 +301,8 @@ class TurnEngine:
         started_at = datetime.now(timezone.utc)
         t0 = time.monotonic()
         first_delta_ms: int | None = None
+        first_model_activity_ms: int | None = None
+        model_activity_counts: dict[str, int] = {}
         triage_kind = TriageKind.SIMPLE
         status = TurnStatus.OK
         assistant_text_parts: list[str] = []
@@ -480,6 +482,20 @@ class TurnEngine:
                     temperature=cfg.temperature,
                     request_id=ti.turn_id,
                 ):
+                    if delta.activity is not None:
+                        activity_kind = delta.activity.value
+                        if first_model_activity_ms is None:
+                            first_model_activity_ms = int((time.monotonic() - t0) * 1000)
+                        model_activity_counts[activity_kind] = (
+                            model_activity_counts.get(activity_kind, 0) + 1
+                        )
+                        yield TurnEvent(
+                            turn_id=ti.turn_id,
+                            seq=seq.next(),
+                            kind=TurnEventKind.PROGRESS,
+                            data={"phase": "model", "kind": activity_kind},
+                            ts=time.time(),
+                        )
                     if delta.text_delta:
                         if first_delta_ms is None:
                             first_delta_ms = int((time.monotonic() - t0) * 1000)
@@ -733,6 +749,7 @@ class TurnEngine:
                 triage_at=ts_triage_ms,
                 compile_at=ts_compile_ms,
                 first_delta_at=first_delta_ms,
+                first_activity_at=first_model_activity_ms,
                 output_at=ts_output_ms,
                 tokens_in=usage_in,
                 tokens_out=usage_out,
@@ -867,6 +884,8 @@ class TurnEngine:
                     "triage_ms": ts_triage_ms,
                     "compile_ms": ts_compile_ms,
                     "first_delta_ms": first_delta_ms,
+                    "first_model_activity_ms": first_model_activity_ms,
+                    "model_activity_counts": dict(model_activity_counts),
                     "output_ms": ts_output_ms,
                     "tool_ms": tool_ms_total,
                     "context_ledger": ti.metadata.get("context_ledger"),
@@ -1291,6 +1310,7 @@ def _log_turn_timings(
     triage_at: int | None,
     compile_at: int | None,
     first_delta_at: int | None,
+    first_activity_at: int | None,
     output_at: int | None,
     tokens_in: int,
     tokens_out: int,
@@ -1318,12 +1338,13 @@ def _log_turn_timings(
 
     _log.info(
         "turn_timings turn=%s total_ms=%d guard=%s triage=%s compile=%s "
-        "llm_ttft=%s output=%s tokens_in=%d tokens_out=%d",
+        "llm_activity=%s llm_ttft=%s output=%s tokens_in=%d tokens_out=%d",
         turn_id,
         total_ms,
         guard_ms,
         triage_ms,
         compile_ms,
+        _delta(first_activity_at, compile_at),
         llm_ttft_ms,
         output_ms,
         tokens_in,

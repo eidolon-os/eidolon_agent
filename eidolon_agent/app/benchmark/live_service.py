@@ -290,6 +290,8 @@ async def _run_turn(
     assistant_parts: list[str] = []
     events: list[dict[str, Any]] = []
     first_delta_ms: int | None = None
+    first_progress_ms: int | None = None
+    first_tool_call_ms: int | None = None
     total_ms: int | None = None
     error: str | None = None
 
@@ -312,17 +314,22 @@ async def _run_turn(
     try:
 
         async def _receive_until_terminal() -> None:
-            nonlocal error, first_delta_ms, total_ms
+            nonlocal error, first_delta_ms, first_progress_ms, first_tool_call_ms, total_ms
             async for ev in call:
                 if ev.turn_id != turn_id:
                     continue
                 kind = pb.TurnEvent.Kind.Name(ev.kind)
                 data = struct_to_dict(ev.data) if ev.data else {}
-                events.append({"kind": kind, "data": data})
+                received_ms = int((time.monotonic() - started) * 1000)
+                events.append({"kind": kind, "data": data, "receive_ms": received_ms})
                 if kind == "DELTA":
                     if first_delta_ms is None:
-                        first_delta_ms = int((time.monotonic() - started) * 1000)
+                        first_delta_ms = received_ms
                     assistant_parts.append(str(data.get("text") or ""))
+                elif kind == "PROGRESS" and first_progress_ms is None:
+                    first_progress_ms = received_ms
+                elif kind == "TOOL_CALL" and first_tool_call_ms is None:
+                    first_tool_call_ms = received_ms
                 elif kind == "DONE":
                     total_ms = int((time.monotonic() - started) * 1000)
                     break
@@ -362,6 +369,24 @@ async def _run_turn(
         "input_preview": text[:80],
         "assistant_preview": "".join(assistant_parts)[:240],
         "first_delta_ms": first_delta_ms,
+        "first_progress_ms": first_progress_ms,
+        "first_tool_call_ms": first_tool_call_ms,
+        "first_model_activity_ms": min(
+            value
+            for value in (first_progress_ms, first_tool_call_ms, first_delta_ms)
+            if value is not None
+        )
+        if any(
+            value is not None
+            for value in (first_progress_ms, first_tool_call_ms, first_delta_ms)
+        )
+        else None,
+        "output_path": _classify_output_path(
+            first_progress_ms=first_progress_ms,
+            first_tool_call_ms=first_tool_call_ms,
+            first_delta_ms=first_delta_ms,
+            error=error,
+        ),
         "total_ms": total_ms,
         "error": error,
         "passed": all(c["passed"] for c in checks),
@@ -373,6 +398,30 @@ async def _run_turn(
             "observability_summary": detail.get("observability_summary"),
         },
     }
+
+
+def _classify_output_path(
+    *,
+    first_progress_ms: int | None,
+    first_tool_call_ms: int | None,
+    first_delta_ms: int | None,
+    error: str | None,
+) -> str:
+    """Classify slow output without conflating activity and playable text."""
+
+    if first_delta_ms is not None:
+        if first_progress_ms is not None and first_progress_ms <= first_delta_ms:
+            return "visible_after_progress"
+        if first_tool_call_ms is not None and first_tool_call_ms <= first_delta_ms:
+            return "visible_after_tool"
+        return "visible_direct"
+    if first_progress_ms is not None:
+        return "progress_without_visible_output"
+    if first_tool_call_ms is not None:
+        return "tool_without_visible_output"
+    if error:
+        return "silent_error"
+    return "empty_completion"
 
 
 async def _fetch_turn_detail(

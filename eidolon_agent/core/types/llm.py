@@ -22,6 +22,18 @@ class LLMFinishReason(str, Enum):
     CANCELLED = "cancelled"
 
 
+class LLMActivityKind(str, Enum):
+    """Non-user-visible evidence that a provider stream is making progress.
+
+    Activity is deliberately separate from ``text_delta``: reasoning must
+    never be rendered or sent to TTS, while callers still need to distinguish
+    a healthy reasoning/tool stream from a silent or stalled provider.
+    """
+
+    REASONING = "reasoning"
+    TOOL_CALL = "tool_call"
+
+
 @dataclass(frozen=True, slots=True)
 class LLMUsage:
     tokens_in: int = 0
@@ -34,11 +46,12 @@ class LLMUsage:
 class LLMDelta:
     """A single increment from a streaming LLM call.
 
-    Exactly one of {text_delta, tool_call, finish, usage} is non-None per
+    Exactly one of {text_delta, activity, tool_call, finish, usage} is non-None per
     instance. Discriminating by None lets the consumer use a single async loop.
     """
 
     text_delta: str | None = None
+    activity: LLMActivityKind | None = None
     tool_call: ToolCall | None = None
     finish: LLMFinishReason | None = None
     usage: LLMUsage | None = None
