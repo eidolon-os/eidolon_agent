@@ -139,6 +139,25 @@ async def test_session_reused_for_same_route() -> None:
     assert s1 is s2
 
 
+async def test_read_and_write_sessions_use_distinct_discovered_surfaces() -> None:
+    pool = McpClientPool(
+        routes=_routes(
+            MemoryRoute(
+                memory_space_id="default.alice.default",
+                mcp_url="http://a/mcp",
+                ops_mcp_url="http://a/ops/mcp",
+            )
+        )
+    )
+
+    read = await pool.session_for("default.alice.default")
+    write = await pool.write_session_for("default.alice.default")
+
+    assert read is not write
+    assert read.matches(mcp_url="http://a/mcp", bearer_token=None)
+    assert write.matches(mcp_url="http://a/ops/mcp", bearer_token=None)
+
+
 async def test_session_rotated_when_url_changes() -> None:
     routes = _routes(MemoryRoute(memory_space_id="default.alice.default", mcp_url="http://old/mcp"))
     pool = McpClientPool(routes=routes)

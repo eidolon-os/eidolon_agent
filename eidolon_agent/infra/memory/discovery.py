@@ -36,6 +36,7 @@ class DiscoveryMemoryRealm(BaseModel):
     owner_id: str | None = None
     enabled: bool = True
     mcp_http_url: str
+    ops_mcp_http_url: str
     mcp_auth: DiscoveryMcpAuth | None = None
     agent_reachable: bool = True
 
@@ -52,7 +53,7 @@ class DiscoveryNats(BaseModel):
 class DiscoveryResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    version: int = 1
+    version: int = 2
     generated_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     )
@@ -64,6 +65,7 @@ class DiscoveryResponse(BaseModel):
 class MemoryRoute:
     memory_space_id: str
     mcp_url: str
+    ops_mcp_url: str | None = None
     bearer_token: str | None = None
     enabled: bool = True
     reachable: bool = True
@@ -103,6 +105,7 @@ class MemoryRoutingTable:
             e.memory_space_id: MemoryRoute(
                 memory_space_id=e.memory_space_id,
                 mcp_url=e.mcp_url,
+                ops_mcp_url=e.ops_mcp_url or e.mcp_url,
                 bearer_token=e.bearer_token,
                 enabled=True,
                 reachable=True,
@@ -130,6 +133,7 @@ class MemoryRoutingTable:
             routes[realm.memory_space_id] = MemoryRoute(
                 memory_space_id=realm.memory_space_id,
                 mcp_url=realm.mcp_http_url,
+                ops_mcp_url=realm.ops_mcp_http_url,
                 bearer_token=token,
                 enabled=realm.enabled,
                 reachable=realm.agent_reachable,

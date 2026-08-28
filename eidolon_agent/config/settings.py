@@ -99,6 +99,7 @@ class MemoryEndpoint(BaseModel):
 
     memory_space_id: str
     mcp_url: str  # e.g. http://127.0.0.1:8030/mcp
+    ops_mcp_url: str | None = None  # explicit-write surface; defaults to mcp_url for static servers
     bearer_token: str | None = None
 
 

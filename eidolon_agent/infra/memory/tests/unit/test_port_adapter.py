@@ -27,7 +27,9 @@ def _port(*, session_call=None, session_close=None, pub_methods=None):
 
     pool = MagicMock()
     pool.session_for = AsyncMock(return_value=session)
+    pool.write_session_for = AsyncMock(return_value=session)
     pool.drop_session = AsyncMock(return_value=True)
+    pool.drop_write_session = AsyncMock(return_value=True)
     pool.health = AsyncMock(return_value=True)
     pool.close_all = AsyncMock()
 
@@ -480,7 +482,7 @@ async def test_write_confirmed_fact_uses_observable_mcp_command() -> None:
             "resource_id": "drawer-1",
         }
     )
-    port, _, _, pub = _port(session_call=command)
+    port, _, pool, pub = _port(session_call=command)
     outcome = await port.write_confirmed_fact(
         "owner-1",
         "companion-1",
@@ -503,6 +505,8 @@ async def test_write_confirmed_fact_uses_observable_mcp_command() -> None:
     assert arguments["wing"] == "auto"
     assert arguments["memory_type"] == "auto"
     assert arguments["request_id"]
+    pool.write_session_for.assert_awaited_once_with("realm-1")
+    pool.session_for.assert_not_awaited()
     pub.publish_verbatim_intent.assert_not_awaited()
 
 
@@ -561,7 +565,7 @@ async def test_forget_preview_returns_exact_candidates_without_mutation() -> Non
         "confirmation_token": "token-1",
         "expires_at": "2026-07-16T12:00:00Z",
     })
-    port, *_ = _port(session_call=call)
+    port, _, pool, _ = _port(session_call=call)
     preview = await port.preview_forget(
         "owner-1",
         "companion-1",
@@ -577,6 +581,7 @@ async def test_forget_preview_returns_exact_candidates_without_mutation() -> Non
     name, args = call.await_args.args
     assert name == "eidolon_memory_forget_preview"
     assert args == {"target": "old chat", "action": "delete"}
+    pool.write_session_for.assert_awaited_once_with("realm-1")
 
 
 async def test_forget_preview_reports_failure_without_claiming_success() -> None:

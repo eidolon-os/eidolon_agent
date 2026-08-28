@@ -386,7 +386,7 @@ class EidolonMemoryPort:
             text,
         )
         try:
-            session = await self._pool.session_for(ctx.memory_space_id)
+            session = await self._pool.write_session_for(ctx.memory_space_id)
         except MemoryUnavailableError as exc:
             return MemoryWriteOutcome(
                 status="failed",
@@ -417,10 +417,10 @@ class EidolonMemoryPort:
                 timeout=max(0.25, wait_applied_seconds + 0.75),
             )
         except TimeoutError:
-            await self._pool.drop_session(ctx.memory_space_id, session=session)
+            await self._pool.drop_write_session(ctx.memory_space_id, session=session)
             return MemoryWriteOutcome(status="unknown", request_id=request_id)
         except Exception as exc:
-            await self._pool.drop_session(ctx.memory_space_id, session=session)
+            await self._pool.drop_write_session(ctx.memory_space_id, session=session)
             return MemoryWriteOutcome(
                 status="failed",
                 request_id=request_id,
@@ -505,7 +505,7 @@ class EidolonMemoryPort:
             session_id=session_id,
         )
         try:
-            session = await self._pool.session_for(ctx.memory_space_id)
+            session = await self._pool.write_session_for(ctx.memory_space_id)
             if not await session.supports("eidolon_memory_forget_preview"):
                 _log.info(
                     "memory forget preview absent for memory_space=%s",
@@ -580,7 +580,7 @@ class EidolonMemoryPort:
             session_id=session_id,
         )
         try:
-            session = await self._pool.session_for(ctx.memory_space_id)
+            session = await self._pool.write_session_for(ctx.memory_space_id)
             if not await session.supports("eidolon_memory_forget_confirm"):
                 return MemoryForgetOutcome(
                     status="unavailable",

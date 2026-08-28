@@ -190,7 +190,12 @@ def _unwrap_fastmcp_result(payload: Any) -> Any:
 
 
 class McpClientPool:
-    """memory_space_id -> :class:`McpUserSession`. One session per space, lazy."""
+    """Realm-scoped read and write MCP sessions, opened lazily.
+
+    Read sessions use the narrow agent surface. Explicit mutations use the
+    separate ops surface; keeping both sessions distinct prevents capability
+    leakage while preserving connection reuse on each path.
+    """
 
     def __init__(
         self,
@@ -215,27 +220,44 @@ class McpClientPool:
             )
         self._routes = routes
         self._sessions: dict[str, McpUserSession] = {}
+        self._write_sessions: dict[str, McpUserSession] = {}
         self._lock = asyncio.Lock()
 
     async def session_for(self, memory_space_id: str) -> McpUserSession:
+        return await self._session_for(memory_space_id, write=False)
+
+    async def write_session_for(self, memory_space_id: str) -> McpUserSession:
+        return await self._session_for(memory_space_id, write=True)
+
+    async def _session_for(
+        self,
+        memory_space_id: str,
+        *,
+        write: bool,
+    ) -> McpUserSession:
         route, unavailable_reason = await self._routes.route_status_for(memory_space_id)
         if route is None:
-            await self.drop_session(memory_space_id)
+            if write:
+                await self.drop_write_session(memory_space_id)
+            else:
+                await self.drop_session(memory_space_id)
             raise MemoryUnavailableError(
                 f"no reachable MCP endpoint for memory space {memory_space_id}: {unavailable_reason}",
                 details={"memory_space_id": memory_space_id, "reason": unavailable_reason},
             )
+        mcp_url = (route.ops_mcp_url or route.mcp_url) if write else route.mcp_url
+        sessions = self._write_sessions if write else self._sessions
         async with self._lock:
-            sess = self._sessions.get(memory_space_id)
+            sess = sessions.get(memory_space_id)
             if sess is not None and sess.matches(
-                mcp_url=route.mcp_url,
+                mcp_url=mcp_url,
                 bearer_token=route.bearer_token,
             ):
                 return sess
             if sess is not None:
                 await sess.close()
-            sess = McpUserSession(route.mcp_url, bearer_token=route.bearer_token)
-            self._sessions[memory_space_id] = sess
+            sess = McpUserSession(mcp_url, bearer_token=route.bearer_token)
+            sessions[memory_space_id] = sess
             return sess
 
     async def drop_session(
@@ -250,21 +272,46 @@ class McpClientPool:
         instance. This lets callers discard a poisoned session after a timeout
         without racing and closing a fresh replacement created by another turn.
         """
+        return await self._drop_from(
+            self._sessions,
+            memory_space_id,
+            session=session,
+        )
+
+    async def drop_write_session(
+        self,
+        memory_space_id: str,
+        *,
+        session: McpUserSession | None = None,
+    ) -> bool:
+        return await self._drop_from(
+            self._write_sessions,
+            memory_space_id,
+            session=session,
+        )
+
+    async def _drop_from(
+        self,
+        sessions: dict[str, McpUserSession],
+        memory_space_id: str,
+        *,
+        session: McpUserSession | None,
+    ) -> bool:
         async with self._lock:
-            sess = self._sessions.get(memory_space_id)
-            if sess is None:
+            cached = sessions.get(memory_space_id)
+            if cached is None:
                 return False
-            if session is not None and sess is not session:
+            if session is not None and cached is not session:
                 return False
-            self._sessions.pop(memory_space_id, None)
-        if sess is not None:
-            await sess.close()
+            sessions.pop(memory_space_id, None)
+        await cached.close()
         return True
 
     async def close_all(self) -> None:
         async with self._lock:
-            sessions = list(self._sessions.values())
+            sessions = [*self._sessions.values(), *self._write_sessions.values()]
             self._sessions.clear()
+            self._write_sessions.clear()
         for s in sessions:
             await s.close()
 

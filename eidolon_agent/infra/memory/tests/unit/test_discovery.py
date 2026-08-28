@@ -37,7 +37,7 @@ async def test_discovery_client_ignores_shell_proxy_env(monkeypatch):
             return httpx.Response(
                 200,
                 json={
-                    "version": 1,
+                    "version": 2,
                     "nats": {"url": "nats://127.0.0.1:4222"},
                     "memory_realms": [],
                 },
@@ -60,7 +60,7 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
     monkeypatch.setenv("EIDOLON_MEMORY_MCP_TOKEN", "secret")
     discovery = DiscoveryResponse.model_validate(
         {
-            "version": 1,
+            "version": 2,
             "nats": {
                 "url": "nats://memory:4222",
                 "stream": "MEMORY_TURNS",
@@ -74,6 +74,7 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
                     "owner_id": "benchmark",
                     "enabled": True,
                     "mcp_http_url": "http://127.0.0.1:8031/mcp",
+                    "ops_mcp_http_url": "http://127.0.0.1:8031/ops/mcp",
                     "mcp_auth": {
                         "type": "bearer",
                         "token_env": "EIDOLON_MEMORY_MCP_TOKEN",
@@ -86,6 +87,7 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
                     "owner_id": "benchmark",
                     "enabled": False,
                     "mcp_http_url": "http://127.0.0.1:8032/mcp",
+                    "ops_mcp_http_url": "http://127.0.0.1:8032/ops/mcp",
                     "agent_reachable": True,
                 },
                 {
@@ -94,6 +96,7 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
                     "owner_id": "benchmark",
                     "enabled": True,
                     "mcp_http_url": "http://127.0.0.1:8033/mcp",
+                    "ops_mcp_http_url": "http://127.0.0.1:8033/ops/mcp",
                     "agent_reachable": False,
                 },
             ],
@@ -106,6 +109,7 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
     alice = await routes.route_for("r_benchmark_default")
     assert alice is not None
     assert alice.mcp_url == "http://127.0.0.1:8031/mcp"
+    assert alice.ops_mcp_url == "http://127.0.0.1:8031/ops/mcp"
     assert alice.bearer_token == "secret"
     assert await routes.route_for("r_benchmark_disabled") is None
     assert await routes.route_for("r_benchmark_unreachable") is None
@@ -141,6 +145,7 @@ async def test_static_routes_remain_fallback():
     route = await routes.route_for("default.alice.default")
     assert route is not None
     assert route.bearer_token == "local-token"
+    assert route.ops_mcp_url == "http://127.0.0.1:8030/mcp"
     assert await routes.nats_url() == "nats://static:4222"
     assert await routes.render_turn_subject("default.alice.default") == (
         "eidolon.memory.turn.b64_ZGVmYXVsdC5hbGljZS5kZWZhdWx0"
