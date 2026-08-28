@@ -19,7 +19,7 @@ from collections.abc import AsyncIterator
 
 from eidolon_agent.core.types.turn import TurnEvent, TurnInput
 from eidolon_agent.domain.agent.turn import TurnEngine
-from eidolon_agent.infra.observability.live_turns import LiveTurnBoard
+from eidolon_agent.infra.observability import LiveTurnBoard
 
 
 class CompanionAgent:

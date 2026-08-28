@@ -56,10 +56,10 @@ from pydantic import BaseModel, Field
 from eidolon_agent.app.admin.authority import AUTHORITY_DEPENDENCIES
 from eidolon_agent.core.types.conversation import CONVERSATION_ID_MAX_LENGTH
 from eidolon_agent.infra.observability import (
+    LiveTurnView,
     build_live_turn_observability_summary,
     build_turn_observability_summary,
 )
-from eidolon_agent.infra.observability.live_turns import LiveTurnView
 from eidolon_agent.infra.persistence import AgentConversationReader
 
 router = APIRouter(dependencies=AUTHORITY_DEPENDENCIES)
