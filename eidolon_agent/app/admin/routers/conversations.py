@@ -54,6 +54,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from eidolon_agent.app.admin.authority import AUTHORITY_DEPENDENCIES
+from eidolon_agent.core.types.conversation import CONVERSATION_ID_MAX_LENGTH
 from eidolon_agent.infra.observability import (
     build_live_turn_observability_summary,
     build_turn_observability_summary,
@@ -72,7 +73,7 @@ class TurnSummary(BaseModel):
 
     turn_id: str
     trace_id: str | None = None
-    conversation_id: str
+    conversation_id: str = Field(min_length=1, max_length=CONVERSATION_ID_MAX_LENGTH)
     seq: int
     owner_id: str
     companion_id: str
@@ -104,7 +105,7 @@ class ListTurnsResponse(BaseModel):
 
 
 class ConversationSummary(BaseModel):
-    conversation_id: str
+    conversation_id: str = Field(min_length=1, max_length=CONVERSATION_ID_MAX_LENGTH)
     owner_id: str
     companion_id: str
     runtime_session_id: str | None = None
@@ -124,7 +125,7 @@ class ListConversationsResponse(BaseModel):
 
 class MemoryAuditRow(BaseModel):
     turn_id: str
-    conversation_id: str
+    conversation_id: str = Field(min_length=1, max_length=CONVERSATION_ID_MAX_LENGTH)
     seq: int
     owner_id: str
     companion_id: str
@@ -165,7 +166,7 @@ class TurnDetail(BaseModel):
     """Detail-view shape: turn-level columns + the full message list."""
 
     turn_id: str
-    conversation_id: str
+    conversation_id: str = Field(min_length=1, max_length=CONVERSATION_ID_MAX_LENGTH)
     conversation_title: str | None
     seq: int
     owner_id: str
@@ -303,7 +304,9 @@ async def list_turns(
     # happening — the durable row is written when a turn ends, so every
     # consumer downstream was built for a ``running`` turn that no producer
     # emitted.
-    live = _live_turns(request, owner_id=owner_id, companion_id=companion_id) if before is None else []
+    live = (
+        _live_turns(request, owner_id=owner_id, companion_id=companion_id) if before is None else []
+    )
     if live:
         known = {turn.turn_id for turn in turns}
         # A turn that finished between the two reads is in both. The durable row
@@ -395,7 +398,7 @@ async def list_memory_audit(
     )
     out: list[MemoryAuditRow] = []
     for row in rows:
-        trace = ((row.get("metadata_") or {}).get("turn_trace") or {})
+        trace = (row.get("metadata_") or {}).get("turn_trace") or {}
         write = trace.get("memory_write_trace") or {}
         if not write:
             continue
@@ -437,7 +440,9 @@ class ConversationTurn(BaseModel):
 
 
 class ConversationTurnsResponse(BaseModel):
-    conversation_id: str
+    owner_id: str
+    companion_id: str
+    conversation_id: str = Field(min_length=1, max_length=CONVERSATION_ID_MAX_LENGTH)
     turns: list[ConversationTurn]
     next_before: datetime | None = None
 
@@ -450,16 +455,16 @@ async def list_conversation_turns(
     conversation_id: str,
     request: Request,
     owner_id: str = Query(...),
+    companion_id: str = Query(...),
     limit: int = Query(20, ge=1, le=50),
     before: datetime | None = None,
 ) -> ConversationTurnsResponse:
     """One conversation's turns, with their messages.
 
-    ``owner_id`` is required rather than an optional filter, unlike the
-    owner-wide list: this route carries message bodies, so answering without a
-    scope would hand one caller everyone's words. A conversation that is not this
-    Owner's is 404 — the same answer as one that does not exist, so an id cannot
-    be probed.
+    Both scopes are required rather than optional filters. This route carries
+    message bodies, so a conversation that is not this Owner's *and* this
+    Companion's is 404 — the same answer as one that does not exist, so an id
+    cannot be probed or opened through another Companion's page.
 
     Newest first, so ``before`` walks backwards through the conversation the way
     "load earlier" does. A transcript reads forward; which direction a person
@@ -468,7 +473,11 @@ async def list_conversation_turns(
 
     reader = _runtime_reader(request)
     rows = await reader.list_turns_for_conversation(
-        conversation_id, owner_id=owner_id, limit=limit, before=before
+        conversation_id,
+        owner_id=owner_id,
+        companion_id=companion_id,
+        limit=limit,
+        before=before,
     )
     if rows is None:
         raise HTTPException(404, f"conversation {conversation_id!r} not found")
@@ -485,6 +494,8 @@ async def list_conversation_turns(
         for row in rows
     ]
     return ConversationTurnsResponse(
+        owner_id=owner_id,
+        companion_id=companion_id,
         conversation_id=conversation_id,
         turns=turns,
         # Only when the page was full: a short page is the end of the
@@ -552,7 +563,5 @@ async def get_turn(turn_id: str, request: Request) -> TurnDetail:
             latency_first_delta_ms=row["latency_first_delta_ms"],
             total_latency_ms=row["total_latency_ms"],
         ),
-        messages=[
-            _message_view(m) for m in messages
-        ],
+        messages=[_message_view(m) for m in messages],
     )

@@ -632,11 +632,12 @@ class AgentConversationReader:
         conversation_id: str,
         *,
         owner_id: str,
+        companion_id: str,
         limit: int = 20,
         before: datetime | None = None,
     ) -> list[dict] | None:
         """One conversation's turns, newest first, or ``None`` if it is not this
-        Owner's.
+        Owner's and Companion's.
 
         ``None`` rather than an empty list, because those are different answers:
         a conversation with no turns yet is a real state, and "that is not yours"
@@ -650,7 +651,11 @@ class AgentConversationReader:
 
         async with self._runtime_store.session_factory() as session:
             conversation = await session.get(ConversationRow, conversation_id)
-            if conversation is None or conversation.owner_id != owner_id:
+            if (
+                conversation is None
+                or conversation.owner_id != owner_id
+                or conversation.companion_id != companion_id
+            ):
                 return None
             stmt = (
                 select(TurnRow)

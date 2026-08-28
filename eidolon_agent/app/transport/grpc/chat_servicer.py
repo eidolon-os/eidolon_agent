@@ -24,6 +24,7 @@ from eidolon_agent.core.errors import (
     NotFoundError,
     PermissionDeniedError,
 )
+from eidolon_agent.core.types.conversation import validate_conversation_id
 from eidolon_agent.core.types.signal import SignalDigest
 from eidolon_agent.core.types.turn import (
     TurnEvent,
@@ -148,7 +149,10 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     continue
 
                 start = frame.start
-                conversation_id = start.conversation_id
+                try:
+                    conversation_id = validate_conversation_id(start.conversation_id)
+                except ValueError as exc:
+                    await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
                 previous = active_by_conversation.get(conversation_id)
                 if previous is not None and not previous.done():
                     previous.cancel()

@@ -34,6 +34,8 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from eidolon_agent.core.types.conversation import CONVERSATION_ID_MAX_LENGTH
+
 JsonDict = dict[str, Any]
 _SCHEMA_VERSION = 1
 
@@ -72,7 +74,9 @@ class RuntimeSessionRow(RuntimeBase):
 class ConversationRow(RuntimeBase):
     __tablename__ = "conversations"
 
-    conversation_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        String(CONVERSATION_ID_MAX_LENGTH), primary_key=True
+    )
     owner_id: Mapped[str] = mapped_column(String(64), index=True)
     companion_id: Mapped[str] = mapped_column(String(64), index=True)
     runtime_session_id: Mapped[str | None] = mapped_column(
@@ -98,7 +102,7 @@ class TurnRow(RuntimeBase):
 
     turn_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     conversation_id: Mapped[str] = mapped_column(
-        String(64),
+        String(CONVERSATION_ID_MAX_LENGTH),
         ForeignKey("conversations.conversation_id", ondelete="CASCADE"),
         index=True,
     )
@@ -154,7 +158,9 @@ class JobRow(RuntimeBase):
     job_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     owner_id: Mapped[str] = mapped_column(String(64), index=True)
     companion_id: Mapped[str | None] = mapped_column(String(64), index=True)
-    conversation_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    conversation_id: Mapped[str | None] = mapped_column(
+        String(CONVERSATION_ID_MAX_LENGTH), index=True
+    )
     turn_id: Mapped[str | None] = mapped_column(String(64), index=True)
     provider: Mapped[str] = mapped_column(String(64), index=True)
     kind: Mapped[str] = mapped_column(String(64), index=True)
@@ -426,9 +432,7 @@ class AgentRuntimeStore:
             await session.commit()
             return counts
 
-    async def delete_companion_runtime(
-        self, owner_id: str, companion_id: str
-    ) -> dict[str, int]:
+    async def delete_companion_runtime(self, owner_id: str, companion_id: str) -> dict[str, int]:
         """Delete runtime rows for one companion within an owner boundary."""
         async with self.session_factory() as session:
             scope = (
@@ -467,9 +471,7 @@ class AgentRuntimeStore:
                 .where(JobRow.owner_id == owner_id)
                 .where(JobRow.companion_id == companion_id)
             )
-            conversation_result = await session.execute(
-                delete(ConversationRow).where(*scope)
-            )
+            conversation_result = await session.execute(delete(ConversationRow).where(*scope))
             session_result = await session.execute(
                 delete(RuntimeSessionRow)
                 .where(RuntimeSessionRow.owner_id == owner_id)

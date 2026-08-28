@@ -30,6 +30,7 @@ pytestmark = pytest.mark.functional
 
 OWNER = "manson"
 OTHER = "alice"
+COMPANION = f"{OWNER}-test"
 
 
 def _at(minute: int) -> datetime:
@@ -56,7 +57,7 @@ async def test_a_transcript_carries_what_was_said(tmp_path) -> None:
         await _seed_conversation(store, owner_id=OWNER, conversation_id="conv-a", turns=2)
 
         answered = await client.get(
-            f"/api/admin/conversations/conv-a/turns?owner_id={OWNER}"
+            f"/api/admin/conversations/conv-a/turns?owner_id={OWNER}&companion_id={COMPANION}"
         )
 
         assert answered.status_code == 200
@@ -84,10 +85,79 @@ async def test_only_this_conversation(tmp_path) -> None:
         await _seed_conversation(store, owner_id=OWNER, conversation_id="conv-b", turns=1)
 
         body = (
-            await client.get(f"/api/admin/conversations/conv-a/turns?owner_id={OWNER}")
+            await client.get(
+                f"/api/admin/conversations/conv-a/turns?owner_id={OWNER}&companion_id={COMPANION}"
+            )
         ).json()
 
         assert [turn["turn_id"] for turn in body["turns"]] == ["conv-a-t0"]
+    finally:
+        await client.aclose()
+        await store.close()
+
+
+async def test_only_this_companions_conversation(tmp_path) -> None:
+    """The Companion in the route is a scope, not decorative hierarchy."""
+
+    client, store = await _fresh_app(tmp_path)
+    try:
+        await _seed_turn(
+            store,
+            owner_id=OWNER,
+            companion_id="companion-other",
+            conversation_id="conv-other-companion",
+            turn_id="turn-other-companion",
+            seq=0,
+            user_text="不属于当前伙伴",
+            assistant_text="也不应从当前伙伴打开",
+            started_at=_at(0),
+        )
+
+        answered = await client.get(
+            f"/api/admin/conversations/conv-other-companion/turns?owner_id={OWNER}"
+            f"&companion_id={COMPANION}"
+        )
+
+        assert answered.status_code == 404
+        assert "不属于当前伙伴" not in answered.text
+    finally:
+        await client.aclose()
+        await store.close()
+
+
+async def test_transport_opaque_conversation_id_opens_as_a_transcript(tmp_path) -> None:
+    """A real Channel key is not a UUID and must not be narrowed to 64 chars."""
+
+    client, store = await _fresh_app(tmp_path)
+    conversation_id = "livekit:" + "participant-identity-" * 5
+    assert len(conversation_id) > 64
+    try:
+        await _seed_turn(
+            store,
+            owner_id=OWNER,
+            companion_id=COMPANION,
+            conversation_id=conversation_id,
+            turn_id="turn-opaque-conversation",
+            seq=0,
+            user_text="还记得吗",
+            assistant_text="记得",
+            started_at=_at(0),
+        )
+
+        listed = await client.get(
+            f"/api/admin/conversations?owner_id={OWNER}&companion_id={COMPANION}"
+        )
+        opened = await client.get(
+            f"/api/admin/conversations/{quote(conversation_id, safe='')}/turns"
+            f"?owner_id={OWNER}&companion_id={COMPANION}"
+        )
+
+        assert listed.status_code == 200
+        assert listed.json()["conversations"][0]["conversation_id"] == conversation_id
+        assert opened.status_code == 200
+        assert opened.json()["conversation_id"] == conversation_id
+        assert opened.json()["owner_id"] == OWNER
+        assert opened.json()["companion_id"] == COMPANION
     finally:
         await client.aclose()
         await store.close()
@@ -102,10 +172,10 @@ async def test_another_owners_conversation_is_not_readable(tmp_path) -> None:
         await _seed_conversation(store, owner_id=OTHER, conversation_id="conv-theirs", turns=1)
 
         theirs = await client.get(
-            f"/api/admin/conversations/conv-theirs/turns?owner_id={OWNER}"
+            f"/api/admin/conversations/conv-theirs/turns?owner_id={OWNER}&companion_id={COMPANION}"
         )
         absent = await client.get(
-            f"/api/admin/conversations/conv-nowhere/turns?owner_id={OWNER}"
+            f"/api/admin/conversations/conv-nowhere/turns?owner_id={OWNER}&companion_id={COMPANION}"
         )
 
         assert (theirs.status_code, absent.status_code) == (404, 404)
@@ -126,9 +196,14 @@ async def test_an_owner_must_be_named(tmp_path) -> None:
     try:
         await _seed_conversation(store, owner_id=OWNER, conversation_id="conv-a", turns=1)
 
-        answered = await client.get("/api/admin/conversations/conv-a/turns")
+        without_owner = await client.get(
+            f"/api/admin/conversations/conv-a/turns?companion_id={COMPANION}"
+        )
+        without_companion = await client.get(
+            f"/api/admin/conversations/conv-a/turns?owner_id={OWNER}"
+        )
 
-        assert answered.status_code == 422
+        assert (without_owner.status_code, without_companion.status_code) == (422, 422)
     finally:
         await client.aclose()
         await store.close()
@@ -145,6 +220,7 @@ async def test_a_page_walks_backwards_and_stops_at_the_beginning(tmp_path) -> No
         first = (
             await client.get(
                 f"/api/admin/conversations/conv-a/turns?owner_id={OWNER}&limit=2"
+                f"&companion_id={COMPANION}"
             )
         ).json()
         assert [turn["turn_id"] for turn in first["turns"]] == ["conv-a-t2", "conv-a-t1"]
@@ -153,6 +229,7 @@ async def test_a_page_walks_backwards_and_stops_at_the_beginning(tmp_path) -> No
         second = (
             await client.get(
                 f"/api/admin/conversations/conv-a/turns?owner_id={OWNER}&limit=2"
+                f"&companion_id={COMPANION}"
                 f"&before={first['next_before']}"
             )
         ).json()
@@ -182,6 +259,7 @@ async def test_a_conversation_with_no_turns_is_an_empty_transcript_not_a_404(
         body = (
             await client.get(
                 f"/api/admin/conversations/conv-a/turns?owner_id={OWNER}"
+                f"&companion_id={COMPANION}"
                 f"&before={quote(_at(0).isoformat(), safe='')}"
             )
         ).json()
