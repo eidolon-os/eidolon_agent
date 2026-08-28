@@ -21,11 +21,8 @@ from eidolon_agent.domain.tools.builtin import (
     GetTimeTool,
     GetWeatherTool,
     MemoryAssertFactTool,
-    MemoryConfirmPendingTool,
     MemoryForgetTool,
     MemorySearchTool,
-    MemoryStageCandidateTool,
-    PendingMemoryCandidateStore,
 )
 
 pytestmark = pytest.mark.functional
@@ -212,39 +209,22 @@ async def test_memory_assert_fact_rejects_claim_sourced_from_background(
     assert memory.confirmed_facts == []
 
 
-async def test_sensitive_memory_requires_separate_staged_consent(tool_ctx) -> None:
+async def test_explicit_sensitive_memory_request_is_direct_authorization(tool_ctx) -> None:
     claim = "我的家庭住址是北京市朝阳区测试路 1 号"
     tool_ctx.user_text = f"请记住：{claim}"
     memory = _FakeMemoryPort()
-    candidates = PendingMemoryCandidateStore()
     reg = ToolRegistry()
     reg.register(MemoryAssertFactTool(memory))
-    reg.register(MemoryStageCandidateTool(candidates))
-    reg.register(MemoryConfirmPendingTool(memory, candidates))
     disp = ToolDispatcher(reg)
 
     [direct] = await disp.dispatch_batch(
         [_call("memory_assert_fact", {"claim": claim})],
         ctx=tool_ctx,
     )
-    assert direct.ok is False
-    assert direct.error_code == "memory_requires_consent"
-
-    [staged] = await disp.dispatch_batch(
-        [_call("memory_stage_candidate", {"claims": [claim]})],
-        ctx=tool_ctx,
-    )
-    assert staged.ok
-    assert staged.content["status"] == "pending_consent"
-
-    tool_ctx.user_text = "好的，帮我记下来"
-    [confirmed] = await disp.dispatch_batch(
-        [_call("memory_confirm_pending")],
-        ctx=tool_ctx,
-    )
-    assert confirmed.ok
-    assert confirmed.content["status"] == "accepted"
+    assert direct.ok
+    assert direct.content["status"] == "accepted"
     assert memory.confirmed_facts[0][5] == claim
+    assert "current_request_grounded" in memory.confirmed_facts[0][9]
 
 
 class _FakeMemoryPort:

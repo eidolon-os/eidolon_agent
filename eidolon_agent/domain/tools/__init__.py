@@ -5,11 +5,8 @@ from eidolon_agent.domain.tools.builtin import (
     GetTimeTool,
     GetWeatherTool,
     MemoryAssertFactTool,
-    MemoryConfirmPendingTool,
     MemoryForgetTool,
     MemorySearchTool,
-    MemoryStageCandidateTool,
-    PendingMemoryCandidateStore,
     SubmitLongTaskTool,
 )
 from eidolon_agent.domain.tools.dispatcher import ToolDispatcher
@@ -20,11 +17,8 @@ __all__ = [
     "GetTimeTool",
     "GetWeatherTool",
     "MemoryAssertFactTool",
-    "MemoryConfirmPendingTool",
     "MemoryForgetTool",
     "MemorySearchTool",
-    "MemoryStageCandidateTool",
-    "PendingMemoryCandidateStore",
     "SubmitLongTaskTool",
     "ToolDispatcher",
     "ToolRegistry",

@@ -544,8 +544,6 @@ class TurnEngine:
                         call.name
                         in {
                             "memory_assert_fact",
-                            "memory_stage_candidate",
-                            "memory_confirm_pending",
                         }
                         for call in tool_calls
                     ):
@@ -1204,30 +1202,14 @@ def _terminal_memory_write_ack(results: list[ToolResult]) -> str | None:
     """Return a truthful terminal response for simple memory write tools."""
     write_names = {
         "memory_assert_fact",
-        "memory_stage_candidate",
-        "memory_confirm_pending",
     }
     if not results or any(result.name not in write_names for result in results):
-        return None
-    if any(
-        result.name == "memory_assert_fact"
-        and not result.ok
-        and result.error_code == "memory_requires_consent"
-        for result in results
-    ):
-        # Let the model proceed to memory_stage_candidate and ask consent.
         return None
     result = results[-1]
     content = result.content if isinstance(result.content, dict) else {}
     status = str(content.get("status") or "")
     if not result.ok:
         return "这次没有确认写入成功，请稍后再试。"
-    if result.name == "memory_stage_candidate":
-        return "这条信息可能较敏感或存在歧义。你确认要把它保存为长期记忆吗？"
-    if result.name == "memory_confirm_pending":
-        if status == "applied":
-            return "已按你的确认保存为长期记忆。"
-        return "确认写入请求已提交，正在处理。"
     if status == "applied":
         return "已经记下了。"
     return "记忆写入请求已提交，正在处理。"

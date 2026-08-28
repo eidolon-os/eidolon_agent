@@ -28,7 +28,6 @@ from eidolon_sdk.biz.system_data import SystemDataRuntimeClient
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
 from eidolon_agent.app.admin import build_admin_app
-from eidolon_agent.infra.observability.live_turns import LiveTurnBoard
 from eidolon_agent.app.runtime.container import Container
 from eidolon_agent.app.transport.grpc import GrpcServer
 from eidolon_agent.app.transport.grpc.chat_servicer import EidolonAgentServicer
@@ -54,11 +53,8 @@ from eidolon_agent.domain.tools.builtin import (
     GetTimeTool,
     GetWeatherTool,
     MemoryAssertFactTool,
-    MemoryConfirmPendingTool,
     MemoryForgetTool,
     MemorySearchTool,
-    MemoryStageCandidateTool,
-    PendingMemoryCandidateStore,
     SubmitLongTaskTool,
 )
 from eidolon_agent.infra.events import NatsEventBus, NatsKVStore
@@ -74,6 +70,7 @@ from eidolon_agent.infra.memory.mcp_client import McpClientPool
 from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
 from eidolon_agent.infra.memory.null_port import NullMemoryPort
 from eidolon_agent.infra.observability import configure_logging
+from eidolon_agent.infra.observability.live_turns import LiveTurnBoard
 from eidolon_agent.infra.persistence.agent_runtime import (
     AgentLongTaskStore,
     build_agent_history_hydrator,
@@ -300,10 +297,6 @@ async def build_application(
     explicit_memory_timeout_s = settings.memory.explicit_recall_timeout_s
     tool_registry.register(MemorySearchTool(memory_port, timeout_s=explicit_memory_timeout_s))
     tool_registry.register(MemoryAssertFactTool(memory_port))
-    pending_memory_candidates = PendingMemoryCandidateStore()
-    container.extras["pending_memory_candidates"] = pending_memory_candidates
-    tool_registry.register(MemoryStageCandidateTool(pending_memory_candidates))
-    tool_registry.register(MemoryConfirmPendingTool(memory_port, pending_memory_candidates))
     tool_registry.register(MemoryForgetTool(memory_port))
     tool_registry.register(EmitEventTool(event_bus=container.event_bus))
     delegate_tool = SubmitLongTaskTool(
