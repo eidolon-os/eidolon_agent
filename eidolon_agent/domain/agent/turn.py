@@ -1096,6 +1096,7 @@ class TurnEngine:
                     "conversation_id": ti.conversation_id,
                     "genome_id": self._genome_id,
                     "privacy_mode": policy.privacy.mode,
+                    "memory_projection_only": write_trace["projection_only"],
                 },
             )
         except Exception:
@@ -1360,13 +1361,18 @@ def _memory_write_trace(
             user_text=ti.text or "",
             assistant_text=assistant_text,
         )
-        if memory_tool_owned_turn:
-            skipped_reason = "explicit_memory_tool"
-        elif mode == "shadow":
+        if mode == "shadow":
             skipped_reason = "shadow_only"
-        elif disposition.kind is MemoryWriteDispositionKind.IGNORE:
+        elif (
+            not memory_tool_owned_turn
+            and disposition.kind is MemoryWriteDispositionKind.IGNORE
+        ):
             skipped_reason = "low_signal"
-        elif disposition.kind is MemoryWriteDispositionKind.SENSITIVE_REQUIRES_CONSENT:
+        elif (
+            not memory_tool_owned_turn
+            and disposition.kind
+            is MemoryWriteDispositionKind.SENSITIVE_REQUIRES_CONSENT
+        ):
             skipped_reason = "requires_consent"
 
     if disposition is None and mode != "disabled":
@@ -1386,6 +1392,11 @@ def _memory_write_trace(
         "disposition": disposition.kind.value if disposition is not None else None,
         "reason": disposition.reason if disposition is not None else None,
         "policy_version": metadata.get("memory_policy_version"),
+        # An explicit memory tool has already persisted the user's verbatim
+        # evidence. The completed turn must still reach the steward so the
+        # normal KG/privacy/canonical projections run; the memory service owns
+        # suppressing a duplicate drawer after verifying that evidence exists.
+        "projection_only": memory_tool_owned_turn,
         "fanout_allowed": skipped_reason is None,
         "skipped_reason": skipped_reason,
     }

@@ -63,7 +63,7 @@ def test_memory_write_ignore_disposition_stops_fanout() -> None:
     assert trace["skipped_reason"] == "low_signal"
 
 
-def test_explicit_memory_tool_owns_turn_and_stops_generic_fanout() -> None:
+def test_explicit_memory_tool_keeps_steward_projection_fanout() -> None:
     ti = make_turn_input("请记住我明天去北京")
     trace = _memory_write_trace(
         ti=ti,
@@ -72,8 +72,9 @@ def test_explicit_memory_tool_owns_turn_and_stops_generic_fanout() -> None:
         memory_tool_owned_turn=True,
     )
 
-    assert trace["fanout_allowed"] is False
-    assert trace["skipped_reason"] == "explicit_memory_tool"
+    assert trace["fanout_allowed"] is True
+    assert trace["projection_only"] is True
+    assert trace["skipped_reason"] is None
 
 
 @pytest.mark.parametrize(
