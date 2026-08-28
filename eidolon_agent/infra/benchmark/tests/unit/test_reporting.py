@@ -7,9 +7,41 @@ from eidolon_agent.infra.benchmark.reporting import (
     SCHEMA_VERSION,
     build_realtime_benchmark_report,
     normalize_flat_turns,
+    normalize_live_service_report,
     write_benchmark_artifacts,
     write_standard_benchmark_run,
 )
+
+
+def test_live_service_normalization_preserves_activity_visible_latency_matrix() -> None:
+    scenarios, turns = normalize_live_service_report(
+        {
+            "scenarios": [
+                {
+                    "scenario_id": "reasoning",
+                    "passed": True,
+                    "turns": [
+                        {
+                            "turn_id": "t-reasoning",
+                            "logical_turn_id": "repeat-1",
+                            "passed": True,
+                            "first_progress_ms": 240,
+                            "first_model_activity_ms": 240,
+                            "first_delta_ms": 12_400,
+                            "total_ms": 13_000,
+                            "output_path": "visible_after_progress",
+                        }
+                    ],
+                }
+            ]
+        },
+        mode="live-service",
+    )
+
+    assert turns[0]["first_progress_ms"] == 240
+    assert turns[0]["first_delta_ms"] == 12_400
+    assert turns[0]["output_path"] == "visible_after_progress"
+    assert scenarios[0]["turns"][0]["first_model_activity_ms"] == 240
 
 
 def test_build_realtime_report_exposes_stable_admin_contract() -> None:
