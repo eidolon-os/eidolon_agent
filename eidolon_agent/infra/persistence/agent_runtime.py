@@ -589,7 +589,7 @@ class AgentConversationReader:
         limit: int = 50,
         before: datetime | None = None,
     ) -> list[ConversationRow]:
-        async with self._runtime_store.session_factory() as session:
+        async with self._runtime_store.read_session_factory() as session:
             stmt = select(ConversationRow).order_by(
                 ConversationRow.updated_at.desc(),
                 ConversationRow.conversation_id.desc(),
@@ -611,7 +611,7 @@ class AgentConversationReader:
         limit: int = 50,
         before: datetime | None = None,
     ) -> list[dict]:
-        async with self._runtime_store.session_factory() as session:
+        async with self._runtime_store.read_session_factory() as session:
             stmt = (
                 select(TurnRow, ConversationRow)
                 .join(ConversationRow, TurnRow.conversation_id == ConversationRow.conversation_id)
@@ -649,7 +649,7 @@ class AgentConversationReader:
         the client's business.
         """
 
-        async with self._runtime_store.session_factory() as session:
+        async with self._runtime_store.read_session_factory() as session:
             conversation = await session.get(ConversationRow, conversation_id)
             if (
                 conversation is None
@@ -669,7 +669,7 @@ class AgentConversationReader:
             return [_turn_row_to_admin_dict(turn, conversation) for turn in turns]
 
     async def get_turn(self, turn_id: str) -> dict | None:
-        async with self._runtime_store.session_factory() as session:
+        async with self._runtime_store.read_session_factory() as session:
             row = (
                 await session.execute(
                     select(TurnRow, ConversationRow)
@@ -694,7 +694,7 @@ class AgentConversationReader:
 
         if not turn_ids:
             return {}
-        async with self._runtime_store.session_factory() as session:
+        async with self._runtime_store.read_session_factory() as session:
             rows = (
                 (
                     await session.execute(
@@ -712,7 +712,7 @@ class AgentConversationReader:
         return grouped
 
     async def list_for_turn(self, turn_id: str) -> list[ChatMessage]:
-        async with self._runtime_store.session_factory() as session:
+        async with self._runtime_store.read_session_factory() as session:
             rows = (
                 (
                     await session.execute(

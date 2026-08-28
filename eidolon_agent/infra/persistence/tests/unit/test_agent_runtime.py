@@ -122,9 +122,7 @@ async def test_turn_persister_writes_agent_runtime_history(
     assert [message.role for message in messages] == [MessageRole.USER, MessageRole.ASSISTANT]
     assert [message.content for message in messages] == ["hello", "hi"]
 
-    rows = await AgentConversationReader(runtime_store).list_turns_by_owner(
-        owner_id="owner-1"
-    )
+    rows = await AgentConversationReader(runtime_store).list_turns_by_owner(owner_id="owner-1")
     assert rows[0]["owner_id"] == "owner-1"
     assert rows[0]["companion_id"] == "companion-1"
     assert rows[0]["runtime_session_id"] == "session-1"
@@ -256,9 +254,7 @@ async def test_turn_persister_records_admin_test_without_device_row(
         assistant_text="hi",
     )
 
-    rows = await AgentConversationReader(runtime_store).list_turns_by_owner(
-        owner_id="owner-admin"
-    )
+    rows = await AgentConversationReader(runtime_store).list_turns_by_owner(owner_id="owner-admin")
     assert rows[0]["device_id"] is None
     assert rows[0]["runtime_session_id"] == "session-admin"
 
@@ -315,11 +311,29 @@ async def test_turn_persister_is_idempotent_under_concurrent_first_writes(
 
     await asyncio.gather(*(_write(i) for i in range(12)))
 
-    rows = await AgentConversationReader(runtime_store).list_turns_by_owner(
-        owner_id="owner-race"
-    )
+    rows = await AgentConversationReader(runtime_store).list_turns_by_owner(owner_id="owner-race")
     assert len(rows) == 12
     assert sorted(row["seq"] for row in rows) == list(range(12))
+
+
+@pytest.mark.asyncio
+async def test_conversation_reader_does_not_wait_for_the_runtime_writer_pool(
+    runtime_store: AgentRuntimeStore,
+) -> None:
+    """History browsing remains available while live runtime owns its writer."""
+
+    # Occupying the only writer connection models a live turn without coupling
+    # this regression to the much larger turn pipeline.  Before the dedicated
+    # query-only pool, the reader queued here until the Admin's timeout expired.
+    async with runtime_store.engine.connect():
+        rows = await asyncio.wait_for(
+            AgentConversationReader(runtime_store).list_conversations(
+                owner_id="owner-1",
+            ),
+            timeout=0.5,
+        )
+
+    assert rows == []
 
 
 @pytest.mark.asyncio

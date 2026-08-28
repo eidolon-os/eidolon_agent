@@ -331,10 +331,14 @@ class AgentRuntimeStore:
         sqlite_path: Path,
         engine: AsyncEngine,
         session_factory: async_sessionmaker,
+        read_engine: AsyncEngine,
+        read_session_factory: async_sessionmaker,
     ) -> None:
         self.sqlite_path = sqlite_path
         self.engine = engine
         self.session_factory = session_factory
+        self.read_engine = read_engine
+        self.read_session_factory = read_session_factory
 
     @classmethod
     def open(
@@ -347,6 +351,18 @@ class AgentRuntimeStore:
         path = Path(sqlite_path).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
         engine = create_async_engine(
+            f"sqlite+aiosqlite:///{path}",
+            connect_args={"timeout": busy_timeout_ms / 1_000},
+            pool_size=1,
+            max_overflow=0,
+        )
+        # Runtime writes intentionally stay serialized through ``engine``.  A
+        # management read must not queue behind a turn that is holding that one
+        # connection while it persists live state, though: the Admin contract
+        # has a short authority timeout and conversation history is read-only.
+        # A distinct, query-only connection preserves the single-writer rule
+        # while letting observability reads proceed from SQLite's WAL snapshot.
+        read_engine = create_async_engine(
             f"sqlite+aiosqlite:///{path}",
             connect_args={"timeout": busy_timeout_ms / 1_000},
             pool_size=1,
@@ -365,10 +381,22 @@ class AgentRuntimeStore:
             finally:
                 cursor.close()
 
+        @event.listens_for(read_engine.sync_engine, "connect")
+        def _configure_reader(connection, _record) -> None:  # type: ignore[no-untyped-def]
+            cursor = connection.cursor()
+            try:
+                cursor.execute("PRAGMA query_only=ON")
+                cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
+            finally:
+                cursor.close()
+
         return cls(
             sqlite_path=path,
             engine=engine,
             session_factory=async_sessionmaker(engine, expire_on_commit=False),
+            read_engine=read_engine,
+            read_session_factory=async_sessionmaker(read_engine, expire_on_commit=False),
         )
 
     async def init_schema(self) -> None:
@@ -385,6 +413,7 @@ class AgentRuntimeStore:
                 )
 
     async def close(self) -> None:
+        await self.read_engine.dispose()
         await self.engine.dispose()
 
     @property
