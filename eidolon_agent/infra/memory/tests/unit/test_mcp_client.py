@@ -169,6 +169,35 @@ async def test_read_pool_leases_independent_sessions_for_concurrent_calls(
     await pool.close()
 
 
+async def test_read_pool_closes_transport_in_its_owner_task_after_caller_timeout(
+    monkeypatch,
+) -> None:
+    started = asyncio.Event()
+    owner_tasks: dict[McpUserSession, asyncio.Task] = {}
+    closed_tasks: dict[McpUserSession, asyncio.Task] = {}
+
+    async def call_tool(self, name, arguments):
+        del name, arguments
+        owner_tasks[self] = asyncio.current_task()
+        started.set()
+        await asyncio.Event().wait()
+
+    async def close(self):
+        closed_tasks[self] = asyncio.current_task()
+
+    monkeypatch.setattr(McpUserSession, "call_tool", call_tool)
+    monkeypatch.setattr(McpUserSession, "close", close)
+    pool = McpReadSessionPool("http://a/mcp", size=1)
+
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(pool.call_tool("recall", {}), timeout=0.01)
+    await started.wait()
+    await pool.close()
+
+    session = next(iter(owner_tasks))
+    assert closed_tasks[session] is owner_tasks[session]
+
+
 async def test_read_and_write_sessions_use_distinct_discovered_surfaces() -> None:
     pool = McpClientPool(
         routes=_routes(

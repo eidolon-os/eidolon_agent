@@ -168,8 +168,10 @@ class McpReadSessionPool:
     session still becomes a head-of-line queue under concurrent Agent turns.
     Keeping a bounded number of ordinary client sessions removes that
     transport bottleneck without introducing a reader proxy, cache, writer, or
-    another consistency mechanism. Each request exclusively leases one
-    session; Memory remains the sole read authority and NATS remains the sole
+    another consistency mechanism. Each session is owned for its entire
+    lifetime by one worker task. This is required by the MCP SDK's AnyIO cancel
+    scopes: a transport context must be entered, used, and exited by the same
+    task. Memory remains the sole read authority and NATS remains the sole
     writer.
     """
 
@@ -184,51 +186,83 @@ class McpReadSessionPool:
         self._token = bearer_token
         self._size = max(1, int(size))
         self._sessions: set[McpUserSession] = set()
-        self._available: asyncio.Queue[McpUserSession] = asyncio.Queue()
-        self._create_lock = asyncio.Lock()
+        self._requests: asyncio.Queue[
+            tuple[str, str | None, dict | None, asyncio.Future[Any]]
+        ] = asyncio.Queue()
+        self._workers: set[asyncio.Task[None]] = set()
+        self._lifecycle_lock = asyncio.Lock()
         self._closed = False
         self._tool_names: frozenset[str] | None = None
 
-    async def _acquire(self) -> McpUserSession:
-        if self._closed:
-            raise MemoryUnavailableError("MCP read session pool is closed")
-        try:
-            return self._available.get_nowait()
-        except asyncio.QueueEmpty:
-            pass
-        async with self._create_lock:
+    async def _submit(
+        self,
+        operation: str,
+        *,
+        name: str | None = None,
+        arguments: dict | None = None,
+    ) -> Any:
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[Any] = loop.create_future()
+        async with self._lifecycle_lock:
             if self._closed:
                 raise MemoryUnavailableError("MCP read session pool is closed")
-            try:
-                return self._available.get_nowait()
-            except asyncio.QueueEmpty:
-                if len(self._sessions) < self._size:
-                    session = McpUserSession(self._url, bearer_token=self._token)
-                    self._sessions.add(session)
-                    return session
-        return await self._available.get()
+            if not self._workers:
+                for index in range(self._size):
+                    worker = asyncio.create_task(
+                        self._run_worker(),
+                        name=f"mcp-read-session-{index}",
+                    )
+                    self._workers.add(worker)
+            self._requests.put_nowait((operation, name, arguments, future))
+        # The Agent's recall deadline may cancel this caller. Shielding keeps
+        # cancellation from crossing into the SDK transport owner task; the
+        # worker finishes or is cancelled by close() in its own task.
+        try:
+            return await asyncio.shield(future)
+        except asyncio.CancelledError:
+            # There is no caller left to consume a result or exception. This
+            # cancels only the hand-off Future, not the worker or MCP request.
+            future.cancel()
+            raise
 
-    async def _release(self, session: McpUserSession) -> None:
-        if self._closed or session not in self._sessions:
+    async def _run_worker(self) -> None:
+        session = McpUserSession(self._url, bearer_token=self._token)
+        self._sessions.add(session)
+        try:
+            while True:
+                operation, name, arguments, future = await self._requests.get()
+                try:
+                    if operation == "call_tool":
+                        result = await session.call_tool(name or "", arguments or {})
+                    else:
+                        result = await session.tool_names()
+                    if not future.done():
+                        future.set_result(result)
+                except asyncio.CancelledError:
+                    if not future.done():
+                        future.set_exception(
+                            MemoryUnavailableError("MCP read session pool is closed")
+                        )
+                    raise
+                except BaseException as exc:
+                    if not future.done():
+                        future.set_exception(exc)
+                finally:
+                    self._requests.task_done()
+        finally:
+            # Enter/use/exit remain in this worker task, satisfying AnyIO's
+            # cancel-scope ownership contract even during overload shutdown.
             await session.close()
-            return
-        self._available.put_nowait(session)
+            self._sessions.discard(session)
 
     async def call_tool(self, name: str, arguments: dict) -> dict:
-        session = await self._acquire()
-        try:
-            return await session.call_tool(name, arguments)
-        finally:
-            await self._release(session)
+        result = await self._submit("call_tool", name=name, arguments=arguments)
+        return result
 
     async def tool_names(self) -> frozenset[str] | None:
         if self._tool_names is not None:
             return self._tool_names
-        session = await self._acquire()
-        try:
-            names = await session.tool_names()
-        finally:
-            await self._release(session)
+        names = await self._submit("tool_names")
         if names is not None:
             self._tool_names = names
         return names
@@ -241,17 +275,24 @@ class McpReadSessionPool:
         return self._url == mcp_url and self._token == bearer_token
 
     async def close(self) -> None:
-        async with self._create_lock:
+        async with self._lifecycle_lock:
             self._closed = True
-            sessions = list(self._sessions)
-            self._sessions.clear()
+            workers = list(self._workers)
+            self._workers.clear()
             self._tool_names = None
-            while not self._available.empty():
+            while not self._requests.empty():
                 try:
-                    self._available.get_nowait()
+                    _operation, _name, _arguments, future = self._requests.get_nowait()
                 except asyncio.QueueEmpty:
                     break
-        await asyncio.gather(*(session.close() for session in sessions))
+                if not future.done():
+                    future.set_exception(
+                        MemoryUnavailableError("MCP read session pool is closed")
+                    )
+                self._requests.task_done()
+            for worker in workers:
+                worker.cancel()
+        await asyncio.gather(*workers, return_exceptions=True)
 
 
 def _decode_call_tool_result(result: Any) -> Any:
