@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 from eidolon_memory_contracts import (
@@ -55,7 +55,7 @@ class MemoryNatsPublisher:
         payload = ConversationTurnPayload(
             turn_id=turn_id,
             context=context,
-            timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            timestamp=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             user_text=owner_text,
             assistant_text=assistant_text,
             metadata=metadata or {"source": "eidolon-agent"},
@@ -90,14 +90,96 @@ class MemoryNatsPublisher:
         tool_call_id: str,
         confidence: float = 0.9,
     ) -> str:
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return await self._publish_structured_lifecycle(
+            owner_id=owner_id,
+            companion_id=companion_id,
+            memory_realm_id=memory_realm_id,
+            subject=subject,
+            predicate=predicate,
+            object_=object_,
+            source_event_id=source_event_id,
+            tool_call_id=tool_call_id,
+            confidence=confidence,
+            operation="confirm",
+        )
+
+    async def publish_structured_invalidation(
+        self,
+        *,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        subject: str,
+        predicate: str,
+        object_: str,
+        source_event_id: str,
+        tool_call_id: str,
+        confidence: float = 0.99,
+    ) -> str:
+        return await self._publish_structured_lifecycle(
+            owner_id=owner_id,
+            companion_id=companion_id,
+            memory_realm_id=memory_realm_id,
+            subject=subject,
+            predicate=predicate,
+            object_=object_,
+            source_event_id=source_event_id,
+            tool_call_id=tool_call_id,
+            confidence=confidence,
+            operation="invalidate",
+        )
+
+    async def publish_structured_reactivation(
+        self,
+        *,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        subject: str,
+        predicate: str,
+        object_: str,
+        source_event_id: str,
+        tool_call_id: str,
+        confidence: float = 0.99,
+    ) -> str:
+        return await self._publish_structured_lifecycle(
+            owner_id=owner_id,
+            companion_id=companion_id,
+            memory_realm_id=memory_realm_id,
+            subject=subject,
+            predicate=predicate,
+            object_=object_,
+            source_event_id=source_event_id,
+            tool_call_id=tool_call_id,
+            confidence=confidence,
+            operation="reactivate",
+        )
+
+    async def _publish_structured_lifecycle(
+        self,
+        *,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        subject: str,
+        predicate: str,
+        object_: str,
+        source_event_id: str,
+        tool_call_id: str,
+        confidence: float,
+        operation: Literal["confirm", "invalidate", "reactivate"],
+    ) -> str:
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         memory_space_id = build_memory_space_id(memory_realm_id=memory_realm_id)
         intent_type, wing, memory_type = _structured_intent_classification(predicate)
+        identity_claim = f"{subject}\x1f{predicate}\x1f{object_}"
+        if operation != "confirm":
+            identity_claim = f"{identity_claim}\x1f{operation}"
         intent_id = _explicit_intent_id(
             memory_space_id,
             source_event_id,
             tool_call_id,
-            f"{subject}\x1f{predicate}\x1f{object_}",
+            identity_claim,
         )
         request_id = intent_id.removeprefix("intent:")
         intent = MemoryIntent(
@@ -105,9 +187,13 @@ class MemoryNatsPublisher:
             memory_space_id=memory_space_id,
             source_event_id=source_event_id,
             authority="explicit_user",
-            intent_type=intent_type,
+            intent_type="correction" if operation == "invalidate" else intent_type,
             raw_claim=f"{subject} {predicate} {object_}",
-            operation_hint="confirm",
+            operation_hint={
+                "confirm": "confirm",
+                "invalidate": "invalidate",
+                "reactivate": "update",
+            }[operation],
             subject=subject,
             predicate=predicate,
             object=object_,
@@ -118,7 +204,7 @@ class MemoryNatsPublisher:
                 "wing": wing,
                 "memory_type": memory_type,
                 "importance": 5,
-                "tags": ["memory_assert_fact", "structured"],
+                "tags": ["memory_assert_fact", "structured", operation],
                 "source_instance_id": companion_id or "",
             },
         )
@@ -149,7 +235,7 @@ class MemoryNatsPublisher:
         confidence: float = 0.99,
         tags: list[str] | None = None,
     ) -> str:
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         memory_space_id = build_memory_space_id(memory_realm_id=memory_realm_id)
         intent_id = _explicit_intent_id(
             memory_space_id,
@@ -255,7 +341,7 @@ class MemoryNatsPublisher:
             tool_call_id,
             identity_payload,
         )
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         payload = MemoryIntentCommand(
             request_id=intent_id.removeprefix("intent:"),
             memory_space_id=memory_space_id,
