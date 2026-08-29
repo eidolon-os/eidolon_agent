@@ -21,6 +21,8 @@ from eidolon_agent.infra.memory.discovery import MemoryRoutingTable
 
 _log = logging.getLogger(__name__)
 
+_DEFAULT_READ_SESSION_POOL_SIZE = 4
+
 
 class McpUserSession:
     """One MCP HTTP session for one user. Lazy-connected, reusable."""
@@ -159,6 +161,99 @@ class McpUserSession:
         self._tool_names = None
 
 
+class McpReadSessionPool:
+    """A small set of independent MCP transports for one Realm.
+
+    The MCP SDK multiplexes requests logically, but one Streamable-HTTP
+    session still becomes a head-of-line queue under concurrent Agent turns.
+    Keeping a bounded number of ordinary client sessions removes that
+    transport bottleneck without introducing a reader proxy, cache, writer, or
+    another consistency mechanism. Each request exclusively leases one
+    session; Memory remains the sole read authority and NATS remains the sole
+    writer.
+    """
+
+    def __init__(
+        self,
+        mcp_url: str,
+        *,
+        bearer_token: str | None = None,
+        size: int = _DEFAULT_READ_SESSION_POOL_SIZE,
+    ) -> None:
+        self._url = mcp_url
+        self._token = bearer_token
+        self._size = max(1, int(size))
+        self._sessions: set[McpUserSession] = set()
+        self._available: asyncio.Queue[McpUserSession] = asyncio.Queue()
+        self._create_lock = asyncio.Lock()
+        self._closed = False
+        self._tool_names: frozenset[str] | None = None
+
+    async def _acquire(self) -> McpUserSession:
+        if self._closed:
+            raise MemoryUnavailableError("MCP read session pool is closed")
+        try:
+            return self._available.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+        async with self._create_lock:
+            if self._closed:
+                raise MemoryUnavailableError("MCP read session pool is closed")
+            try:
+                return self._available.get_nowait()
+            except asyncio.QueueEmpty:
+                if len(self._sessions) < self._size:
+                    session = McpUserSession(self._url, bearer_token=self._token)
+                    self._sessions.add(session)
+                    return session
+        return await self._available.get()
+
+    async def _release(self, session: McpUserSession) -> None:
+        if self._closed or session not in self._sessions:
+            await session.close()
+            return
+        self._available.put_nowait(session)
+
+    async def call_tool(self, name: str, arguments: dict) -> dict:
+        session = await self._acquire()
+        try:
+            return await session.call_tool(name, arguments)
+        finally:
+            await self._release(session)
+
+    async def tool_names(self) -> frozenset[str] | None:
+        if self._tool_names is not None:
+            return self._tool_names
+        session = await self._acquire()
+        try:
+            names = await session.tool_names()
+        finally:
+            await self._release(session)
+        if names is not None:
+            self._tool_names = names
+        return names
+
+    async def supports(self, name: str) -> bool:
+        names = await self.tool_names()
+        return True if names is None else name in names
+
+    def matches(self, *, mcp_url: str, bearer_token: str | None) -> bool:
+        return self._url == mcp_url and self._token == bearer_token
+
+    async def close(self) -> None:
+        async with self._create_lock:
+            self._closed = True
+            sessions = list(self._sessions)
+            self._sessions.clear()
+            self._tool_names = None
+            while not self._available.empty():
+                try:
+                    self._available.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+        await asyncio.gather(*(session.close() for session in sessions))
+
+
 def _decode_call_tool_result(result: Any) -> Any:
     if getattr(result, "isError", False):
         parts: list[str] = []
@@ -203,6 +298,7 @@ class McpClientPool:
         routes: MemoryRoutingTable | None = None,
         endpoints: dict[str, str] | None = None,
         bearer_tokens: dict[str, str] | None = None,
+        read_session_pool_size: int = _DEFAULT_READ_SESSION_POOL_SIZE,
     ) -> None:
         if routes is None:
             from eidolon_agent.config.settings import MemoryEndpoint, NatsSettings
@@ -219,11 +315,12 @@ class McpClientPool:
                 nats=NatsSettings(),
             )
         self._routes = routes
-        self._sessions: dict[str, McpUserSession] = {}
+        self._read_session_pool_size = max(1, int(read_session_pool_size))
+        self._sessions: dict[str, McpReadSessionPool] = {}
         self._write_sessions: dict[str, McpUserSession] = {}
         self._lock = asyncio.Lock()
 
-    async def session_for(self, memory_space_id: str) -> McpUserSession:
+    async def session_for(self, memory_space_id: str) -> McpReadSessionPool:
         return await self._session_for(memory_space_id, write=False)
 
     async def write_session_for(self, memory_space_id: str) -> McpUserSession:
@@ -234,7 +331,7 @@ class McpClientPool:
         memory_space_id: str,
         *,
         write: bool,
-    ) -> McpUserSession:
+    ) -> McpReadSessionPool | McpUserSession:
         route, unavailable_reason = await self._routes.route_status_for(memory_space_id)
         if route is None:
             if write:
@@ -256,7 +353,15 @@ class McpClientPool:
                 return sess
             if sess is not None:
                 await sess.close()
-            sess = McpUserSession(mcp_url, bearer_token=route.bearer_token)
+            sess = (
+                McpUserSession(mcp_url, bearer_token=route.bearer_token)
+                if write
+                else McpReadSessionPool(
+                    mcp_url,
+                    bearer_token=route.bearer_token,
+                    size=self._read_session_pool_size,
+                )
+            )
             sessions[memory_space_id] = sess
             return sess
 
@@ -264,7 +369,7 @@ class McpClientPool:
         self,
         memory_space_id: str,
         *,
-        session: McpUserSession | None = None,
+        session: McpReadSessionPool | None = None,
     ) -> bool:
         """Close and remove a cached user session.
 
@@ -292,10 +397,10 @@ class McpClientPool:
 
     async def _drop_from(
         self,
-        sessions: dict[str, McpUserSession],
+        sessions: dict[str, McpReadSessionPool] | dict[str, McpUserSession],
         memory_space_id: str,
         *,
-        session: McpUserSession | None,
+        session: McpReadSessionPool | McpUserSession | None,
     ) -> bool:
         async with self._lock:
             cached = sessions.get(memory_space_id)
