@@ -25,6 +25,8 @@ llm:
   models:
   - name: openai/deepseek-v4-flash
     api_base: https://api.deepseek.com/v1
+    # Voice turns prioritize immediate playable output over hidden reasoning.
+    thinking: disabled
   default_model: openai/deepseek-v4-flash
 long_task:
   transport: mementos_http

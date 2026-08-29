@@ -54,6 +54,25 @@ def test_build_llm_router_includes_fake_and_configured_models() -> None:
     assert {"fake", "openai/gpt-4o-mini", "ollama/llama3"} <= keys
 
 
+def test_build_llm_router_wires_model_thinking_policy() -> None:
+    settings = Settings(
+        llm={
+            "models": [
+                LLMModelConfig(
+                    name="openai/deepseek-v4-flash",
+                    thinking="disabled",
+                )
+            ],
+            "default_model": "openai/deepseek-v4-flash",
+        },
+    )
+
+    router = _build_llm_router(settings)
+    provider = router._providers["openai/deepseek-v4-flash"]  # type: ignore[attr-defined]
+
+    assert provider._thinking == "disabled"  # type: ignore[attr-defined]
+
+
 def test_build_llm_router_falls_back_to_fake_when_default_missing() -> None:
     settings = Settings(
         llm={

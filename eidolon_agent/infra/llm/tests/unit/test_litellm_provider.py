@@ -141,6 +141,45 @@ async def test_text_chunks_yield_text_delta(monkeypatch: pytest.MonkeyPatch, pro
     assert any(d.finish is LLMFinishReason.STOP for d in out)
 
 
+async def test_disabled_thinking_is_sent_as_provider_extra_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    async def _fake(**kwargs):
+        captured.update(kwargs)
+        return _aiter([_Chunk(choices=[_Choice(delta=_Delta(content="869"))])])
+
+    monkeypatch.setattr(litellm, "acompletion", _fake)
+    fast_provider = LiteLLMProvider(
+        model="openai/deepseek-v4-flash",
+        api_key="k",
+        api_base="https://api.deepseek.com/v1",
+        shared_http_client=False,
+        thinking="disabled",
+    )
+
+    out = [d async for d in fast_provider.stream([_msg("只回答869")], request_id="fast")]
+
+    assert [d.text_delta for d in out if d.text_delta] == ["869"]
+    assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+async def test_default_thinking_does_not_add_provider_specific_body(
+    monkeypatch: pytest.MonkeyPatch, provider: LiteLLMProvider
+) -> None:
+    captured: dict = {}
+
+    async def _fake(**kwargs):
+        captured.update(kwargs)
+        return _aiter([_Chunk(choices=[_Choice(delta=_Delta(content="ok"))])])
+
+    monkeypatch.setattr(litellm, "acompletion", _fake)
+    _ = [d async for d in provider.stream([_msg("hi")], request_id="default")]
+
+    assert "extra_body" not in captured
+
+
 async def test_ttft_ignores_empty_raw_chunks(
     monkeypatch: pytest.MonkeyPatch,
     provider,
