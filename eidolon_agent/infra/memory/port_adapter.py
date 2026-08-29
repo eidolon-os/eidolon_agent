@@ -245,8 +245,11 @@ class EidolonMemoryPort:
             try:
                 raw = await asyncio.wait_for(
                     session.call_tool(
-                        "eidolon_memory_commitments",
-                        {"include_terminal": False, "limit": bounded_limit},
+                        "eidolon_memory_active_commitments",
+                        {
+                            "context": ctx.model_dump(mode="json"),
+                            "limit": bounded_limit,
+                        },
                     ),
                     timeout=_remaining_timeout(deadline),
                 )
@@ -717,7 +720,8 @@ def _records_to_active_commitments(
         if not isinstance(row, dict):
             continue
         try:
-            if str(row.get("memory_space_id") or "") != memory_space_id:
+            row_memory_space_id = str(row.get("memory_space_id") or "")
+            if row_memory_space_id and row_memory_space_id != memory_space_id:
                 continue
             status = str(row.get("status") or "")
             predicate = str(row.get("predicate") or "")

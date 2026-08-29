@@ -445,8 +445,11 @@ async def test_active_commitments_are_realm_bound_bounded_and_active_only() -> N
 
     pool.session_for.assert_awaited_once_with("realm-1")
     name, args = call.await_args.args
-    assert name == "eidolon_memory_commitments"
-    assert args == {"include_terminal": False, "limit": 10}
+    assert name == "eidolon_memory_active_commitments"
+    assert args["limit"] == 10
+    assert args["context"]["memory_realm_id"] == "realm-1"
+    assert args["context"]["owner_id"] == "owner-1"
+    assert args["context"]["companion_id"] == "companion-1"
     assert result.degraded is False
     assert len(result.commitments) == 10
     assert result.total == 12
