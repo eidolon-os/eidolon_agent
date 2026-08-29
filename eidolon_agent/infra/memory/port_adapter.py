@@ -119,7 +119,6 @@ class EidolonMemoryPort:
                     "top_k": plan.semantic_k,
                     "voice": plan.voice,
                     "include_kg": True,
-                    "include_sensitive_kg": False,
                     "kg_subjects": list(plan.kg_subjects),
                 },
             ),
@@ -201,11 +200,15 @@ class EidolonMemoryPort:
         kg_triples = raw.get("kg_triples") or []
         if not isinstance(kg_triples, list):
             kg_triples = []
+        degraded = bool(raw.get("degraded", False))
+        degraded_reason = str(raw.get("degraded_reason") or "") or None
         return MemoryRecallResult(
             context=context,
             hits=hits,
             kg_triples=kg_triples,
-            degraded=False,
+            degraded=degraded,
+            degraded_reason=degraded_reason if degraded else None,
+            diagnostics=_numeric_trace(raw.get("trace")),
         )
 
     async def read_active_commitments(
@@ -732,6 +735,25 @@ def _parse_memory_datetime(value: object) -> datetime | None:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+def _numeric_trace(value: object) -> dict[str, float]:
+    """Keep timing telemetry while refusing arbitrary backend payloads."""
+
+    if not isinstance(value, dict):
+        return {}
+    trace: dict[str, float] = {}
+    for key, raw in list(value.items())[:64]:
+        if (
+            not isinstance(key, str)
+            or not key.endswith("_ms")
+            or len(key) > 64
+            or isinstance(raw, bool)
+        ):
+            continue
+        if isinstance(raw, (int, float)):
+            trace[key] = float(raw)
+    return trace
 
 
 def _memory_unavailable_reason(exc: MemoryUnavailableError) -> str:
