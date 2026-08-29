@@ -122,15 +122,15 @@ async def test_search_invokes_mcp_search_with_args() -> None:
     assert hits[0].content == "hello"
 
 
-async def test_search_returns_empty_on_timeout() -> None:
+async def test_search_timeout_does_not_close_the_shared_read_session() -> None:
     async def _slow(name, args):
         import asyncio
         await asyncio.sleep(10)
         return {}
 
-    port, session, pool, _ = _port(session_call=_slow)
+    port, _, pool, _ = _port(session_call=_slow)
     assert await port.search("owner-1", "x", memory_realm_id="realm-1", timeout_s=0.01) == []
-    pool.drop_session.assert_awaited_once_with("realm-1", session=session)
+    pool.drop_session.assert_not_awaited()
 
 
 async def test_search_drops_session_on_memory_unavailable() -> None:
@@ -289,13 +289,13 @@ async def test_recall_context_returns_degraded_on_exception() -> None:
     pool.drop_session.assert_not_awaited()
 
 
-async def test_recall_context_drops_session_on_timeout() -> None:
+async def test_recall_context_timeout_does_not_close_the_shared_read_session() -> None:
     async def _slow(name, args):
         import asyncio
         await asyncio.sleep(10)
         return {}
 
-    port, session, pool, _ = _port(session_call=_slow)
+    port, _, pool, _ = _port(session_call=_slow)
     result = await port.recall_context(
         "owner-1",
         "x",
@@ -309,7 +309,7 @@ async def test_recall_context_drops_session_on_timeout() -> None:
     assert hits == []
     assert degraded is True
     assert result.degraded_reason == "timeout"
-    pool.drop_session.assert_awaited_once_with("realm-1", session=session)
+    pool.drop_session.assert_not_awaited()
 
 
 async def test_recall_context_drops_session_on_memory_unavailable_call() -> None:

@@ -84,7 +84,11 @@ class EidolonMemoryPort:
                 return _records_to_hits(raw.get("records") or [])
             except TimeoutError:
                 _log.warning("memory search timed out for memory_space=%s", memory_space_id)
-                await self._pool.drop_session(memory_space_id, session=session)
+                # The budget belongs to this request, not to the shared MCP
+                # transport. Closing the Realm session here cancels unrelated
+                # reads already multiplexed over it (recall and commitment
+                # hydration commonly run together). Transport failures below
+                # still rotate the session; an ordinary request timeout does not.
                 return []
             except MemoryUnavailableError:
                 _log.warning(
@@ -168,7 +172,10 @@ class EidolonMemoryPort:
                 break
             except TimeoutError:
                 _log.warning("memory recall timed out for memory_space=%s", memory_space_id)
-                await self._pool.drop_session(memory_space_id, session=session)
+                # Do not turn one caller's latency budget into a Realm-wide
+                # cancellation. The MCP session is shared by concurrent Agent
+                # reads and remains healthy unless the transport reports an
+                # actual MemoryUnavailableError.
                 return MemoryRecallResult(degraded=True, degraded_reason="timeout")
             except MemoryUnavailableError as exc:
                 reason = _memory_unavailable_reason(exc)
@@ -278,7 +285,8 @@ class EidolonMemoryPort:
                     ),
                 )
             except TimeoutError:
-                await self._pool.drop_session(memory_space_id, session=session)
+                # Active-commitment hydration shares the read session with
+                # recall. Its smaller budget must not cancel the recall request.
                 return ActiveCommitmentReadResult(
                     degraded=True,
                     degraded_reason="timeout",
