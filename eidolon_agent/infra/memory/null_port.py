@@ -103,6 +103,36 @@ class NullMemoryPort:
     ) -> str:
         return ""
 
+    async def invalidate_fact(
+        self,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        subject: str,
+        predicate: str,
+        object_: str,
+        *,
+        source_event_id: str,
+        tool_call_id: str,
+        confidence: float = 0.99,
+    ) -> str:
+        return ""
+
+    async def reactivate_fact(
+        self,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        subject: str,
+        predicate: str,
+        object_: str,
+        *,
+        source_event_id: str,
+        tool_call_id: str,
+        confidence: float = 0.99,
+    ) -> str:
+        return ""
+
     async def write_confirmed_fact(
         self,
         owner_id: str | None,

@@ -99,6 +99,38 @@ class MemoryPort(Protocol):
         """Publish one explicit structured intent and return its request id."""
         ...
 
+    async def invalidate_fact(
+        self,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        subject: str,
+        predicate: str,
+        object_: str,
+        *,
+        source_event_id: str,
+        tool_call_id: str,
+        confidence: float = 0.99,
+    ) -> str:
+        """End one exact canonical fact through the durable intent chain."""
+        ...
+
+    async def reactivate_fact(
+        self,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        subject: str,
+        predicate: str,
+        object_: str,
+        *,
+        source_event_id: str,
+        tool_call_id: str,
+        confidence: float = 0.99,
+    ) -> str:
+        """Start a new active interval for one exact inactive canonical fact."""
+        ...
+
     async def write_confirmed_fact(
         self,
         owner_id: str | None,

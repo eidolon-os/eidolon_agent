@@ -279,6 +279,48 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
 
 
 @pytest.mark.asyncio
+async def test_structured_fact_lifecycle_uses_canonical_intent_operations():
+    class CaptureBus:
+        def __init__(self):
+            self.events = []
+
+        async def publish(self, event, *, persistent=False):
+            self.events.append((event, persistent))
+
+    bus = CaptureBus()
+    pub = MemoryNatsPublisher(event_bus=bus)
+    common = {
+        "owner_id": "owner-1",
+        "companion_id": "companion-1",
+        "memory_realm_id": "realm-1",
+        "subject": "self",
+        "predicate": "likes",
+        "object_": "oolong",
+    }
+
+    await pub.publish_structured_invalidation(
+        **common,
+        source_event_id="turn-invalidate",
+        tool_call_id="call-invalidate",
+    )
+    await pub.publish_structured_reactivation(
+        **common,
+        source_event_id="turn-reactivate",
+        tool_call_id="call-reactivate",
+    )
+
+    invalidation = unwrap_memory_payload(bus.events[0][0].payload)["intent"]
+    reactivation = unwrap_memory_payload(bus.events[1][0].payload)["intent"]
+    assert invalidation["intent_type"] == "correction"
+    assert invalidation["operation_hint"] == "invalidate"
+    assert invalidation["attributes"]["source_instance_id"] == "companion-1"
+    assert reactivation["intent_type"] == "preference"
+    assert reactivation["operation_hint"] == "update"
+    assert reactivation["attributes"]["source_instance_id"] == "companion-1"
+    assert all(persistent for _, persistent in bus.events)
+
+
+@pytest.mark.asyncio
 async def test_commitment_publisher_requires_target_for_update():
     pub = MemoryNatsPublisher(event_bus=object())
 

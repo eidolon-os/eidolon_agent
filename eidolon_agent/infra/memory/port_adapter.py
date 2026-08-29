@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from eidolon_agent.core.errors import MemoryUnavailableError
 from eidolon_agent.core.types.memory import (
@@ -349,6 +349,56 @@ class EidolonMemoryPort:
         confidence: float = 0.9,
     ) -> str:
         return await self._pub.publish_structured_intent(
+            owner_id=owner_id,
+            companion_id=companion_id,
+            memory_realm_id=memory_realm_id,
+            subject=subject,
+            predicate=predicate,
+            object_=object_,
+            source_event_id=source_event_id,
+            tool_call_id=tool_call_id,
+            confidence=confidence,
+        )
+
+    async def invalidate_fact(
+        self,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        subject: str,
+        predicate: str,
+        object_: str,
+        *,
+        source_event_id: str,
+        tool_call_id: str,
+        confidence: float = 0.99,
+    ) -> str:
+        return await self._pub.publish_structured_invalidation(
+            owner_id=owner_id,
+            companion_id=companion_id,
+            memory_realm_id=memory_realm_id,
+            subject=subject,
+            predicate=predicate,
+            object_=object_,
+            source_event_id=source_event_id,
+            tool_call_id=tool_call_id,
+            confidence=confidence,
+        )
+
+    async def reactivate_fact(
+        self,
+        owner_id: str | None,
+        companion_id: str | None,
+        memory_realm_id: str,
+        subject: str,
+        predicate: str,
+        object_: str,
+        *,
+        source_event_id: str,
+        tool_call_id: str,
+        confidence: float = 0.99,
+    ) -> str:
+        return await self._pub.publish_structured_reactivation(
             owner_id=owner_id,
             companion_id=companion_id,
             memory_realm_id=memory_realm_id,
@@ -733,7 +783,7 @@ def _parse_memory_datetime(value: object) -> datetime | None:
         except (TypeError, ValueError):
             return None
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
+        return dt.replace(tzinfo=UTC)
     return dt
 
 

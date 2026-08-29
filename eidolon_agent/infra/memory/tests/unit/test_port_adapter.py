@@ -40,6 +40,12 @@ def _port(*, session_call=None, session_close=None, pub_methods=None):
     pub.publish_structured_intent = pub_methods.get(
         "publish_structured_intent", AsyncMock()
     )
+    pub.publish_structured_invalidation = pub_methods.get(
+        "publish_structured_invalidation", AsyncMock()
+    )
+    pub.publish_structured_reactivation = pub_methods.get(
+        "publish_structured_reactivation", AsyncMock()
+    )
     pub.publish_verbatim_intent = pub_methods.get(
         "publish_verbatim_intent", AsyncMock()
     )
@@ -509,6 +515,46 @@ async def test_assert_fact_delegates_to_publisher() -> None:
         confidence=0.75,
     )
     assert request_id == "request-structured"
+
+
+@pytest.mark.parametrize(
+    ("method_name", "publisher_name"),
+    (
+        ("invalidate_fact", "publish_structured_invalidation"),
+        ("reactivate_fact", "publish_structured_reactivation"),
+    ),
+)
+async def test_fact_lifecycle_delegates_to_canonical_publisher(
+    method_name: str,
+    publisher_name: str,
+) -> None:
+    port, _, _, pub = _port()
+    getattr(pub, publisher_name).return_value = f"request-{method_name}"
+
+    request_id = await getattr(port, method_name)(
+        "owner-1",
+        "companion-1",
+        "realm-1",
+        "self",
+        "likes",
+        "oolong",
+        source_event_id="turn-1",
+        tool_call_id="call-1",
+        confidence=0.97,
+    )
+
+    getattr(pub, publisher_name).assert_awaited_once_with(
+        owner_id="owner-1",
+        companion_id="companion-1",
+        memory_realm_id="realm-1",
+        subject="self",
+        predicate="likes",
+        object_="oolong",
+        source_event_id="turn-1",
+        tool_call_id="call-1",
+        confidence=0.97,
+    )
+    assert request_id == f"request-{method_name}"
 
 
 async def test_write_confirmed_fact_uses_observable_mcp_command() -> None:
