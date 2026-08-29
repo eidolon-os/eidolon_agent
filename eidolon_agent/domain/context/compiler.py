@@ -204,6 +204,7 @@ class ContextCompiler:
         memory_hit_ids: list[str] = []
         memory_hits: list[MemoryHit] = []
         memory_kg_triple_ids: list[str] = []
+        memory_backend_trace: dict[str, float] = {}
         if isinstance(memory_payload, BaseException):
             _log.warning("memory recall raised: %s", memory_payload)
             memory_degraded = True
@@ -216,6 +217,7 @@ class ContextCompiler:
                 memory_degraded_reason,
                 memory_kg_triple_ids,
                 memory_hits,
+                memory_backend_trace,
             ) = memory_payload
 
         active_commitments: list[ActiveCommitment] = []
@@ -566,6 +568,7 @@ class ContextCompiler:
             "hit_count": len(memory_hit_ids),
             "kg_triple_ids": memory_kg_triple_ids,
             "kg_triple_count": len(memory_kg_triple_ids),
+            "backend_trace": memory_backend_trace,
             "context_injected": memory_kept,
         }
         ti.metadata["commitment_context_trace"] = {
@@ -744,6 +747,7 @@ class ContextCompiler:
         str | None,
         list[str],
         list[MemoryHit],
+        dict[str, float],
     ] | None:
         """Memory recall branch for the parallel ``gather`` above.
 
@@ -775,7 +779,7 @@ class ContextCompiler:
                 semantic_k=self._memory_top_k,
                 voice=ti.input_modality == "voice",
                 kg_subjects=("self",)
-                if query_source == "explicit_personal_lookup"
+                if query_source == "personal_memory_lookup"
                 else (),
             )
             ti.metadata["memory_recall_query"] = {
@@ -789,6 +793,7 @@ class ContextCompiler:
             hit_ids: list[str] = []
             hits: list[MemoryHit] = []
             kg_triples: list[dict] = []
+            backend_trace: dict[str, float] = {}
             degraded_reason: str | None = None
             any_success = False
             for recall_query in recall_queries:
@@ -806,6 +811,8 @@ class ContextCompiler:
                     session_id=ti.session_id,
                     timeout_s=remaining,
                 )
+                for key, value in recall.diagnostics.items():
+                    backend_trace[key] = backend_trace.get(key, 0.0) + value
                 if recall.context:
                     contexts.append(recall.context)
                     any_success = True
@@ -836,6 +843,7 @@ class ContextCompiler:
                 degraded_reason if _degraded else None,
                 _kg_triple_ids(kg_triples),
                 hits,
+                backend_trace,
             )
         except Exception as exc:
             _log.exception(
@@ -850,6 +858,7 @@ class ContextCompiler:
                 _exception_degraded_reason(exc),
                 [],
                 [],
+                {},
             )
 
     async def _active_commitments(
@@ -884,7 +893,7 @@ class ContextCompiler:
             )
 
     def _memory_timeout_for(self, text: str) -> float:
-        if _is_explicit_memory_lookup(text):
+        if _is_personal_memory_lookup(text):
             return max(self._memory_timeout_s, self._explicit_memory_timeout_s)
         return self._memory_timeout_s
 
@@ -912,8 +921,8 @@ class ContextCompiler:
             raise
 
     async def _memory_recall_queries(self, ti: TurnInput) -> tuple[list[str], str]:
-        if _is_explicit_memory_lookup(ti.text or ""):
-            return [(ti.text or "").strip()], "explicit_personal_lookup"
+        if _is_personal_memory_lookup(ti.text or ""):
+            return [(ti.text or "").strip()], "personal_memory_lookup"
         query, source = await self._memory_recall_query(ti)
         return [query], source
 
@@ -1177,20 +1186,99 @@ def _merge_memory_contexts(contexts: list[str]) -> str:
     return "\n\n".join(blocks)
 
 
-def _is_explicit_memory_lookup(text: str) -> bool:
+def _is_personal_memory_lookup(text: str) -> bool:
+    """Classify direct autobiographical fact questions.
+
+    A user need not say “记得” to ask for stored personal knowledge. Stable
+    personal slots get the same extended budget; advice, planning and immediate
+    choice questions stay on the ordinary hot path.
+    """
+
     normalized = "".join((text or "").split()).lower()
     if not normalized:
         return False
 
-    memory_intent = any(phrase in normalized for phrase in ("记得", "记不记得", "知道", "关于我", "了解我"))
+    memory_intent = any(
+        phrase in normalized
+        for phrase in ("记得", "记不记得", "知道", "关于我", "了解我")
+    )
     question_intent = any(
         token in normalized
-        for token in ("?", "？", "吗", "什么", "哪里", "哪儿", "哪所", "在哪")
+        for token in (
+            "?",
+            "？",
+            "吗",
+            "什么",
+            "哪里",
+            "哪儿",
+            "哪所",
+            "哪个",
+            "哪种",
+            "哪天",
+            "多少",
+            "几岁",
+            "在哪",
+        )
     )
-    personal_subject = any(
-        marker in normalized for marker in ("我", "本人", "自己")
+    personal_subject = any(marker in normalized for marker in ("我", "本人", "自己"))
+    if not (personal_subject and question_intent):
+        return False
+    if memory_intent:
+        return True
+
+    advice_or_choice = any(
+        phrase in normalized
+        for phrase in (
+            "应该",
+            "怎么办",
+            "怎么做",
+            "如何",
+            "能不能",
+            "可不可以",
+            "要不要",
+            "建议",
+            "今天吃什么",
+            "现在吃什么",
+        )
     )
-    return personal_subject and question_intent and memory_intent
+    if advice_or_choice:
+        return False
+
+    stable_personal_slot = any(
+        marker in normalized
+        for marker in (
+            "名字",
+            "姓名",
+            "叫什么",
+            "生日",
+            "年龄",
+            "几岁",
+            "家乡",
+            "哪里人",
+            "住哪里",
+            "住哪儿",
+            "住在哪",
+            "来自哪里",
+            "来自哪儿",
+            "读书",
+            "学校",
+            "大学",
+            "专业",
+            "职业",
+            "工作是什么",
+            "在哪里工作",
+            "在哪工作",
+            "公司",
+            "最喜欢",
+            "偏好",
+            "讨厌",
+            "妈妈",
+            "爸爸",
+            "伴侣",
+            "宠物",
+        )
+    )
+    return stable_personal_slot
 
 
 def _kg_triple_ids(triples: object) -> list[str]:

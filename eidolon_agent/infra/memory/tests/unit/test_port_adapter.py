@@ -194,6 +194,12 @@ async def test_recall_context_returns_context_hits_and_degraded_false() -> None:
                 "object": "边境牧羊犬",
             }
         ],
+        "degraded": False,
+        "trace": {
+            "embedding_ms": 12.5,
+            "service_total_ms": 42,
+            "unsafe_detail": "must not cross the port",
+        },
     })
     port, *_ = _port(session_call=call)
     result = await port.recall_context(
@@ -221,6 +227,10 @@ async def test_recall_context_returns_context_hits_and_degraded_false() -> None:
     ]
     assert degraded is False
     assert result.degraded_reason is None
+    assert result.diagnostics == {
+        "embedding_ms": 12.5,
+        "service_total_ms": 42.0,
+    }
     name, args = call.await_args.args
     assert name == "eidolon_memory_recall_context"
     assert args["top_k"] == 5
@@ -232,6 +242,33 @@ async def test_recall_context_returns_context_hits_and_degraded_false() -> None:
     assert args["context"]["session_id"] == "s1"
     assert args["context"]["memory_space_id"] == "realm-1"
     assert args["kg_subjects"] == []
+    assert "include_sensitive_kg" not in args
+
+
+async def test_recall_context_preserves_backend_degraded_state() -> None:
+    call = AsyncMock(
+        return_value={
+            "context": "",
+            "records": [],
+            "kg_triples": [],
+            "degraded": True,
+            "degraded_reason": "vector_unavailable",
+            "trace": {"service_total_ms": 37.5},
+        }
+    )
+    port, *_ = _port(session_call=call)
+
+    result = await port.recall_context(
+        "owner-1",
+        "x",
+        companion_id="companion-1",
+        memory_realm_id="realm-1",
+        plan=_plan(),
+    )
+
+    assert result.degraded is True
+    assert result.degraded_reason == "vector_unavailable"
+    assert result.diagnostics == {"service_total_ms": 37.5}
 
 
 async def test_recall_context_returns_degraded_on_exception() -> None:

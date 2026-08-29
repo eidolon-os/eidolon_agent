@@ -52,11 +52,13 @@ class _StubMemory:
         degraded: bool = False,
         degraded_reason: str | None = None,
         kg_triples: list[dict] | None = None,
+        diagnostics: dict[str, float] | None = None,
     ) -> None:
         self._formatted = formatted
         self._degraded = degraded
         self._degraded_reason = degraded_reason
         self._kg_triples = list(kg_triples or [])
+        self._diagnostics = dict(diagnostics or {})
         self.calls: list[dict] = []
 
     async def recall_context(
@@ -89,6 +91,7 @@ class _StubMemory:
             kg_triples=self._kg_triples,
             degraded=self._degraded,
             degraded_reason=self._degraded_reason,
+            diagnostics=self._diagnostics,
         )
 
 
@@ -456,8 +459,61 @@ async def test_explicit_personal_memory_lookup_uses_extended_timeout() -> None:
     assert memory.calls[0]["plan"].kg_subjects == ("self",)
     assert ti.metadata["memory_trace"]["timeout_ms"] == 1200
     assert ti.metadata["memory_trace"]["hit_count"] == 1
-    assert ti.metadata["memory_recall_query"]["source"] == "explicit_personal_lookup"
+    assert ti.metadata["memory_recall_query"]["source"] == "personal_memory_lookup"
     assert ti.metadata["memory_recall_query"]["query_count"] == 1
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "我最喜欢的水果是什么？",
+        "我叫什么？",
+        "我的生日是哪天？",
+        "我在哪里读书？",
+        "我的宠物叫什么？",
+    ],
+)
+async def test_natural_personal_fact_query_uses_extended_timeout(query: str) -> None:
+    memory = _StubMemory(formatted="stored personal fact")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=memory,
+        memory_timeout_s=0.5,
+        explicit_memory_timeout_s=4.0,
+    )
+
+    await compiler.compile(make_turn_input(query))
+
+    assert memory.calls[0]["timeout_s"] == pytest.approx(4.0)
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "我应该怎么做？",
+        "我今天吃什么？",
+        "我能不能换工作？",
+        "你最喜欢什么水果？",
+    ],
+)
+async def test_advice_and_non_personal_questions_keep_hot_path_budget(
+    query: str,
+) -> None:
+    memory = _StubMemory()
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=memory,
+        memory_timeout_s=0.5,
+        explicit_memory_timeout_s=4.0,
+    )
+
+    await compiler.compile(make_turn_input(query))
+
+    assert memory.calls[0]["timeout_s"] == pytest.approx(0.5, abs=0.001)
 
 
 async def test_explicit_personal_memory_lookup_uses_single_combined_result() -> None:
@@ -721,7 +777,10 @@ async def test_memory_trace_records_ids_and_degraded_without_content() -> None:
         personas_service=_StubPersonas(),
         instance_locator=_locator,
         history_manager=HistoryManager(),
-        memory_port=_StubMemory(formatted="private recalled sentence"),
+        memory_port=_StubMemory(
+            formatted="private recalled sentence",
+            diagnostics={"embedding_ms": 12.5, "service_total_ms": 41.0},
+        ),
     )
 
     await compiler.compile(ti)
@@ -734,6 +793,10 @@ async def test_memory_trace_records_ids_and_degraded_without_content() -> None:
     assert trace["kg_triple_ids"] == []
     assert trace["kg_triple_count"] == 0
     assert trace["context_injected"] is True
+    assert trace["backend_trace"] == {
+        "embedding_ms": 12.5,
+        "service_total_ms": 41.0,
+    }
     assert "private recalled sentence" not in str(trace)
 
 
