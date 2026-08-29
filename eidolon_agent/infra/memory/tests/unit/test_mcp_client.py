@@ -24,6 +24,7 @@ from eidolon_agent.infra.memory.discovery import (
 )
 from eidolon_agent.infra.memory.mcp_client import (
     McpClientPool,
+    McpReadSessionPool,
     McpUserSession,
     _decode_call_tool_result,
     transient_mcp_session,
@@ -137,6 +138,35 @@ async def test_session_reused_for_same_route() -> None:
     s1 = await pool.session_for("default.alice.default")
     s2 = await pool.session_for("default.alice.default")
     assert s1 is s2
+
+
+async def test_read_pool_leases_independent_sessions_for_concurrent_calls(
+    monkeypatch,
+) -> None:
+    started = 0
+    release = asyncio.Event()
+
+    async def call_tool(self, name, arguments):
+        del self, name, arguments
+        nonlocal started
+        started += 1
+        if started == 2:
+            release.set()
+        await asyncio.wait_for(release.wait(), timeout=0.2)
+        return {"ok": True}
+
+    monkeypatch.setattr(McpUserSession, "call_tool", call_tool)
+    pool = McpReadSessionPool("http://a/mcp", size=2)
+
+    first, second = await asyncio.gather(
+        pool.call_tool("recall", {}),
+        pool.call_tool("recall", {}),
+    )
+
+    assert first == second == {"ok": True}
+    assert started == 2
+    assert len(pool._sessions) == 2
+    await pool.close()
 
 
 async def test_read_and_write_sessions_use_distinct_discovered_surfaces() -> None:
