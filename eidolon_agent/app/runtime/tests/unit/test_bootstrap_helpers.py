@@ -73,6 +73,14 @@ def test_build_llm_router_wires_model_thinking_policy() -> None:
     assert provider._thinking == "disabled"  # type: ignore[attr-defined]
 
 
+def test_model_thinking_policy_rejects_unknown_mode() -> None:
+    with pytest.raises(ValueError):
+        LLMModelConfig(
+            name="openai/deepseek-v4-flash",
+            thinking="sometimes",  # type: ignore[arg-type]
+        )
+
+
 def test_build_llm_router_falls_back_to_fake_when_default_missing() -> None:
     settings = Settings(
         llm={

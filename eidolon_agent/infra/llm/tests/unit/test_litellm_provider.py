@@ -180,6 +180,35 @@ async def test_default_thinking_does_not_add_provider_specific_body(
     assert "extra_body" not in captured
 
 
+@pytest.mark.parametrize("mode", ["enabled", "disabled"])
+async def test_explicit_thinking_mode_is_preserved_for_stream_and_warmup(
+    monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    calls: list[dict] = []
+
+    async def _fake(**kwargs):
+        calls.append(kwargs)
+        if kwargs["stream"]:
+            return _aiter([_Chunk(choices=[_Choice(delta=_Delta(content="ok"))])])
+        return object()
+
+    monkeypatch.setattr(litellm, "acompletion", _fake)
+    configured = LiteLLMProvider(
+        model="openai/deepseek-v4-flash",
+        shared_http_client=False,
+        thinking=mode,
+    )
+
+    _ = [d async for d in configured.stream([_msg("hi")], request_id=f"stream-{mode}")]
+    assert await configured.warmup(timeout_s=1)
+
+    assert len(calls) == 2
+    assert all(
+        call["extra_body"] == {"thinking": {"type": mode}}
+        for call in calls
+    )
+
+
 async def test_ttft_ignores_empty_raw_chunks(
     monkeypatch: pytest.MonkeyPatch,
     provider,
@@ -378,6 +407,55 @@ async def test_tool_call_buffered_across_chunks(monkeypatch: pytest.MonkeyPatch,
     assert tcs[0].arguments == {"tz": "UTC"}
     finishes = [d.finish for d in out if d.finish is not None]
     assert finishes == [LLMFinishReason.TOOL_CALLS]
+
+
+async def test_disabled_thinking_keeps_tool_activity_and_complete_tool_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict = {}
+    chunks = [
+        _Chunk(choices=[_Choice(delta=_Delta(tool_calls=[
+            _ToolCallChunk(
+                index=0,
+                id="call-fast",
+                function=_ToolCallFunc(name="get_current_time", arguments="{"),
+            )
+        ]))]),
+        _Chunk(choices=[_Choice(delta=_Delta(tool_calls=[
+            _ToolCallChunk(
+                index=0,
+                function=_ToolCallFunc(arguments='"timezone":"Asia/Shanghai"}'),
+            )
+        ]))]),
+        _Chunk(choices=[_Choice(delta=_Delta(), finish_reason="tool_calls")]),
+    ]
+
+    async def _fake(**kwargs):
+        seen.update(kwargs)
+        return _aiter(chunks)
+
+    monkeypatch.setattr(litellm, "acompletion", _fake)
+    configured = LiteLLMProvider(
+        model="openai/deepseek-v4-flash",
+        shared_http_client=False,
+        thinking="disabled",
+    )
+
+    out = [d async for d in configured.stream([_msg("上海几点")], request_id="tool-fast")]
+
+    assert seen["extra_body"] == {"thinking": {"type": "disabled"}}
+    # Fragment activity is intentionally heartbeat-rate-limited; the complete
+    # ToolCall below must still contain every fragment.
+    assert sum(d.activity is LLMActivityKind.TOOL_CALL for d in out) >= 1
+    assert not any(d.activity is LLMActivityKind.REASONING for d in out)
+    assert [d.tool_call for d in out if d.tool_call] == [
+        ToolCall(
+            id="call-fast",
+            name="get_current_time",
+            arguments={"timezone": "Asia/Shanghai"},
+        )
+    ]
+    assert [d.finish for d in out if d.finish] == [LLMFinishReason.TOOL_CALLS]
 
 
 async def test_malformed_tool_args_falls_back_to_raw(monkeypatch: pytest.MonkeyPatch, provider) -> None:
