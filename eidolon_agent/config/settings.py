@@ -130,6 +130,7 @@ class LLMModelConfig(BaseModel):
     name: str
     api_base: str | None = None
     timeout_s: float = 30.0
+    thinking: Literal["default", "enabled", "disabled"] = "default"
 
     @model_validator(mode="before")
     @classmethod

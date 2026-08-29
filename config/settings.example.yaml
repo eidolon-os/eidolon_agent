@@ -35,6 +35,9 @@ llm:
   models:
     - name: openai/deepseek-v4-flash
       api_base: http://127.0.0.1:8180/v1
+      # DeepSeek V4 enables thinking by default. Disable it for low-latency
+      # conversational/voice paths; keep "default" for provider behavior.
+      thinking: disabled
     # Configure a second model to make `fallback_models` effective. It should
     # be a genuinely independent endpoint — falling back to the same upstream
     # that just failed buys nothing.

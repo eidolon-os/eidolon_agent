@@ -81,6 +81,7 @@ class LiteLLMProvider:
         timeout_s: float = 30.0,
         max_retries: int = 2,
         shared_http_client: bool = True,
+        thinking: str = "default",
     ) -> None:
         self._model = model
         self._api_key = api_key
@@ -88,6 +89,7 @@ class LiteLLMProvider:
         self._timeout = timeout_s
         self._max_retries = max_retries
         self._shared_http_client = shared_http_client
+        self._thinking = thinking
 
     @property
     def model_id(self) -> str:
@@ -374,6 +376,11 @@ class LiteLLMProvider:
             kwargs["api_key"] = self._api_key
         if self._api_base:
             kwargs["api_base"] = self._api_base
+        if self._thinking != "default":
+            # DeepSeek's OpenAI-compatible API expects the mode switch in
+            # extra_body. Keeping it model-level avoids changing unrelated
+            # LiteLLM providers while making voice latency policy explicit.
+            kwargs["extra_body"] = {"thinking": {"type": self._thinking}}
         return kwargs
 
 
