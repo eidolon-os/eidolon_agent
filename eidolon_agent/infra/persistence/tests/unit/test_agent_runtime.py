@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import event, text
 
 from eidolon_agent.core.types.long_task import LongTaskRecord, LongTaskStatus
 from eidolon_agent.core.types.messages import MessageRole
 from eidolon_agent.core.types.turn import TriageKind, TurnInput, TurnStatus, TurnTrigger
 from eidolon_agent.core.types.turn_context import TurnContext
+from eidolon_agent.domain.history import HistoryManager
 from eidolon_agent.infra.persistence.agent_runtime import (
     AgentConversationReader,
     AgentLongTaskStore,
@@ -337,6 +340,68 @@ async def test_conversation_reader_does_not_wait_for_the_runtime_writer_pool(
         )
 
     assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_history_hydration_does_not_wait_for_the_runtime_writer_pool(
+    runtime_store: AgentRuntimeStore,
+) -> None:
+    """A cancellable context read must never consume the single writer slot."""
+
+    async with runtime_store.engine.connect():
+        messages = await asyncio.wait_for(
+            build_agent_history_hydrator(runtime_store)(
+                conversation_id="conversation-1",
+                window=10,
+            ),
+            timeout=0.5,
+        )
+
+    assert messages == []
+
+
+@pytest.mark.asyncio
+async def test_cancelled_history_read_cannot_starve_the_next_read(
+    runtime_store: AgentRuntimeStore,
+) -> None:
+    """Repeated turn cancellation must not strand a pooled SQLite reader.
+
+    A preemptive turn and its parent stream can cancel the same history lookup
+    in quick succession. QueuePool retains that interrupted checkout forever;
+    the next room then stalls before the LLM call. The hydration owner must
+    apply one bounded cancellation and finish returning the shared reader.
+    """
+
+    @event.listens_for(runtime_store.read_engine.sync_engine, "connect")
+    def _install_blocking_read(connection, _record) -> None:  # type: ignore[no-untyped-def]
+        connection.create_function(
+            "test_sleep_ms",
+            1,
+            lambda duration_ms: time.sleep(float(duration_ms) / 1_000),
+        )
+
+    async def _blocked_hydration(**_kwargs):
+        async with runtime_store.read_session_factory() as session:
+            await session.execute(text("SELECT test_sleep_ms(200)"))
+        return []
+
+    history = HistoryManager(
+        hydrate_messages=_blocked_hydration,
+        hydrate_timeout_s=0.05,
+    )
+    blocked = asyncio.create_task(
+        history.recent_window(conversation_id="conversation-1", window=10)
+    )
+    await asyncio.sleep(0.01)
+    blocked.cancel()
+    await asyncio.sleep(0.01)
+    blocked.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await blocked
+
+    await asyncio.sleep(0.25)
+    async with runtime_store.read_session_factory() as session:
+        assert await asyncio.wait_for(session.scalar(text("SELECT 1")), timeout=0.2) == 1
 
 
 @pytest.mark.asyncio

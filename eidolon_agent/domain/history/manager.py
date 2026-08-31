@@ -31,6 +31,7 @@ class HistoryManager:
         self._lock = asyncio.Lock()
         self._hydrate_messages = hydrate_messages
         self._hydrate_timeout_s = hydrate_timeout_s
+        self._hydration_tasks: set[asyncio.Task[list[ChatMessage] | None]] = set()
 
     async def append(self, *, conversation_id: str, message: ChatMessage) -> None:
         async with self._lock:
@@ -50,12 +51,21 @@ class HistoryManager:
             if len(cached) >= window or self._hydrate_messages is None:
                 return cached
 
+        hydration = asyncio.create_task(
+            self._bounded_hydrate(conversation_id=conversation_id, window=window),
+            name=f"history-hydrate:{conversation_id}",
+        )
+        self._hydration_tasks.add(hydration)
+        hydration.add_done_callback(self._hydration_done)
         try:
-            hydrated = await asyncio.wait_for(
-                self._hydrate_external(conversation_id=conversation_id, window=window),
-                timeout=self._hydrate_timeout_s,
-            )
-        except Exception:
+            # Context compilation can be cancelled independently by both the
+            # preemptive turn and its parent stream. Keep that cancellation at
+            # this boundary: the owned task applies exactly one DB timeout and
+            # is allowed to return its connection before it leaves the set.
+            hydrated = await asyncio.shield(hydration)
+        except asyncio.CancelledError:
+            raise
+        if hydrated is None:
             return cached
         return _merge_tail(hydrated, cached, window=window)
 
@@ -71,6 +81,28 @@ class HistoryManager:
             window=window,
         )
         return _public_messages(messages)
+
+    async def _bounded_hydrate(
+        self,
+        *,
+        conversation_id: str,
+        window: int,
+    ) -> list[ChatMessage] | None:
+        try:
+            return await asyncio.wait_for(
+                self._hydrate_external(conversation_id=conversation_id, window=window),
+                timeout=self._hydrate_timeout_s,
+            )
+        except Exception:
+            return None
+
+    def _hydration_done(self, task: asyncio.Task[list[ChatMessage] | None]) -> None:
+        self._hydration_tasks.discard(task)
+        if task.cancelled():
+            return
+        # Retrieve any BaseException raised outside the normal bounded path so
+        # asyncio never reports an unobserved task during process shutdown.
+        task.exception()
 
 
 def _public_messages(messages: list[ChatMessage]) -> list[ChatMessage]:

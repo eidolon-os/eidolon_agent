@@ -503,7 +503,10 @@ class AgentRuntimeStore:
         # connection while it persists live state, though: the Admin contract
         # has a short authority timeout and conversation history is read-only.
         # A distinct, query-only connection preserves the single-writer rule
-        # while letting observability reads proceed from SQLite's WAL snapshot.
+        # while letting observability and context reads proceed from SQLite's
+        # WAL snapshot. HistoryManager owns cancellation supervision for its
+        # bounded hydration tasks so an interrupted turn cannot strand this
+        # deliberately small reader pool.
         read_engine = create_async_engine(
             f"sqlite+aiosqlite:///{path}",
             connect_args={"timeout": busy_timeout_ms / 1_000},
