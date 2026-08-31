@@ -32,7 +32,8 @@ metadata so reports stay useful without becoming prompt dumps.
 Use the contract harness before live replay when you want to verify the local
 stack boundary is actually reachable. It checks only public contracts: Agent
 HTTP/admin endpoints, Admin gateway HTTP endpoints, Memory discovery, advertised
-MCP tools, NATS turn publish, and optional Memory readback by source turn id.
+MCP tools, NATS turn publish, Memory readback by source turn id, and product-path
+privacy deletion of the unique canary marker.
 It does not import `eidolon_memory` internals and does not start or own the dev
 stack processes.
 
@@ -46,16 +47,23 @@ Memory smoke, keep PR behavior deterministic and opt in explicitly:
 
 ```bash
 EIDOLON_AGENT_LIVE_MEMORY_CONTRACT=1 \
+EIDOLON_AGENT_LIVE_MEMORY_SPACE_ID=<realm> \
+EIDOLON_AGENT_LIVE_MEMORY_OWNER_ID=<owner> \
+EIDOLON_AGENT_LIVE_MEMORY_COMPANION_ID=<companion> \
   ./.venv/bin/python -m pytest -q tests/smoke/test_live_memory_contract.py -rs
 
 EIDOLON_AGENT_LIVE_MEMORY_CONTRACT=1 \
 EIDOLON_AGENT_LIVE_MEMORY_READBACK=1 \
+EIDOLON_AGENT_LIVE_MEMORY_SPACE_ID=<realm> \
+EIDOLON_AGENT_LIVE_MEMORY_OWNER_ID=<owner> \
+EIDOLON_AGENT_LIVE_MEMORY_COMPANION_ID=<companion> \
   ./.venv/bin/python -m pytest -q tests/smoke/test_live_memory_contract.py -rs
 ```
 
 The smoke profile reports unavailable live dependencies as `skipped`; the
 harness report still marks those required checks as skipped so a real contract
-run never pretends the stack passed.
+run never pretends the stack passed. Identity is explicit and fail-closed; the
+harness never selects a Realm and invents an Owner scope.
 
 ## Live Benchmark User
 

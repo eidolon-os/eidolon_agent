@@ -21,7 +21,6 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import quote
 from uuid import uuid4
 
 import httpx
@@ -37,7 +36,6 @@ from eidolon_agent.infra.memory import (
 
 CheckStatus = Literal["passed", "failed", "skipped"]
 DependencyUnavailableStatus = Literal["failed", "skipped"]
-DEFAULT_MEMORY_SUPERVISOR_RECONCILE_TIMEOUT_S = 120.0
 
 
 @dataclass(slots=True)
@@ -62,14 +60,6 @@ class LiveLocalContractReport:
 
 
 @dataclass(slots=True)
-class ContractWorkspace:
-    owner_id: str
-    companion_id: str
-    memory_realm_id: str
-    genome_id: str | None = None
-
-
-@dataclass(slots=True)
 class LiveLocalContractConfig:
     mode: str = "live-local"
     agent_http_base: str = "http://127.0.0.1:8180"
@@ -82,16 +72,13 @@ class LiveLocalContractConfig:
     require_memory_readback: bool = True
     dependency_unavailable_status: DependencyUnavailableStatus = "failed"
     memory_space_id: str | None = None
+    memory_owner_id: str | None = None
+    memory_companion_id: str | None = None
+    require_memory_cleanup: bool = True
     timeout_s: float = 5.0
     memory_route_timeout_s: float = 0.0
     memory_readback_timeout_s: float = 30.0
     memory_readback_poll_s: float = 0.5
-    provision_contract_owner: bool = False
-    cleanup_contract_owner: bool = True
-    reconcile_memory_supervisor: bool = True
-    memory_supervisor_reconcile_timeout_s: float = DEFAULT_MEMORY_SUPERVISOR_RECONCILE_TIMEOUT_S
-    contract_owner_id: str = field(default_factory=lambda: f"owner_live_contract_{uuid4().hex[:8]}")
-    contract_companion_id: str | None = None
     run_product_acceptance: bool = False
     product_acceptance_work_dir: Path = Path("/tmp/eidolon-product-acceptance")
     product_acceptance_sqlite_path: Path | None = None
@@ -99,8 +86,6 @@ class LiveLocalContractConfig:
     def __post_init__(self) -> None:
         if self.dependency_unavailable_status not in {"failed", "skipped"}:
             raise ValueError("dependency_unavailable_status must be 'failed' or 'skipped'")
-        if self.provision_contract_owner and self.memory_route_timeout_s <= 0:
-            self.memory_route_timeout_s = 60.0
 
 
 async def run_live_local_contract(
@@ -109,86 +94,69 @@ async def run_live_local_contract(
     cfg = config or LiveLocalContractConfig()
     started = time.perf_counter()
     checks: list[ContractCheck] = []
-    workspace: ContractWorkspace | None = None
+    if cfg.include_agent_http:
+        checks.append(
+            await _http_json_check(
+                name="agent_http_readyz",
+                url=_join_url(cfg.agent_http_base, "/readyz"),
+                required=True,
+                timeout_s=cfg.timeout_s,
+                expected_status=200,
+                expected_json={"status": "ready"},
+                unavailable_status=cfg.dependency_unavailable_status,
+                hint="Start eidolon_agent or the admin dev stack.",
+            )
+        )
+    if cfg.include_agent_admin:
+        checks.append(
+            await _http_json_check(
+                name="agent_admin_openapi",
+                url=_join_url(cfg.agent_admin_base, "/api/openapi.json"),
+                required=True,
+                timeout_s=cfg.timeout_s,
+                expected_status=200,
+                expected_json_path=("info", "title"),
+                expected_json_value="eidolon-agent admin",
+                unavailable_status=cfg.dependency_unavailable_status,
+                hint="Start eidolon_agent admin HTTP on the configured admin port.",
+            )
+        )
+    if cfg.include_admin_gateway and cfg.admin_gateway_base:
+        checks.append(
+            await _http_json_check(
+                name="admin_gateway_services",
+                url=_join_url(cfg.admin_gateway_base, "/api/services"),
+                required=True,
+                timeout_s=cfg.timeout_s,
+                expected_status=200,
+                expected_json_key="services",
+                unavailable_status=cfg.dependency_unavailable_status,
+                hint="Start eidolon_admin with deploy/dev/run_all.sh start.",
+            )
+        )
+        checks.append(
+            await _http_json_check(
+                name="admin_gateway_system_health",
+                url=_join_url(cfg.admin_gateway_base, "/api/system/health"),
+                required=True,
+                timeout_s=max(cfg.timeout_s, 10.0),
+                expected_status=200,
+                expected_json_key="services",
+                unavailable_status=cfg.dependency_unavailable_status,
+                hint="Admin gateway is up but system health is unavailable.",
+            )
+        )
 
-    try:
-        if cfg.include_agent_http:
-            checks.append(
-                await _http_json_check(
-                    name="agent_http_readyz",
-                    url=_join_url(cfg.agent_http_base, "/readyz"),
-                    required=True,
-                    timeout_s=cfg.timeout_s,
-                    expected_status=200,
-                    expected_json={"status": "ready"},
-                    unavailable_status=cfg.dependency_unavailable_status,
-                    hint="Start eidolon_agent or the admin dev stack.",
-                )
+    if cfg.include_memory:
+        checks.extend(
+            await _memory_contract_checks(
+                cfg,
+                selected_memory_space_id=cfg.memory_space_id,
             )
-        if cfg.include_agent_admin:
-            checks.append(
-                await _http_json_check(
-                    name="agent_admin_openapi",
-                    url=_join_url(cfg.agent_admin_base, "/api/openapi.json"),
-                    required=True,
-                    timeout_s=cfg.timeout_s,
-                    expected_status=200,
-                    expected_json_path=("info", "title"),
-                    expected_json_value="eidolon-agent admin",
-                    unavailable_status=cfg.dependency_unavailable_status,
-                    hint="Start eidolon_agent admin HTTP on the configured admin port.",
-                )
-            )
-        if cfg.include_admin_gateway and cfg.admin_gateway_base:
-            checks.append(
-                await _http_json_check(
-                    name="admin_gateway_services",
-                    url=_join_url(cfg.admin_gateway_base, "/api/services"),
-                    required=True,
-                    timeout_s=cfg.timeout_s,
-                    expected_status=200,
-                    expected_json_key="services",
-                    unavailable_status=cfg.dependency_unavailable_status,
-                    hint="Start eidolon_admin with deploy/dev/run_all.sh start.",
-                )
-            )
-            checks.append(
-                await _http_json_check(
-                    name="admin_gateway_system_health",
-                    url=_join_url(cfg.admin_gateway_base, "/api/system/health"),
-                    required=True,
-                    timeout_s=max(cfg.timeout_s, 10.0),
-                    expected_status=200,
-                    expected_json_key="services",
-                    unavailable_status=cfg.dependency_unavailable_status,
-                    hint="Admin gateway is up but system health is unavailable.",
-                )
-            )
+        )
 
-        if cfg.provision_contract_owner:
-            provision_check, workspace = await _provision_contract_workspace(cfg)
-            checks.append(provision_check)
-            if workspace is None:
-                return _build_report(cfg=cfg, checks=checks, started=started)
-            if cfg.include_memory and cfg.reconcile_memory_supervisor:
-                checks.append(await _memory_supervisor_reconcile_check(cfg, workspace))
-
-        if cfg.include_memory:
-            selected_memory_space_id = cfg.memory_space_id or (
-                workspace.memory_realm_id if workspace is not None else None
-            )
-            checks.extend(
-                await _memory_contract_checks(
-                    cfg,
-                    selected_memory_space_id=selected_memory_space_id,
-                )
-            )
-
-        if cfg.run_product_acceptance:
-            checks.append(await _product_acceptance_check(cfg))
-    finally:
-        if workspace is not None and cfg.cleanup_contract_owner:
-            checks.append(await _cleanup_contract_workspace(cfg, workspace))
+    if cfg.run_product_acceptance:
+        checks.append(await _product_acceptance_check(cfg))
 
     return _build_report(cfg=cfg, checks=checks, started=started)
 
@@ -340,6 +308,22 @@ async def _memory_contract_checks(
 ) -> list[ContractCheck]:
     checks: list[ContractCheck] = []
     started = time.perf_counter()
+    owner_id = str(cfg.memory_owner_id or "").strip()
+    companion_id = str(cfg.memory_companion_id or "").strip()
+    if not owner_id or not companion_id:
+        return [
+            _check(
+                name="memory_test_identity",
+                status="failed",
+                required=True,
+                started=started,
+                summary="memory_owner_id and memory_companion_id are required",
+                details={
+                    "owner_id_present": bool(owner_id),
+                    "companion_id_present": bool(companion_id),
+                },
+            )
+        ]
     deadline = time.perf_counter() + max(0.0, cfg.memory_route_timeout_s)
     last_details: dict[str, Any] | None = None
     try:
@@ -444,15 +428,25 @@ async def _memory_contract_checks(
             bus=bus,
             routes=routes,
             memory_space_id=memory_space_id,
+            owner_id=owner_id,
+            companion_id=companion_id,
             cfg=cfg,
         )
         checks.append(publish_check)
         if publish_check.status == "passed":
+            readback = await _memory_readback_check(
+                pool=pool,
+                tool_names=advertised,
+                memory_space_id=memory_space_id,
+                turn_id=turn_id,
+                cfg=cfg,
+            )
+            checks.append(readback)
             checks.append(
-                await _memory_readback_check(
+                await _memory_cleanup_check(
                     pool=pool,
-                    tool_names=advertised,
                     memory_space_id=memory_space_id,
+                    owner_id=owner_id,
                     turn_id=turn_id,
                     cfg=cfg,
                 )
@@ -461,327 +455,6 @@ async def _memory_contract_checks(
     finally:
         await pool.close_all()
         await bus.close()
-
-
-async def _provision_contract_workspace(
-    cfg: LiveLocalContractConfig,
-) -> tuple[ContractCheck, ContractWorkspace | None]:
-    started = time.perf_counter()
-    if not cfg.admin_gateway_base:
-        return _check(
-            name="contract_owner_provision",
-            status="failed",
-            required=True,
-            started=started,
-            summary="admin_gateway_base is required for contract owner provisioning",
-        ), None
-
-    owner_id = cfg.contract_owner_id.strip()
-    companion_id = (cfg.contract_companion_id or f"c_{owner_id.removeprefix('owner_')}").strip()
-    payload = {
-        "owner_id": owner_id,
-        "owner_display_name": "Live Contract Owner",
-        "companion_id": companion_id,
-        "companion_display_name": "Live Contract Companion",
-        "character_portrait": "A local contract companion used for live E2E validation.",
-        "relationship_narrative": "Temporary owner/companion workspace for public contract checks.",
-        "voice_portrait": "Brief, concrete, and deterministic.",
-        "values": ["contract stability", "clear boundaries"],
-        "boundaries": ["Never persist beyond the contract cleanup window."],
-    }
-    url = _join_url(cfg.admin_gateway_base, "/api/onboarding/initialize")
-    try:
-        async with httpx.AsyncClient(
-            timeout=max(cfg.timeout_s, 15.0),
-            follow_redirects=True,
-            trust_env=False,
-        ) as client:
-            response = await client.post(url, json=payload)
-    except Exception as exc:
-        return _check(
-            name="contract_owner_provision",
-            status=cfg.dependency_unavailable_status,
-            required=True,
-            started=started,
-            summary=f"{type(exc).__name__}: {exc}",
-            details={"url": url, "owner_id": owner_id, "companion_id": companion_id},
-        ), None
-
-    details: dict[str, Any] = {
-        "url": url,
-        "status_code": response.status_code,
-        "owner_id": owner_id,
-        "companion_id": companion_id,
-    }
-    if response.status_code >= 400:
-        details["body_preview"] = response.text[:500]
-        return _check(
-            name="contract_owner_provision",
-            status="failed",
-            required=True,
-            started=started,
-            summary=f"expected HTTP <400, got {response.status_code}",
-            details=details,
-        ), None
-    try:
-        body = response.json()
-    except ValueError as exc:
-        return _check(
-            name="contract_owner_provision",
-            status="failed",
-            required=True,
-            started=started,
-            summary=f"response is not JSON: {exc}",
-            details=details,
-        ), None
-
-    state = body.get("state") if isinstance(body, dict) else None
-    master = state.get("master_companion") if isinstance(state, dict) else None
-    if not isinstance(master, dict):
-        return _check(
-            name="contract_owner_provision",
-            status="failed",
-            required=True,
-            started=started,
-            summary="onboarding response did not include master_companion",
-            details=details,
-        ), None
-    memory_realm_id = str(master.get("default_memory_realm_id") or "").strip()
-    genome_id = str(master.get("current_genome_id") or "").strip() or None
-    if not memory_realm_id:
-        return _check(
-            name="contract_owner_provision",
-            status="failed",
-            required=True,
-            started=started,
-            summary="onboarding response did not pin a memory realm",
-            details=details,
-        ), None
-
-    workspace = ContractWorkspace(
-        owner_id=owner_id,
-        companion_id=companion_id,
-        memory_realm_id=memory_realm_id,
-        genome_id=genome_id,
-    )
-    return _check(
-        name="contract_owner_provision",
-        status="passed",
-        required=True,
-        started=started,
-        summary="ok",
-        details={
-            **details,
-            "memory_realm_id": memory_realm_id,
-            "genome_id": genome_id,
-        },
-    ), workspace
-
-
-async def _memory_supervisor_reconcile_check(
-    cfg: LiveLocalContractConfig,
-    workspace: ContractWorkspace,
-) -> ContractCheck:
-    started = time.perf_counter()
-    if not cfg.admin_gateway_base:
-        return _check(
-            name="memory_supervisor_reconcile",
-            status="failed",
-            required=True,
-            started=started,
-            summary="admin_gateway_base is required for memory supervisor reconcile",
-            details={"memory_realm_id": workspace.memory_realm_id},
-        )
-    url = _join_url(cfg.admin_gateway_base, "/api/memory/supervisor/reconcile")
-    try:
-        async with httpx.AsyncClient(
-            timeout=max(cfg.timeout_s, cfg.memory_supervisor_reconcile_timeout_s),
-            follow_redirects=True,
-            trust_env=False,
-        ) as client:
-            response = await client.post(url)
-    except Exception as exc:
-        return _check(
-            name="memory_supervisor_reconcile",
-            status=cfg.dependency_unavailable_status,
-            required=True,
-            started=started,
-            summary=f"{type(exc).__name__}: {exc}",
-            details={"url": url, "memory_realm_id": workspace.memory_realm_id},
-        )
-
-    details: dict[str, Any] = {
-        "url": url,
-        "status_code": response.status_code,
-        "memory_realm_id": workspace.memory_realm_id,
-    }
-    if response.status_code >= 400:
-        details["body_preview"] = response.text[:500]
-        return _check(
-            name="memory_supervisor_reconcile",
-            status="failed",
-            required=True,
-            started=started,
-            summary=f"expected HTTP <400, got {response.status_code}",
-            details=details,
-        )
-    try:
-        body = response.json()
-    except ValueError as exc:
-        return _check(
-            name="memory_supervisor_reconcile",
-            status="failed",
-            required=True,
-            started=started,
-            summary=f"response is not JSON: {exc}",
-            details=details,
-        )
-    if body.get("ok") is not True:
-        return _check(
-            name="memory_supervisor_reconcile",
-            status="failed",
-            required=True,
-            started=started,
-            summary="memory supervisor reconcile did not return ok=true",
-            details={**details, "body": body},
-        )
-    return _check(
-        name="memory_supervisor_reconcile",
-        status="passed",
-        required=True,
-        started=started,
-        summary="ok",
-        details=details,
-    )
-
-
-async def _cleanup_contract_workspace(
-    cfg: LiveLocalContractConfig,
-    workspace: ContractWorkspace,
-) -> ContractCheck:
-    started = time.perf_counter()
-    if not cfg.admin_gateway_base:
-        return _check(
-            name="contract_owner_cleanup",
-            status="failed",
-            required=True,
-            started=started,
-            summary="admin_gateway_base is required for contract owner cleanup",
-            details={"owner_id": workspace.owner_id},
-        )
-    url = _join_url(cfg.admin_gateway_base, f"/api/owners/{workspace.owner_id}")
-    orphan_url = _join_url(
-        cfg.admin_gateway_base,
-        f"/api/memory/realms/{quote(workspace.memory_realm_id, safe='')}/orphan",
-    )
-    try:
-        async with httpx.AsyncClient(
-            timeout=max(cfg.timeout_s, 30.0),
-            follow_redirects=True,
-            trust_env=False,
-        ) as client:
-            response = await client.delete(
-                url,
-                params={"confirm_owner_id": workspace.owner_id, "purge_memory": "true"},
-            )
-            orphan_response = None
-            if response.status_code < 400 or response.status_code == 404:
-                orphan_response = await client.delete(
-                    orphan_url,
-                    params={"purge_palace": "true"},
-                )
-    except Exception as exc:
-        return _check(
-            name="contract_owner_cleanup",
-            status="failed",
-            required=True,
-            started=started,
-            summary=f"{type(exc).__name__}: {exc}",
-            details={
-                "url": url,
-                "owner_id": workspace.owner_id,
-                "memory_realm_id": workspace.memory_realm_id,
-            },
-        )
-    details: dict[str, Any] = {
-        "url": url,
-        "status_code": response.status_code,
-        "owner_id": workspace.owner_id,
-        "memory_realm_id": workspace.memory_realm_id,
-    }
-    if orphan_response is not None:
-        details["memory_orphan_cleanup"] = {
-            "url": orphan_url,
-            "status_code": orphan_response.status_code,
-        }
-    if response.status_code == 404:
-        if orphan_response is not None and orphan_response.status_code >= 400:
-            details["memory_orphan_cleanup"]["body_preview"] = orphan_response.text[:500]
-            return _check(
-                name="contract_owner_cleanup",
-                status="failed",
-                required=True,
-                started=started,
-                summary=(
-                    "owner already absent but memory orphan cleanup failed "
-                    f"with HTTP {orphan_response.status_code}"
-                ),
-                details=details,
-            )
-        return _check(
-            name="contract_owner_cleanup",
-            status="passed",
-            required=True,
-            started=started,
-            summary="owner already absent",
-            details=details,
-        )
-    if response.status_code >= 400:
-        details["body_preview"] = response.text[:500]
-        return _check(
-            name="contract_owner_cleanup",
-            status="failed",
-            required=True,
-            started=started,
-            summary=f"expected HTTP <400, got {response.status_code}",
-            details=details,
-        )
-    if orphan_response is None:
-        return _check(
-            name="contract_owner_cleanup",
-            status="failed",
-            required=True,
-            started=started,
-            summary="memory orphan cleanup was not attempted",
-            details=details,
-        )
-    if orphan_response.status_code >= 400:
-        details["memory_orphan_cleanup"]["body_preview"] = orphan_response.text[:500]
-        return _check(
-            name="contract_owner_cleanup",
-            status="failed",
-            required=True,
-            started=started,
-            summary=f"memory orphan cleanup failed with HTTP {orphan_response.status_code}",
-            details=details,
-        )
-    try:
-        body = response.json()
-    except ValueError:
-        body = {}
-    try:
-        orphan_body = orphan_response.json()
-    except ValueError:
-        orphan_body = {}
-    counts = body.get("counts") if isinstance(body, dict) else None
-    return _check(
-        name="contract_owner_cleanup",
-        status="passed",
-        required=True,
-        started=started,
-        summary="ok",
-        details={**details, "counts": counts, "memory_orphan_cleanup_body": orphan_body},
-    )
 
 
 async def _probe_memory_tools(
@@ -905,6 +578,8 @@ async def _memory_publish_check(
     bus: NatsEventBus,
     routes: Any,
     memory_space_id: str,
+    owner_id: str,
+    companion_id: str,
     cfg: LiveLocalContractConfig,
 ) -> tuple[ContractCheck, str]:
     started = time.perf_counter()
@@ -912,8 +587,8 @@ async def _memory_publish_check(
     fanout = HistoryFanout(event_bus=bus, memory_routes=routes)
     try:
         status = await fanout.publish_turn(
-            owner_id="live-local-contract",
-            companion_id="live-local-contract",
+            owner_id=owner_id,
+            companion_id=companion_id,
             memory_realm_id=memory_space_id,
             device_id=None,
             session_id="live-local-contract",
@@ -967,7 +642,7 @@ def _memory_contract_owner_text(turn_id: str) -> str:
     return (
         "我喜欢把重要的技术验收记录写成短清单，"
         "尤其偏好用 Acquired 半导体播客做灵感来源。"
-        f"请记住这个长期偏好，验收标记 {turn_id}。"
+        f"这次验收的唯一标记是 {turn_id}。"
     )
 
 
@@ -1073,6 +748,131 @@ async def _memory_readback_check(
             "last_payload": last_payload,
             "last_error": last_error,
         },
+    )
+
+
+async def _memory_cleanup_check(
+    *,
+    pool: McpClientPool,
+    memory_space_id: str,
+    owner_id: str,
+    turn_id: str,
+    cfg: LiveLocalContractConfig,
+) -> ContractCheck:
+    """Delete the canary through the product privacy workflow and prove absence."""
+
+    started = time.perf_counter()
+    if not cfg.require_memory_cleanup:
+        return _check(
+            name="memory_marker_cleanup",
+            status="skipped",
+            required=False,
+            started=started,
+            summary="cleanup disabled explicitly",
+            details={"memory_space_id": memory_space_id, "turn_id": turn_id},
+        )
+    if not cfg.admin_gateway_base:
+        return _check(
+            name="memory_marker_cleanup",
+            status="failed",
+            required=True,
+            started=started,
+            summary="admin_gateway_base is required for product-path cleanup",
+            details={"memory_space_id": memory_space_id, "turn_id": turn_id},
+        )
+
+    preview_url = _join_url(
+        cfg.admin_gateway_base,
+        "/api/internal/v1/management/memory/forget/preview",
+    )
+    confirm_url = _join_url(
+        cfg.admin_gateway_base,
+        "/api/internal/v1/management/memory/forget/confirm",
+    )
+    details: dict[str, Any] = {
+        "memory_space_id": memory_space_id,
+        "turn_id": turn_id,
+        "preview_url": preview_url,
+        "confirm_url": confirm_url,
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=max(cfg.timeout_s, 10.0),
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
+            preview_response = await client.post(
+                preview_url,
+                params={"owner_id": owner_id},
+                json={"target": turn_id, "action": "delete"},
+            )
+            details["preview_status_code"] = preview_response.status_code
+            if preview_response.status_code >= 400:
+                details["preview_body"] = preview_response.text[:500]
+                raise RuntimeError(f"forget preview returned HTTP {preview_response.status_code}")
+            preview = preview_response.json()
+            confirmation_token = str(preview.get("confirmation_token") or "").strip()
+            if preview.get("status") != "preview" or not confirmation_token:
+                details["preview_status"] = preview.get("status")
+                details["entry_count"] = len(preview.get("entries") or [])
+                raise RuntimeError("forget preview did not bind the marker")
+
+            confirm_response = await client.post(
+                confirm_url,
+                params={"owner_id": owner_id},
+                json={"confirmation_token": confirmation_token},
+            )
+            details["confirm_status_code"] = confirm_response.status_code
+            if confirm_response.status_code >= 400:
+                details["confirm_body"] = confirm_response.text[:500]
+                raise RuntimeError(f"forget confirm returned HTTP {confirm_response.status_code}")
+            confirmed = confirm_response.json()
+            details["confirm_status"] = confirmed.get("status")
+            details["deleted_entry_count"] = confirmed.get("entry_count")
+            if confirmed.get("status") != "applied":
+                raise RuntimeError("forget confirm was not applied")
+    except Exception as exc:
+        return _check(
+            name="memory_marker_cleanup",
+            status="failed",
+            required=True,
+            started=started,
+            summary=f"{type(exc).__name__}: {exc}",
+            details=details,
+        )
+
+    deadline = time.perf_counter() + cfg.memory_readback_timeout_s
+    last_payload: dict[str, Any] | None = None
+    while time.perf_counter() < deadline:
+        try:
+            session = await pool.session_for(memory_space_id)
+            last_payload = await _call_mcp_tool_with_timeout(
+                session,
+                "eidolon_memory_get_by_source_turn",
+                {"source_turn_id": turn_id, "include_private": True},
+                timeout_s=cfg.timeout_s,
+            )
+            if not last_payload.get("record"):
+                return _check(
+                    name="memory_marker_cleanup",
+                    status="passed",
+                    required=True,
+                    started=started,
+                    summary="applied and no longer readable",
+                    details=details,
+                )
+        except Exception as exc:
+            details["last_verify_error"] = f"{type(exc).__name__}: {exc}"
+        await asyncio.sleep(cfg.memory_readback_poll_s)
+
+    details["last_verify_payload"] = last_payload
+    return _check(
+        name="memory_marker_cleanup",
+        status="failed",
+        required=True,
+        started=started,
+        summary="marker remained readable after applied forget",
+        details=details,
     )
 
 
@@ -1204,6 +1004,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--memory-space-id", default=os.getenv("EIDOLON_AGENT_LIVE_MEMORY_SPACE_ID", "")
     )
+    parser.add_argument(
+        "--memory-owner-id", default=os.getenv("EIDOLON_AGENT_LIVE_MEMORY_OWNER_ID", "")
+    )
+    parser.add_argument(
+        "--memory-companion-id",
+        default=os.getenv("EIDOLON_AGENT_LIVE_MEMORY_COMPANION_ID", ""),
+    )
     parser.add_argument("--timeout-s", type=float, default=5.0)
     parser.add_argument("--memory-route-timeout-s", type=float, default=0.0)
     parser.add_argument("--memory-readback-timeout-s", type=float, default=30.0)
@@ -1211,16 +1018,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-admin-gateway", action="store_true")
     parser.add_argument("--no-memory", action="store_true")
     parser.add_argument("--no-memory-readback", action="store_true")
-    parser.add_argument("--provision-contract-owner", action="store_true")
-    parser.add_argument("--no-memory-supervisor-reconcile", action="store_true")
-    parser.add_argument(
-        "--memory-supervisor-reconcile-timeout-s",
-        type=float,
-        default=DEFAULT_MEMORY_SUPERVISOR_RECONCILE_TIMEOUT_S,
-    )
-    parser.add_argument("--keep-contract-owner", action="store_true")
-    parser.add_argument("--contract-owner-id", default="")
-    parser.add_argument("--contract-companion-id", default="")
+    parser.add_argument("--no-memory-cleanup", action="store_true")
     parser.add_argument("--product-acceptance", action="store_true")
     parser.add_argument(
         "--product-acceptance-work-dir", type=Path, default=Path("/tmp/eidolon-product-acceptance")
@@ -1240,16 +1038,12 @@ def main(argv: list[str] | None = None) -> int:
                 include_memory=not args.no_memory,
                 require_memory_readback=not args.no_memory_readback,
                 memory_space_id=args.memory_space_id or None,
+                memory_owner_id=args.memory_owner_id or None,
+                memory_companion_id=args.memory_companion_id or None,
+                require_memory_cleanup=not args.no_memory_cleanup,
                 timeout_s=args.timeout_s,
                 memory_route_timeout_s=args.memory_route_timeout_s,
                 memory_readback_timeout_s=args.memory_readback_timeout_s,
-                provision_contract_owner=args.provision_contract_owner,
-                cleanup_contract_owner=not args.keep_contract_owner,
-                reconcile_memory_supervisor=not args.no_memory_supervisor_reconcile,
-                memory_supervisor_reconcile_timeout_s=args.memory_supervisor_reconcile_timeout_s,
-                contract_owner_id=args.contract_owner_id
-                or f"owner_live_contract_{uuid4().hex[:8]}",
-                contract_companion_id=args.contract_companion_id or None,
                 run_product_acceptance=args.product_acceptance,
                 product_acceptance_work_dir=args.product_acceptance_work_dir,
                 product_acceptance_sqlite_path=args.sqlite_path,

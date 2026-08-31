@@ -23,13 +23,13 @@ async def test_live_memory_contract_mcp_tools_nats_and_optional_readback() -> No
             mode="live-memory-smoke",
             include_agent_http=False,
             include_agent_admin=False,
-            include_admin_gateway=False,
+            include_admin_gateway=True,
             include_memory=True,
-            require_memory_readback=(
-                os.environ.get("EIDOLON_AGENT_LIVE_MEMORY_READBACK") == "1"
-            ),
+            require_memory_readback=(os.environ.get("EIDOLON_AGENT_LIVE_MEMORY_READBACK") == "1"),
             dependency_unavailable_status="skipped",
             memory_space_id=os.environ.get("EIDOLON_AGENT_LIVE_MEMORY_SPACE_ID"),
+            memory_owner_id=os.environ.get("EIDOLON_AGENT_LIVE_MEMORY_OWNER_ID"),
+            memory_companion_id=os.environ.get("EIDOLON_AGENT_LIVE_MEMORY_COMPANION_ID"),
         )
     )
 
