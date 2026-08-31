@@ -456,6 +456,7 @@ async def _memory_contract_checks(
             checks.append(
                 await _memory_cleanup_check(
                     pool=pool,
+                    ops_session=ops_session,
                     memory_space_id=memory_space_id,
                     owner_id=owner_id,
                     companion_id=companion_id,
@@ -581,7 +582,11 @@ async def _probe_memory_ops_tools(
             details={"memory_space_id": memory_space_id},
         )
     advertised = sorted(tool_names)
-    missing = {"eidolon_memory_get_by_source_turn", "eidolon_memory_status"} - set(tool_names)
+    missing = {
+        "eidolon_memory_forget_source_event",
+        "eidolon_memory_get_by_source_turn",
+        "eidolon_memory_status",
+    } - set(tool_names)
     if missing:
         return session, _check(
             name="memory_ops_mcp_tools",
@@ -850,6 +855,7 @@ async def _memory_readback_check(
 async def _memory_cleanup_check(
     *,
     pool: McpClientPool,
+    ops_session: Any,
     memory_space_id: str,
     owner_id: str,
     companion_id: str,
@@ -868,74 +874,57 @@ async def _memory_cleanup_check(
             summary="cleanup disabled explicitly",
             details={"memory_space_id": memory_space_id, "marker": marker},
         )
-    if not cfg.admin_gateway_base:
-        return _check(
-            name="memory_marker_cleanup",
-            status="failed",
-            required=True,
-            started=started,
-            summary="admin_gateway_base is required for product-path cleanup",
-            details={"memory_space_id": memory_space_id, "marker": marker},
-        )
-
-    preview_url = _join_url(
-        cfg.admin_gateway_base,
-        "/api/internal/v1/management/memory/forget/preview",
-    )
-    confirm_url = _join_url(
-        cfg.admin_gateway_base,
-        "/api/internal/v1/management/memory/forget/confirm",
-    )
     details: dict[str, Any] = {
         "memory_space_id": memory_space_id,
         "marker": marker,
-        "preview_url": preview_url,
-        "confirm_url": confirm_url,
     }
-    try:
-        async with httpx.AsyncClient(
-            timeout=max(cfg.timeout_s, 10.0),
-            follow_redirects=True,
-            trust_env=False,
-        ) as client:
-            preview_response = await client.post(
-                preview_url,
-                params={"owner_id": owner_id},
-                json={"target": marker, "action": "delete"},
+    cleanup_deadline = time.perf_counter() + max(cfg.memory_readback_timeout_s, cfg.timeout_s)
+    cleanup: Any = None
+    cleanup_error: str | None = None
+    session = ops_session
+    while time.perf_counter() < cleanup_deadline:
+        remaining_s = cleanup_deadline - time.perf_counter()
+        wait_s = max(0.001, min(10.0, remaining_s))
+        try:
+            cleanup = await _call_mcp_tool_with_timeout(
+                session,
+                "eidolon_memory_forget_source_event",
+                {
+                    "source_event_id": marker,
+                    "wait_applied_seconds": wait_s,
+                },
+                timeout_s=max(cfg.timeout_s, wait_s + 2.0),
             )
-            details["preview_status_code"] = preview_response.status_code
-            if preview_response.status_code >= 400:
-                details["preview_body"] = preview_response.text[:500]
-                raise RuntimeError(f"forget preview returned HTTP {preview_response.status_code}")
-            preview = preview_response.json()
-            confirmation_token = str(preview.get("confirmation_token") or "").strip()
-            entries = preview.get("entries") or []
-            if preview.get("status") != "preview" or not confirmation_token or not entries:
-                details["preview_status"] = preview.get("status")
-                details["entry_count"] = len(preview.get("entries") or [])
-                raise RuntimeError("forget preview did not bind the marker")
-
-            confirm_response = await client.post(
-                confirm_url,
-                params={"owner_id": owner_id},
-                json={"confirmation_token": confirmation_token},
-            )
-            details["confirm_status_code"] = confirm_response.status_code
-            if confirm_response.status_code >= 400:
-                details["confirm_body"] = confirm_response.text[:500]
-                raise RuntimeError(f"forget confirm returned HTTP {confirm_response.status_code}")
-            confirmed = confirm_response.json()
-            details["confirm_status"] = confirmed.get("status")
-            details["deleted_entry_count"] = confirmed.get("entry_count")
-            if confirmed.get("status") != "applied":
-                raise RuntimeError("forget confirm was not applied")
-    except Exception as exc:
+            if not isinstance(cleanup, dict):
+                raise RuntimeError("source-event cleanup returned an invalid payload")
+            details["cleanup_status"] = cleanup.get("status")
+            details["cleanup_request_id"] = cleanup.get("request_id")
+            details["source_event_tombstoned"] = cleanup.get("source_event_tombstoned")
+            if (
+                cleanup.get("status") == "applied"
+                and cleanup.get("source_event_tombstoned") is True
+            ):
+                cleanup_error = None
+                break
+            cleanup_error = "source-event cleanup is not yet applied and tombstoned"
+        except Exception as exc:
+            cleanup_error = f"{type(exc).__name__}: {exc}"
+            await _drop_ops_mcp_session(pool, memory_space_id, session)
+            try:
+                session = await pool.write_session_for(memory_space_id)
+            except Exception as reconnect_exc:
+                cleanup_error = f"{type(reconnect_exc).__name__}: {reconnect_exc}"
+        await asyncio.sleep(
+            min(cfg.memory_readback_poll_s, max(0.0, cleanup_deadline - time.perf_counter()))
+        )
+    if cleanup_error is not None:
+        details["cleanup_error"] = cleanup_error
         return _check(
             name="memory_marker_cleanup",
             status="failed",
             required=True,
             started=started,
-            summary=f"{type(exc).__name__}: {exc}",
+            summary=cleanup_error,
             details=details,
         )
 
@@ -964,7 +953,7 @@ async def _memory_cleanup_check(
                     status="passed",
                     required=True,
                     started=started,
-                    summary="applied and no longer readable",
+                    summary="source event tombstoned and no longer readable",
                     details=details,
                 )
         except Exception as exc:

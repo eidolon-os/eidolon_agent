@@ -110,6 +110,7 @@ class _FakeOpsSession:
             {
                 "eidolon_memory_status",
                 "eidolon_memory_get_by_source_turn",
+                "eidolon_memory_forget_source_event",
             }
         )
 
@@ -420,43 +421,18 @@ async def test_live_local_contract_readback_unavailable_uses_dependency_policy()
     assert check.details["last_error"] == "mcp warming"
 
 
-async def test_memory_cleanup_uses_product_privacy_flow_and_proves_absence(
-    monkeypatch,
-) -> None:
-    class _Response:
-        def __init__(self, body: dict) -> None:
-            self.status_code = 200
-            self._body = body
-            self.text = str(body)
+async def test_memory_cleanup_uses_exact_source_event_and_proves_absence() -> None:
+    class _OpsSession:
+        calls: ClassVar[list[tuple[str, dict]]] = []
 
-        def json(self) -> dict:
-            return self._body
-
-    class _Client:
-        calls: ClassVar[list[tuple[str, dict, dict]]] = []
-        responses: ClassVar[list[_Response]] = [
-            _Response(
-                {
-                    "status": "preview",
-                    "entries": [{"entry_id": "drawer-canary"}],
-                    "confirmation_token": "opaque-secret-token",
-                }
-            ),
-            _Response({"status": "applied", "entry_count": 1}),
-        ]
-
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb) -> None:
-            return None
-
-        async def post(self, url: str, *, params: dict, json: dict):
-            self.calls.append((url, dict(params), dict(json)))
-            return self.responses.pop(0)
+        async def call_tool(self, name, arguments):
+            self.calls.append((name, dict(arguments)))
+            return {
+                "status": "applied",
+                "request_id": "cleanup-command",
+                "source_event_id": arguments["source_event_id"],
+                "source_event_tombstoned": True,
+            }
 
     class _GoneSession:
         async def call_tool(self, name, arguments):
@@ -466,9 +442,10 @@ async def test_memory_cleanup_uses_product_privacy_flow_and_proves_absence(
             assert arguments["context"]["companion_id"] == "companion_contract"
             return []
 
-    monkeypatch.setattr(live_local_contract.httpx, "AsyncClient", _Client)
+    ops = _OpsSession()
     check = await live_local_contract._memory_cleanup_check(
         pool=_StaticSessionPool(_GoneSession()),
+        ops_session=ops,
         memory_space_id="r_contract",
         owner_id="owner_contract",
         companion_id="companion_contract",
@@ -477,20 +454,60 @@ async def test_memory_cleanup_uses_product_privacy_flow_and_proves_absence(
     )
 
     assert check.status == "passed"
-    assert check.summary == "applied and no longer readable"
-    assert _Client.calls == [
+    assert check.summary == "source event tombstoned and no longer readable"
+    assert ops.calls == [
         (
-            "http://127.0.0.1:9000/api/internal/v1/management/memory/forget/preview",
-            {"owner_id": "owner_contract"},
-            {"target": "turn-canary", "action": "delete"},
-        ),
-        (
-            "http://127.0.0.1:9000/api/internal/v1/management/memory/forget/confirm",
-            {"owner_id": "owner_contract"},
-            {"confirmation_token": "opaque-secret-token"},
-        ),
+            "eidolon_memory_forget_source_event",
+            {"source_event_id": "turn-canary", "wait_applied_seconds": 10.0},
+        )
     ]
-    assert "confirmation_token" not in check.details
+    assert check.details["cleanup_request_id"] == "cleanup-command"
+    assert check.details["source_event_tombstoned"] is True
+
+
+async def test_memory_cleanup_retries_the_same_source_event_until_tombstoned() -> None:
+    class _OpsSession:
+        calls = 0
+
+        async def call_tool(self, name, arguments):
+            assert name == "eidolon_memory_forget_source_event"
+            assert arguments["source_event_id"] == "turn-canary"
+            self.calls += 1
+            if self.calls == 1:
+                return {
+                    "status": "accepted",
+                    "request_id": "cleanup-pending",
+                    "source_event_tombstoned": False,
+                }
+            return {
+                "status": "applied",
+                "request_id": "cleanup-retry",
+                "source_event_tombstoned": True,
+            }
+
+    class _GoneSession:
+        async def call_tool(self, name, arguments):
+            assert name == "eidolon_memory_search"
+            return []
+
+    ops = _OpsSession()
+    check = await live_local_contract._memory_cleanup_check(
+        pool=_StaticSessionPool(_GoneSession()),
+        ops_session=ops,
+        memory_space_id="r_contract",
+        owner_id="owner_contract",
+        companion_id="companion_contract",
+        marker="turn-canary",
+        cfg=LiveLocalContractConfig(
+            memory_readback_timeout_s=0.1,
+            memory_readback_poll_s=0.001,
+            timeout_s=0.01,
+        ),
+    )
+
+    assert check.status == "passed"
+    assert ops.calls == 2
+    assert check.details["cleanup_request_id"] == "cleanup-retry"
 
 
 async def test_live_memory_contract_requires_explicit_scope_identity() -> None:
