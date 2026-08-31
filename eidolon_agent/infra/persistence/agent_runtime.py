@@ -69,7 +69,7 @@ def _emit_job_transition(session, *, before: LongTaskStatus, after: LongTaskReco
 
 def build_agent_history_hydrator(runtime_store: AgentRuntimeStore):
     async def _hydrate(*, conversation_id: str, window: int) -> list[ChatMessage]:
-        async with runtime_store.session_factory() as session:
+        async with runtime_store.read_session_factory() as session:
             pairs = (
                 await session.execute(
                     select(MessageRow, TurnRow.seq)
