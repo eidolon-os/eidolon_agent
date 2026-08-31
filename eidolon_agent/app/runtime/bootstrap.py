@@ -64,7 +64,6 @@ from eidolon_agent.infra.long_tasks.mementos import MementosWorkerConfig
 from eidolon_agent.infra.memory import EidolonMemoryPort
 from eidolon_agent.infra.memory.discovery import build_initial_memory_routes
 from eidolon_agent.infra.memory.mcp_client import McpClientPool
-from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
 from eidolon_agent.infra.memory.null_port import NullMemoryPort
 from eidolon_agent.infra.observability import configure_logging
 from eidolon_agent.infra.observability.live_turns import LiveTurnBoard
@@ -197,11 +196,7 @@ async def build_application(
 
         # 4. Memory MCP probe --------------------------------------------------
         mem_pool = McpClientPool(routes=memory_routes)
-        mem_pub = MemoryNatsPublisher(event_bus=container.event_bus, routes=memory_routes)
-        memory_port = EidolonMemoryPort(
-            pool=mem_pool,
-            publisher=mem_pub,
-        )
+        memory_port = EidolonMemoryPort(pool=mem_pool)
         container.memory_port = memory_port
         if settings.runtime.warmup_enabled and settings.memory.startup_warm_enabled:
             try:

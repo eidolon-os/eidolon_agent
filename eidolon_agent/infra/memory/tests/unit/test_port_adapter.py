@@ -1,9 +1,4 @@
-"""EidolonMemoryPort — read via MCP pool, write via NATS publisher.
-
-The port composes two collaborators (``McpClientPool`` + ``MemoryNatsPublisher``)
-that are themselves tested elsewhere. Here we stub them and verify the port's
-own behaviour: argument passing, timeout, exception swallowing, hit decoding.
-"""
+"""EidolonMemoryPort read behavior over the MCP session pool."""
 
 from __future__ import annotations
 
@@ -18,7 +13,7 @@ from eidolon_agent.infra.memory.port_adapter import EidolonMemoryPort, _records_
 pytestmark = pytest.mark.unit
 
 
-def _port(*, session_call=None, session_close=None, pub_methods=None):
+def _port(*, session_call=None, session_close=None):
     session = MagicMock()
     session.call_tool = session_call or AsyncMock(return_value={})
     session.close = session_close or AsyncMock()
@@ -31,12 +26,7 @@ def _port(*, session_call=None, session_close=None, pub_methods=None):
     pool.health = AsyncMock(return_value=True)
     pool.close_all = AsyncMock()
 
-    pub = MagicMock()
-    if pub_methods is None:
-        pub_methods = {}
-    pub.publish_turn = pub_methods.get("publish_turn", AsyncMock())
-
-    return EidolonMemoryPort(pool=pool, publisher=pub), session, pool, pub
+    return EidolonMemoryPort(pool=pool), session, pool
 
 
 # ---- _records_to_hits decoder ---------------------------------------------
@@ -185,7 +175,7 @@ async def test_recall_context_preserves_backend_degraded_state() -> None:
 
 async def test_recall_context_returns_degraded_on_exception() -> None:
     call = AsyncMock(side_effect=RuntimeError("upstream"))
-    port, _, pool, _ = _port(session_call=call)
+    port, _, pool = _port(session_call=call)
     result = await port.recall_context("owner-1", "x", memory_realm_id="realm-1", plan=_plan())
     ctx, hits, degraded = result.context, result.hits, result.degraded
     assert ctx == ""
@@ -202,7 +192,7 @@ async def test_recall_context_timeout_does_not_close_the_shared_read_session() -
         await asyncio.sleep(10)
         return {}
 
-    port, _, pool, _ = _port(session_call=_slow)
+    port, _, pool = _port(session_call=_slow)
     result = await port.recall_context(
         "owner-1",
         "x",
@@ -226,7 +216,7 @@ async def test_recall_context_drops_session_on_memory_unavailable_call() -> None
             details={"reason": "memory_stream_closed"},
         )
     )
-    port, session, pool, _ = _port(session_call=call)
+    port, session, pool = _port(session_call=call)
     result = await port.recall_context("owner-1", "x", memory_realm_id="realm-1", plan=_plan())
 
     ctx, hits, degraded = result.context, result.hits, result.degraded
@@ -259,7 +249,7 @@ async def test_recall_context_retries_once_after_stale_session_unavailable() -> 
             ],
         }
     )
-    port, _, pool, _ = _port()
+    port, _, pool = _port()
     pool.session_for = AsyncMock(side_effect=[stale_session, fresh_session])
 
     result = await port.recall_context(
@@ -279,7 +269,7 @@ async def test_recall_context_retries_once_after_stale_session_unavailable() -> 
 
 
 async def test_recall_context_returns_route_reason_on_unavailable_session() -> None:
-    port, _, pool, _ = _port()
+    port, _, pool = _port()
     pool.session_for = AsyncMock(
         side_effect=MemoryUnavailableError(
             "no route",
@@ -341,7 +331,7 @@ async def test_active_commitments_are_realm_bound_bounded_and_active_only() -> N
             "commitments": records,
         }
     )
-    port, _, pool, _ = _port(session_call=call)
+    port, _, pool = _port(session_call=call)
 
     result = await port.read_active_commitments(
         "owner-1",
@@ -382,45 +372,16 @@ async def test_active_commitments_fail_closed_on_response_realm_mismatch() -> No
     assert result.degraded_reason == "realm_mismatch"
 
 
-# ---- write_turn / forget --------------------------------------------------
-
-
-async def test_write_turn_delegates_to_publisher() -> None:
-    port, _, _, pub = _port()
-    await port.write_turn(
-        "owner-1",
-        "companion-1",
-        "realm-1",
-        "device-1",
-        "s1",
-        "turn-1",
-        "hi",
-        "hello",
-        metadata={"k": "v"},
-    )
-    pub.publish_turn.assert_awaited_once_with(
-        owner_id="owner-1",
-        companion_id="companion-1",
-        memory_realm_id="realm-1",
-        device_id="device-1",
-        session_id="s1",
-        turn_id="turn-1",
-        owner_text="hi",
-        assistant_text="hello",
-        metadata={"k": "v"},
-    )
-
-
 # ---- health / close -------------------------------------------------------
 
 
 async def test_health_delegates_to_pool() -> None:
-    port, _, pool, _ = _port()
+    port, _, pool = _port()
     assert await port.health() is True
     pool.health.assert_awaited_once()
 
 
 async def test_close_calls_pool_close_all() -> None:
-    port, _, pool, _ = _port()
+    port, _, pool = _port()
     await port.close()
     pool.close_all.assert_awaited_once()

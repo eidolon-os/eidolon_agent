@@ -158,7 +158,7 @@ eidolon_agent/
 │   │                  #   + Alembic migrations + UoW
 │   ├── events/        #   NatsEventBus + NatsKVStore (生产)
 │   │                  #   InMemoryEventBus + InMemoryKVStore (测试)
-│   ├── memory/        #   McpClientPool + MemoryNatsPublisher
+│   ├── memory/        #   McpClientPool（读）；写由 HistoryFanout + durable outbox 负责
 │   │                  #   + MemoryRoutingTable + EidolonMemoryPort
 │   ├── system_data/   #   Companion Runtime Authority HTTP adapter
 │   └── observability/ #   loguru 配置（stdlib 桥接 + 三方静默）

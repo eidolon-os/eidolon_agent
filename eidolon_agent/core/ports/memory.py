@@ -14,7 +14,12 @@ from eidolon_agent.core.types.memory import (
 
 @runtime_checkable
 class MemoryPort(Protocol):
-    """Combined read (MCP) + write (NATS) interface to eidolon-memory."""
+    """Read-only hot-path interface to eidolon-memory.
+
+    Completed turns are delivered once through ``HistoryFanout`` and its
+    durable outbox. Keeping writes off this port prevents a second producer
+    from competing with that lifecycle.
+    """
 
     async def recall_context(
         self,
@@ -43,22 +48,6 @@ class MemoryPort(Protocol):
         timeout_s: float = 0.2,
     ) -> ActiveCommitmentReadResult:
         """Read a bounded current Commitment set from the caller's Realm."""
-        ...
-
-    async def write_turn(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        device_id: str | None,
-        session_id: str | None,
-        turn_id: str,
-        owner_text: str,
-        assistant_text: str,
-        *,
-        metadata: dict | None = None,
-    ) -> None:
-        """Publish a ConversationTurnPayload to NATS for steward ingestion."""
         ...
 
     async def health(self) -> bool:

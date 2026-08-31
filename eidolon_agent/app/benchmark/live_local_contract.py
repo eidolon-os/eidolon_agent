@@ -18,7 +18,7 @@ import json
 import os
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote
@@ -27,11 +27,11 @@ from uuid import uuid4
 import httpx
 
 from eidolon_agent.config import load_settings
-from eidolon_agent.core.errors import MemoryUnavailableError, NatsUnavailableError
+from eidolon_agent.core.errors import MemoryUnavailableError
+from eidolon_agent.domain.history import HistoryFanout
 from eidolon_agent.infra.events import NatsEventBus
 from eidolon_agent.infra.memory import (
     McpClientPool,
-    MemoryNatsPublisher,
     build_initial_memory_routes,
 )
 
@@ -174,9 +174,8 @@ async def run_live_local_contract(
                 checks.append(await _memory_supervisor_reconcile_check(cfg, workspace))
 
         if cfg.include_memory:
-            selected_memory_space_id = (
-                cfg.memory_space_id
-                or (workspace.memory_realm_id if workspace is not None else None)
+            selected_memory_space_id = cfg.memory_space_id or (
+                workspace.memory_realm_id if workspace is not None else None
             )
             checks.extend(
                 await _memory_contract_checks(
@@ -207,7 +206,7 @@ def _build_report(
     passed = not failed_required and not skipped_required
     return LiveLocalContractReport(
         schema_version="eidolon_agent.live_local_contract_report.v1",
-        generated_at=datetime.now(timezone.utc).isoformat(),
+        generated_at=datetime.now(UTC).isoformat(),
         mode=cfg.mode,
         passed=passed,
         summary={
@@ -361,8 +360,7 @@ async def _memory_contract_checks(
                 "memory_space_ids": memory_space_ids,
             }
             if memory_space_ids and (
-                not selected_memory_space_id
-                or selected_memory_space_id in memory_space_ids
+                not selected_memory_space_id or selected_memory_space_id in memory_space_ids
             ):
                 break
             if time.perf_counter() >= deadline:
@@ -479,9 +477,7 @@ async def _provision_contract_workspace(
         ), None
 
     owner_id = cfg.contract_owner_id.strip()
-    companion_id = (
-        cfg.contract_companion_id or f"c_{owner_id.removeprefix('owner_')}"
-    ).strip()
+    companion_id = (cfg.contract_companion_id or f"c_{owner_id.removeprefix('owner_')}").strip()
     payload = {
         "owner_id": owner_id,
         "owner_display_name": "Live Contract Owner",
@@ -913,31 +909,24 @@ async def _memory_publish_check(
 ) -> tuple[ContractCheck, str]:
     started = time.perf_counter()
     turn_id = f"live-local-contract-{uuid4().hex}"
-    publisher = MemoryNatsPublisher(event_bus=bus, routes=routes)
+    fanout = HistoryFanout(event_bus=bus, memory_routes=routes)
     try:
-        await publisher.publish_turn(
+        status = await fanout.publish_turn(
             owner_id="live-local-contract",
             companion_id="live-local-contract",
             memory_realm_id=memory_space_id,
             device_id=None,
             session_id="live-local-contract",
             turn_id=turn_id,
-            owner_text=_memory_contract_owner_text(turn_id),
+            user_text=_memory_contract_owner_text(turn_id),
             assistant_text="记住了：你偏好把重要的技术验收记录写成短清单。",
+            timestamp_iso=datetime.now(UTC).isoformat(),
+            trace_id=turn_id,
             metadata={
                 "source": "eidolon-agent-live-local-contract",
                 "purpose": "memory-contract-readback",
             },
         )
-    except NatsUnavailableError as exc:
-        return _check(
-            name="memory_nats_publish",
-            status=cfg.dependency_unavailable_status,
-            required=True,
-            started=started,
-            summary=str(exc),
-            details={"memory_space_id": memory_space_id, "turn_id": turn_id},
-        ), turn_id
     except Exception as exc:
         return _check(
             name="memory_nats_publish",
@@ -947,13 +936,30 @@ async def _memory_publish_check(
             summary=f"{type(exc).__name__}: {exc}",
             details={"memory_space_id": memory_space_id, "turn_id": turn_id},
         ), turn_id
+    if status.state != "published":
+        return _check(
+            name="memory_nats_publish",
+            status=cfg.dependency_unavailable_status,
+            required=True,
+            started=started,
+            summary=status.error or status.state,
+            details={
+                "memory_space_id": memory_space_id,
+                "turn_id": turn_id,
+                "fanout_state": status.state,
+            },
+        ), turn_id
     return _check(
         name="memory_nats_publish",
         status="passed",
         required=True,
         started=started,
         summary="ok",
-        details={"memory_space_id": memory_space_id, "turn_id": turn_id},
+        details={
+            "memory_space_id": memory_space_id,
+            "turn_id": turn_id,
+            "fanout_state": status.state,
+        },
     ), turn_id
 
 
@@ -1002,7 +1008,7 @@ async def _memory_readback_check(
                 {"source_turn_id": turn_id, "include_private": True},
                 timeout_s=max(0.001, min(cfg.timeout_s, remaining_s)),
             )
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             last_error = f"{type(exc).__name__}: {exc}"
             last_dependency_unavailable = False
             await _drop_mcp_session(pool, memory_space_id, session)
@@ -1086,12 +1092,12 @@ async def _call_mcp_tool_with_timeout(
             await task
         except BaseException:
             pass
-        raise asyncio.TimeoutError(f"MCP call cancelled before completion: {exc}") from exc
+        raise TimeoutError(f"MCP call cancelled before completion: {exc}") from exc
     if task in done:
         try:
             return task.result()
         except asyncio.CancelledError as exc:
-            raise asyncio.TimeoutError(f"MCP call cancelled before completion: {exc}") from exc
+            raise TimeoutError(f"MCP call cancelled before completion: {exc}") from exc
 
     task.cancel()
     try:
@@ -1100,7 +1106,7 @@ async def _call_mcp_tool_with_timeout(
         pass
     except Exception:
         pass
-    raise asyncio.TimeoutError()
+    raise TimeoutError()
 
 
 async def _drop_mcp_session(
@@ -1195,7 +1201,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--agent-http", default="http://127.0.0.1:8180")
     parser.add_argument("--agent-admin", default="http://127.0.0.1:8081")
     parser.add_argument("--admin-gateway", default="http://127.0.0.1:9000")
-    parser.add_argument("--memory-space-id", default=os.getenv("EIDOLON_AGENT_LIVE_MEMORY_SPACE_ID", ""))
+    parser.add_argument(
+        "--memory-space-id", default=os.getenv("EIDOLON_AGENT_LIVE_MEMORY_SPACE_ID", "")
+    )
     parser.add_argument("--timeout-s", type=float, default=5.0)
     parser.add_argument("--memory-route-timeout-s", type=float, default=0.0)
     parser.add_argument("--memory-readback-timeout-s", type=float, default=30.0)
@@ -1214,7 +1222,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--contract-owner-id", default="")
     parser.add_argument("--contract-companion-id", default="")
     parser.add_argument("--product-acceptance", action="store_true")
-    parser.add_argument("--product-acceptance-work-dir", type=Path, default=Path("/tmp/eidolon-product-acceptance"))
+    parser.add_argument(
+        "--product-acceptance-work-dir", type=Path, default=Path("/tmp/eidolon-product-acceptance")
+    )
     parser.add_argument("--sqlite-path", type=Path, default=None)
     args = parser.parse_args(argv)
 
@@ -1237,7 +1247,8 @@ def main(argv: list[str] | None = None) -> int:
                 cleanup_contract_owner=not args.keep_contract_owner,
                 reconcile_memory_supervisor=not args.no_memory_supervisor_reconcile,
                 memory_supervisor_reconcile_timeout_s=args.memory_supervisor_reconcile_timeout_s,
-                contract_owner_id=args.contract_owner_id or f"owner_live_contract_{uuid4().hex[:8]}",
+                contract_owner_id=args.contract_owner_id
+                or f"owner_live_contract_{uuid4().hex[:8]}",
                 contract_companion_id=args.contract_companion_id or None,
                 run_product_acceptance=args.product_acceptance,
                 product_acceptance_work_dir=args.product_acceptance_work_dir,
