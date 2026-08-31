@@ -134,7 +134,7 @@ async def test_it_reports_only_what_the_stream_carried() -> None:
 
     async def stream() -> AsyncIterator[TurnEvent]:
         yield TurnEvent(
-            turn_id="turn-1", seq=1, kind=TurnEventKind.TOOL_CALL, data={"name": "memory_search"}, ts=0.0
+            turn_id="turn-1", seq=1, kind=TurnEventKind.TOOL_CALL, data={"name": "get_weather"}, ts=0.0
         )
         yield TurnEvent.delta("turn-1", 2, "你", 0.0)
         captured.append(board.snapshot()[0])
@@ -153,7 +153,7 @@ async def test_it_reports_only_what_the_stream_carried() -> None:
     # guess.
     assert (view.tools.count, view.tools.completed) == (1, 0)
     assert view.tools.running is True
-    assert view.tools.names == ("memory_search",)
+    assert view.tools.names == ("get_weather",)
     # The answer has started. This is the one internal boundary the stream
     # exposes, and the only timing this board ever claims.
     assert view.latency_first_delta_ms is not None

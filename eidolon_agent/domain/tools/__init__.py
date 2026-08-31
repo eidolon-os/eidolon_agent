@@ -4,7 +4,6 @@ from eidolon_agent.domain.tools.builtin import (
     EmitEventTool,
     GetTimeTool,
     GetWeatherTool,
-    MemorySearchTool,
     SubmitLongTaskTool,
 )
 from eidolon_agent.domain.tools.dispatcher import ToolDispatcher
@@ -14,7 +13,6 @@ __all__ = [
     "EmitEventTool",
     "GetTimeTool",
     "GetWeatherTool",
-    "MemorySearchTool",
     "SubmitLongTaskTool",
     "ToolDispatcher",
     "ToolRegistry",

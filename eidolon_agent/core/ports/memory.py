@@ -7,33 +7,14 @@ from typing import Protocol, runtime_checkable
 
 from eidolon_agent.core.types.memory import (
     ActiveCommitmentReadResult,
-    MemoryHit,
     MemoryQueryPlan,
     MemoryRecallResult,
-    MemoryScope,
 )
 
 
 @runtime_checkable
 class MemoryPort(Protocol):
     """Combined read (MCP) + write (NATS) interface to eidolon-memory."""
-
-    async def search(
-        self,
-        owner_id: str | None,
-        query: str,
-        *,
-        memory_realm_id: str,
-        companion_id: str | None = None,
-        device_id: str | None = None,
-        top_k: int = 5,
-        scope: MemoryScope = MemoryScope.ALL,
-        voice: bool = True,
-        timeout_s: float = 0.2,
-        session_id: str | None = None,
-    ) -> list[MemoryHit]:
-        """Vector + KG fused retrieval. Returns [] on soft-timeout."""
-        ...
 
     async def recall_context(
         self,

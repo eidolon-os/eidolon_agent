@@ -93,6 +93,12 @@ async def test_standalone_builds_with_inprocess_fakes(tmp_path, monkeypatch) -> 
         assert container.agent_registry is not None
         assert container.grpc_server is not None
         assert container.kv_buckets  # in-memory KV buckets provisioned
+        assert container.tool_registry.names() == [
+            "delegate_to_coworker",
+            "emit_event",
+            "get_time",
+            "get_weather",
+        ]
 
 
 async def test_standalone_runs_a_full_turn_offline(tmp_path, monkeypatch) -> None:

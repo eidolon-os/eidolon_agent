@@ -115,7 +115,6 @@ class MemorySettings(BaseModel):
     discovery_timeout_s: float = 2.0
     endpoints: list[MemoryEndpoint] = Field(default_factory=list)
     recall_timeout_s: float = Field(default=0.5, gt=0.0, le=10.0)
-    explicit_recall_timeout_s: float = Field(default=4.0, gt=0.0, le=10.0)
 
 
 class LLMModelConfig(BaseModel):

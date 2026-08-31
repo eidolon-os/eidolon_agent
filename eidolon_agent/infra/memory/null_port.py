@@ -10,10 +10,8 @@ from __future__ import annotations
 
 from eidolon_agent.core.types.memory import (
     ActiveCommitmentReadResult,
-    MemoryHit,
     MemoryQueryPlan,
     MemoryRecallResult,
-    MemoryScope,
 )
 
 _DEGRADED_REASON = "standalone_no_memory_service"
@@ -21,22 +19,6 @@ _DEGRADED_REASON = "standalone_no_memory_service"
 
 class NullMemoryPort:
     """No-op MemoryPort: empty recall, dropped writes, always healthy."""
-
-    async def search(
-        self,
-        owner_id: str | None,
-        query: str,
-        *,
-        memory_realm_id: str,
-        companion_id: str | None = None,
-        device_id: str | None = None,
-        top_k: int = 5,
-        scope: MemoryScope = MemoryScope.ALL,
-        voice: bool = True,
-        timeout_s: float = 0.2,
-        session_id: str | None = None,
-    ) -> list[MemoryHit]:
-        return []
 
     async def recall_context(
         self,

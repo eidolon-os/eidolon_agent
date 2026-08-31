@@ -308,6 +308,7 @@ async def test_memory_recall_appended_when_port_present() -> None:
     assert "[RETRIEVED MEMORY]" in msgs[0].content
     assert "authority=retrieved_memory" in msgs[0].content
     assert "actionability=may_use_as_reference" in msgs[0].content
+    assert "Do not narrate retrieval, storage, search, tools" in msgs[0].content
     assert "prior_episode_summary" in msgs[0].content
     assert memory.calls and memory.calls[0]["query"] == "帮我回忆一下"
 
@@ -473,7 +474,7 @@ async def test_all_natural_queries_share_one_recall_contract(
     assert ti.metadata["memory_trace"]["timeout_ms"] == 500
     assert ti.metadata["memory_recall_query"]["source"] in {
         "current_only",
-        "current_plus_recent_history",
+        "current_then_history_fallback",
     }
 
 
@@ -534,7 +535,17 @@ async def test_memory_recall_query_includes_recent_history_for_anaphora() -> Non
             created_at=_now(),
         ),
     )
-    memory = _StubMemory(formatted="铁锤是一只边境牧羊犬")
+    class _AnaphoraMemory(_StubMemory):
+        async def recall_context(self, **kwargs):
+            self.calls.append(kwargs)
+            if "铁锤" not in kwargs["query"]:
+                return MemoryRecallResult()
+            return MemoryRecallResult(
+                context="铁锤是一只边境牧羊犬",
+                hits=[SimpleNamespace(id="dog-hit")],
+            )
+
+    memory = _AnaphoraMemory()
     ti = make_turn_input("我想了解它是什么品种。")
     compiler = ContextCompiler(
         personas_service=_StubPersonas(),
@@ -545,10 +556,50 @@ async def test_memory_recall_query_includes_recent_history_for_anaphora() -> Non
 
     await compiler.compile(ti)
 
-    query = memory.calls[0]["query"]
+    assert memory.calls[0]["query"] == "我想了解它是什么品种。"
+    query = memory.calls[1]["query"]
     assert "铁锤" in query
     assert "我想了解它是什么品种" in query
-    assert ti.metadata["memory_recall_query"]["source"] == "current_plus_recent_history"
+    assert ti.metadata["memory_recall_query"]["source"] == "current_then_history_fallback"
+    assert ti.metadata["memory_recall_query"]["attempted_queries"] == [
+        memory.calls[0]["query"],
+        memory.calls[1]["query"],
+    ]
+
+
+async def test_direct_query_hit_is_not_polluted_by_noisy_recent_history() -> None:
+    history = HistoryManager()
+    for role, content in (
+        (MessageRole.USER, "因为2号昨天。"),
+        (MessageRole.ASSISTANT, "我不太确定你指什么。"),
+    ):
+        await history.append(
+            conversation_id="c1",
+            message=ChatMessage(
+                id=uuid.uuid4().hex,
+                role=role,
+                content=content,
+                created_at=_now(),
+            ),
+        )
+    memory = _StubMemory(formatted="书房绿植名为青蓝9号")
+    ti = make_turn_input("书房那盆绿植叫什么名字？")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=history,
+        memory_port=memory,
+        memory_timeout_s=0.5,
+    )
+
+    messages = await compiler.compile(ti)
+
+    assert [call["query"] for call in memory.calls] == ["书房那盆绿植叫什么名字？"]
+    assert ti.metadata["memory_recall_query"]["source"] == "current_then_history_fallback"
+    assert ti.metadata["memory_recall_query"]["attempted_queries"] == [
+        "书房那盆绿植叫什么名字？"
+    ]
+    assert "书房绿植名为青蓝9号" in messages[0].content
 
 
 async def test_memory_failure_does_not_break_turn() -> None:
@@ -908,7 +959,7 @@ async def test_budget_keeps_recent_history_before_older_history() -> None:
         history_manager=history,
         # Leave room for exactly one 32-token history item after the current
         # persona, harness policy, and request segments.
-        context_budget_tokens=282,
+        context_budget_tokens=304,
     )
 
     ti = make_turn_input("now")

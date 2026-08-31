@@ -827,10 +827,8 @@ async def _probe_memory_tools(
             details={"memory_space_id": memory_space_id},
         )
     advertised = sorted(tool_names)
-    required_any = {"eidolon_memory_recall_context", "eidolon_memory_search"}
-    missing_any = not required_any.intersection(tool_names)
-    missing = {"eidolon_memory_status"} - set(tool_names)
-    if missing_any or missing:
+    missing = {"eidolon_memory_recall_context", "eidolon_memory_status"} - set(tool_names)
+    if missing:
         return session, _check(
             name="memory_mcp_tools",
             status="failed",
@@ -841,8 +839,6 @@ async def _probe_memory_tools(
                 "memory_space_id": memory_space_id,
                 "tool_names": advertised,
                 "missing": sorted(missing),
-                "required_any": sorted(required_any),
-                "missing_required_any": missing_any,
             },
         )
     return session, _check(

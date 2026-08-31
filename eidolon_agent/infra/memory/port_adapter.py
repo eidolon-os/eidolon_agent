@@ -14,7 +14,6 @@ from eidolon_agent.core.types.memory import (
     MemoryKind,
     MemoryQueryPlan,
     MemoryRecallResult,
-    MemoryScope,
 )
 from eidolon_agent.core.types.turn_context import build_memory_actor_context
 from eidolon_agent.infra.memory.mcp_client import McpClientPool
@@ -34,71 +33,6 @@ class EidolonMemoryPort:
     ) -> None:
         self._pool = pool
         self._pub = publisher
-
-    async def search(
-        self,
-        owner_id: str | None,
-        query: str,
-        *,
-        memory_realm_id: str,
-        top_k: int = 5,
-        scope: MemoryScope = MemoryScope.ALL,
-        voice: bool = True,
-        timeout_s: float = 0.2,
-        companion_id: str | None = None,
-        device_id: str | None = None,
-        session_id: str | None = None,
-    ) -> list[MemoryHit]:
-        ctx = build_memory_actor_context(
-            owner_id=owner_id,
-            companion_id=companion_id,
-            memory_realm_id=memory_realm_id,
-            device_id=device_id,
-            session_id=session_id,
-        )
-        memory_space_id = ctx.memory_space_id
-        deadline = asyncio.get_running_loop().time() + timeout_s
-        for attempt in range(2):
-            try:
-                session = await self._pool.session_for(memory_space_id)
-            except MemoryUnavailableError:
-                _log.warning("memory search unavailable for memory_space=%s", memory_space_id)
-                return []
-            try:
-                raw = await asyncio.wait_for(
-                    session.call_tool(
-                        "eidolon_memory_search",
-                        {
-                            "query": query,
-                            "context": ctx.model_dump(mode="json"),
-                            "top_k": top_k,
-                        },
-                    ),
-                    timeout=_remaining_timeout(deadline),
-                )
-                return _records_to_hits(raw.get("records") or [])
-            except TimeoutError:
-                _log.warning("memory search timed out for memory_space=%s", memory_space_id)
-                # The budget belongs to this request, not to the shared MCP
-                # transport. Closing the Realm session here cancels unrelated
-                # reads already multiplexed over it (recall and commitment
-                # hydration commonly run together). Transport failures below
-                # still rotate the session; an ordinary request timeout does not.
-                return []
-            except MemoryUnavailableError:
-                _log.warning(
-                    "memory search unavailable for memory_space=%s attempt=%d",
-                    memory_space_id,
-                    attempt + 1,
-                )
-                await self._pool.drop_session(memory_space_id, session=session)
-                if attempt == 0 and _remaining_timeout(deadline) > 0:
-                    continue
-                return []
-            except Exception:
-                _log.exception("memory search failed for memory_space=%s", memory_space_id)
-                return []
-        return []
 
     async def _recall_context_once(
         self,

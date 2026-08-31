@@ -6,14 +6,12 @@ import asyncio
 
 import pytest
 
-from eidolon_agent.core.types.memory import MemoryHit, MemoryKind
 from eidolon_agent.core.types.tool import ToolCall
 from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
 from eidolon_agent.domain.tools.builtin import (
     EmitEventTool,
     GetTimeTool,
     GetWeatherTool,
-    MemorySearchTool,
 )
 
 pytestmark = pytest.mark.functional
@@ -91,76 +89,3 @@ async def test_get_weather_uses_injected_fetcher(tool_ctx) -> None:
 
     assert res.ok
     assert res.content == {"location": "杭州", "lang": "zh", "temperature": 26}
-
-
-async def test_memory_search_uses_memory_port(tool_ctx) -> None:
-    memory = _FakeMemoryPort()
-    reg = ToolRegistry()
-    reg.register(MemorySearchTool(memory))
-    disp = ToolDispatcher(reg)
-
-    [search] = await disp.dispatch_batch(
-        [_call("memory_search", {"query": "乌龙茶", "top_k": 2, "scope": "semantic"})],
-        ctx=tool_ctx,
-    )
-    assert search.ok
-    assert search.content["records"][0]["content"] == "用户喜欢乌龙茶"
-    assert memory.search_calls[0]["scope"] == "semantic"
-    assert memory.search_calls[0]["companion_id"] == "companion-1"
-    assert memory.search_calls[0]["memory_realm_id"] == "realm-1"
-    assert memory.search_calls[0]["device_id"] == "device-1"
-
-
-async def test_memory_tool_without_port_returns_error(tool_ctx) -> None:
-    reg = ToolRegistry()
-    reg.register(MemorySearchTool(None))
-
-    [res] = await ToolDispatcher(reg).dispatch_batch(
-        [_call("memory_search", {"query": "x"})],
-        ctx=tool_ctx,
-    )
-
-    assert res.ok is False
-    assert res.error_code == "memory_port_unavailable"
-
-
-class _FakeMemoryPort:
-    def __init__(self) -> None:
-        self.search_calls: list[dict] = []
-
-    async def search(
-        self,
-        owner_id,
-        query,
-        *,
-        companion_id,
-        memory_realm_id,
-        device_id,
-        top_k=5,
-        scope=None,
-        voice=True,
-        timeout_s=0.2,
-        session_id="default",
-    ):
-        self.search_calls.append(
-            {
-                "owner_id": owner_id,
-                "companion_id": companion_id,
-                "memory_realm_id": memory_realm_id,
-                "device_id": device_id,
-                "query": query,
-                "top_k": top_k,
-                "scope": getattr(scope, "value", scope),
-                "voice": voice,
-                "timeout_s": timeout_s,
-                "session_id": session_id,
-            }
-        )
-        return [
-            MemoryHit(
-                id="m1",
-                content="用户喜欢乌龙茶",
-                kind=MemoryKind.PREFERENCE,
-                similarity=0.91,
-            )
-        ]
