@@ -2,8 +2,8 @@
 
 Used by the standalone runtime profile (and available as a degraded-mode
 fallback): recall always reports degraded with no hits so the turn engine
-keeps talking, and every write is a no-op. Satisfies the full MemoryPort
-protocol so the brain can run end to end with no memory service.
+keeps talking. Completed-turn delivery remains the responsibility of
+``HistoryFanout`` rather than this read port.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ _DEGRADED_REASON = "standalone_no_memory_service"
 
 
 class NullMemoryPort:
-    """No-op MemoryPort: empty recall, dropped writes, always healthy."""
+    """No-op MemoryPort: empty recall, always healthy."""
 
     async def recall_context(
         self,
@@ -51,21 +51,6 @@ class NullMemoryPort:
             degraded=True,
             degraded_reason=_DEGRADED_REASON,
         )
-
-    async def write_turn(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        device_id: str | None,
-        session_id: str | None,
-        turn_id: str,
-        owner_text: str,
-        assistant_text: str,
-        *,
-        metadata: dict | None = None,
-    ) -> str:
-        return ""
 
     async def health(self) -> bool:
         return True

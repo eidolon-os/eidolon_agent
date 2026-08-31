@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
+from eidolon_memory_contracts import unwrap_memory_payload
 
 from eidolon_agent.app.benchmark import live_local_contract
 from eidolon_agent.app.benchmark.live_local_contract import (
@@ -193,6 +194,7 @@ class _FakePool:
 
 class _FakeBus:
     closed = False
+    published: ClassVar[list[tuple[object, bool]]] = []
 
     def __init__(self, url: str, *, creds_path=None) -> None:
         self.url = url
@@ -201,16 +203,8 @@ class _FakeBus:
     async def close(self) -> None:
         self.closed = True
 
-
-class _FakePublisher:
-    published: ClassVar[list[dict]] = []
-
-    def __init__(self, *, event_bus, routes) -> None:
-        self.event_bus = event_bus
-        self.routes = routes
-
-    async def publish_turn(self, **kwargs) -> None:
-        self.published.append(kwargs)
+    async def publish(self, event, *, persistent=False) -> None:
+        self.published.append((event, persistent))
 
 
 class _StaticSessionPool:
@@ -251,7 +245,7 @@ async def test_live_local_contract_memory_publish_and_readback(monkeypatch) -> N
     )
     monkeypatch.setattr(live_local_contract, "McpClientPool", _FakePool)
     monkeypatch.setattr(live_local_contract, "NatsEventBus", _FakeBus)
-    monkeypatch.setattr(live_local_contract, "MemoryNatsPublisher", _FakePublisher)
+    _FakeBus.published.clear()
 
     report = await run_live_local_contract(
         LiveLocalContractConfig(
@@ -273,13 +267,21 @@ async def test_live_local_contract_memory_publish_and_readback(monkeypatch) -> N
         "memory_nats_readback",
     ]
     assert all(check.status == "passed" for check in report.checks)
-    assert _FakePublisher.published
-    published = _FakePublisher.published[-1]
-    assert published["memory_realm_id"] == "r_contract"
-    assert "Acquired" in published["owner_text"]
-    assert published["turn_id"] in published["owner_text"]
+    assert _FakeBus.published
+    event, persistent = _FakeBus.published[-1]
+    assert persistent is True
+    published = unwrap_memory_payload(event.payload)
+    assert published["context"]["memory_realm_id"] == "r_contract"
+    assert "Acquired" in published["user_text"]
+    assert published["turn_id"] in published["user_text"]
     assert published["metadata"] == {
         "source": "eidolon-agent-live-local-contract",
+        "source_project": "eidolon_agent",
+        "source_component": "history.fanout",
+        "source_turn_id": published["turn_id"],
+        "owner_id": "live-local-contract",
+        "companion_id": "live-local-contract",
+        "memory_realm_id": "r_contract",
         "purpose": "memory-contract-readback",
     }
 
@@ -293,7 +295,7 @@ async def test_live_local_contract_readback_retries_transient_timeout() -> None:
             assert name == "eidolon_memory_get_by_source_turn"
             self.calls += 1
             if self.calls == 1:
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
             return {
                 "record": {
                     "key": "drawer-timeout-retry",
@@ -488,12 +490,9 @@ async def test_live_local_contract_dependency_unavailable_can_skip(monkeypatch) 
 async def test_live_local_contract_nats_unavailable_uses_dependency_policy(
     monkeypatch,
 ) -> None:
-    class UnavailablePublisher:
-        def __init__(self, *, event_bus, routes) -> None:
-            self.event_bus = event_bus
-            self.routes = routes
-
-        async def publish_turn(self, **kwargs) -> None:
+    class UnavailableBus(_FakeBus):
+        async def publish(self, event, *, persistent=False) -> None:
+            del event, persistent
             raise NatsUnavailableError("nats down")
 
     async def fake_build_initial_memory_routes(
@@ -516,8 +515,7 @@ async def test_live_local_contract_nats_unavailable_uses_dependency_policy(
         fake_build_initial_memory_routes,
     )
     monkeypatch.setattr(live_local_contract, "McpClientPool", _FakePool)
-    monkeypatch.setattr(live_local_contract, "NatsEventBus", _FakeBus)
-    monkeypatch.setattr(live_local_contract, "MemoryNatsPublisher", UnavailablePublisher)
+    monkeypatch.setattr(live_local_contract, "NatsEventBus", UnavailableBus)
 
     report = await run_live_local_contract(
         LiveLocalContractConfig(

@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from eidolon_memory_contracts import unwrap_memory_payload
 
 from eidolon_agent.config.settings import MemoryEndpoint, NatsSettings
 from eidolon_agent.infra.memory.discovery import (
@@ -13,7 +12,6 @@ from eidolon_agent.infra.memory.discovery import (
     MemoryRoutingTable,
 )
 from eidolon_agent.infra.memory.mcp_client import _decode_call_tool_result
-from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
 from eidolon_agent.infra.memory.port_adapter import EidolonMemoryPort
 
 pytestmark = pytest.mark.unit
@@ -152,53 +150,6 @@ async def test_static_routes_remain_fallback():
     )
 
 
-@pytest.mark.asyncio
-async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
-    class CaptureBus:
-        def __init__(self):
-            self.events = []
-
-        async def publish(self, event, *, persistent=False):
-            self.events.append((event, persistent))
-
-    discovery = DiscoveryResponse.model_validate(
-        {
-            "nats": {
-                "url": "nats://memory:4222",
-                "stream": "MEMORY_TURNS",
-                "turn_subject_template": "turns.{memory_space_id}",
-                "cmd_subject_template": "cmds.{memory_space_id}",
-            },
-            "memory_realms": [],
-        }
-    )
-    routes = MemoryRoutingTable.from_static(endpoints=[], nats=NatsSettings())
-    await routes.replace_from_discovery(discovery)
-    bus = CaptureBus()
-    pub = MemoryNatsPublisher(event_bus=bus, routes=routes)
-
-    await pub.publish_turn(
-        owner_id="benchmark",
-        companion_id="test",
-        memory_realm_id="r_benchmark_default",
-        device_id="admin-console",
-        session_id="s1",
-        turn_id="t1",
-        owner_text="hi",
-        assistant_text="hello",
-    )
-    turn_event, turn_persistent = bus.events[0]
-    assert len(bus.events) == 1
-    assert turn_persistent is True
-    assert turn_event.subject == "turns.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
-    turn_payload = unwrap_memory_payload(turn_event.payload)
-    assert turn_payload["turn_id"] == "t1"
-    assert turn_payload["context"]["owner_id"] == "benchmark"
-    assert turn_payload["context"]["companion_id"] == "test"
-    assert turn_payload["context"]["memory_realm_id"] == "r_benchmark_default"
-    assert turn_payload["context"]["device_id"] == "admin-console"
-
-
 def test_mcp_decode_prefers_structured_content_and_unwraps_fastmcp_result():
     result = SimpleNamespace(
         isError=False,
@@ -250,10 +201,7 @@ async def test_recall_context_calls_mcp_directly():
 
     from eidolon_agent.core.types.memory import MemoryQueryPlan
 
-    port = EidolonMemoryPort(
-        pool=Pool(),
-        publisher=MemoryNatsPublisher(event_bus=object()),
-    )
+    port = EidolonMemoryPort(pool=Pool())
 
     result = await port.recall_context(
         "benchmark",

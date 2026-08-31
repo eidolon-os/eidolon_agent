@@ -1,4 +1,4 @@
-"""Combined :class:`MemoryPort` adapter — MCP for reads, NATS for writes."""
+"""Read-side :class:`MemoryPort` adapter over the Realm MCP endpoint."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from eidolon_agent.core.types.memory import (
 )
 from eidolon_agent.core.types.turn_context import build_memory_actor_context
 from eidolon_agent.infra.memory.mcp_client import McpClientPool
-from eidolon_agent.infra.memory.nats_pub import MemoryNatsPublisher
 
 _log = logging.getLogger(__name__)
 
@@ -29,10 +28,8 @@ class EidolonMemoryPort:
         self,
         *,
         pool: McpClientPool,
-        publisher: MemoryNatsPublisher,
     ) -> None:
         self._pool = pool
-        self._pub = publisher
 
     async def _recall_context_once(
         self,
@@ -246,31 +243,6 @@ class EidolonMemoryPort:
         return ActiveCommitmentReadResult(
             degraded=True,
             degraded_reason="memory_unavailable",
-        )
-
-    async def write_turn(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        device_id: str | None,
-        session_id: str | None,
-        turn_id: str,
-        owner_text: str,
-        assistant_text: str,
-        *,
-        metadata: dict | None = None,
-    ) -> None:
-        await self._pub.publish_turn(
-            owner_id=owner_id,
-            companion_id=companion_id,
-            memory_realm_id=memory_realm_id,
-            device_id=device_id,
-            session_id=session_id,
-            turn_id=turn_id,
-            owner_text=owner_text,
-            assistant_text=assistant_text,
-            metadata=metadata,
         )
 
     async def health(self) -> bool:
