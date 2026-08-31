@@ -7,7 +7,7 @@ import os
 import statistics
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -173,7 +173,7 @@ async def _run_scenarios(
     total = [t["total_ms"] for t in turns if t.get("total_ms") is not None]
     return {
         "schema_version": "eidolon_agent.live_service_replay_report.v1",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "mode": "live_service",
         "tenant_id": tenant_id,
         "user_id": user_id,
@@ -377,8 +377,7 @@ async def _run_turn(
             if value is not None
         )
         if any(
-            value is not None
-            for value in (first_progress_ms, first_tool_call_ms, first_delta_ms)
+            value is not None for value in (first_progress_ms, first_tool_call_ms, first_delta_ms)
         )
         else None,
         "output_path": _classify_output_path(
@@ -555,12 +554,6 @@ def _turn_checks(
             obs.get("history_presentation") == expect["history_presentation"],
             f"got={obs.get('history_presentation')}",
         )
-    if "memory_write_disposition" in expect:
-        add(
-            "memory_write_disposition",
-            memory_write.get("disposition") == expect["memory_write_disposition"],
-            f"got={memory_write.get('disposition')}",
-        )
     if "memory_fanout_allowed" in expect:
         add(
             "memory_fanout_allowed",
@@ -624,13 +617,6 @@ def _turn_checks(
             actual >= int(expect["context_budget_shadow_dropped_count_min"]),
             f"got={actual}",
         )
-    if "memory_write_requires_consent" in expect:
-        requires = memory_write.get("disposition") == "sensitive_requires_consent"
-        add(
-            "memory_write_requires_consent",
-            requires is bool(expect["memory_write_requires_consent"]),
-            f"got={memory_write.get('disposition')}",
-        )
     if "required_event_kinds" in expect:
         kinds = {e["kind"] for e in events}
         for kind in expect["required_event_kinds"]:
@@ -680,7 +666,7 @@ def _startup_failure_report(
     detail = f"{type(error).__name__}: {error}"
     return {
         "schema_version": "eidolon_agent.live_service_replay_report.v1",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "mode": "live_service",
         "tenant_id": tenant_id,
         "user_id": user_id,

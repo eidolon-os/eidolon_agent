@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Literal, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from eidolon_agent.core.types.memory import (
     ActiveCommitmentReadResult,
-    MemoryForgetOutcome,
-    MemoryForgetPreview,
     MemoryHit,
     MemoryQueryPlan,
     MemoryRecallResult,
     MemoryScope,
-    MemoryWriteOutcome,
 )
 
 
@@ -81,127 +78,6 @@ class MemoryPort(Protocol):
         metadata: dict | None = None,
     ) -> None:
         """Publish a ConversationTurnPayload to NATS for steward ingestion."""
-        ...
-
-    async def assert_fact(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        subject: str,
-        predicate: str,
-        object_: str,
-        *,
-        source_event_id: str,
-        tool_call_id: str,
-        confidence: float = 0.9,
-    ) -> str:
-        """Publish one explicit structured intent and return its request id."""
-        ...
-
-    async def invalidate_fact(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        subject: str,
-        predicate: str,
-        object_: str,
-        *,
-        source_event_id: str,
-        tool_call_id: str,
-        confidence: float = 0.99,
-    ) -> str:
-        """End one exact canonical fact through the durable intent chain."""
-        ...
-
-    async def reactivate_fact(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        subject: str,
-        predicate: str,
-        object_: str,
-        *,
-        source_event_id: str,
-        tool_call_id: str,
-        confidence: float = 0.99,
-    ) -> str:
-        """Start a new active interval for one exact inactive canonical fact."""
-        ...
-
-    async def write_confirmed_fact(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        device_id: str | None,
-        session_id: str | None,
-        text: str,
-        *,
-        source_event_id: str,
-        tool_call_id: str,
-        confidence: float = 0.99,
-        tags: list[str] | None = None,
-        wait_applied_seconds: float = 0.75,
-    ) -> MemoryWriteOutcome:
-        """Submit a verbatim intent and return its durable command outcome."""
-        ...
-
-    async def apply_commitment(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        promisor: str,
-        predicate: Literal["promised", "committed_to", "planned_to"],
-        action: str,
-        raw_claim: str,
-        *,
-        source_event_id: str,
-        tool_call_id: str,
-        operation: Literal["add", "update", "invalidate", "confirm"] = "confirm",
-        target_id: str | None = None,
-        beneficiaries: list[str] | None = None,
-        participants: list[str] | None = None,
-        condition: str | None = None,
-        due_at: str | None = None,
-        status: Literal[
-            "proposed", "confirmed", "fulfilled", "cancelled", "superseded"
-        ]
-        | None = None,
-        confidence: float = 0.99,
-    ) -> str:
-        """Publish an explicit Commitment lifecycle intent."""
-        ...
-
-    async def preview_forget(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        device_id: str | None,
-        query: str,
-        *,
-        action: str = "archive",
-        session_id: str | None = None,
-    ) -> MemoryForgetPreview:
-        """Resolve a topic to exact memory IDs without mutating memory."""
-        ...
-
-    async def confirm_forget(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        device_id: str | None,
-        confirmation_token: str,
-        *,
-        session_id: str | None = None,
-        wait_applied_seconds: float = 2.0,
-    ) -> MemoryForgetOutcome:
-        """Submit one preview-bound exact-ID privacy command."""
         ...
 
     async def health(self) -> bool:

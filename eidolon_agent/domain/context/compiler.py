@@ -18,7 +18,7 @@ import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Protocol
 
 from eidolon_agent.core.types.memory import (
@@ -69,7 +69,6 @@ class ContextCompiler:
         history_window: int = 4,
         degraded_history_window: int = 12,
         memory_timeout_s: float = 0.2,
-        explicit_memory_timeout_s: float = 1.2,
         memory_top_k: int = 5,
         active_commitment_limit: int = 5,
         active_commitment_timeout_s: float = 0.2,
@@ -93,7 +92,6 @@ class ContextCompiler:
         # memory is healthy (memory health is only known after the gather).
         self._degraded_history_window = max(degraded_history_window, history_window)
         self._memory_timeout_s = memory_timeout_s
-        self._explicit_memory_timeout_s = explicit_memory_timeout_s
         self._memory_top_k = memory_top_k
         self._active_commitment_limit = max(1, min(active_commitment_limit, 10))
         self._active_commitment_timeout_s = max(0.001, active_commitment_timeout_s)
@@ -128,7 +126,7 @@ class ContextCompiler:
                 dry_run_memory=[],
             ),
         )
-        memory_timeout_s = self._memory_timeout_for(ti.text or "")
+        memory_timeout_s = self._memory_timeout_s
         memory_task = _timed("memory", self._memory_recall(ti, timeout_s=memory_timeout_s))
         commitment_task = _timed("commitments", self._active_commitments(ti))
         # Topic switch fencing: when the reflex layer flagged this turn as a
@@ -228,27 +226,19 @@ class ContextCompiler:
         if isinstance(commitment_payload, BaseException):
             _log.warning("active commitment read raised: %s", commitment_payload)
             commitments_degraded = True
-            commitments_degraded_reason = _exception_degraded_reason(
-                commitment_payload
-            )
+            commitments_degraded_reason = _exception_degraded_reason(commitment_payload)
         elif commitment_payload:
             active_commitments = list(commitment_payload.commitments)
-            active_commitment_total = max(
-                len(active_commitments), commitment_payload.total
-            )
+            active_commitment_total = max(len(active_commitments), commitment_payload.total)
             active_commitments_truncated = bool(commitment_payload.truncated)
             commitments_degraded = bool(commitment_payload.degraded)
             commitments_degraded_reason = commitment_payload.degraded_reason
 
         commitment_text = ""
         if active_commitments:
-            commitment_text = self._personas.realize_commitment_context(
-                active_commitments
-            )
+            commitment_text = self._personas.realize_commitment_context(active_commitments)
 
-        apply_memory_evidence = getattr(
-            self._personas, "apply_memory_evidence", None
-        )
+        apply_memory_evidence = getattr(self._personas, "apply_memory_evidence", None)
         if memory_hits and callable(apply_memory_evidence):
             persona = await apply_memory_evidence(
                 persona=persona,
@@ -450,9 +440,7 @@ class ContextCompiler:
             # amnesia; healthy memory → trim back to the tight window so we
             # don't dilute attention with stale turns.
             effective_window = (
-                self._degraded_history_window
-                if memory_degraded
-                else self._history_window
+                self._degraded_history_window if memory_degraded else self._history_window
             )
             if len(history) > effective_window:
                 history = history[-effective_window:]
@@ -535,13 +523,9 @@ class ContextCompiler:
             ledger.mark_degraded(source)
         kept_ids = {id(seg) for seg in kept_segments}
         memory_kept = memory_segment is not None and id(memory_segment) in kept_ids
-        commitment_kept = (
-            commitment_segment is not None and id(commitment_segment) in kept_ids
-        )
+        commitment_kept = commitment_segment is not None and id(commitment_segment) in kept_ids
         summary_kept = summary_segment is not None and id(summary_segment) in kept_ids
-        summary_attempted = (
-            self._summary_provider is not None and policy.history_context_allowed
-        )
+        summary_attempted = self._summary_provider is not None and policy.history_context_allowed
         ti.metadata["summary_trace"] = {
             "attempted": summary_attempted,
             "degraded": summary_degraded,
@@ -551,9 +535,7 @@ class ContextCompiler:
         }
         ti.metadata["memory_trace"] = {
             "attempted": (
-                self._memory is not None
-                and bool(ti.text)
-                and policy.memory_recall_allowed
+                self._memory is not None and bool(ti.text) and policy.memory_recall_allowed
             ),
             "skipped_reason": (
                 "privacy_policy"
@@ -580,9 +562,7 @@ class ContextCompiler:
             ),
             "skipped_reason": (
                 "privacy_policy"
-                if self._memory is not None
-                and bool(ti.text)
-                and not policy.memory_recall_allowed
+                if self._memory is not None and bool(ti.text) and not policy.memory_recall_allowed
                 else None
             ),
             "degraded": commitments_degraded,
@@ -590,9 +570,7 @@ class ContextCompiler:
             "elapsed_ms": commitment_ms,
             "timeout_ms": int(self._active_commitment_timeout_s * 1000),
             "limit": self._active_commitment_limit,
-            "commitment_ids": [
-                record.commitment_id for record in active_commitments
-            ],
+            "commitment_ids": [record.commitment_id for record in active_commitments],
             "count": len(active_commitments),
             "total": active_commitment_total,
             "truncated": active_commitments_truncated,
@@ -600,16 +578,14 @@ class ContextCompiler:
         }
 
         # ---- Assemble messages ---------------------------------------------
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         system_parts = [
             system_parts_by_segment[id(seg)]
             for seg in kept_segments
             if id(seg) in system_parts_by_segment
         ]
         kept_history = [
-            history_by_segment[id(seg)]
-            for seg in kept_segments
-            if id(seg) in history_by_segment
+            history_by_segment[id(seg)] for seg in kept_segments if id(seg) in history_by_segment
         ]
         interrupted_context_dropped_count = _interrupted_history_count(
             history
@@ -638,9 +614,7 @@ class ContextCompiler:
             )
         ti.metadata["context_focus"] = {
             "current_user_last": bool(
-                out
-                and out[-1].role is MessageRole.USER
-                and out[-1].content == (ti.text or "")
+                out and out[-1].role is MessageRole.USER and out[-1].content == (ti.text or "")
             ),
             "current_user_token_estimate": (
                 current_user_segment.token_estimate if current_user_segment else 0
@@ -689,18 +663,22 @@ class ContextCompiler:
             "output_reserve_tokens": self._harness.budget.output_reserve_tokens,
         }
         if self._context_budget_tokens is None:
-            return segments, unbudgeted, {
-                "mode": "disabled",
-                "configured": False,
-                "applied": False,
-                "max_tokens": None,
-                "kept_token_estimate": unbudgeted.total_token_estimate,
-                **runtime_budget,
-                **totals,
-                "dropped_count": 0,
-                "shadow_dropped_count": 0,
-                "shadow_dropped_kinds": [],
-            }
+            return (
+                segments,
+                unbudgeted,
+                {
+                    "mode": "disabled",
+                    "configured": False,
+                    "applied": False,
+                    "max_tokens": None,
+                    "kept_token_estimate": unbudgeted.total_token_estimate,
+                    **runtime_budget,
+                    **totals,
+                    "dropped_count": 0,
+                    "shadow_dropped_count": 0,
+                    "shadow_dropped_kinds": [],
+                },
+            )
 
         budget = ContextBudget(max_tokens=self._context_budget_tokens)
         pruned_segments, pruned_ledger = budget.prune(segments)
@@ -717,14 +695,10 @@ class ContextCompiler:
             **runtime_budget,
             **totals,
             "dropped_count": (
-                len(pruned_ledger.dropped_segments)
-                if self._context_budget_mode == "enabled"
-                else 0
+                len(pruned_ledger.dropped_segments) if self._context_budget_mode == "enabled" else 0
             ),
             "shadow_dropped_count": len(pruned_ledger.dropped_segments),
-            "shadow_dropped_kinds": [
-                seg.kind.value for seg in pruned_ledger.dropped_segments
-            ],
+            "shadow_dropped_kinds": [seg.kind.value for seg in pruned_ledger.dropped_segments],
         }
         if self._context_budget_mode == "enabled":
             return pruned_segments, pruned_ledger, guard
@@ -740,15 +714,18 @@ class ContextCompiler:
 
     async def _memory_recall(
         self, ti: TurnInput, *, timeout_s: float
-    ) -> tuple[
-        str | None,
-        bool,
-        list[str],
-        str | None,
-        list[str],
-        list[MemoryHit],
-        dict[str, float],
-    ] | None:
+    ) -> (
+        tuple[
+            str | None,
+            bool,
+            list[str],
+            str | None,
+            list[str],
+            list[MemoryHit],
+            dict[str, float],
+        ]
+        | None
+    ):
         """Memory recall branch for the parallel ``gather`` above.
 
         Three return shapes:
@@ -778,9 +755,7 @@ class ContextCompiler:
                 episodic_k=3,
                 semantic_k=self._memory_top_k,
                 voice=ti.input_modality == "voice",
-                kg_subjects=("self",)
-                if query_source == "personal_memory_lookup"
-                else (),
+                kg_subjects=("self",),
             )
             ti.metadata["memory_recall_query"] = {
                 "source": query_source,
@@ -825,15 +800,12 @@ class ContextCompiler:
                     if isinstance(triple, dict):
                         triple_id = str(triple.get("id") or "")
                         if triple_id and all(
-                            str(existing.get("id") or "") != triple_id
-                            for existing in kg_triples
+                            str(existing.get("id") or "") != triple_id for existing in kg_triples
                         ):
                             kg_triples.append(triple)
                 if recall.degraded and not any_success:
                     degraded_reason = (
-                        degraded_reason
-                        or recall.degraded_reason
-                        or "memory_unavailable"
+                        degraded_reason or recall.degraded_reason or "memory_unavailable"
                     )
             _degraded = bool(degraded_reason and not any_success)
             return (
@@ -847,8 +819,7 @@ class ContextCompiler:
             )
         except Exception as exc:
             _log.exception(
-                "memory recall failed for owner=%s; injecting degraded notice "
-                "into system prompt",
+                "memory recall failed for owner=%s; injecting degraded notice into system prompt",
                 ti.context.owner_id,
             )
             return (
@@ -892,14 +863,7 @@ class ContextCompiler:
                 degraded_reason=_exception_degraded_reason(exc),
             )
 
-    def _memory_timeout_for(self, text: str) -> float:
-        if _is_personal_memory_lookup(text):
-            return max(self._memory_timeout_s, self._explicit_memory_timeout_s)
-        return self._memory_timeout_s
-
-    async def _summary_context(
-        self, ti: TurnInput, policy: TurnRuntimePolicy
-    ) -> str | None:
+    async def _summary_context(self, ti: TurnInput, policy: TurnRuntimePolicy) -> str | None:
         """Read an already-computed rolling summary without blocking TTFT."""
 
         if self._summary_provider is None or not policy.history_context_allowed:
@@ -912,7 +876,7 @@ class ContextCompiler:
                 ),
                 timeout=self._summary_timeout_s,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _log.warning(
                 "conversation summary timed out for conv=%s after %.3fs",
                 ti.conversation_id,
@@ -921,8 +885,6 @@ class ContextCompiler:
             raise
 
     async def _memory_recall_queries(self, ti: TurnInput) -> tuple[list[str], str]:
-        if _is_personal_memory_lookup(ti.text or ""):
-            return [(ti.text or "").strip()], "personal_memory_lookup"
         query, source = await self._memory_recall_query(ti)
         return [query], source
 
@@ -1050,9 +1012,7 @@ def _budget_totals(segments: list[ContextSegment]) -> dict[str, int]:
         ContextSegmentKind.CURRENT_USER,
     }
     protected = sum(
-        seg.token_estimate
-        for seg in segments
-        if seg.kind in protected_kinds or not seg.droppable
+        seg.token_estimate for seg in segments if seg.kind in protected_kinds or not seg.droppable
     )
     total = sum(seg.token_estimate for seg in segments)
     return {
@@ -1131,9 +1091,7 @@ def _background_context_block(messages: list[ChatMessage]) -> str:
         if not content:
             continue
         tool_relation = (
-            f"; tool_relation={tags['tool_relation']}"
-            if "tool_relation" in tags
-            else ""
+            f"; tool_relation={tags['tool_relation']}" if "tool_relation" in tags else ""
         )
         lines.append(
             f"{idx}. role={role}; status={tags['status']}; actionability=must_not_execute"
@@ -1186,109 +1144,12 @@ def _merge_memory_contexts(contexts: list[str]) -> str:
     return "\n\n".join(blocks)
 
 
-def _is_personal_memory_lookup(text: str) -> bool:
-    """Classify direct autobiographical fact questions.
-
-    A user need not say “记得” to ask for stored personal knowledge. Stable
-    personal slots get the same extended budget; advice, planning and immediate
-    choice questions stay on the ordinary hot path.
-    """
-
-    normalized = "".join((text or "").split()).lower()
-    if not normalized:
-        return False
-
-    memory_intent = any(
-        phrase in normalized
-        for phrase in ("记得", "记不记得", "知道", "关于我", "了解我")
-    )
-    question_intent = any(
-        token in normalized
-        for token in (
-            "?",
-            "？",
-            "吗",
-            "什么",
-            "哪里",
-            "哪儿",
-            "哪所",
-            "哪个",
-            "哪种",
-            "哪天",
-            "多少",
-            "几岁",
-            "在哪",
-        )
-    )
-    personal_subject = any(marker in normalized for marker in ("我", "本人", "自己"))
-    if not (personal_subject and question_intent):
-        return False
-    if memory_intent:
-        return True
-
-    advice_or_choice = any(
-        phrase in normalized
-        for phrase in (
-            "应该",
-            "怎么办",
-            "怎么做",
-            "如何",
-            "能不能",
-            "可不可以",
-            "要不要",
-            "建议",
-            "今天吃什么",
-            "现在吃什么",
-        )
-    )
-    if advice_or_choice:
-        return False
-
-    stable_personal_slot = any(
-        marker in normalized
-        for marker in (
-            "名字",
-            "姓名",
-            "叫什么",
-            "生日",
-            "年龄",
-            "几岁",
-            "家乡",
-            "哪里人",
-            "住哪里",
-            "住哪儿",
-            "住在哪",
-            "来自哪里",
-            "来自哪儿",
-            "读书",
-            "学校",
-            "大学",
-            "专业",
-            "职业",
-            "工作是什么",
-            "在哪里工作",
-            "在哪工作",
-            "公司",
-            "最喜欢",
-            "偏好",
-            "讨厌",
-            "妈妈",
-            "爸爸",
-            "伴侣",
-            "宠物",
-        )
-    )
-    return stable_personal_slot
-
-
 def _kg_triple_ids(triples: object) -> list[str]:
     if not isinstance(triples, list):
         return []
     ids: list[str] = []
     for triple in triples:
-        triple_id = (
-            triple.get("id") if isinstance(triple, dict) else getattr(triple, "id", None)
-        )
+        triple_id = triple.get("id") if isinstance(triple, dict) else getattr(triple, "id", None)
         if triple_id:
             ids.append(str(triple_id))
     return ids

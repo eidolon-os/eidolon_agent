@@ -7,7 +7,7 @@ No more pluggable providers; tests verify the fixed structured shape:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -110,7 +110,7 @@ def _locator(_t, _u, _c):
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def test_assembles_structured_system_background_and_current_user() -> None:
@@ -431,36 +431,12 @@ async def test_ordinary_memory_recall_uses_soft_timeout() -> None:
         history_manager=HistoryManager(),
         memory_port=memory,
         memory_timeout_s=0.2,
-        explicit_memory_timeout_s=1.2,
     )
 
     await compiler.compile(ti)
 
     assert memory.calls[0]["timeout_s"] == pytest.approx(0.2, abs=0.001)
     assert ti.metadata["memory_trace"]["timeout_ms"] == 200
-
-
-async def test_explicit_personal_memory_lookup_uses_extended_timeout() -> None:
-    memory = _StubMemory(formatted="用户叫曼森，在北京化工大学读书。")
-    ti = make_turn_input("你记得我叫什么、在哪里读书吗？")
-    compiler = ContextCompiler(
-        personas_service=_StubPersonas(),
-        instance_locator=_locator,
-        history_manager=HistoryManager(),
-        memory_port=memory,
-        memory_timeout_s=0.2,
-        explicit_memory_timeout_s=1.2,
-    )
-
-    await compiler.compile(ti)
-
-    assert [call["query"] for call in memory.calls] == ["你记得我叫什么、在哪里读书吗？"]
-    assert memory.calls[0]["timeout_s"] == pytest.approx(1.2)
-    assert memory.calls[0]["plan"].kg_subjects == ("self",)
-    assert ti.metadata["memory_trace"]["timeout_ms"] == 1200
-    assert ti.metadata["memory_trace"]["hit_count"] == 1
-    assert ti.metadata["memory_recall_query"]["source"] == "personal_memory_lookup"
-    assert ti.metadata["memory_recall_query"]["query_count"] == 1
 
 
 @pytest.mark.parametrize(
@@ -471,34 +447,13 @@ async def test_explicit_personal_memory_lookup_uses_extended_timeout() -> None:
         "我的生日是哪天？",
         "我在哪里读书？",
         "我的宠物叫什么？",
-    ],
-)
-async def test_natural_personal_fact_query_uses_extended_timeout(query: str) -> None:
-    memory = _StubMemory(formatted="stored personal fact")
-    compiler = ContextCompiler(
-        personas_service=_StubPersonas(),
-        instance_locator=_locator,
-        history_manager=HistoryManager(),
-        memory_port=memory,
-        memory_timeout_s=0.5,
-        explicit_memory_timeout_s=4.0,
-    )
-
-    await compiler.compile(make_turn_input(query))
-
-    assert memory.calls[0]["timeout_s"] == pytest.approx(4.0)
-
-
-@pytest.mark.parametrize(
-    "query",
-    [
         "我应该怎么做？",
         "我今天吃什么？",
         "我能不能换工作？",
         "你最喜欢什么水果？",
     ],
 )
-async def test_advice_and_non_personal_questions_keep_hot_path_budget(
+async def test_all_natural_queries_share_one_recall_contract(
     query: str,
 ) -> None:
     memory = _StubMemory()
@@ -508,15 +463,21 @@ async def test_advice_and_non_personal_questions_keep_hot_path_budget(
         history_manager=HistoryManager(),
         memory_port=memory,
         memory_timeout_s=0.5,
-        explicit_memory_timeout_s=4.0,
     )
 
-    await compiler.compile(make_turn_input(query))
+    ti = make_turn_input(query)
+    await compiler.compile(ti)
 
     assert memory.calls[0]["timeout_s"] == pytest.approx(0.5, abs=0.001)
+    assert memory.calls[0]["plan"].kg_subjects == ("self",)
+    assert ti.metadata["memory_trace"]["timeout_ms"] == 500
+    assert ti.metadata["memory_recall_query"]["source"] in {
+        "current_only",
+        "current_plus_recent_history",
+    }
 
 
-async def test_explicit_personal_memory_lookup_uses_single_combined_result() -> None:
+async def test_natural_memory_lookup_uses_single_combined_result() -> None:
     class _SlotMemory:
         def __init__(self) -> None:
             self.calls: list[dict] = []
@@ -542,7 +503,6 @@ async def test_explicit_personal_memory_lookup_uses_single_combined_result() -> 
         instance_locator=_locator,
         history_manager=HistoryManager(),
         memory_port=memory,
-        explicit_memory_timeout_s=2.0,
     )
 
     msgs = await compiler.compile(ti)
@@ -946,9 +906,9 @@ async def test_budget_keeps_recent_history_before_older_history() -> None:
         personas_service=_StubPersonas("[P]"),
         instance_locator=_locator,
         history_manager=history,
-        # Mandatory persona + harness + current request currently consume 314
-        # estimated tokens. Leave room for exactly one 32-token history item.
-        context_budget_tokens=346,
+        # Leave room for exactly one 32-token history item after the current
+        # persona, harness policy, and request segments.
+        context_budget_tokens=282,
     )
 
     ti = make_turn_input("now")

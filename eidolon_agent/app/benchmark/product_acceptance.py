@@ -344,10 +344,11 @@ async def _close_container(container) -> None:  # type: ignore[no-untyped-def]
         if container.llm_router is not None and hasattr(container.llm_router, "close"):
             await container.llm_router.close()
     with suppress(Exception):
-        audit_dispatch_task = container.extras.get("audit_dispatch_task")
-        if audit_dispatch_task is not None:
-            audit_dispatch_task.cancel()
-            await audit_dispatch_task
+        for task_name in ("memory_turn_dispatch_task", "audit_dispatch_task"):
+            dispatch_task = container.extras.get(task_name)
+            if dispatch_task is not None:
+                dispatch_task.cancel()
+                await dispatch_task
     with suppress(Exception):
         if container.local_system_data is not None and hasattr(
             container.local_system_data,

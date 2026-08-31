@@ -35,6 +35,39 @@ class _StatusSink:
         self.statuses.append(status)
 
 
+class _Outbox:
+    def __init__(self) -> None:
+        self.rows = []
+
+    async def enqueue(self, **row) -> None:
+        self.rows.append(row)
+
+
+async def test_durable_fanout_queues_without_touching_transport() -> None:
+    outbox = _Outbox()
+    fanout = HistoryFanout(event_bus=None, memory_outbox=outbox)
+
+    status = await fanout.publish_turn(
+        owner_id="alice",
+        companion_id="companion-a",
+        memory_realm_id="r_alice_default",
+        device_id="device-a",
+        session_id="s",
+        turn_id="turn-durable",
+        user_text="自然表达",
+        assistant_text="",
+        timestamp_iso="2026-08-31T10:00:00Z",
+        trace_id="trace-durable",
+    )
+
+    assert fanout.is_durable is True
+    assert status.state == "queued"
+    assert outbox.rows[0]["turn_id"] == "turn-durable"
+    payload = unwrap_memory_payload(outbox.rows[0]["payload"])
+    assert payload["user_text"] == "自然表达"
+    assert payload["assistant_text"] == ""
+
+
 async def test_publish_turn_emits_memory_event(event_bus) -> None:
     received: list = []
 
@@ -141,8 +174,7 @@ async def test_publish_turn_merges_memory_policy_metadata(event_bus) -> None:
         assistant_text="好的",
         timestamp_iso="2026-05-22T10:00:00Z",
         metadata={
-            "memory_write_disposition": "semantic_upsert",
-            "memory_write_reason": "stable_preference_or_identity",
+            "memory_ingest_policy": "semantic_steward",
             "conversation_id": "c1",
         },
     )
@@ -151,7 +183,7 @@ async def test_publish_turn_merges_memory_policy_metadata(event_bus) -> None:
     metadata = unwrap_memory_payload(received[0].payload)["metadata"]
     assert metadata["source"] == "eidolon-agent"
     assert metadata["source_component"] == "history.fanout"
-    assert metadata["memory_write_disposition"] == "semantic_upsert"
+    assert metadata["memory_ingest_policy"] == "semantic_steward"
     assert metadata["conversation_id"] == "c1"
 
 

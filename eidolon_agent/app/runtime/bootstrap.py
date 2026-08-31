@@ -52,8 +52,6 @@ from eidolon_agent.domain.tools.builtin import (
     EmitEventTool,
     GetTimeTool,
     GetWeatherTool,
-    MemoryAssertFactTool,
-    MemoryForgetTool,
     MemorySearchTool,
     SubmitLongTaskTool,
 )
@@ -79,6 +77,9 @@ from eidolon_agent.infra.persistence.agent_runtime import (
 from eidolon_agent.infra.persistence.audit_dispatch import run_agent_audit_dispatcher
 from eidolon_agent.infra.persistence.eidolon_data_persona import (
     RuntimeAuthorityPersonaGenomeStore,
+)
+from eidolon_agent.infra.persistence.memory_turn_dispatch import (
+    run_memory_turn_dispatcher,
 )
 from eidolon_agent.infra.persistence.runtime_store import AgentRuntimeStore
 from eidolon_agent.infra.system_data import (
@@ -232,6 +233,7 @@ async def build_application(
     fanout = HistoryFanout(
         event_bus=container.event_bus,
         memory_routes=memory_routes,
+        memory_outbox=None if standalone else runtime_store.memory_turn_outbox,
         # Publish/absorb status is operational telemetry. Keeping it in the
         # shared system-data SQLite made this per-turn async path the largest
         # Event-table producer without providing a governance guarantee.
@@ -245,6 +247,10 @@ async def build_application(
                 nats_url=effective_nats_url,
             ),
             name="eidolon-agent-audit-dispatcher",
+        )
+        container.extras["memory_turn_dispatch_task"] = asyncio.create_task(
+            run_memory_turn_dispatcher(runtime_store, container.event_bus),
+            name="eidolon-agent-memory-turn-dispatcher",
         )
     sig_bus = SignalBus()
     container.history_manager = history
@@ -294,10 +300,8 @@ async def build_application(
     tool_registry = ToolRegistry()
     tool_registry.register(GetTimeTool())
     tool_registry.register(GetWeatherTool())
-    explicit_memory_timeout_s = settings.memory.explicit_recall_timeout_s
-    tool_registry.register(MemorySearchTool(memory_port, timeout_s=explicit_memory_timeout_s))
-    tool_registry.register(MemoryAssertFactTool(memory_port))
-    tool_registry.register(MemoryForgetTool(memory_port))
+    memory_search_timeout_s = settings.memory.explicit_recall_timeout_s
+    tool_registry.register(MemorySearchTool(memory_port, timeout_s=memory_search_timeout_s))
     tool_registry.register(EmitEventTool(event_bus=container.event_bus))
     delegate_tool = SubmitLongTaskTool(
         long_task_submitter=long_task_worker,
@@ -465,7 +469,6 @@ def _build_turn_engine(
         history_window=harness.budget.history_window,
         degraded_history_window=container.settings.turn.degraded_history_context_window,
         memory_timeout_s=container.settings.memory.recall_timeout_s,
-        explicit_memory_timeout_s=container.settings.memory.explicit_recall_timeout_s,
         context_budget_tokens=container.settings.turn.max_token_budget,
         context_budget_mode=container.settings.turn.context_budget_mode,
         harness=harness,
@@ -483,7 +486,6 @@ def _build_turn_engine(
         event_bus=container.event_bus,
         personas_service=container.personas_service,
         genome_id=genome_id,
-        memory_port=container.memory_port,
         max_tool_iters=container.settings.turn.max_tool_iters,
         memory_write_mode=container.settings.turn.memory_write_mode,
         tool_schema_strict=container.settings.turn.tool_schema_strict,

@@ -10,7 +10,6 @@ from eidolon_agent.app.benchmark.suites import live_agent_memory_experience_scen
 def test_live_turn_checks_read_admin_observability_summary() -> None:
     checks = replay_live_service._turn_checks(
         expect={
-            "memory_write_disposition": "semantic_upsert",
             "memory_fanout_allowed": True,
             "privacy_mode": "normal",
             "context_contains_segments": ["persona", "memory"],
@@ -31,7 +30,7 @@ def test_live_turn_checks_read_admin_observability_summary() -> None:
                 "privacy_mode": "normal",
                 "context": {"segment_kinds": ["persona", "memory", "current_user"]},
                 "memory_write": {
-                    "disposition": "semantic_upsert",
+                    "ingest_policy": "semantic_steward",
                     "fanout_allowed": True,
                 },
                 "memory": {"degraded": False},
@@ -163,12 +162,15 @@ def test_output_path_latency_matrix_classification(
     error: str | None,
     expected: str,
 ) -> None:
-    assert replay_live_service._classify_output_path(
-        first_progress_ms=progress,
-        first_tool_call_ms=tool,
-        first_delta_ms=visible,
-        error=error,
-    ) == expected
+    assert (
+        replay_live_service._classify_output_path(
+            first_progress_ms=progress,
+            first_tool_call_ms=tool,
+            first_delta_ms=visible,
+            error=error,
+        )
+        == expected
+    )
 
 
 def test_live_turn_checks_detects_missing_admin_trace() -> None:
@@ -185,32 +187,6 @@ def test_live_turn_checks_detects_missing_admin_trace() -> None:
     assert by_name["stream_done"]["passed"] is True
     assert by_name["admin_trace_available"]["passed"] is False
     assert by_name["admin_trace_available"]["detail"] == "HTTP 404"
-
-
-def test_live_turn_checks_accepts_sensitive_requires_consent() -> None:
-    checks = replay_live_service._turn_checks(
-        expect={
-            "memory_write_disposition": "sensitive_requires_consent",
-            "memory_write_requires_consent": True,
-            "memory_fanout_allowed": False,
-        },
-        assistant_text="",
-        events=[{"kind": "DONE"}],
-        detail={
-            "observability_summary": {
-                "memory_write": {
-                    "disposition": "sensitive_requires_consent",
-                    "fanout_allowed": False,
-                }
-            }
-        },
-        first_delta_ms=None,
-        total_ms=10,
-    )
-
-    by_name = {c["name"]: c for c in checks}
-    assert by_name["memory_write_requires_consent"]["passed"] is True
-    assert by_name["memory_fanout_allowed"]["passed"] is True
 
 
 def test_live_turn_checks_can_assert_memory_degraded_reason() -> None:

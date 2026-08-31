@@ -10,13 +10,10 @@ from __future__ import annotations
 
 from eidolon_agent.core.types.memory import (
     ActiveCommitmentReadResult,
-    MemoryForgetOutcome,
-    MemoryForgetPreview,
     MemoryHit,
     MemoryQueryPlan,
     MemoryRecallResult,
     MemoryScope,
-    MemoryWriteOutcome,
 )
 
 _DEGRADED_REASON = "standalone_no_memory_service"
@@ -87,133 +84,6 @@ class NullMemoryPort:
         metadata: dict | None = None,
     ) -> str:
         return ""
-
-    async def assert_fact(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        subject: str,
-        predicate: str,
-        object_: str,
-        *,
-        source_event_id: str,
-        tool_call_id: str,
-        confidence: float = 0.9,
-    ) -> str:
-        return ""
-
-    async def invalidate_fact(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        subject: str,
-        predicate: str,
-        object_: str,
-        *,
-        source_event_id: str,
-        tool_call_id: str,
-        confidence: float = 0.99,
-    ) -> str:
-        return ""
-
-    async def reactivate_fact(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        subject: str,
-        predicate: str,
-        object_: str,
-        *,
-        source_event_id: str,
-        tool_call_id: str,
-        confidence: float = 0.99,
-    ) -> str:
-        return ""
-
-    async def write_confirmed_fact(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        device_id: str | None,
-        session_id: str | None,
-        text: str,
-        *,
-        source_event_id: str,
-        tool_call_id: str,
-        confidence: float = 0.99,
-        tags: list[str] | None = None,
-        wait_applied_seconds: float = 0.75,
-    ) -> MemoryWriteOutcome:
-        return MemoryWriteOutcome(
-            status="failed",
-            request_id="",
-            error=_DEGRADED_REASON,
-        )
-
-    async def apply_commitment(
-        self,
-        owner_id,
-        companion_id,
-        memory_realm_id,
-        promisor,
-        predicate,
-        action,
-        raw_claim,
-        *,
-        source_event_id,
-        tool_call_id,
-        operation="confirm",
-        target_id=None,
-        beneficiaries=None,
-        participants=None,
-        condition=None,
-        due_at=None,
-        status=None,
-        confidence=0.99,
-    ) -> str:
-        return ""
-
-    async def preview_forget(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        device_id: str | None,
-        query: str,
-        *,
-        action: str = "archive",
-        session_id: str | None = None,
-    ) -> MemoryForgetPreview:
-        del owner_id, companion_id, memory_realm_id, device_id, session_id
-        return MemoryForgetPreview(
-            status="unavailable",
-            target=query,
-            action="delete" if action == "delete" else "archive",
-            error=_DEGRADED_REASON,
-        )
-
-    async def confirm_forget(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        device_id: str | None,
-        confirmation_token: str,
-        *,
-        session_id: str | None = None,
-        wait_applied_seconds: float = 2.0,
-    ) -> MemoryForgetOutcome:
-        del owner_id, companion_id, memory_realm_id, device_id, session_id
-        del confirmation_token, wait_applied_seconds
-        return MemoryForgetOutcome(
-            status="unavailable",
-            action="archive",
-            error=_DEGRADED_REASON,
-        )
 
     async def health(self) -> bool:
         return True

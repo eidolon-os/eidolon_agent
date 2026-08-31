@@ -132,9 +132,7 @@ class MemoryAuditRow(BaseModel):
     started_at: datetime
     trace_kind: str | None = None
     durable_result: str | None = None
-    disposition: str | None
-    reason: str | None
-    policy_version: str | None
+    ingest_policy: str | None
     fanout_allowed: bool
     skipped_reason: str | None
     privacy_mode: str | None
@@ -412,9 +410,7 @@ async def list_memory_audit(
                 started_at=row["started_at"],
                 trace_kind=write.get("trace_kind"),
                 durable_result=write.get("durable_result"),
-                disposition=write.get("disposition"),
-                reason=write.get("reason"),
-                policy_version=write.get("policy_version"),
+                ingest_policy=write.get("ingest_policy"),
                 fanout_allowed=bool(write.get("fanout_allowed")),
                 skipped_reason=write.get("skipped_reason"),
                 privacy_mode=write.get("privacy_mode"),

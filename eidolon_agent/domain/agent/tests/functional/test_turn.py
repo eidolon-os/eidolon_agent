@@ -93,9 +93,7 @@ async def test_speculative_turn_streams_but_does_not_persist(turn_engine_factory
     assert events[-1].kind.value == "done"
 
     # But nothing lands in the recent-history window.
-    recent = await engine._history.recent_window(
-        conversation_id=ti.conversation_id, window=10
-    )
+    recent = await engine._history.recent_window(conversation_id=ti.conversation_id, window=10)
     assert recent == []
 
 
@@ -111,60 +109,42 @@ async def test_ordinary_turn_does_not_create_evolution_observation(
 
 async def test_persona_state_is_not_exposed_as_tool(turn_engine_factory):
     engine = turn_engine_factory()
-    schemas, _extra = await engine._tool_schemas(
-        make_turn_input("你好"), CompanionRuntimeConfig()
-    )
+    schemas, _extra = await engine._tool_schemas(make_turn_input("你好"), CompanionRuntimeConfig())
     tool_names = {schema.name for schema in schemas}
     assert "set_mood" not in tool_names
     assert "set_persona_state" not in tool_names
+    assert "memory_assert_fact" not in tool_names
 
 
 @pytest.mark.asyncio
-async def test_memory_write_uses_truthful_terminal_ack_without_second_llm_pass(
-    turn_engine_factory,
-) -> None:
-    from eidolon_agent.core.types.tool import Permission, ToolResult, ToolSchema
-    from eidolon_agent.domain.tools import ToolDispatcher, ToolRegistry
+async def test_slow_memory_observation_does_not_delay_reply(turn_engine_factory) -> None:
+    class _SlowFanout:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.finished = asyncio.Event()
+            self.calls = []
 
-    class _AppliedMemoryTool:
-        schema = ToolSchema(
-            name="memory_assert_fact",
-            description="test memory write",
-            json_schema={"type": "object", "properties": {}},
-            permissions=frozenset({Permission.MEMORY_WRITE}),
-            side_effect=True,
-        )
+        async def publish_turn(self, **kwargs):
+            self.calls.append(kwargs)
+            self.started.set()
+            await asyncio.sleep(0.2)
+            self.finished.set()
 
-        async def invoke(self, call, *, ctx):
-            del ctx
-            return ToolResult(
-                call_id=call.id,
-                name=call.name,
-                ok=True,
-                content={"status": "applied", "request_id": "request-1"},
-            )
+    fanout = _SlowFanout()
+    engine = turn_engine_factory()
+    engine._fanout = fanout
 
-    registry = ToolRegistry()
-    registry.register(_AppliedMemoryTool())
-    llm = FakeLLM(
-        script=[
-            [{"kind": "tool_call", "name": "memory_assert_fact", "arguments": {}}],
-        ]
-    )
-    engine = turn_engine_factory(
-        llm=llm,
-        tool_dispatcher=ToolDispatcher(registry),
+    events = await asyncio.wait_for(
+        _collect_events(engine.run(make_turn_input("书房最近换成了偏暖的灯光"))),
+        timeout=0.15,
     )
 
-    events = [ev async for ev in engine.run(make_turn_input("请记住明天我要去北京"))]
-    spoken = [
-        event.data["text"]
-        for event in events
-        if event.kind.value == "delta"
-    ]
-
-    assert spoken == ["已经记下了。"]
     assert events[-1].kind.value == "done"
+    await asyncio.wait_for(fanout.started.wait(), timeout=0.05)
+    assert not fanout.finished.is_set()
+    assert fanout.calls[0]["assistant_text"] == ""
+    await engine._background.drain(timeout_s=1)
+    assert fanout.finished.is_set()
 
 
 @pytest.mark.asyncio
@@ -205,17 +185,8 @@ async def test_turn_completed_publish_runs_after_stream_completion(turn_engine_f
 
 
 @pytest.mark.asyncio
-async def test_forget_intent_returns_action_marker(turn_engine_factory):
-    engine = turn_engine_factory()
-    events = [ev async for ev in engine.run(make_turn_input("请忘记我刚才说的"))]
-    done = [e for e in events if e.kind.value == "done"]
-    assert done and done[0].data.get("action") == "memory_forget_preview"
-    assert done[0].data.get("memory_status") == "unavailable"
-
-
-@pytest.mark.asyncio
 async def test_stop_utterance_short_circuits_without_llm(turn_engine_factory):
-    """"停，别说了" must not reach the LLM and returns user_stop."""
+    """ "停，别说了" must not reach the LLM and returns user_stop."""
 
     class _BoomLLM:
         model_id = "fake:boom"
@@ -239,7 +210,7 @@ async def test_stop_utterance_short_circuits_without_llm(turn_engine_factory):
 
 @pytest.mark.asyncio
 async def test_stop_plus_new_task_still_runs_the_turn(turn_engine_factory):
-    """"停一下再帮我查天气" carries a task — it must NOT short-circuit."""
+    """ "停一下再帮我查天气" carries a task — it must NOT short-circuit."""
     engine = turn_engine_factory()
     events = [ev async for ev in engine.run(make_turn_input("停一下再帮我查天气"))]
     done = [e for e in events if e.kind.value == "done"]
@@ -252,23 +223,22 @@ async def test_persona_phrase_overrides_hot_path_line(turn_engine_factory):
     """A genome-defined spoken_phrase overrides the default canned line."""
     llm = FakeLLM(
         script=[
-            [{"kind": "tool_call", "name": "delegate_to_coworker",
-              "arguments": {"instruction": "整理资料"}}],
+            [
+                {
+                    "kind": "tool_call",
+                    "name": "delegate_to_coworker",
+                    "arguments": {"instruction": "整理资料"},
+                }
+            ],
             [{"kind": "text", "text": "好的。"}],
         ]
     )
     engine = turn_engine_factory(llm=llm)
     ti = make_turn_input("帮我整理资料")
     # Simulate the context compiler stashing the genome's canned lines.
-    ti.metadata["persona_spoken_phrases"] = {
-        "coworker_delegated": "喵～交给我啦，我这就去办。"
-    }
+    ti.metadata["persona_spoken_phrases"] = {"coworker_delegated": "喵～交给我啦，我这就去办。"}
 
-    deltas = [
-        ev.data.get("text", "")
-        async for ev in engine.run(ti)
-        if ev.kind.value == "delta"
-    ]
+    deltas = [ev.data.get("text", "") async for ev in engine.run(ti) if ev.kind.value == "delta"]
     assert any("喵～交给我啦" in t for t in deltas)
     assert not any("收到，我已交给后台 coworker" in t for t in deltas)
 
@@ -314,9 +284,7 @@ async def test_barge_in_persists_only_heard_text(turn_engine_factory):
 
     # Give the background persistence tasks a tick to run.
     await asyncio.sleep(0.05)
-    recent = await engine._history.recent_window(
-        conversation_id=ti.conversation_id, window=10
-    )
+    recent = await engine._history.recent_window(conversation_id=ti.conversation_id, window=10)
     assistant = [m for m in recent if m.role == MessageRole.ASSISTANT]
     assert assistant, "heard prefix should be persisted"
     assert assistant[-1].content == "你好呀，"
@@ -384,14 +352,10 @@ async def test_slow_tool_hint_emitted_once_per_turn(turn_engine_factory):
     hint_deltas = [e for e in deltas if e.data["text"] == slow_hint]
     assert all(e.data.get("role") == "slow_tool_hint" for e in hint_deltas)
     answer_deltas = [e for e in deltas if "抱歉" in e.data["text"]]
-    assert answer_deltas and all(
-        e.data.get("role") != "slow_tool_hint" for e in answer_deltas
-    )
+    assert answer_deltas and all(e.data.get("role") != "slow_tool_hint" for e in answer_deltas)
 
     # The wait hint must not pollute the persisted assistant answer text.
-    recent = await engine._history.recent_window(
-        conversation_id=ti.conversation_id, window=10
-    )
+    recent = await engine._history.recent_window(conversation_id=ti.conversation_id, window=10)
     assistant = [m for m in recent if m.role == MessageRole.ASSISTANT]
     assert assistant and slow_hint not in assistant[-1].content
 
@@ -432,9 +396,7 @@ async def test_coworker_delegation_ack_is_persisted_as_answer(turn_engine_factor
     assert all(e.data.get("role") != "tool_preamble" for e in ack_deltas)
 
     # And it must be persisted as the assistant answer (not dropped to "").
-    recent = await engine._history.recent_window(
-        conversation_id=ti.conversation_id, window=10
-    )
+    recent = await engine._history.recent_window(conversation_id=ti.conversation_id, window=10)
     assistant = [m for m in recent if m.role == MessageRole.ASSISTANT]
     assert assistant and ack in assistant[-1].content
 

@@ -75,23 +75,15 @@ async def turn_engine_factory(personas_service, event_bus):
 
         history = history or HistoryManager(
             hydrate_messages=(
-                build_agent_history_hydrator(runtime_store)
-                if runtime_store is not None
-                else None
+                build_agent_history_hydrator(runtime_store) if runtime_store is not None else None
             )
         )
         fanout = HistoryFanout(event_bus=event_bus)
         if tool_dispatcher is None:
             tools = ToolRegistry()
             tools.register(EmitEventTool(event_bus=event_bus))
-            task_store = (
-                AgentLongTaskStore(runtime_store)
-                if runtime_store is not None
-                else None
-            )
-            long_task_submitter = _ImmediateLongTaskSubmitter(
-                task_store
-            )
+            task_store = AgentLongTaskStore(runtime_store) if runtime_store is not None else None
+            long_task_submitter = _ImmediateLongTaskSubmitter(task_store)
             tools.register(SubmitLongTaskTool(long_task_submitter=long_task_submitter))
             tool_dispatcher = ToolDispatcher(tools)
 
@@ -120,7 +112,6 @@ async def turn_engine_factory(personas_service, event_bus):
             event_bus=event_bus,
             personas_service=personas_service,
             genome_id="genome-test",
-            memory_port=memory_port,
             turn_persister=(
                 build_agent_turn_persister(
                     runtime_store,

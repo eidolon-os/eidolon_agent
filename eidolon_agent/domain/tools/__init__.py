@@ -4,8 +4,6 @@ from eidolon_agent.domain.tools.builtin import (
     EmitEventTool,
     GetTimeTool,
     GetWeatherTool,
-    MemoryAssertFactTool,
-    MemoryForgetTool,
     MemorySearchTool,
     SubmitLongTaskTool,
 )
@@ -16,8 +14,6 @@ __all__ = [
     "EmitEventTool",
     "GetTimeTool",
     "GetWeatherTool",
-    "MemoryAssertFactTool",
-    "MemoryForgetTool",
     "MemorySearchTool",
     "SubmitLongTaskTool",
     "ToolDispatcher",

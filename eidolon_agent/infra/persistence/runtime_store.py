@@ -31,13 +31,14 @@ from sqlalchemy import (
     text,
     update,
 )
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from eidolon_agent.core.types.conversation import CONVERSATION_ID_MAX_LENGTH
 
 JsonDict = dict[str, Any]
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 
 def utc_now() -> datetime:
@@ -212,6 +213,147 @@ class AgentAuditOutboxRow(RuntimeBase):
             "outbox_id",
         ),
     )
+
+
+class MemoryTurnOutboxRow(RuntimeBase):
+    __tablename__ = "memory_turn_outbox"
+
+    outbox_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    turn_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    owner_id: Mapped[str] = mapped_column(String(64), index=True)
+    companion_id: Mapped[str] = mapped_column(String(64), index=True)
+    subject: Mapped[str] = mapped_column(String(256))
+    payload_json: Mapped[JsonDict] = mapped_column(default=dict)
+    trace_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    __table_args__ = (
+        Index(
+            "ix_agent_memory_turn_outbox_delivery",
+            "published_at",
+            "next_attempt_at",
+            "outbox_id",
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class PendingMemoryTurn:
+    turn_id: str
+    subject: str
+    payload: dict[str, Any]
+    trace_id: str | None
+    attempt_count: int
+
+
+class AgentMemoryTurnOutbox:
+    def __init__(self, session_factory: async_sessionmaker) -> None:
+        self._session_factory = session_factory
+
+    async def enqueue(
+        self,
+        *,
+        turn_id: str,
+        owner_id: str,
+        companion_id: str,
+        subject: str,
+        payload: dict[str, Any],
+        trace_id: str | None,
+    ) -> None:
+        async with self._session_factory() as session:
+            await session.execute(
+                sqlite_insert(MemoryTurnOutboxRow)
+                .values(
+                    turn_id=turn_id,
+                    owner_id=owner_id,
+                    companion_id=companion_id,
+                    subject=subject,
+                    payload_json=payload,
+                    trace_id=trace_id,
+                )
+                .on_conflict_do_nothing(index_elements=["turn_id"])
+            )
+            await session.commit()
+            row = await session.scalar(
+                select(MemoryTurnOutboxRow).where(MemoryTurnOutboxRow.turn_id == turn_id)
+            )
+            if row is None:
+                raise RuntimeError(f"memory turn enqueue lost after commit: {turn_id}")
+            identity = (
+                row.owner_id,
+                row.companion_id,
+                row.subject,
+                dict(row.payload_json or {}),
+                row.trace_id,
+            )
+            requested = (owner_id, companion_id, subject, payload, trace_id)
+            if identity != requested:
+                raise RuntimeError(f"memory turn identity collision: {turn_id}")
+
+    async def pending_batch(self, *, limit: int = 100) -> list[PendingMemoryTurn]:
+        now = utc_now()
+        async with self._session_factory() as session:
+            blocked_subjects = (
+                select(MemoryTurnOutboxRow.subject)
+                .where(MemoryTurnOutboxRow.published_at.is_(None))
+                .where(MemoryTurnOutboxRow.next_attempt_at > now)
+            )
+            rows = list(
+                await session.scalars(
+                    select(MemoryTurnOutboxRow)
+                    .where(MemoryTurnOutboxRow.published_at.is_(None))
+                    .where(MemoryTurnOutboxRow.next_attempt_at <= now)
+                    .where(MemoryTurnOutboxRow.subject.not_in(blocked_subjects))
+                    .order_by(MemoryTurnOutboxRow.outbox_id)
+                    .limit(limit)
+                )
+            )
+            return [
+                PendingMemoryTurn(
+                    turn_id=row.turn_id,
+                    subject=row.subject,
+                    payload=dict(row.payload_json or {}),
+                    trace_id=row.trace_id,
+                    attempt_count=row.attempt_count,
+                )
+                for row in rows
+            ]
+
+    async def mark_published(self, turn_id: str) -> None:
+        async with self._session_factory() as session:
+            await session.execute(
+                delete(MemoryTurnOutboxRow).where(MemoryTurnOutboxRow.turn_id == turn_id)
+            )
+            await session.commit()
+
+    async def mark_failed(self, turn_id: str, *, error: str) -> None:
+        async with self._session_factory() as session:
+            row = await session.scalar(
+                select(MemoryTurnOutboxRow).where(MemoryTurnOutboxRow.turn_id == turn_id)
+            )
+            if row is None or row.published_at is not None:
+                return
+            row.attempt_count += 1
+            row.last_error = error[:2_000]
+            row.next_attempt_at = utc_now() + timedelta(
+                seconds=min(2 ** min(row.attempt_count, 6), 60)
+            )
+            await session.commit()
+
+    async def pending_count(self) -> int:
+        async with self._session_factory() as session:
+            return int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(MemoryTurnOutboxRow)
+                    .where(MemoryTurnOutboxRow.published_at.is_(None))
+                )
+                or 0
+            )
 
 
 @dataclass(frozen=True)
@@ -407,6 +549,12 @@ class AgentRuntimeStore:
             if version == 0:
                 await connection.run_sync(RuntimeBase.metadata.create_all)
                 await connection.execute(text(f"PRAGMA user_version={_SCHEMA_VERSION}"))
+            elif version == 1:
+                await connection.run_sync(
+                    MemoryTurnOutboxRow.__table__.create,
+                    checkfirst=True,
+                )
+                await connection.execute(text(f"PRAGMA user_version={_SCHEMA_VERSION}"))
             elif version != _SCHEMA_VERSION:
                 raise RuntimeError(
                     f"unsupported agent runtime schema {version}; expected {_SCHEMA_VERSION}"
@@ -419,6 +567,10 @@ class AgentRuntimeStore:
     @property
     def audit_outbox(self) -> AgentAuditOutbox:
         return AgentAuditOutbox(self.session_factory)
+
+    @property
+    def memory_turn_outbox(self) -> AgentMemoryTurnOutbox:
+        return AgentMemoryTurnOutbox(self.session_factory)
 
     async def delete_owner_runtime(self, owner_id: str) -> dict[str, int]:
         """Delete private runtime content without treating audit as source data."""
@@ -450,7 +602,18 @@ class AgentRuntimeStore:
                     )
                     or 0
                 ),
+                "memory_turn_outbox": int(
+                    await session.scalar(
+                        select(func.count())
+                        .select_from(MemoryTurnOutboxRow)
+                        .where(MemoryTurnOutboxRow.owner_id == owner_id)
+                    )
+                    or 0
+                ),
             }
+            await session.execute(
+                delete(MemoryTurnOutboxRow).where(MemoryTurnOutboxRow.owner_id == owner_id)
+            )
             for name, model in (
                 ("jobs", JobRow),
                 ("conversations", ConversationRow),
@@ -494,7 +657,21 @@ class AgentRuntimeStore:
                     )
                     or 0
                 ),
+                "memory_turn_outbox": int(
+                    await session.scalar(
+                        select(func.count())
+                        .select_from(MemoryTurnOutboxRow)
+                        .where(MemoryTurnOutboxRow.owner_id == owner_id)
+                        .where(MemoryTurnOutboxRow.companion_id == companion_id)
+                    )
+                    or 0
+                ),
             }
+            await session.execute(
+                delete(MemoryTurnOutboxRow)
+                .where(MemoryTurnOutboxRow.owner_id == owner_id)
+                .where(MemoryTurnOutboxRow.companion_id == companion_id)
+            )
             job_result = await session.execute(
                 delete(JobRow)
                 .where(JobRow.owner_id == owner_id)
@@ -542,6 +719,7 @@ __all__ = [
     "AgentRuntimeStore",
     "ConversationRow",
     "JobRow",
+    "MemoryTurnOutboxRow",
     "MessageRow",
     "RuntimeSessionRow",
     "TurnRow",
