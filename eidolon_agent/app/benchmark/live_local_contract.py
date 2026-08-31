@@ -430,7 +430,7 @@ async def _memory_contract_checks(
         checks.append(ops_tools)
         if ops_session is None or ops_tools.status != "passed":
             return checks
-        advertised_ops = set(ops_tools.details.get("tool_names") or [])
+        advertised_agent = set(agent_tools.details.get("tool_names") or [])
 
         checks.append(await _memory_status_check(ops_session, memory_space_id, cfg))
         publish_check, turn_id = await _memory_publish_check(
@@ -445,9 +445,11 @@ async def _memory_contract_checks(
         if publish_check.status == "passed":
             readback = await _memory_readback_check(
                 pool=pool,
-                tool_names=advertised_ops,
+                tool_names=advertised_agent,
                 memory_space_id=memory_space_id,
-                turn_id=turn_id,
+                marker=turn_id,
+                owner_id=owner_id,
+                companion_id=companion_id,
                 cfg=cfg,
             )
             checks.append(readback)
@@ -456,7 +458,8 @@ async def _memory_contract_checks(
                     pool=pool,
                     memory_space_id=memory_space_id,
                     owner_id=owner_id,
-                    turn_id=turn_id,
+                    companion_id=companion_id,
+                    marker=turn_id,
                     cfg=cfg,
                 )
             )
@@ -733,19 +736,21 @@ async def _memory_readback_check(
     pool: McpClientPool,
     tool_names: set[str],
     memory_space_id: str,
-    turn_id: str,
+    marker: str,
+    owner_id: str,
+    companion_id: str,
     cfg: LiveLocalContractConfig,
 ) -> ContractCheck:
     started = time.perf_counter()
     required = cfg.require_memory_readback
-    if "eidolon_memory_get_by_source_turn" not in tool_names:
+    if "eidolon_memory_search" not in tool_names:
         return _check(
             name="memory_nats_readback",
             status="failed" if required else "skipped",
             required=required,
             started=started,
-            summary="eidolon_memory_get_by_source_turn is not advertised",
-            details={"memory_space_id": memory_space_id, "turn_id": turn_id},
+            summary="eidolon_memory_search is not advertised",
+            details={"memory_space_id": memory_space_id, "marker": marker},
         )
 
     deadline = time.perf_counter() + cfg.memory_readback_timeout_s
@@ -758,17 +763,25 @@ async def _memory_readback_check(
             break
         session: Any | None = None
         try:
-            session = await pool.write_session_for(memory_space_id)
+            session = await pool.session_for(memory_space_id)
             payload = await _call_mcp_tool_with_timeout(
                 session,
-                "eidolon_memory_get_by_source_turn",
-                {"source_turn_id": turn_id, "include_private": True},
+                "eidolon_memory_search",
+                {
+                    "query": marker,
+                    "context": _memory_canary_context(
+                        memory_space_id=memory_space_id,
+                        owner_id=owner_id,
+                        companion_id=companion_id,
+                    ),
+                    "top_k": 10,
+                },
                 timeout_s=max(0.001, min(cfg.timeout_s, remaining_s)),
             )
         except TimeoutError as exc:
             last_error = f"{type(exc).__name__}: {exc}"
             last_dependency_unavailable = False
-            await _drop_ops_mcp_session(pool, memory_space_id, session)
+            await _drop_agent_mcp_session(pool, memory_space_id, session)
             await asyncio.sleep(
                 min(cfg.memory_readback_poll_s, max(0.0, deadline - time.perf_counter()))
             )
@@ -776,7 +789,7 @@ async def _memory_readback_check(
         except MemoryUnavailableError as exc:
             last_error = str(exc)
             last_dependency_unavailable = True
-            await _drop_ops_mcp_session(pool, memory_space_id, session)
+            await _drop_agent_mcp_session(pool, memory_space_id, session)
             await asyncio.sleep(
                 min(cfg.memory_readback_poll_s, max(0.0, deadline - time.perf_counter()))
             )
@@ -788,13 +801,14 @@ async def _memory_readback_check(
                 required=required,
                 started=started,
                 summary=f"{type(exc).__name__}: {exc}",
-                details={"memory_space_id": memory_space_id, "turn_id": turn_id},
+                details={"memory_space_id": memory_space_id, "marker": marker},
             )
         last_payload = payload
         last_error = None
         last_dependency_unavailable = False
-        record = payload.get("record") if isinstance(payload, dict) else None
-        if isinstance(record, dict):
+        matching = _memory_records_containing(payload, marker)
+        if matching:
+            record = matching[0]
             return _check(
                 name="memory_nats_readback",
                 status="passed",
@@ -803,7 +817,7 @@ async def _memory_readback_check(
                 summary="ok",
                 details={
                     "memory_space_id": memory_space_id,
-                    "turn_id": turn_id,
+                    "marker": marker,
                     "record_key": record.get("key") or record.get("id"),
                 },
             )
@@ -825,7 +839,7 @@ async def _memory_readback_check(
         summary="timed out waiting for memory readback",
         details={
             "memory_space_id": memory_space_id,
-            "turn_id": turn_id,
+            "marker": marker,
             "timeout_s": cfg.memory_readback_timeout_s,
             "last_payload": last_payload,
             "last_error": last_error,
@@ -838,7 +852,8 @@ async def _memory_cleanup_check(
     pool: McpClientPool,
     memory_space_id: str,
     owner_id: str,
-    turn_id: str,
+    companion_id: str,
+    marker: str,
     cfg: LiveLocalContractConfig,
 ) -> ContractCheck:
     """Delete the canary through the product privacy workflow and prove absence."""
@@ -851,7 +866,7 @@ async def _memory_cleanup_check(
             required=False,
             started=started,
             summary="cleanup disabled explicitly",
-            details={"memory_space_id": memory_space_id, "turn_id": turn_id},
+            details={"memory_space_id": memory_space_id, "marker": marker},
         )
     if not cfg.admin_gateway_base:
         return _check(
@@ -860,7 +875,7 @@ async def _memory_cleanup_check(
             required=True,
             started=started,
             summary="admin_gateway_base is required for product-path cleanup",
-            details={"memory_space_id": memory_space_id, "turn_id": turn_id},
+            details={"memory_space_id": memory_space_id, "marker": marker},
         )
 
     preview_url = _join_url(
@@ -873,7 +888,7 @@ async def _memory_cleanup_check(
     )
     details: dict[str, Any] = {
         "memory_space_id": memory_space_id,
-        "turn_id": turn_id,
+        "marker": marker,
         "preview_url": preview_url,
         "confirm_url": confirm_url,
     }
@@ -886,7 +901,7 @@ async def _memory_cleanup_check(
             preview_response = await client.post(
                 preview_url,
                 params={"owner_id": owner_id},
-                json={"target": turn_id, "action": "delete"},
+                json={"target": marker, "action": "delete"},
             )
             details["preview_status_code"] = preview_response.status_code
             if preview_response.status_code >= 400:
@@ -894,7 +909,8 @@ async def _memory_cleanup_check(
                 raise RuntimeError(f"forget preview returned HTTP {preview_response.status_code}")
             preview = preview_response.json()
             confirmation_token = str(preview.get("confirmation_token") or "").strip()
-            if preview.get("status") != "preview" or not confirmation_token:
+            entries = preview.get("entries") or []
+            if preview.get("status") != "preview" or not confirmation_token or not entries:
                 details["preview_status"] = preview.get("status")
                 details["entry_count"] = len(preview.get("entries") or [])
                 raise RuntimeError("forget preview did not bind the marker")
@@ -924,17 +940,25 @@ async def _memory_cleanup_check(
         )
 
     deadline = time.perf_counter() + cfg.memory_readback_timeout_s
-    last_payload: dict[str, Any] | None = None
+    last_payload: Any = None
     while time.perf_counter() < deadline:
         try:
-            session = await pool.write_session_for(memory_space_id)
+            session = await pool.session_for(memory_space_id)
             last_payload = await _call_mcp_tool_with_timeout(
                 session,
-                "eidolon_memory_get_by_source_turn",
-                {"source_turn_id": turn_id, "include_private": True},
+                "eidolon_memory_search",
+                {
+                    "query": marker,
+                    "context": _memory_canary_context(
+                        memory_space_id=memory_space_id,
+                        owner_id=owner_id,
+                        companion_id=companion_id,
+                    ),
+                    "top_k": 10,
+                },
                 timeout_s=cfg.timeout_s,
             )
-            if not last_payload.get("record"):
+            if not _memory_records_containing(last_payload, marker):
                 return _check(
                     name="memory_marker_cleanup",
                     status="passed",
@@ -958,13 +982,43 @@ async def _memory_cleanup_check(
     )
 
 
+def _memory_canary_context(
+    *,
+    memory_space_id: str,
+    owner_id: str,
+    companion_id: str,
+) -> dict[str, str]:
+    """Use the same authoritative scope on write, readback, and deletion proof."""
+
+    return {
+        "memory_realm_id": memory_space_id,
+        "memory_space_id": memory_space_id,
+        "owner_id": owner_id,
+        "companion_id": companion_id,
+        "device_id": "agent-live-contract",
+        "session_id": "live-local-contract",
+    }
+
+
+def _memory_records_containing(payload: Any, marker: str) -> list[dict[str, Any]]:
+    """Return only user-visible records whose projected value contains the canary."""
+
+    if not isinstance(payload, list):
+        return []
+    return [
+        record
+        for record in payload
+        if isinstance(record, dict) and marker in str(record.get("value") or "")
+    ]
+
+
 async def _call_mcp_tool_with_timeout(
     session: Any,
     name: str,
     arguments: dict[str, Any],
     *,
     timeout_s: float,
-) -> dict[str, Any]:
+) -> Any:
     task = asyncio.create_task(session.call_tool(name, arguments))
     try:
         done, _ = await asyncio.wait({task}, timeout=timeout_s)
@@ -1000,6 +1054,19 @@ async def _drop_ops_mcp_session(
         return
     try:
         await pool.drop_write_session(memory_space_id, session=session)
+    except Exception:
+        pass
+
+
+async def _drop_agent_mcp_session(
+    pool: McpClientPool,
+    memory_space_id: str,
+    session: Any | None,
+) -> None:
+    if session is None:
+        return
+    try:
+        await pool.drop_session(memory_space_id, session=session)
     except Exception:
         pass
 
