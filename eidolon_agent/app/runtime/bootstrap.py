@@ -203,6 +203,17 @@ async def build_application(
             publisher=mem_pub,
         )
         container.memory_port = memory_port
+        if settings.runtime.warmup_enabled and settings.memory.startup_warm_enabled:
+            try:
+                await asyncio.wait_for(
+                    mem_pool.warmup_read_sessions(),
+                    timeout=settings.memory.startup_warm_timeout_s,
+                )
+            except Exception:
+                _log.warning(
+                    "memory reader warmup failed; continuing with lazy reconnect",
+                    exc_info=True,
+                )
         if memory_refresher is not None:
             memory_refresher.start()
             container.extras["memory_discovery_refresher"] = memory_refresher

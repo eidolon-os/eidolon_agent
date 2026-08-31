@@ -179,6 +179,50 @@ async def test_read_pool_leases_independent_sessions_for_concurrent_calls(
     await pool.close()
 
 
+async def test_read_pool_warmup_opens_every_bounded_transport(monkeypatch) -> None:
+    warmed: set[McpUserSession] = set()
+
+    async def tool_names(self):
+        warmed.add(self)
+        await asyncio.sleep(0)
+        return frozenset({"eidolon_memory_recall_context"})
+
+    monkeypatch.setattr(McpUserSession, "tool_names", tool_names)
+    pool = McpReadSessionPool("http://a/mcp", size=3)
+
+    await pool.warmup()
+
+    assert len(warmed) == 3
+    assert len(pool._sessions) == 3
+    assert await pool.tool_names() == frozenset({"eidolon_memory_recall_context"})
+    await pool.close()
+
+
+async def test_client_pool_warms_every_reachable_realm(monkeypatch) -> None:
+    warmed: list[str] = []
+
+    async def warmup(self):
+        warmed.append(self._url)
+
+    monkeypatch.setattr(McpReadSessionPool, "warmup", warmup)
+    pool = McpClientPool(
+        routes=_routes(
+            MemoryRoute(memory_space_id="realm-a", mcp_url="http://a/mcp"),
+            MemoryRoute(memory_space_id="realm-b", mcp_url="http://b/mcp"),
+            MemoryRoute(
+                memory_space_id="realm-disabled",
+                mcp_url="http://disabled/mcp",
+                enabled=False,
+            ),
+        )
+    )
+
+    await pool.warmup_read_sessions()
+
+    assert sorted(warmed) == ["http://a/mcp", "http://b/mcp"]
+    await pool.close_all()
+
+
 async def test_read_pool_closes_transport_in_its_owner_task_after_caller_timeout(
     monkeypatch,
 ) -> None:

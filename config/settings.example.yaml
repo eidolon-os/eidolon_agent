@@ -24,6 +24,8 @@ memory:
   discovery_url: http://127.0.0.1:8020/api/discovery/agent-routing
   discovery_token_env: ""   # env var name for discovery bearer (optional)
   discovery_refresh_s: 30
+  startup_warm_enabled: true
+  startup_warm_timeout_s: 5.0
   endpoints:
     - memory_space_id: default.default.default
       mcp_url: http://127.0.0.1:8030/mcp

@@ -1,8 +1,9 @@
-"""MCP Streamable-HTTP client pool — one session per memory_space_id (port).
+"""MCP Streamable-HTTP client pool — one read pool per Memory Realm.
 
-eidolon-memory binds each agent_runner to a port; we hold one long-lived MCP
-session per user. ``recall_context`` is the hot path; ``search`` etc. are
-exposed for admin / debugging.
+eidolon-memory binds each agent_runner to a port. ``recall_context`` is the
+Agent hot path, so every bounded reader transport is connected before the
+Agent advertises readiness instead of charging MCP negotiation to a user's
+first turn.
 """
 
 from __future__ import annotations
@@ -271,6 +272,16 @@ class McpReadSessionPool:
         names = await self.tool_names()
         return True if names is None else name in names
 
+    async def warmup(self) -> None:
+        """Open every bounded reader transport and negotiate capabilities."""
+
+        results = await asyncio.gather(
+            *(self._submit("tool_names") for _ in range(self._size))
+        )
+        names = next((value for value in results if value is not None), None)
+        if names is not None:
+            self._tool_names = names
+
     def matches(self, *, mcp_url: str, bearer_token: str | None) -> bool:
         return self._url == mcp_url and self._token == bearer_token
 
@@ -366,6 +377,17 @@ class McpClientPool:
 
     async def write_session_for(self, memory_space_id: str) -> McpUserSession:
         return await self._session_for(memory_space_id, write=True)
+
+    async def warmup_read_sessions(self) -> None:
+        """Warm all currently reachable Realm readers without issuing a query."""
+
+        memory_space_ids = await self._routes.memory_space_ids()
+
+        async def warm_one(memory_space_id: str) -> None:
+            session = await self.session_for(memory_space_id)
+            await session.warmup()
+
+        await asyncio.gather(*(warm_one(value) for value in memory_space_ids))
 
     async def _session_for(
         self,

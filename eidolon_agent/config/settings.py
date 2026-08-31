@@ -113,6 +113,8 @@ class MemorySettings(BaseModel):
     discovery_token_env: str = ""
     discovery_refresh_s: int = 30
     discovery_timeout_s: float = 2.0
+    startup_warm_enabled: bool = True
+    startup_warm_timeout_s: float = Field(default=5.0, gt=0.0, le=30.0)
     endpoints: list[MemoryEndpoint] = Field(default_factory=list)
     recall_timeout_s: float = Field(default=0.5, gt=0.0, le=10.0)
 
