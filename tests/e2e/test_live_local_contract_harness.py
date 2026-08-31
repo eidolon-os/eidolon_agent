@@ -9,8 +9,6 @@ from eidolon_memory_contracts import unwrap_memory_payload
 
 from eidolon_agent.app.benchmark import live_local_contract
 from eidolon_agent.app.benchmark.live_local_contract import (
-    ContractCheck,
-    ContractWorkspace,
     LiveLocalContractConfig,
     run_live_local_contract,
 )
@@ -72,64 +70,6 @@ async def test_http_json_check_retries_transient_connect_failure(monkeypatch) ->
 
     assert check.status == "passed"
     assert check.details["attempts"] == 2
-
-
-async def test_cleanup_contract_workspace_deletes_owner_then_memory_orphan(
-    monkeypatch,
-) -> None:
-    class _Response:
-        def __init__(self, status_code: int, body: dict) -> None:
-            self.status_code = status_code
-            self._body = body
-            self.text = str(body)
-
-        def json(self):
-            return self._body
-
-    class _Client:
-        calls: ClassVar[list[tuple[str, dict]]] = []
-        responses: ClassVar[list[_Response]] = [
-            _Response(200, {"counts": {"owners": 1}}),
-            _Response(200, {"orphaned": True, "palace_deleted": True}),
-        ]
-
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb) -> None:
-            return None
-
-        async def delete(self, url: str, *, params: dict):
-            self.calls.append((url, dict(params)))
-            return self.responses.pop(0)
-
-    monkeypatch.setattr(live_local_contract.httpx, "AsyncClient", _Client)
-
-    check = await live_local_contract._cleanup_contract_workspace(
-        LiveLocalContractConfig(admin_gateway_base="http://127.0.0.1:9000"),
-        ContractWorkspace(
-            owner_id="owner_contract",
-            companion_id="companion_contract",
-            memory_realm_id="r:owner:contract",
-        ),
-    )
-
-    assert check.status == "passed"
-    assert _Client.calls == [
-        (
-            "http://127.0.0.1:9000/api/owners/owner_contract",
-            {"confirm_owner_id": "owner_contract", "purge_memory": "true"},
-        ),
-        (
-            "http://127.0.0.1:9000/api/memory/realms/r%3Aowner%3Acontract/orphan",
-            {"purge_palace": "true"},
-        ),
-    ]
-    assert check.details["memory_orphan_cleanup"]["status_code"] == 200
-    assert check.details["memory_orphan_cleanup_body"]["palace_deleted"] is True
 
 
 class _FakeRoutes:
@@ -254,6 +194,9 @@ async def test_live_local_contract_memory_publish_and_readback(monkeypatch) -> N
             include_admin_gateway=False,
             include_memory=True,
             require_memory_readback=True,
+            memory_owner_id="live-local-contract",
+            memory_companion_id="live-local-contract",
+            require_memory_cleanup=False,
             memory_readback_poll_s=0.001,
         )
     )
@@ -265,8 +208,10 @@ async def test_live_local_contract_memory_publish_and_readback(monkeypatch) -> N
         "memory_mcp_status",
         "memory_nats_publish",
         "memory_nats_readback",
+        "memory_marker_cleanup",
     ]
-    assert all(check.status == "passed" for check in report.checks)
+    assert all(check.status == "passed" for check in report.checks[:-1])
+    assert report.checks[-1].status == "skipped"
     assert _FakeBus.published
     event, persistent = _FakeBus.published[-1]
     assert persistent is True
@@ -274,6 +219,7 @@ async def test_live_local_contract_memory_publish_and_readback(monkeypatch) -> N
     assert published["context"]["memory_realm_id"] == "r_contract"
     assert "Acquired" in published["user_text"]
     assert published["turn_id"] in published["user_text"]
+    assert "请记住" not in published["user_text"]
     assert published["metadata"] == {
         "source": "eidolon-agent-live-local-contract",
         "source_project": "eidolon_agent",
@@ -444,6 +390,91 @@ async def test_live_local_contract_readback_unavailable_uses_dependency_policy()
     assert check.details["last_error"] == "mcp warming"
 
 
+async def test_memory_cleanup_uses_product_privacy_flow_and_proves_absence(
+    monkeypatch,
+) -> None:
+    class _Response:
+        def __init__(self, body: dict) -> None:
+            self.status_code = 200
+            self._body = body
+            self.text = str(body)
+
+        def json(self) -> dict:
+            return self._body
+
+    class _Client:
+        calls: ClassVar[list[tuple[str, dict, dict]]] = []
+        responses: ClassVar[list[_Response]] = [
+            _Response(
+                {
+                    "status": "preview",
+                    "entries": [{"entry_id": "drawer-canary"}],
+                    "confirmation_token": "opaque-secret-token",
+                }
+            ),
+            _Response({"status": "applied", "entry_count": 1}),
+        ]
+
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def post(self, url: str, *, params: dict, json: dict):
+            self.calls.append((url, dict(params), dict(json)))
+            return self.responses.pop(0)
+
+    class _GoneSession:
+        async def call_tool(self, name, arguments):
+            assert name == "eidolon_memory_get_by_source_turn"
+            assert arguments["source_turn_id"] == "turn-canary"
+            return {"record": None}
+
+    monkeypatch.setattr(live_local_contract.httpx, "AsyncClient", _Client)
+    check = await live_local_contract._memory_cleanup_check(
+        pool=_StaticSessionPool(_GoneSession()),
+        memory_space_id="r_contract",
+        owner_id="owner_contract",
+        turn_id="turn-canary",
+        cfg=LiveLocalContractConfig(memory_readback_poll_s=0.001),
+    )
+
+    assert check.status == "passed"
+    assert check.summary == "applied and no longer readable"
+    assert _Client.calls == [
+        (
+            "http://127.0.0.1:9000/api/internal/v1/management/memory/forget/preview",
+            {"owner_id": "owner_contract"},
+            {"target": "turn-canary", "action": "delete"},
+        ),
+        (
+            "http://127.0.0.1:9000/api/internal/v1/management/memory/forget/confirm",
+            {"owner_id": "owner_contract"},
+            {"confirmation_token": "opaque-secret-token"},
+        ),
+    ]
+    assert "confirmation_token" not in check.details
+
+
+async def test_live_memory_contract_requires_explicit_scope_identity() -> None:
+    report = await run_live_local_contract(
+        LiveLocalContractConfig(
+            include_agent_http=False,
+            include_agent_admin=False,
+            include_admin_gateway=False,
+            include_memory=True,
+        )
+    )
+
+    assert report.passed is False
+    assert report.checks[0].name == "memory_test_identity"
+    assert report.checks[0].status == "failed"
+
+
 async def test_live_local_contract_dependency_unavailable_can_skip(monkeypatch) -> None:
     async def fake_build_initial_memory_routes(
         *,
@@ -478,6 +509,8 @@ async def test_live_local_contract_dependency_unavailable_can_skip(monkeypatch) 
             include_agent_admin=False,
             include_admin_gateway=False,
             include_memory=True,
+            memory_owner_id="live-local-contract",
+            memory_companion_id="live-local-contract",
             dependency_unavailable_status="skipped",
         )
     )
@@ -523,7 +556,10 @@ async def test_live_local_contract_nats_unavailable_uses_dependency_policy(
             include_agent_admin=False,
             include_admin_gateway=False,
             include_memory=True,
+            memory_owner_id="live-local-contract",
+            memory_companion_id="live-local-contract",
             dependency_unavailable_status="skipped",
+            require_memory_cleanup=False,
         )
     )
 
@@ -531,100 +567,3 @@ async def test_live_local_contract_nats_unavailable_uses_dependency_policy(
     assert by_name["memory_nats_publish"].status == "skipped"
     assert report.summary["skipped_required"] == ["memory_nats_publish"]
     assert report.passed is False
-
-
-async def test_live_local_contract_provisions_memory_route_and_cleans_up(
-    monkeypatch,
-) -> None:
-    events: list[tuple[str, str]] = []
-
-    async def fake_provision(cfg):
-        events.append(("provision", cfg.contract_owner_id))
-        return ContractCheck(
-            name="contract_owner_provision",
-            status="passed",
-            required=True,
-            summary="ok",
-            elapsed_ms=1.0,
-            details={},
-        ), ContractWorkspace(
-            owner_id="owner_contract",
-            companion_id="c_contract",
-            memory_realm_id="r_contract",
-            genome_id="g_contract",
-        )
-
-    async def fake_memory_checks(cfg, *, selected_memory_space_id=None):
-        events.append(("memory", selected_memory_space_id or ""))
-        return [
-            ContractCheck(
-                name="memory_discovery",
-                status="passed",
-                required=True,
-                summary="ok",
-                elapsed_ms=1.0,
-                details={"selected_memory_space_id": selected_memory_space_id},
-            )
-        ]
-
-    async def fake_reconcile(cfg, workspace):
-        del cfg
-        events.append(("reconcile", workspace.memory_realm_id))
-        return ContractCheck(
-            name="memory_supervisor_reconcile",
-            status="passed",
-            required=True,
-            summary="ok",
-            elapsed_ms=1.0,
-            details={},
-        )
-
-    async def fake_cleanup(cfg, workspace):
-        del cfg
-        events.append(("cleanup", workspace.owner_id))
-        return ContractCheck(
-            name="contract_owner_cleanup",
-            status="passed",
-            required=True,
-            summary="ok",
-            elapsed_ms=1.0,
-            details={},
-        )
-
-    monkeypatch.setattr(
-        live_local_contract,
-        "_provision_contract_workspace",
-        fake_provision,
-    )
-    monkeypatch.setattr(
-        live_local_contract,
-        "_memory_supervisor_reconcile_check",
-        fake_reconcile,
-    )
-    monkeypatch.setattr(live_local_contract, "_memory_contract_checks", fake_memory_checks)
-    monkeypatch.setattr(live_local_contract, "_cleanup_contract_workspace", fake_cleanup)
-
-    report = await run_live_local_contract(
-        LiveLocalContractConfig(
-            include_agent_http=False,
-            include_agent_admin=False,
-            include_admin_gateway=False,
-            include_memory=True,
-            provision_contract_owner=True,
-            contract_owner_id="owner_contract",
-        )
-    )
-
-    assert report.passed is True
-    assert events == [
-        ("provision", "owner_contract"),
-        ("reconcile", "r_contract"),
-        ("memory", "r_contract"),
-        ("cleanup", "owner_contract"),
-    ]
-    assert [check.name for check in report.checks] == [
-        "contract_owner_provision",
-        "memory_supervisor_reconcile",
-        "memory_discovery",
-        "contract_owner_cleanup",
-    ]
