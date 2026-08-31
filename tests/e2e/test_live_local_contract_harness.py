@@ -84,6 +84,9 @@ class _FakeRoutes:
 
 
 class _FakeAgentSession:
+    def __init__(self) -> None:
+        self.search_calls = 0
+
     async def tool_names(self):
         return frozenset(
             {
@@ -93,11 +96,15 @@ class _FakeAgentSession:
             }
         )
 
+    async def call_tool(self, name, arguments):
+        assert name == "eidolon_memory_search"
+        self.search_calls += 1
+        if self.search_calls == 1:
+            return []
+        return [{"key": "drawer-1", "value": f"验收标记 {arguments['query']}"}]
+
 
 class _FakeOpsSession:
-    def __init__(self) -> None:
-        self.readback_calls = 0
-
     async def tool_names(self):
         return frozenset(
             {
@@ -112,16 +119,6 @@ class _FakeOpsSession:
                 "ready": True,
                 "memory_space_id": "r_contract",
                 "mcp_transport": "streamable-http",
-            }
-        if name == "eidolon_memory_get_by_source_turn":
-            self.readback_calls += 1
-            if self.readback_calls == 1:
-                return {"record": None}
-            return {
-                "record": {
-                    "key": "drawer-1",
-                    "metadata": {"source_turn_id": arguments["source_turn_id"]},
-                }
             }
         raise AssertionError(f"unexpected MCP tool {name}")
 
@@ -263,24 +260,26 @@ async def test_live_local_contract_readback_retries_transient_timeout() -> None:
             self.calls = 0
 
         async def call_tool(self, name, arguments):
-            assert name == "eidolon_memory_get_by_source_turn"
+            assert name == "eidolon_memory_search"
             self.calls += 1
             if self.calls == 1:
                 raise TimeoutError()
-            return {
-                "record": {
+            return [
+                {
                     "key": "drawer-timeout-retry",
-                    "metadata": {"source_turn_id": arguments["source_turn_id"]},
+                    "value": f"contains {arguments['query']}",
                 }
-            }
+            ]
 
     session = TimeoutThenRecordSession()
     pool = _StaticSessionPool(session)
     check = await live_local_contract._memory_readback_check(
         pool=pool,
-        tool_names={"eidolon_memory_get_by_source_turn"},
+        tool_names={"eidolon_memory_search"},
         memory_space_id="r_contract",
-        turn_id="turn-timeout-retry",
+        marker="turn-timeout-retry",
+        owner_id="owner-contract",
+        companion_id="companion-contract",
         cfg=LiveLocalContractConfig(
             memory_readback_timeout_s=0.1,
             memory_readback_poll_s=0.001,
@@ -300,24 +299,26 @@ async def test_live_local_contract_readback_retries_cancelled_mcp_call() -> None
             self.calls = 0
 
         async def call_tool(self, name, arguments):
-            assert name == "eidolon_memory_get_by_source_turn"
+            assert name == "eidolon_memory_search"
             self.calls += 1
             if self.calls == 1:
                 raise asyncio.CancelledError("cancel scope closed")
-            return {
-                "record": {
+            return [
+                {
                     "key": "drawer-cancel-retry",
-                    "metadata": {"source_turn_id": arguments["source_turn_id"]},
+                    "value": f"contains {arguments['query']}",
                 }
-            }
+            ]
 
     session = CancelThenRecordSession()
     pool = _StaticSessionPool(session)
     check = await live_local_contract._memory_readback_check(
         pool=pool,
-        tool_names={"eidolon_memory_get_by_source_turn"},
+        tool_names={"eidolon_memory_search"},
         memory_space_id="r_contract",
-        turn_id="turn-cancel-retry",
+        marker="turn-cancel-retry",
+        owner_id="owner-contract",
+        companion_id="companion-contract",
         cfg=LiveLocalContractConfig(
             memory_readback_timeout_s=0.1,
             memory_readback_poll_s=0.001,
@@ -347,8 +348,8 @@ async def test_call_mcp_tool_wait_cancellation_is_timeout(monkeypatch) -> None:
     with pytest.raises(asyncio.TimeoutError):
         await live_local_contract._call_mcp_tool_with_timeout(
             SlowSession(),
-            "eidolon_memory_get_by_source_turn",
-            {"source_turn_id": "turn-cancel-wait"},
+            "eidolon_memory_search",
+            {"query": "turn-cancel-wait"},
             timeout_s=0.01,
         )
 
@@ -372,9 +373,11 @@ async def test_live_local_contract_readback_child_timeout_does_not_leak_cancel()
     pool = _StaticSessionPool(session)
     check = await live_local_contract._memory_readback_check(
         pool=pool,
-        tool_names={"eidolon_memory_get_by_source_turn"},
+        tool_names={"eidolon_memory_search"},
         memory_space_id="r_contract",
-        turn_id="turn-child-timeout",
+        marker="turn-child-timeout",
+        owner_id="owner-contract",
+        companion_id="companion-contract",
         cfg=LiveLocalContractConfig(
             memory_readback_timeout_s=0.01,
             memory_readback_poll_s=0.001,
@@ -398,9 +401,11 @@ async def test_live_local_contract_readback_unavailable_uses_dependency_policy()
 
     check = await live_local_contract._memory_readback_check(
         pool=_StaticSessionPool(UnavailableSession()),
-        tool_names={"eidolon_memory_get_by_source_turn"},
+        tool_names={"eidolon_memory_search"},
         memory_space_id="r_contract",
-        turn_id="turn-unavailable",
+        marker="turn-unavailable",
+        owner_id="owner-contract",
+        companion_id="companion-contract",
         cfg=LiveLocalContractConfig(
             dependency_unavailable_status="skipped",
             memory_readback_timeout_s=0.01,
@@ -455,16 +460,19 @@ async def test_memory_cleanup_uses_product_privacy_flow_and_proves_absence(
 
     class _GoneSession:
         async def call_tool(self, name, arguments):
-            assert name == "eidolon_memory_get_by_source_turn"
-            assert arguments["source_turn_id"] == "turn-canary"
-            return {"record": None}
+            assert name == "eidolon_memory_search"
+            assert arguments["query"] == "turn-canary"
+            assert arguments["context"]["owner_id"] == "owner_contract"
+            assert arguments["context"]["companion_id"] == "companion_contract"
+            return []
 
     monkeypatch.setattr(live_local_contract.httpx, "AsyncClient", _Client)
     check = await live_local_contract._memory_cleanup_check(
         pool=_StaticSessionPool(_GoneSession()),
         memory_space_id="r_contract",
         owner_id="owner_contract",
-        turn_id="turn-canary",
+        companion_id="companion_contract",
+        marker="turn-canary",
         cfg=LiveLocalContractConfig(memory_readback_poll_s=0.001),
     )
 
