@@ -412,18 +412,27 @@ async def _memory_contract_checks(
         creds_path=str(settings.nats.creds_path) if settings.nats.creds_path else None,
     )
     try:
-        session, tool_names = await _probe_memory_tools(
+        agent_session, agent_tools = await _probe_memory_agent_tools(
             pool=pool,
             memory_space_id=memory_space_id,
             timeout_s=cfg.timeout_s,
             unavailable_status=cfg.dependency_unavailable_status,
         )
-        checks.append(tool_names)
-        if session is None or tool_names.status != "passed":
+        checks.append(agent_tools)
+        if agent_session is None or agent_tools.status != "passed":
             return checks
-        advertised = set(tool_names.details.get("tool_names") or [])
+        ops_session, ops_tools = await _probe_memory_ops_tools(
+            pool=pool,
+            memory_space_id=memory_space_id,
+            timeout_s=cfg.timeout_s,
+            unavailable_status=cfg.dependency_unavailable_status,
+        )
+        checks.append(ops_tools)
+        if ops_session is None or ops_tools.status != "passed":
+            return checks
+        advertised_ops = set(ops_tools.details.get("tool_names") or [])
 
-        checks.append(await _memory_status_check(session, memory_space_id, cfg))
+        checks.append(await _memory_status_check(ops_session, memory_space_id, cfg))
         publish_check, turn_id = await _memory_publish_check(
             bus=bus,
             routes=routes,
@@ -436,7 +445,7 @@ async def _memory_contract_checks(
         if publish_check.status == "passed":
             readback = await _memory_readback_check(
                 pool=pool,
-                tool_names=advertised,
+                tool_names=advertised_ops,
                 memory_space_id=memory_space_id,
                 turn_id=turn_id,
                 cfg=cfg,
@@ -457,7 +466,7 @@ async def _memory_contract_checks(
         await bus.close()
 
 
-async def _probe_memory_tools(
+async def _probe_memory_agent_tools(
     *,
     pool: McpClientPool,
     memory_space_id: str,
@@ -470,7 +479,7 @@ async def _probe_memory_tools(
         tool_names = await asyncio.wait_for(session.tool_names(), timeout=timeout_s)
     except MemoryUnavailableError as exc:
         return None, _check(
-            name="memory_mcp_tools",
+            name="memory_agent_mcp_tools",
             status=unavailable_status,
             required=True,
             started=started,
@@ -479,7 +488,7 @@ async def _probe_memory_tools(
         )
     except Exception as exc:
         return None, _check(
-            name="memory_mcp_tools",
+            name="memory_agent_mcp_tools",
             status=unavailable_status,
             required=True,
             started=started,
@@ -488,7 +497,7 @@ async def _probe_memory_tools(
         )
     if tool_names is None:
         return session, _check(
-            name="memory_mcp_tools",
+            name="memory_agent_mcp_tools",
             status=unavailable_status,
             required=True,
             started=started,
@@ -496,14 +505,87 @@ async def _probe_memory_tools(
             details={"memory_space_id": memory_space_id},
         )
     advertised = sorted(tool_names)
-    missing = {"eidolon_memory_recall_context", "eidolon_memory_status"} - set(tool_names)
-    if missing:
+    required = {
+        "eidolon_memory_active_commitments",
+        "eidolon_memory_recall_context",
+        "eidolon_memory_search",
+    }
+    operator_only = {"eidolon_memory_get_by_source_turn", "eidolon_memory_status"}
+    missing = required - set(tool_names)
+    leaked = operator_only & set(tool_names)
+    if missing or leaked:
         return session, _check(
-            name="memory_mcp_tools",
+            name="memory_agent_mcp_tools",
             status="failed",
             required=True,
             started=started,
-            summary="required MCP tools are missing",
+            summary="agent MCP capability boundary is invalid",
+            details={
+                "memory_space_id": memory_space_id,
+                "tool_names": advertised,
+                "missing": sorted(missing),
+                "operator_tools_exposed": sorted(leaked),
+            },
+        )
+    return session, _check(
+        name="memory_agent_mcp_tools",
+        status="passed",
+        required=True,
+        started=started,
+        summary="ok",
+        details={"memory_space_id": memory_space_id, "tool_names": advertised},
+    )
+
+
+async def _probe_memory_ops_tools(
+    *,
+    pool: McpClientPool,
+    memory_space_id: str,
+    timeout_s: float,
+    unavailable_status: DependencyUnavailableStatus,
+) -> tuple[Any | None, ContractCheck]:
+    """Verify the operator surface separately from the Agent read surface."""
+
+    started = time.perf_counter()
+    try:
+        session = await pool.write_session_for(memory_space_id)
+        tool_names = await asyncio.wait_for(session.tool_names(), timeout=timeout_s)
+    except MemoryUnavailableError as exc:
+        return None, _check(
+            name="memory_ops_mcp_tools",
+            status=unavailable_status,
+            required=True,
+            started=started,
+            summary=str(exc),
+            details={"memory_space_id": memory_space_id},
+        )
+    except Exception as exc:
+        return None, _check(
+            name="memory_ops_mcp_tools",
+            status=unavailable_status,
+            required=True,
+            started=started,
+            summary=f"{type(exc).__name__}: {exc}",
+            details={"memory_space_id": memory_space_id},
+        )
+    if tool_names is None:
+        return session, _check(
+            name="memory_ops_mcp_tools",
+            status=unavailable_status,
+            required=True,
+            started=started,
+            summary="operator MCP list_tools did not return capabilities",
+            details={"memory_space_id": memory_space_id},
+        )
+    advertised = sorted(tool_names)
+    missing = {"eidolon_memory_get_by_source_turn", "eidolon_memory_status"} - set(tool_names)
+    if missing:
+        return session, _check(
+            name="memory_ops_mcp_tools",
+            status="failed",
+            required=True,
+            started=started,
+            summary="required operator MCP tools are missing",
             details={
                 "memory_space_id": memory_space_id,
                 "tool_names": advertised,
@@ -511,7 +593,7 @@ async def _probe_memory_tools(
             },
         )
     return session, _check(
-        name="memory_mcp_tools",
+        name="memory_ops_mcp_tools",
         status="passed",
         required=True,
         started=started,
@@ -676,7 +758,7 @@ async def _memory_readback_check(
             break
         session: Any | None = None
         try:
-            session = await pool.session_for(memory_space_id)
+            session = await pool.write_session_for(memory_space_id)
             payload = await _call_mcp_tool_with_timeout(
                 session,
                 "eidolon_memory_get_by_source_turn",
@@ -686,7 +768,7 @@ async def _memory_readback_check(
         except TimeoutError as exc:
             last_error = f"{type(exc).__name__}: {exc}"
             last_dependency_unavailable = False
-            await _drop_mcp_session(pool, memory_space_id, session)
+            await _drop_ops_mcp_session(pool, memory_space_id, session)
             await asyncio.sleep(
                 min(cfg.memory_readback_poll_s, max(0.0, deadline - time.perf_counter()))
             )
@@ -694,7 +776,7 @@ async def _memory_readback_check(
         except MemoryUnavailableError as exc:
             last_error = str(exc)
             last_dependency_unavailable = True
-            await _drop_mcp_session(pool, memory_space_id, session)
+            await _drop_ops_mcp_session(pool, memory_space_id, session)
             await asyncio.sleep(
                 min(cfg.memory_readback_poll_s, max(0.0, deadline - time.perf_counter()))
             )
@@ -845,7 +927,7 @@ async def _memory_cleanup_check(
     last_payload: dict[str, Any] | None = None
     while time.perf_counter() < deadline:
         try:
-            session = await pool.session_for(memory_space_id)
+            session = await pool.write_session_for(memory_space_id)
             last_payload = await _call_mcp_tool_with_timeout(
                 session,
                 "eidolon_memory_get_by_source_turn",
@@ -909,7 +991,7 @@ async def _call_mcp_tool_with_timeout(
     raise TimeoutError()
 
 
-async def _drop_mcp_session(
+async def _drop_ops_mcp_session(
     pool: McpClientPool,
     memory_space_id: str,
     session: Any | None,
@@ -917,7 +999,7 @@ async def _drop_mcp_session(
     if session is None:
         return
     try:
-        await pool.drop_session(memory_space_id, session=session)
+        await pool.drop_write_session(memory_space_id, session=session)
     except Exception:
         pass
 

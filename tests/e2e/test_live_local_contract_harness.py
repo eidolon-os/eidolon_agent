@@ -83,7 +83,18 @@ class _FakeRoutes:
         return f"eidolon.memory.turn.{memory_space_id}"
 
 
-class _FakeSession:
+class _FakeAgentSession:
+    async def tool_names(self):
+        return frozenset(
+            {
+                "eidolon_memory_active_commitments",
+                "eidolon_memory_recall_context",
+                "eidolon_memory_search",
+            }
+        )
+
+
+class _FakeOpsSession:
     def __init__(self) -> None:
         self.readback_calls = 0
 
@@ -91,8 +102,6 @@ class _FakeSession:
         return frozenset(
             {
                 "eidolon_memory_status",
-                "eidolon_memory_recall_context",
-                "eidolon_memory_search",
                 "eidolon_memory_get_by_source_turn",
             }
         )
@@ -122,11 +131,16 @@ class _FakePool:
 
     def __init__(self, *, routes) -> None:
         self.routes = routes
-        self.session = _FakeSession()
+        self.agent_session = _FakeAgentSession()
+        self.ops_session = _FakeOpsSession()
 
     async def session_for(self, memory_space_id: str):
         assert memory_space_id == "r_contract"
-        return self.session
+        return self.agent_session
+
+    async def write_session_for(self, memory_space_id: str):
+        assert memory_space_id == "r_contract"
+        return self.ops_session
 
     async def close_all(self) -> None:
         self.closed = True
@@ -156,7 +170,17 @@ class _StaticSessionPool:
         assert memory_space_id == "r_contract"
         return self.session
 
+    async def write_session_for(self, memory_space_id: str):
+        assert memory_space_id == "r_contract"
+        return self.session
+
     async def drop_session(self, memory_space_id: str, *, session=None) -> bool:
+        assert memory_space_id == "r_contract"
+        assert session is self.session
+        self.drops += 1
+        return True
+
+    async def drop_write_session(self, memory_space_id: str, *, session=None) -> bool:
         assert memory_space_id == "r_contract"
         assert session is self.session
         self.drops += 1
@@ -204,7 +228,8 @@ async def test_live_local_contract_memory_publish_and_readback(monkeypatch) -> N
     assert report.passed is True
     assert [check.name for check in report.checks] == [
         "memory_discovery",
-        "memory_mcp_tools",
+        "memory_agent_mcp_tools",
+        "memory_ops_mcp_tools",
         "memory_mcp_status",
         "memory_nats_publish",
         "memory_nats_readback",
