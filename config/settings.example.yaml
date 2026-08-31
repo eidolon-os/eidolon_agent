@@ -28,7 +28,6 @@ memory:
     - memory_space_id: default.default.default
       mcp_url: http://127.0.0.1:8030/mcp
   recall_timeout_s: 0.5
-  explicit_recall_timeout_s: 4.0
 
 llm:
   api_key: EIDOLON_AGENT_LLM_API_KEY

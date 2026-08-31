@@ -13,14 +13,6 @@ from enum import StrEnum
 from typing import Literal
 
 
-class MemoryScope(StrEnum):
-    ALL = "all"
-    WORKING = "working"  # current session (handled locally by HistoryManager)
-    EPISODIC = "episodic"  # recent days
-    SEMANTIC = "semantic"  # facts/preferences/promises
-    PROMISE = "promise"  # pending promises only
-
-
 class MemoryKind(StrEnum):
     FRAGMENT = "fragment"
     FACT = "fact"

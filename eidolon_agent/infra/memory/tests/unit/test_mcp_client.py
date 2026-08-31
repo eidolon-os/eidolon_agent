@@ -332,7 +332,7 @@ async def test_call_tool_returns_dict_on_dict_decode() -> None:
         content=[],
     )
     sess = _make_session(raw)
-    out = await sess.call_tool("eidolon_memory_search", {"q": "x"})
+    out = await sess.call_tool("eidolon_memory_recall_context", {"query": "x"})
     assert out == {"records": [{"id": "r1", "value": "v"}]}
 
 

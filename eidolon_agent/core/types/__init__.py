@@ -30,7 +30,6 @@ from eidolon_agent.core.types.memory import (
     MemoryKind,
     MemoryQueryPlan,
     MemoryRecallResult,
-    MemoryScope,
     MemoryWritePolicy,
 )
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
@@ -83,7 +82,6 @@ __all__ = [  # noqa: RUF022 - grouped by domain rather than alphabetical for rea
     "MemoryKind",
     "MemoryQueryPlan",
     "MemoryRecallResult",
-    "MemoryScope",
     "MemoryWritePolicy",
     # messages
     "ChatMessage",

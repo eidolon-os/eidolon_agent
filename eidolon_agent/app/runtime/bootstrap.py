@@ -52,7 +52,6 @@ from eidolon_agent.domain.tools.builtin import (
     EmitEventTool,
     GetTimeTool,
     GetWeatherTool,
-    MemorySearchTool,
     SubmitLongTaskTool,
 )
 from eidolon_agent.infra.events import NatsEventBus, NatsKVStore
@@ -300,8 +299,6 @@ async def build_application(
     tool_registry = ToolRegistry()
     tool_registry.register(GetTimeTool())
     tool_registry.register(GetWeatherTool())
-    memory_search_timeout_s = settings.memory.explicit_recall_timeout_s
-    tool_registry.register(MemorySearchTool(memory_port, timeout_s=memory_search_timeout_s))
     tool_registry.register(EmitEventTool(event_bus=container.event_bus))
     delegate_tool = SubmitLongTaskTool(
         long_task_submitter=long_task_worker,
