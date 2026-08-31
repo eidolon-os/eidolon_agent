@@ -82,7 +82,9 @@ def test_decode_error_block_raises_memory_unavailable() -> None:
 
 def _routes(*routes: MemoryRoute) -> MemoryRoutingTable:
     return MemoryRoutingTable(
-        nats=MemoryNatsRoute(url="nats://x", stream="", turn_subject_template="t", cmd_subject_template="c"),
+        nats=MemoryNatsRoute(
+            url="nats://x", stream="", turn_subject_template="t", cmd_subject_template="c"
+        ),
         routes={r.memory_space_id: r for r in routes},
     )
 
@@ -110,11 +112,15 @@ async def test_session_for_unknown_user_raises_unavailable() -> None:
     ("route", "reason"),
     [
         (
-            MemoryRoute(memory_space_id="default.alice.default", mcp_url="http://a/mcp", enabled=False),
+            MemoryRoute(
+                memory_space_id="default.alice.default", mcp_url="http://a/mcp", enabled=False
+            ),
             "memory_route_disabled",
         ),
         (
-            MemoryRoute(memory_space_id="default.alice.default", mcp_url="http://a/mcp", reachable=False),
+            MemoryRoute(
+                memory_space_id="default.alice.default", mcp_url="http://a/mcp", reachable=False
+            ),
             "memory_route_unreachable",
         ),
     ],
@@ -133,7 +139,11 @@ async def test_session_for_unavailable_route_carries_reason(
 
 async def test_session_reused_for_same_route() -> None:
     pool = McpClientPool(
-        routes=_routes(MemoryRoute(memory_space_id="default.alice.default", mcp_url="http://a/mcp", bearer_token="t1"))
+        routes=_routes(
+            MemoryRoute(
+                memory_space_id="default.alice.default", mcp_url="http://a/mcp", bearer_token="t1"
+            )
+        )
     )
     s1 = await pool.session_for("default.alice.default")
     s2 = await pool.session_for("default.alice.default")
@@ -340,7 +350,9 @@ async def test_call_tool_wraps_scalar_decode_in_result_key() -> None:
     assert out == {"result": 42}
 
 
-async def test_tool_names_cleans_half_open_session_when_initialize_is_cancelled(monkeypatch) -> None:
+async def test_tool_names_cleans_half_open_session_when_initialize_is_cancelled(
+    monkeypatch,
+) -> None:
     class FakeClientContext:
         exited = False
 
@@ -434,24 +446,24 @@ async def test_supports_true_when_server_advertises_tool() -> None:
     sess = _make_session({})
     sess._session.list_tools = AsyncMock(
         return_value=SimpleNamespace(
-            tools=[SimpleNamespace(name="eidolon_memory_recall_context"),
-                   SimpleNamespace(name="eidolon_memory_forget")]
+            tools=[
+                SimpleNamespace(name="eidolon_memory_recall_context"),
+                SimpleNamespace(name="eidolon_memory_active_commitments"),
+            ]
         )
     )
-    assert await sess.supports("eidolon_memory_forget") is True
+    assert await sess.supports("eidolon_memory_active_commitments") is True
     assert await sess.tool_names() == frozenset(
-        {"eidolon_memory_recall_context", "eidolon_memory_forget"}
+        {"eidolon_memory_recall_context", "eidolon_memory_active_commitments"}
     )
 
 
 async def test_supports_false_when_tool_absent() -> None:
     sess = _make_session({})
     sess._session.list_tools = AsyncMock(
-        return_value=SimpleNamespace(
-            tools=[SimpleNamespace(name="eidolon_memory_recall_context")]
-        )
+        return_value=SimpleNamespace(tools=[SimpleNamespace(name="eidolon_memory_recall_context")])
     )
-    assert await sess.supports("eidolon_memory_forget") is False
+    assert await sess.supports("eidolon_memory_active_commitments") is False
 
 
 async def test_supports_optimistic_when_probe_fails() -> None:
@@ -459,14 +471,12 @@ async def test_supports_optimistic_when_probe_fails() -> None:
     sess = _make_session({})
     sess._session.list_tools = AsyncMock(side_effect=RuntimeError("probe failed"))
     assert await sess.tool_names() is None
-    assert await sess.supports("eidolon_memory_forget") is True
+    assert await sess.supports("eidolon_memory_active_commitments") is True
 
 
 async def test_tool_names_cached_after_first_probe() -> None:
     sess = _make_session({})
-    probe = AsyncMock(
-        return_value=SimpleNamespace(tools=[SimpleNamespace(name="a")])
-    )
+    probe = AsyncMock(return_value=SimpleNamespace(tools=[SimpleNamespace(name="a")]))
     sess._session.list_tools = probe
     await sess.supports("a")
     await sess.supports("a")

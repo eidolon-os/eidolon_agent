@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 from datetime import UTC, datetime
 
@@ -11,15 +10,11 @@ from eidolon_agent.core.errors import MemoryUnavailableError
 from eidolon_agent.core.types.memory import (
     ActiveCommitment,
     ActiveCommitmentReadResult,
-    MemoryForgetCandidate,
-    MemoryForgetOutcome,
-    MemoryForgetPreview,
     MemoryHit,
     MemoryKind,
     MemoryQueryPlan,
     MemoryRecallResult,
     MemoryScope,
-    MemoryWriteOutcome,
 )
 from eidolon_agent.core.types.turn_context import build_memory_actor_context
 from eidolon_agent.infra.memory.mcp_client import McpClientPool
@@ -280,9 +275,7 @@ class EidolonMemoryPort:
                 return ActiveCommitmentReadResult(
                     commitments=active,
                     total=max(total, len(active)),
-                    truncated=(
-                        raw.get("truncated") is True or total > len(active)
-                    ),
+                    truncated=(raw.get("truncated") is True or total > len(active)),
                 )
             except TimeoutError:
                 # Active-commitment hydration shares the read session with
@@ -346,340 +339,6 @@ class EidolonMemoryPort:
             metadata=metadata,
         )
 
-    async def assert_fact(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        subject: str,
-        predicate: str,
-        object_: str,
-        *,
-        source_event_id: str,
-        tool_call_id: str,
-        confidence: float = 0.9,
-    ) -> str:
-        return await self._pub.publish_structured_intent(
-            owner_id=owner_id,
-            companion_id=companion_id,
-            memory_realm_id=memory_realm_id,
-            subject=subject,
-            predicate=predicate,
-            object_=object_,
-            source_event_id=source_event_id,
-            tool_call_id=tool_call_id,
-            confidence=confidence,
-        )
-
-    async def invalidate_fact(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        subject: str,
-        predicate: str,
-        object_: str,
-        *,
-        source_event_id: str,
-        tool_call_id: str,
-        confidence: float = 0.99,
-    ) -> str:
-        return await self._pub.publish_structured_invalidation(
-            owner_id=owner_id,
-            companion_id=companion_id,
-            memory_realm_id=memory_realm_id,
-            subject=subject,
-            predicate=predicate,
-            object_=object_,
-            source_event_id=source_event_id,
-            tool_call_id=tool_call_id,
-            confidence=confidence,
-        )
-
-    async def reactivate_fact(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        subject: str,
-        predicate: str,
-        object_: str,
-        *,
-        source_event_id: str,
-        tool_call_id: str,
-        confidence: float = 0.99,
-    ) -> str:
-        return await self._pub.publish_structured_reactivation(
-            owner_id=owner_id,
-            companion_id=companion_id,
-            memory_realm_id=memory_realm_id,
-            subject=subject,
-            predicate=predicate,
-            object_=object_,
-            source_event_id=source_event_id,
-            tool_call_id=tool_call_id,
-            confidence=confidence,
-        )
-
-    async def write_confirmed_fact(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        device_id: str | None,
-        session_id: str | None,
-        text: str,
-        *,
-        source_event_id: str,
-        tool_call_id: str,
-        confidence: float = 0.99,
-        tags: list[str] | None = None,
-        wait_applied_seconds: float = 0.75,
-    ) -> MemoryWriteOutcome:
-        """Use the Realm MCP write facade so command completion is observable."""
-        ctx = build_memory_actor_context(
-            owner_id=owner_id,
-            companion_id=companion_id,
-            memory_realm_id=memory_realm_id,
-            device_id=device_id,
-            session_id=session_id,
-        )
-        request_id = _confirmed_fact_request_id(
-            ctx.memory_space_id,
-            source_event_id,
-            text,
-        )
-        try:
-            session = await self._pool.write_session_for(ctx.memory_space_id)
-        except MemoryUnavailableError as exc:
-            return MemoryWriteOutcome(
-                status="failed",
-                request_id=request_id,
-                error=_memory_unavailable_reason(exc),
-            )
-        try:
-            raw = await asyncio.wait_for(
-                session.call_tool(
-                    "eidolon_memory_user_confirm",
-                    {
-                        "text": text,
-                        "wing": "auto",
-                        "memory_type": "auto",
-                        "confidence": confidence,
-                        "tags": list(tags or []),
-                        "scope": "persona",
-                        "visibility": "all_devices",
-                        "source_device_id": device_id or "",
-                        "source_instance_id": companion_id or "",
-                        "session_id": session_id or "",
-                        "source_event_id": source_event_id,
-                        "tool_call_id": tool_call_id,
-                        "request_id": request_id,
-                        "wait_applied_seconds": wait_applied_seconds,
-                    },
-                ),
-                timeout=max(0.25, wait_applied_seconds + 0.75),
-            )
-        except TimeoutError:
-            await self._pool.drop_write_session(ctx.memory_space_id, session=session)
-            return MemoryWriteOutcome(status="unknown", request_id=request_id)
-        except Exception as exc:
-            await self._pool.drop_write_session(ctx.memory_space_id, session=session)
-            return MemoryWriteOutcome(
-                status="failed",
-                request_id=request_id,
-                error=str(exc),
-            )
-        if not isinstance(raw, dict):
-            return MemoryWriteOutcome(
-                status="failed",
-                request_id=request_id,
-                error="memory write returned an invalid response",
-            )
-        status = str(raw.get("status") or "unknown")
-        if status not in {"accepted", "retrying", "applied", "failed"}:
-            status = "unknown"
-        return MemoryWriteOutcome(
-            status=status,
-            request_id=str(raw.get("request_id") or request_id),
-            resource_id=(
-                str(raw["resource_id"]) if raw.get("resource_id") is not None else None
-            ),
-            error=str(raw["error"]) if raw.get("error") is not None else None,
-        )
-
-    async def apply_commitment(
-        self,
-        owner_id,
-        companion_id,
-        memory_realm_id,
-        promisor,
-        predicate,
-        action,
-        raw_claim,
-        *,
-        source_event_id,
-        tool_call_id,
-        operation="confirm",
-        target_id=None,
-        beneficiaries=None,
-        participants=None,
-        condition=None,
-        due_at=None,
-        status=None,
-        confidence=0.99,
-    ) -> str:
-        return await self._pub.publish_commitment_intent(
-            owner_id=owner_id,
-            companion_id=companion_id,
-            memory_realm_id=memory_realm_id,
-            promisor=promisor,
-            predicate=predicate,
-            action=action,
-            raw_claim=raw_claim,
-            source_event_id=source_event_id,
-            tool_call_id=tool_call_id,
-            operation=operation,
-            target_id=target_id,
-            beneficiaries=beneficiaries,
-            participants=participants,
-            condition=condition,
-            due_at=due_at,
-            status=status,
-            confidence=confidence,
-        )
-
-    async def preview_forget(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        device_id: str | None,
-        query: str,
-        *,
-        action: str = "archive",
-        session_id: str | None = None,
-    ) -> MemoryForgetPreview:
-        resolved_action = "delete" if action == "delete" else "archive"
-        ctx = build_memory_actor_context(
-            owner_id=owner_id,
-            companion_id=companion_id,
-            memory_realm_id=memory_realm_id,
-            device_id=device_id,
-            session_id=session_id,
-        )
-        try:
-            session = await self._pool.write_session_for(ctx.memory_space_id)
-            if not await session.supports("eidolon_memory_forget_preview"):
-                _log.info(
-                    "memory forget preview absent for memory_space=%s",
-                    ctx.memory_space_id,
-                )
-                return MemoryForgetPreview(
-                    status="unavailable",
-                    target=query,
-                    action=resolved_action,
-                    error="forget preview capability unavailable",
-                )
-            result = await session.call_tool(
-                "eidolon_memory_forget_preview",
-                {"target": query, "action": resolved_action},
-            )
-            status = str(result.get("status") or "failed")
-            if status not in {"preview", "not_found", "too_broad"}:
-                status = "failed"
-            candidates = [
-                MemoryForgetCandidate(
-                    id=str(
-                        item.get("drawer_id") or item.get("id") or item.get("key") or ""
-                    ),
-                    content=str(
-                        item.get("text") or item.get("content") or item.get("value") or ""
-                    ),
-                    score=float(item.get("score") or 0.0),
-                )
-                for item in (result.get("candidates") or [])
-                if isinstance(item, dict)
-            ]
-            return MemoryForgetPreview(
-                status=status,
-                target=str(result.get("target") or query),
-                action=resolved_action,
-                candidates=candidates,
-                requires_explicit_confirmation=bool(
-                    result.get("requires_explicit_confirmation")
-                ),
-                confirmation_token=str(result.get("confirmation_token") or ""),
-                expires_at=str(result.get("expires_at") or ""),
-                error=str(result.get("error") or ""),
-            )
-        except Exception as exc:
-            _log.warning(
-                "memory forget preview failed for memory_space=%s",
-                ctx.memory_space_id,
-            )
-            return MemoryForgetPreview(
-                status="failed",
-                target=query,
-                action=resolved_action,
-                error=str(exc),
-            )
-
-    async def confirm_forget(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        device_id: str | None,
-        confirmation_token: str,
-        *,
-        session_id: str | None = None,
-        wait_applied_seconds: float = 2.0,
-    ) -> MemoryForgetOutcome:
-        ctx = build_memory_actor_context(
-            owner_id=owner_id,
-            companion_id=companion_id,
-            memory_realm_id=memory_realm_id,
-            device_id=device_id,
-            session_id=session_id,
-        )
-        try:
-            session = await self._pool.write_session_for(ctx.memory_space_id)
-            if not await session.supports("eidolon_memory_forget_confirm"):
-                return MemoryForgetOutcome(
-                    status="unavailable",
-                    action="archive",
-                    error="forget confirm capability unavailable",
-                )
-            result = await session.call_tool(
-                "eidolon_memory_forget_confirm",
-                {
-                    "confirmation_token": confirmation_token,
-                    "wait_applied_seconds": wait_applied_seconds,
-                },
-            )
-        except Exception as exc:
-            _log.warning(
-                "memory forget confirm failed for memory_space=%s",
-                ctx.memory_space_id,
-            )
-            return MemoryForgetOutcome(
-                status="failed",
-                action="archive",
-                error=str(exc),
-            )
-        status = str(result.get("status") or "failed")
-        if status not in {"accepted", "applied", "failed"}:
-            status = "failed"
-        action = "delete" if result.get("action") == "delete" else "archive"
-        return MemoryForgetOutcome(
-            status=status,
-            action=action,
-            request_id=str(result.get("request_id") or ""),
-            drawer_ids=[str(item) for item in (result.get("drawer_ids") or [])],
-            error=str(result.get("error") or ""),
-        )
-
     async def health(self) -> bool:
         return await self._pool.health()
 
@@ -705,7 +364,9 @@ def _records_to_hits(records: list[dict]) -> list[MemoryHit]:
                         str(r.get("memory_time_source") or meta.get("memory_time_source") or "")
                         or None
                     ),
-                    valid_from=_parse_memory_datetime(r.get("valid_from") or meta.get("valid_from")),
+                    valid_from=_parse_memory_datetime(
+                        r.get("valid_from") or meta.get("valid_from")
+                    ),
                     valid_to=_parse_memory_datetime(r.get("valid_to") or meta.get("valid_to")),
                     metadata=meta,
                 )
@@ -765,11 +426,7 @@ def _records_to_active_commitments(
 def _string_tuple(value: object) -> tuple[str, ...]:
     if not isinstance(value, list):
         return ()
-    return tuple(
-        cleaned
-        for item in value
-        if (cleaned := str(item).strip())
-    )
+    return tuple(cleaned for item in value if (cleaned := str(item).strip()))
 
 
 def _non_negative_int(value: object, *, default: int) -> int:
@@ -827,14 +484,3 @@ def _memory_unavailable_reason(exc: MemoryUnavailableError) -> str:
 
 def _remaining_timeout(deadline: float) -> float:
     return max(0.001, deadline - asyncio.get_running_loop().time())
-
-
-def _confirmed_fact_request_id(
-    memory_space_id: str,
-    source_event_id: str,
-    text: str,
-) -> str:
-    material = "\x1f".join(
-        (memory_space_id, source_event_id.strip(), text.strip())
-    )
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]

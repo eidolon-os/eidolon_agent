@@ -82,9 +82,7 @@ class RealtimeAgentHarness:
         return [schema for schema in schemas if schema.name not in self._hidden_tool_names]
 
     def tool_schema_budget(self, schemas: list[ToolSchema]) -> dict[str, Any]:
-        tokens_by_name = {
-            schema.name: _estimate_tool_schema_tokens(schema) for schema in schemas
-        }
+        tokens_by_name = {schema.name: _estimate_tool_schema_tokens(schema) for schema in schemas}
         total = sum(tokens_by_name.values())
         return {
             "schema_count": len(schemas),
@@ -133,10 +131,7 @@ def realtime_harness_policy_prompt() -> str:
             "- delegate_to_coworker 是复杂任务的唯一委托入口；cowork 是工具，不是另一套 realtime harness。",
             "- 调用 delegate_to_coworker 后，不要编造最终结果；只说明任务已交给 cowork，等待后续进度或结果。",
             "- 工具结果返回后，再基于真实结果总结给用户；工具失败时如实说明并给出可行下一步。",
-            "- 普通、非敏感且稳定的个人事实由系统自动抽取；不要追问“要不要记住”，也不要把推断当成用户事实。",
-            "- 用户在当前消息明确要求记住原文时，调用 memory_assert_fact；这次明确指令本身就是写入授权，不要再追问确认。",
-            "- claim 必须逐字来自当前消息；普通对话中出现的敏感或歧义内容不要主动写入。",
-            "- 记忆工具只有 status=applied 才能表述为“已经记住”；accepted/retrying 只能说“已提交，正在处理”。",
+            "- 长期记忆由独立后台服务治理，不属于本轮对话动作；自然回应用户内容，不询问、引导或播报内部记忆流程。",
             "- 首响优先：不要在当前回复里等待后台 cowork 完成。",
         ]
     )

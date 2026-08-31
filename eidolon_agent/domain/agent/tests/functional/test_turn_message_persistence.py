@@ -7,7 +7,7 @@ created with the admin-facing trace metadata intact.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -57,9 +57,9 @@ async def test_turn_persists_user_and_assistant_messages(
             assert trace["latency"]["first_delta_ms"] <= trace["latency"]["total_ms"]
             assert trace["privacy"]["mode"] == "normal"
             assert trace["memory_write_trace"]["source_turn_id"] == ti.turn_id
-            # A low-signal factual question is intentionally not fanned out;
-            # persistence must retain the decision exactly as produced.
-            assert trace["memory_write_trace"]["fanout_allowed"] is False
+            # Semantic relevance belongs to Memory's steward. Agent forwards
+            # every normal committed turn without phrase classification.
+            assert trace["memory_write_trace"]["fanout_allowed"] is True
             assert trace["development_guards"]["context_budget"]["mode"] == "disabled"
             assert trace["development_guards"]["context_budget"]["configured"] is False
             assert trace["development_guards"]["memory_write_policy"]["mode"] == "enabled"
@@ -93,8 +93,8 @@ async def test_persist_skips_messages_when_text_empty(
             ti=ti,
             status=TurnStatus.ERRORED,
             triage_kind=TriageKind.SIMPLE,
-            started_at=datetime.now(timezone.utc),
-            finished_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
+            finished_at=datetime.now(UTC),
             first_delta_ms=None,
             total_ms=100,
             usage_in=0,

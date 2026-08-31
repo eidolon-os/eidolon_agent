@@ -187,48 +187,8 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
         owner_text="hi",
         assistant_text="hello",
     )
-    await pub.publish_structured_intent(
-        owner_id="benchmark",
-        companion_id="test",
-        memory_realm_id="r_benchmark_default",
-        subject="self",
-        predicate="likes",
-        object_="oolong",
-        source_event_id="t1",
-        tool_call_id="call-structured",
-    )
-    await pub.publish_verbatim_intent(
-        owner_id="benchmark",
-        companion_id="test",
-        memory_realm_id="r_benchmark_default",
-        device_id="admin-console",
-        session_id="s1",
-        text="用户 最终验证时间 2026-06-28 20:00",
-        source_event_id="t1",
-        tool_call_id="call-verbatim",
-        confidence=0.95,
-        tags=["kg_fallback"],
-    )
-    await pub.publish_commitment_intent(
-        owner_id="benchmark",
-        companion_id="test",
-        memory_realm_id="r_benchmark_default",
-        promisor="self",
-        predicate="promised",
-        action="带 companion:test 去恐龙园",
-        raw_claim="以后带你去恐龙园",
-        source_event_id="t1",
-        tool_call_id="call-commitment",
-        operation="update",
-        target_id="commitment:abc",
-        participants=["friend:小明"],
-        status="fulfilled",
-    )
-
     turn_event, turn_persistent = bus.events[0]
-    cmd_event, cmd_persistent = bus.events[1]
-    confirmed_event, confirmed_persistent = bus.events[2]
-    commitment_event, commitment_persistent = bus.events[3]
+    assert len(bus.events) == 1
     assert turn_persistent is True
     assert turn_event.subject == "turns.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
     turn_payload = unwrap_memory_payload(turn_event.payload)
@@ -237,106 +197,6 @@ async def test_nats_publisher_uses_discovered_subjects_and_memory_schema():
     assert turn_payload["context"]["companion_id"] == "test"
     assert turn_payload["context"]["memory_realm_id"] == "r_benchmark_default"
     assert turn_payload["context"]["device_id"] == "admin-console"
-    assert cmd_persistent is True
-    assert cmd_event.subject == "cmds.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
-    cmd_payload = unwrap_memory_payload(cmd_event.payload)
-    assert cmd_payload["kind"] == "memory_intent"
-    assert cmd_payload["issuer"] == "agent"
-    assert cmd_payload["request_id"]
-    assert "command" not in cmd_payload
-    assert cmd_payload["intent"]["source_event_id"] == "t1"
-    assert cmd_payload["intent"]["tool_call_id"] == "call-structured"
-    assert cmd_payload["intent"]["subject"] == "self"
-    assert cmd_payload["intent"]["predicate"] == "likes"
-    assert cmd_payload["intent"]["object"] == "oolong"
-    assert confirmed_persistent is True
-    assert confirmed_event.subject == "cmds.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
-    confirmed_payload = unwrap_memory_payload(confirmed_event.payload)
-    assert confirmed_payload["kind"] == "memory_intent"
-    assert confirmed_payload["issuer"] == "agent"
-    intent = confirmed_payload["intent"]
-    assert intent["raw_claim"] == "用户 最终验证时间 2026-06-28 20:00"
-    assert intent["source_event_id"] == "t1"
-    assert intent["tool_call_id"] == "call-verbatim"
-    assert intent["attributes"]["source_device_id"] == "admin-console"
-    assert intent["attributes"]["source_instance_id"] == "test"
-    assert intent["attributes"]["session_id"] == "s1"
-    assert intent["attributes"]["tags"] == ["kg_fallback"]
-    assert commitment_persistent is True
-    assert commitment_event.subject == "cmds.b64_cl9iZW5jaG1hcmtfZGVmYXVsdA"
-    commitment_payload = unwrap_memory_payload(commitment_event.payload)
-    commitment = commitment_payload["intent"]
-    assert commitment["intent_type"] == "commitment"
-    assert commitment["operation_hint"] == "update"
-    assert commitment["target_id"] == "commitment:abc"
-    assert commitment["subject"] == "self"
-    assert commitment["predicate"] == "promised"
-    assert commitment["object"] == "带 companion:test 去恐龙园"
-    assert commitment["attributes"] == {
-        "participants": ["friend:小明"],
-        "status": "fulfilled",
-    }
-
-
-@pytest.mark.asyncio
-async def test_structured_fact_lifecycle_uses_canonical_intent_operations():
-    class CaptureBus:
-        def __init__(self):
-            self.events = []
-
-        async def publish(self, event, *, persistent=False):
-            self.events.append((event, persistent))
-
-    bus = CaptureBus()
-    pub = MemoryNatsPublisher(event_bus=bus)
-    common = {
-        "owner_id": "owner-1",
-        "companion_id": "companion-1",
-        "memory_realm_id": "realm-1",
-        "subject": "self",
-        "predicate": "likes",
-        "object_": "oolong",
-    }
-
-    await pub.publish_structured_invalidation(
-        **common,
-        source_event_id="turn-invalidate",
-        tool_call_id="call-invalidate",
-    )
-    await pub.publish_structured_reactivation(
-        **common,
-        source_event_id="turn-reactivate",
-        tool_call_id="call-reactivate",
-    )
-
-    invalidation = unwrap_memory_payload(bus.events[0][0].payload)["intent"]
-    reactivation = unwrap_memory_payload(bus.events[1][0].payload)["intent"]
-    assert invalidation["intent_type"] == "correction"
-    assert invalidation["operation_hint"] == "invalidate"
-    assert invalidation["attributes"]["source_instance_id"] == "companion-1"
-    assert reactivation["intent_type"] == "preference"
-    assert reactivation["operation_hint"] == "update"
-    assert reactivation["attributes"]["source_instance_id"] == "companion-1"
-    assert all(persistent for _, persistent in bus.events)
-
-
-@pytest.mark.asyncio
-async def test_commitment_publisher_requires_target_for_update():
-    pub = MemoryNatsPublisher(event_bus=object())
-
-    with pytest.raises(ValueError, match="requires target_id"):
-        await pub.publish_commitment_intent(
-            owner_id="benchmark",
-            companion_id="test",
-            memory_realm_id="r_benchmark_default",
-            promisor="self",
-            predicate="promised",
-            action="带 companion:test 去恐龙园",
-            raw_claim="补充一个朋友",
-            source_event_id="t1",
-            tool_call_id="call-commitment",
-            operation="update",
-        )
 
 
 def test_mcp_decode_prefers_structured_content_and_unwraps_fastmcp_result():

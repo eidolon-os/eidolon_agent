@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -24,7 +24,7 @@ def _msg(
         id=uuid.uuid4().hex,
         role=role,
         content=text,
-        created_at=created_at or datetime.now(timezone.utc),
+        created_at=created_at or datetime.now(UTC),
         metadata={"is_private": True} if private else {},
     )
 
@@ -75,26 +75,11 @@ async def test_private_messages_are_filtered_from_recent_window() -> None:
     assert [m.content for m in items] == ["public"]
 
 
-async def test_forget_matching_extracts_forget_target_from_request() -> None:
-    mgr = HistoryManager()
-    await mgr.append(conversation_id="c1", message=_msg("以后叫我小满"))
-    await mgr.append(conversation_id="c1", message=_msg("普通聊天"))
-
-    removed = await mgr.forget_matching(
-        conversation_id="c1",
-        query="请忘记叫我小满",
-    )
-    items = await mgr.recent_window(conversation_id="c1", window=10)
-
-    assert removed == 1
-    assert [m.content for m in items] == ["普通聊天"]
-
-
 async def test_db_hydrate_runs_when_window_is_insufficient() -> None:
     calls = []
 
     async def _hydrate(*, conversation_id: str, window: int):
-        old = datetime.now(timezone.utc) - timedelta(minutes=5)
+        old = datetime.now(UTC) - timedelta(minutes=5)
         calls.append((conversation_id, window))
         return [
             _msg("db-old", created_at=old),
@@ -111,7 +96,7 @@ async def test_db_hydrate_runs_when_window_is_insufficient() -> None:
 
 
 async def test_db_and_memory_copies_of_same_turn_message_are_deduplicated() -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     def copy(message_id: str, created_at: datetime) -> ChatMessage:
         return ChatMessage(
@@ -153,7 +138,7 @@ async def test_db_hydrate_merges_sqlite_naive_and_in_memory_aware_timestamps() -
         conversation_id="c1",
         message=_msg(
             "cached-new",
-            created_at=datetime(2026, 1, 1, 8, 1, 0, tzinfo=timezone.utc),
+            created_at=datetime(2026, 1, 1, 8, 1, 0, tzinfo=UTC),
         ),
     )
 

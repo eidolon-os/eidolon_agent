@@ -24,7 +24,7 @@ def agent_memory_experience_scenarios() -> list[dict[str, Any]]:
     scenarios.extend(_topic_switch_scenarios(24))
     scenarios.extend(_personal_memory_scenarios(20))
     scenarios.extend(_memory_update_and_abstention_scenarios(16))
-    scenarios.extend(_privacy_and_forgetting_scenarios(16))
+    scenarios.extend(_privacy_boundary_scenarios(20))
     scenarios.extend(_tool_drift_scenarios(16))
     scenarios.extend(_interrupt_recovery_scenarios(16))
     scenarios.extend(_multi_turn_reference_scenarios(12))
@@ -115,11 +115,46 @@ def _background_expect(*, required: list[str] | None = None) -> dict[str, Any]:
 
 def _topic_switch_scenarios(count: int) -> list[dict[str, Any]]:
     old_topics = [
-        ("天气", "常州天气怎么样？", "常州今天偏热，傍晚留意阵雨。", "数三个数，一二三", "一二三。", "常州"),
-        ("餐厅", "帮我想个晚餐餐厅", "可以考虑清淡一点的日料。", "翻译 hello world", "hello world 可以译为：你好，世界。", "餐厅"),
-        ("会议", "明天会议要准备什么？", "可以准备议程和风险清单。", "讲个短笑话", "短笑话：日志一开，问题就害羞了。", "会议"),
-        ("代码", "这个报错怎么修？", "先看堆栈和最近改动。", "帮我写一句生日祝福", "生日快乐，愿新的一岁轻松明亮。", "报错"),
-        ("行程", "去上海两天怎么玩？", "第一天市区，第二天看展会更稳。", "解释一下递归", "递归就是函数在子问题上调用自己。", "上海"),
+        (
+            "天气",
+            "常州天气怎么样？",
+            "常州今天偏热，傍晚留意阵雨。",
+            "数三个数，一二三",
+            "一二三。",
+            "常州",
+        ),
+        (
+            "餐厅",
+            "帮我想个晚餐餐厅",
+            "可以考虑清淡一点的日料。",
+            "翻译 hello world",
+            "hello world 可以译为：你好，世界。",
+            "餐厅",
+        ),
+        (
+            "会议",
+            "明天会议要准备什么？",
+            "可以准备议程和风险清单。",
+            "讲个短笑话",
+            "短笑话：日志一开，问题就害羞了。",
+            "会议",
+        ),
+        (
+            "代码",
+            "这个报错怎么修？",
+            "先看堆栈和最近改动。",
+            "帮我写一句生日祝福",
+            "生日快乐，愿新的一岁轻松明亮。",
+            "报错",
+        ),
+        (
+            "行程",
+            "去上海两天怎么玩？",
+            "第一天市区，第二天看展会更稳。",
+            "解释一下递归",
+            "递归就是函数在子问题上调用自己。",
+            "上海",
+        ),
         ("提醒", "记得提醒我喝水", "我会把提醒意图记下来。", "只回答 ok", "ok", "提醒"),
     ]
     scenarios: list[dict[str, Any]] = []
@@ -249,78 +284,40 @@ def _memory_update_and_abstention_scenarios(count: int) -> list[dict[str, Any]]:
     return scenarios
 
 
-def _privacy_and_forgetting_scenarios(count: int) -> list[dict[str, Any]]:
+def _privacy_boundary_scenarios(count: int) -> list[dict[str, Any]]:
     scenarios: list[dict[str, Any]] = []
     for idx in range(count):
-        if idx % 2 == 0:
-            temp_name = f"临时称呼{idx + 1}"
-            scenarios.append(
-                _scenario(
-                    scenario_id=f"temporary_memory_{idx + 1:03d}",
-                    category="memory_privacy",
-                    tags=["temporary", "no_write"],
-                    description="temporary turn 可以回答，但不能写入长期记忆。",
-                    turns=[
-                        _turn(
-                            f"以后叫我{temp_name}",
-                            f"好的，这轮我先叫你{temp_name}。",
-                            turn_id=f"temporary-memory-{idx + 1:03d}-1",
-                            metadata={"temporary": True},
-                            expect={
-                                "memory_fanout_allowed": False,
-                                "memory_context_empty": True,
-                                "required_assistant_substrings": [temp_name],
-                            },
-                        ),
-                        _turn(
-                            "你记得刚才那个临时称呼吗？",
-                            "我没有把它写进长期记忆。",
-                            turn_id=f"temporary-memory-{idx + 1:03d}-2",
-                            expect={
-                                "memory_context_empty": True,
-                                "required_assistant_substrings": ["没有"],
-                            },
-                        ),
-                    ],
-                )
+        temp_name = f"临时称呼{idx + 1}"
+        scenarios.append(
+            _scenario(
+                scenario_id=f"temporary_memory_{idx + 1:03d}",
+                category="memory_privacy",
+                tags=["temporary", "no_write"],
+                description="temporary turn 可以回答，但不能写入长期记忆。",
+                turns=[
+                    _turn(
+                        f"以后叫我{temp_name}",
+                        f"好的，这轮我先叫你{temp_name}。",
+                        turn_id=f"temporary-memory-{idx + 1:03d}-1",
+                        metadata={"temporary": True},
+                        expect={
+                            "memory_fanout_allowed": False,
+                            "memory_context_empty": True,
+                            "required_assistant_substrings": [temp_name],
+                        },
+                    ),
+                    _turn(
+                        "你记得刚才那个临时称呼吗？",
+                        "我没有把它写进长期记忆。",
+                        turn_id=f"temporary-memory-{idx + 1:03d}-2",
+                        expect={
+                            "memory_context_empty": True,
+                            "required_assistant_substrings": ["没有"],
+                        },
+                    ),
+                ],
             )
-        else:
-            name = "小满" if idx % 4 == 1 else "阿满"
-            scenarios.append(
-                _scenario(
-                    scenario_id=f"forget_memory_{idx + 1:03d}",
-                    category="memory_privacy",
-                    tags=["forget", "privacy"],
-                    description="用户要求忘记后，记忆和历史都不应继续注入目标事实。",
-                    turns=[
-                        _turn(
-                            f"以后叫我{name}",
-                            f"好的，我会叫你{name}。",
-                            turn_id=f"forget-memory-{idx + 1:03d}-1",
-                        ),
-                        _turn(
-                            f"请忘记叫我{name}",
-                            "好的，我会忘掉这个称呼。",
-                            turn_id=f"forget-memory-{idx + 1:03d}-2",
-                            expect={
-                                "skip_default_expect": True,
-                                "forget_called": True,
-                                "memory_context_empty": True,
-                            },
-                        ),
-                        _turn(
-                            "你还记得怎么叫我吗？",
-                            "我不确定你希望我怎么称呼你。",
-                            turn_id=f"forget-memory-{idx + 1:03d}-3",
-                            expect={
-                                "memory_context_empty": True,
-                                "forbidden_assistant_substrings": [name],
-                            },
-                        ),
-                    ],
-                    expect={"forget_called": True, "memory_context_empty": True},
-                )
-            )
+        )
     return scenarios
 
 
@@ -433,8 +430,18 @@ def _multi_turn_reference_scenarios(count: int) -> list[dict[str, Any]]:
     seeds = [
         ("常州今天有阵雨。", "那明天呢？", "明天常州也要留意阵雨。", "常州"),
         ("这段代码的问题是空值没处理。", "那怎么改？", "可以先加空值判断。", "空值"),
-        ("你刚才说我适合早晨做深度工作。", "那下午适合干嘛？", "下午更适合处理沟通和收尾。", "下午"),
-        ("我们定了小项目目标：先跑通 benchmark。", "下一步呢？", "下一步是把结果报告固定下来。", "报告"),
+        (
+            "你刚才说我适合早晨做深度工作。",
+            "那下午适合干嘛？",
+            "下午更适合处理沟通和收尾。",
+            "下午",
+        ),
+        (
+            "我们定了小项目目标：先跑通 benchmark。",
+            "下一步呢？",
+            "下一步是把结果报告固定下来。",
+            "报告",
+        ),
     ]
     scenarios: list[dict[str, Any]] = []
     for idx in range(count):
@@ -521,9 +528,7 @@ def _live_context_authority_scenarios(count: int) -> list[dict[str, Any]]:
                         turn_id=f"live-context-authority-{idx + 1:03d}-1",
                     ),
                     _turn(
-                        (
-                            f"换个话题。请只回答这个测试码，不要解释：{token}-{idx + 1:03d}"
-                        ),
+                        (f"换个话题。请只回答这个测试码，不要解释：{token}-{idx + 1:03d}"),
                         "",
                         turn_id=f"live-context-authority-{idx + 1:03d}-2",
                         expect={
@@ -551,11 +556,10 @@ def _live_memory_recall_scenarios(count: int) -> list[dict[str, Any]]:
                 description="真实服务：写入唯一偏好/事实后，后续 turn 能召回。",
                 turns=[
                     _turn(
-                        f"请记住我的 benchmark 测试代号是 {token}。",
+                        f"我的 benchmark 测试代号是 {token}。",
                         "",
                         turn_id=f"live-memory-recall-{idx + 1:03d}-1",
                         expect={
-                            "memory_write_disposition": "semantic_upsert",
                             "memory_fanout_allowed": True,
                         },
                     ),
@@ -588,16 +592,16 @@ def _live_memory_update_scenarios(count: int) -> list[dict[str, Any]]:
                 description="真实服务：事实更正后，回答应使用新值。",
                 turns=[
                     _turn(
-                        f"请记住我的当前项目代号是 {old_token}。",
+                        f"我的当前项目代号是 {old_token}。",
                         "",
                         turn_id=f"live-memory-update-{idx + 1:03d}-1",
-                        expect={"memory_write_disposition": "semantic_upsert"},
+                        expect={"memory_fanout_allowed": True},
                     ),
                     _turn(
                         f"更正一下，我的当前项目代号不是 {old_token}，而是 {new_token}。",
                         "",
                         turn_id=f"live-memory-update-{idx + 1:03d}-2",
-                        expect={"memory_write_disposition": "semantic_upsert"},
+                        expect={"memory_fanout_allowed": True},
                     ),
                     _turn(
                         "我的当前项目代号是什么？请只回答代号。",

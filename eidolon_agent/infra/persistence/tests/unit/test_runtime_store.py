@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import sqlite3
 from datetime import UTC, datetime
 
+import pytest
 from sqlalchemy import text
 
 from eidolon_agent.core.types.long_task import LongTaskRecord, LongTaskStatus
@@ -13,6 +16,7 @@ from eidolon_agent.infra.persistence.agent_runtime import (
     build_agent_turn_persister,
 )
 from eidolon_agent.infra.persistence.audit_dispatch import AgentAuditDispatcher
+from eidolon_agent.infra.persistence.memory_turn_dispatch import MemoryTurnDispatcher
 from eidolon_agent.infra.persistence.runtime_store import AgentRuntimeStore
 
 
@@ -63,6 +67,7 @@ async def test_runtime_store_contains_only_agent_authority_tables(tmp_path) -> N
             "audit_outbox",
             "conversations",
             "jobs",
+            "memory_turn_outbox",
             "messages",
             "runtime_sessions",
             "turns",
@@ -70,7 +75,187 @@ async def test_runtime_store_contains_only_agent_authority_tables(tmp_path) -> N
         assert journal_mode == "wal"
         assert synchronous == 2  # FULL
         assert foreign_keys == 1
-        assert schema_version == 1
+        assert schema_version == 2
+    finally:
+        await store.close()
+
+
+async def test_memory_turn_outbox_survives_process_restart(tmp_path) -> None:
+    path = tmp_path / "eidolon-agent.sqlite3"
+    store = AgentRuntimeStore.open(path)
+    await store.init_schema()
+    await store.memory_turn_outbox.enqueue(
+        turn_id="turn-memory-1",
+        owner_id="owner-1",
+        companion_id="companion-1",
+        subject="eidolon.memory.turn.realm",
+        payload={"schema_version": 1, "payload": {"turn_id": "turn-memory-1"}},
+        trace_id="trace-memory-1",
+    )
+    await store.close()
+
+    reopened = AgentRuntimeStore.open(path)
+    await reopened.init_schema()
+
+    class _Bus:
+        def __init__(self) -> None:
+            self.events = []
+
+        async def publish(self, event, *, persistent=False):
+            assert persistent is True
+            self.events.append(event)
+
+    bus = _Bus()
+    try:
+        dispatcher = MemoryTurnDispatcher(reopened, bus)
+        assert await dispatcher.dispatch_once() == 1
+        assert [event.payload["payload"]["turn_id"] for event in bus.events] == ["turn-memory-1"]
+        assert await reopened.memory_turn_outbox.pending_count() == 0
+    finally:
+        await reopened.close()
+
+
+async def test_memory_turn_outbox_rejects_turn_identity_collision(tmp_path) -> None:
+    store = await _store(tmp_path)
+    try:
+        await store.memory_turn_outbox.enqueue(
+            turn_id="turn-memory-1",
+            owner_id="owner-1",
+            companion_id="companion-1",
+            subject="eidolon.memory.turn.realm",
+            payload={"value": 1},
+            trace_id="trace-memory-1",
+        )
+        await store.memory_turn_outbox.enqueue(
+            turn_id="turn-memory-1",
+            owner_id="owner-1",
+            companion_id="companion-1",
+            subject="eidolon.memory.turn.realm",
+            payload={"value": 1},
+            trace_id="trace-memory-1",
+        )
+
+        with pytest.raises(RuntimeError, match="identity collision"):
+            await store.memory_turn_outbox.enqueue(
+                turn_id="turn-memory-1",
+                owner_id="owner-1",
+                companion_id="companion-1",
+                subject="eidolon.memory.turn.realm",
+                payload={"value": 2},
+                trace_id="trace-memory-1",
+            )
+        assert await store.memory_turn_outbox.pending_count() == 1
+    finally:
+        await store.close()
+
+
+async def test_runtime_schema_v1_migrates_memory_outbox_without_rebuilding(tmp_path) -> None:
+    path = tmp_path / "eidolon-agent.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.execute("PRAGMA user_version=1")
+    connection.close()
+
+    store = AgentRuntimeStore.open(path)
+    try:
+        await store.init_schema()
+        async with store.session_factory() as session:
+            version = await session.scalar(text("PRAGMA user_version"))
+            table = await session.scalar(
+                text(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type='table' AND name='memory_turn_outbox'"
+                )
+            )
+        assert version == 2
+        assert table == "memory_turn_outbox"
+    finally:
+        await store.close()
+
+
+async def test_memory_turn_outbox_concurrent_enqueue_is_idempotent(tmp_path) -> None:
+    store = await _store(tmp_path)
+    try:
+
+        async def _enqueue() -> None:
+            await store.memory_turn_outbox.enqueue(
+                turn_id="turn-concurrent",
+                owner_id="owner-1",
+                companion_id="companion-1",
+                subject="eidolon.memory.turn.realm-1",
+                payload={"value": 1},
+                trace_id="trace-concurrent",
+            )
+
+        await asyncio.gather(*(_enqueue() for _ in range(20)))
+        assert await store.memory_turn_outbox.pending_count() == 1
+    finally:
+        await store.close()
+
+
+async def test_memory_turn_dispatch_preserves_realm_order_and_isolates_failures(
+    tmp_path,
+) -> None:
+    store = await _store(tmp_path)
+    try:
+        for turn_id, subject in (
+            ("realm-a-1", "eidolon.memory.turn.realm-a"),
+            ("realm-a-2", "eidolon.memory.turn.realm-a"),
+            ("realm-b-1", "eidolon.memory.turn.realm-b"),
+        ):
+            await store.memory_turn_outbox.enqueue(
+                turn_id=turn_id,
+                owner_id=f"owner-{subject[-1]}",
+                companion_id=f"companion-{subject[-1]}",
+                subject=subject,
+                payload={"turn_id": turn_id},
+                trace_id=f"trace-{turn_id}",
+            )
+
+        class _Bus:
+            def __init__(self) -> None:
+                self.attempts: list[str] = []
+                self.published: list[str] = []
+
+            async def publish(self, event, *, persistent=False):
+                assert persistent is True
+                turn_id = event.payload["turn_id"]
+                self.attempts.append(turn_id)
+                if turn_id == "realm-a-1":
+                    raise ConnectionError("NATS unavailable for this publish")
+                self.published.append(turn_id)
+
+        bus = _Bus()
+        dispatcher = MemoryTurnDispatcher(store, bus)
+        assert await dispatcher.dispatch_once() == 1
+        assert bus.attempts == ["realm-a-1", "realm-b-1"]
+        assert bus.published == ["realm-b-1"]
+        assert await store.memory_turn_outbox.pending_count() == 2
+
+        # The failed head is in backoff, so a new dispatcher iteration must not
+        # let the later correction overtake it.
+        assert await dispatcher.dispatch_once() == 0
+        assert bus.attempts == ["realm-a-1", "realm-b-1"]
+    finally:
+        await store.close()
+
+
+async def test_owner_runtime_delete_removes_pending_memory_turns(tmp_path) -> None:
+    store = await _store(tmp_path)
+    try:
+        for turn_id, owner_id in (("turn-delete", "owner-delete"), ("turn-keep", "owner-keep")):
+            await store.memory_turn_outbox.enqueue(
+                turn_id=turn_id,
+                owner_id=owner_id,
+                companion_id="companion-1",
+                subject=f"eidolon.memory.turn.{owner_id}",
+                payload={"turn_id": turn_id},
+                trace_id=f"trace-{turn_id}",
+            )
+
+        counts = await store.delete_owner_runtime("owner-delete")
+        assert counts["memory_turn_outbox"] == 1
+        pending = await store.memory_turn_outbox.pending_batch()
+        assert [row.turn_id for row in pending] == ["turn-keep"]
     finally:
         await store.close()
 

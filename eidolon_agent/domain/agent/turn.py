@@ -27,7 +27,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from eidolon_sdk.biz.chat_stream import DeltaRole, TerminationCause
 from eidolon_sdk.biz.dialogue_control import InterruptIntent
@@ -42,14 +42,12 @@ from eidolon_agent.core.types import (
     Event,
     LatencyBreakdown,
     LLMFinishReason,
-    MemoryWriteDispositionKind,
     MessageRole,
     PersonaTrace,
     ToolCall,
     ToolResult,
     ToolTrace,
     TurnTrace,
-    classify_memory_write,
 )
 from eidolon_agent.core.types.companion_runtime import CompanionRuntimeConfig
 from eidolon_agent.core.types.topics import Topics
@@ -80,7 +78,6 @@ from eidolon_agent.domain.tools.visibility import ToolVisibilityPolicy
 
 _log = logging.getLogger(__name__)
 _MAX_FAILURES_PER_TOOL_PER_TURN = 1
-_MAX_PENDING_FORGETS = 1000
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,22 +89,13 @@ class ToolLatencyPolicy:
     slow_hint_role: str = DeltaRole.SLOW_TOOL_HINT.value
 
 
-@dataclass(frozen=True, slots=True)
-class _PendingForget:
-    query: str
-    confirmation_token: str
-    candidate_count: int
-    expires_at_monotonic: float
-
-
 class TurnEngine:
     """Per-instance Turn runner.
 
     One engine instance per AgentInstance (so tools/history are scoped).
-    Multiple concurrent Turns are supported. The only local cross-turn state is
-    a bounded-by-conversation, ten-minute privacy confirmation token; it is not
-    memory truth, is claimed before mutation, and may safely disappear on
-    restart (the user previews again).
+    Multiple concurrent Turns are supported. Memory semantic and privacy
+    decisions are delegated to the independent Memory steward rather than
+    inferred from wording in this request path.
     """
 
     def __init__(
@@ -126,7 +114,6 @@ class TurnEngine:
         event_bus=None,
         personas_service=None,
         genome_id: str | None = None,
-        memory_port=None,
         max_tool_iters: int = 4,
         memory_write_mode: str = "enabled",
         tool_schema_strict: bool = True,
@@ -151,7 +138,6 @@ class TurnEngine:
         self._bus = event_bus
         self._personas = personas_service
         self._genome_id = genome_id
-        self._memory = memory_port
         self._max_tool_iters = max_tool_iters
         self._memory_write_mode = _normalize_guard_mode(memory_write_mode)
         self._tool_schema_strict = tool_schema_strict
@@ -162,143 +148,11 @@ class TurnEngine:
         self._background = background_tasks or BackgroundTaskRunner()
         self._tool_latency_policy = tool_latency_policy or ToolLatencyPolicy()
         self._body_capability_provider = body_capability_provider
-        # Ephemeral UX state only: the memory service token remains the signed
-        # authority. A restart merely requires the user to preview again.
-        self._pending_forgets: dict[str, _PendingForget] = {}
-
-    def _prune_pending_forgets(self) -> None:
-        now = time.monotonic()
-        for conversation_id, pending in list(self._pending_forgets.items()):
-            if pending.expires_at_monotonic <= now:
-                self._pending_forgets.pop(conversation_id, None)
-        overflow = len(self._pending_forgets) - _MAX_PENDING_FORGETS
-        if overflow > 0:
-            oldest = sorted(
-                self._pending_forgets,
-                key=lambda key: self._pending_forgets[key].expires_at_monotonic,
-            )
-            for conversation_id in oldest[:overflow]:
-                self._pending_forgets.pop(conversation_id, None)
-
-    async def _preview_forget(self, ti: TurnInput) -> tuple[str, dict]:
-        if self._memory is None:
-            return (
-                "记忆服务现在不可用，我没有执行归档或删除。",
-                {"memory_status": "unavailable", "request_id": "", "candidate_count": 0},
-            )
-        query = ti.text or ""
-        action = "delete" if _requests_physical_delete(query) else "archive"
-        try:
-            preview = await self._memory.preview_forget(
-                ti.context.owner_id,
-                ti.context.companion_id,
-                ti.context.memory_realm_id,
-                ti.context.device_id,
-                query,
-                action=action,
-                session_id=ti.session_id or "default",
-            )
-        except Exception:
-            _log.exception("memory forget preview failed")
-            return (
-                "我没能完成记忆查询，因此没有执行归档或删除。",
-                {"memory_status": "failed", "request_id": "", "candidate_count": 0},
-            )
-        candidate_count = len(preview.candidates)
-        base = {
-            "memory_status": preview.status,
-            "request_id": "",
-            "candidate_count": candidate_count,
-            "forget_action": preview.action,
-        }
-        if preview.status == "not_found":
-            return "我没有找到匹配的长期记忆，没有执行任何修改。", base
-        if preview.status == "too_broad":
-            return "这个范围太宽，我没有执行修改。请说得更具体一些。", base
-        if preview.status in {"unavailable", "failed"}:
-            return "记忆查询没有成功，我没有执行归档或删除。", base
-        if not preview.confirmation_token:
-            return "记忆预览缺少有效确认凭证，我没有执行修改。", {
-                **base,
-                "memory_status": "failed",
-            }
-        if preview.action == "delete" and preview.requires_explicit_confirmation:
-            self._pending_forgets[ti.conversation_id] = _PendingForget(
-                query=query,
-                confirmation_token=preview.confirmation_token,
-                candidate_count=candidate_count,
-                expires_at_monotonic=time.monotonic() + 600.0,
-            )
-            self._prune_pending_forgets()
-            return (
-                f"我找到了 {candidate_count} 条相关记忆。删除后无法恢复，"
-                "请回复“确认删除”或“取消”。",
-                {**base, "memory_status": "confirmation_required"},
-            )
-        pending = _PendingForget(
-            query=query,
-            confirmation_token=preview.confirmation_token,
-            candidate_count=candidate_count,
-            expires_at_monotonic=time.monotonic() + 600.0,
-        )
-        return await self._confirm_forget(ti, pending)
-
-    async def _confirm_forget(
-        self,
-        ti: TurnInput,
-        pending: _PendingForget,
-    ) -> tuple[str, dict]:
-        if self._memory is None:
-            return (
-                "记忆服务现在不可用，我没有执行修改。",
-                {"memory_status": "unavailable", "request_id": "", "candidate_count": 0},
-            )
-        try:
-            outcome = await self._memory.confirm_forget(
-                ti.context.owner_id,
-                ti.context.companion_id,
-                ti.context.memory_realm_id,
-                ti.context.device_id,
-                pending.confirmation_token,
-                session_id=ti.session_id or "default",
-                wait_applied_seconds=2.0,
-            )
-        except Exception:
-            _log.exception("memory forget confirmation failed")
-            return (
-                "操作没有成功，我没有把它说成已经完成。",
-                {
-                    "memory_status": "failed",
-                    "request_id": "",
-                    "candidate_count": pending.candidate_count,
-                },
-            )
-        data = {
-            "memory_status": outcome.status,
-            "request_id": outcome.request_id,
-            "candidate_count": pending.candidate_count,
-            "forget_action": outcome.action,
-        }
-        if outcome.status == "applied":
-            try:
-                await self._history.forget_matching(
-                    conversation_id=ti.conversation_id,
-                    query=pending.query,
-                )
-            except Exception:
-                _log.exception("local history forget failed")
-            if outcome.action == "delete":
-                return "已删除你确认的相关记忆。", data
-            return "相关记忆已经归档，之后不会再用于长期回忆。", data
-        if outcome.status == "accepted":
-            operation = "删除" if outcome.action == "delete" else "归档"
-            return f"{operation}请求已经提交，仍在处理中。", data
-        return "操作没有成功，我没有修改这些记忆。", data
 
     async def run(self, ti: TurnInput) -> AsyncIterator[TurnEvent]:
         """Run a single Turn. Yields TurnEvents until DONE or ERROR."""
         seq = _SeqGen()
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         t0 = time.monotonic()
         first_delta_ms: int | None = None
         first_model_activity_ms: int | None = None
@@ -330,7 +184,6 @@ class TurnEngine:
         post_turn_allowed = False
         post_turn_scheduled = False
         recent_history_persisted = False
-        memory_tool_owned_turn = False
 
         try:
             # ---- Input guardrail --------------------------------------------
@@ -367,52 +220,6 @@ class TurnEngine:
                 yield TurnEvent.delta(ti.turn_id, seq.next(), refuse, time.time())
                 yield TurnEvent.done(ti.turn_id, seq.next(), TurnStatus.OK, time.time())
                 return
-            self._prune_pending_forgets()
-            pending = self._pending_forgets.get(ti.conversation_id)
-            if pending is not None and _is_forget_cancel(ti.text):
-                self._pending_forgets.pop(ti.conversation_id, None)
-                ack = "好的，已取消，没有删除任何记忆。"
-                assistant_text_for_persist = ack
-                yield TurnEvent.delta(ti.turn_id, seq.next(), ack, time.time())
-                yield TurnEvent.done(
-                    ti.turn_id,
-                    seq.next(),
-                    TurnStatus.OK,
-                    time.time(),
-                    action="memory_forget_cancelled",
-                    memory_status="cancelled",
-                )
-                return
-            if pending is not None and _is_forget_confirmation(ti.text):
-                # Claim before awaiting so concurrent duplicate confirmations
-                # cannot submit the same pending operation twice.
-                self._pending_forgets.pop(ti.conversation_id, None)
-                ack, forget_data = await self._confirm_forget(ti, pending)
-                assistant_text_for_persist = ack
-                yield TurnEvent.delta(ti.turn_id, seq.next(), ack, time.time())
-                yield TurnEvent.done(
-                    ti.turn_id,
-                    seq.next(),
-                    TurnStatus.OK,
-                    time.time(),
-                    action="memory_forget_confirm",
-                    **forget_data,
-                )
-                return
-            if verdict.action is SafetyAction.FORGET:
-                ack, forget_data = await self._preview_forget(ti)
-                assistant_text_for_persist = ack
-                yield TurnEvent.delta(ti.turn_id, seq.next(), ack, time.time())
-                yield TurnEvent.done(
-                    ti.turn_id,
-                    seq.next(),
-                    TurnStatus.OK,
-                    time.time(),
-                    action="memory_forget_preview",
-                    **forget_data,
-                )
-                return
-
             # ---- Reflex control intent (stop / topic switch) ---------------
             # Runs before triage on the final utterance. A whole-utterance
             # stop must never reach the LLM: emit a DONE tagged
@@ -435,6 +242,30 @@ class TurnEngine:
                 return
             if control.intent is InterruptIntent.TOPIC_SWITCH:
                 ti.metadata["topic_switch"] = True
+
+            # A committed user turn is the only input to long-term extraction.
+            # Publish it independently of context compilation, LLM generation,
+            # tools and TTS; the Memory service owns semantic relevance,
+            # sensitivity and projection decisions. Assistant output is never
+            # evidence for this event.
+            memory_observation = _memory_write_trace(
+                ti=ti,
+                policy=runtime_policy,
+                mode=self._memory_write_mode,
+            )
+            if not speculative and memory_observation["fanout_allowed"]:
+                ti.metadata["memory_observation_scheduled"] = True
+                if getattr(self._fanout, "is_durable", False):
+                    enqueue_started = time.monotonic()
+                    await self._publish_memory_observation(ti, started_at)
+                    ti.metadata["memory_observation_enqueue_ms"] = int(
+                        (time.monotonic() - enqueue_started) * 1000
+                    )
+                else:
+                    self._background.create(
+                        self._publish_memory_observation(ti, started_at),
+                        name=f"turn-{ti.turn_id}-memory-observation",
+                    )
 
             # ---- Triage -----------------------------------------------------
             triage_kind = self._triage.classify(ti.text)
@@ -556,17 +387,6 @@ class TurnEngine:
                         )
                         break
                     tool_iters += 1
-                    if any(
-                        call.name
-                        in {
-                            "memory_assert_fact",
-                        }
-                        for call in tool_calls
-                    ):
-                        # Explicit memory tools own this turn's write contract.
-                        # The generic steward fanout must not create a second,
-                        # differently classified copy of the same claim.
-                        memory_tool_owned_turn = True
                     dispatch_calls: list[ToolCall] = []
                     suppressed_results: list[ToolResult] = []
                     for call in tool_calls:
@@ -652,7 +472,7 @@ class TurnEngine:
                         for r in results
                     )
                     # Feed results back into the conversation as TOOL messages.
-                    now = datetime.now(timezone.utc)
+                    now = datetime.now(UTC)
                     tool_result_messages: list[ChatMessage] = []
                     for r in results:
                         yield TurnEvent(
@@ -686,18 +506,6 @@ class TurnEngine:
                                 created_at=now,
                             )
                         )
-                    memory_ack = _terminal_memory_write_ack(results)
-                    if memory_ack is not None:
-                        if first_delta_ms is None:
-                            first_delta_ms = int((time.monotonic() - t0) * 1000)
-                        assistant_text_parts.append(memory_ack)
-                        yield TurnEvent.delta(
-                            ti.turn_id,
-                            seq.next(),
-                            memory_ack,
-                            time.time(),
-                        )
-                        break
                     messages = [
                         *messages,
                         ChatMessage(
@@ -765,7 +573,7 @@ class TurnEngine:
                 first_delta_ms=first_delta_ms,
             )
 
-            # User has their answer; persistence + fanout can take their time.
+            # User has their answer; durable persistence can take its time.
             # Speculative turns are ephemeral — skip entirely.
             if not speculative:
                 post_turn_scheduled = True
@@ -775,7 +583,6 @@ class TurnEngine:
                         final_text,
                         started_at,
                         history_already_persisted=recent_history_persisted,
-                        memory_tool_owned_turn=memory_tool_owned_turn,
                     ),
                     name=f"turn-{ti.turn_id}-post-turn",
                 )
@@ -821,10 +628,8 @@ class TurnEngine:
                 total_ms = int((time.monotonic() - t0) * 1000)
                 memory_write_trace = _memory_write_trace(
                     ti=ti,
-                    assistant_text=assistant_text_for_persist,
                     policy=runtime_policy,
                     mode=self._memory_write_mode,
-                    memory_tool_owned_turn=memory_tool_owned_turn,
                 )
                 development_guards = _development_guard_trace(
                     ti=ti,
@@ -917,7 +722,7 @@ class TurnEngine:
                         status=status,
                         triage_kind=triage_kind,
                         started_at=started_at,
-                        finished_at=datetime.now(timezone.utc),
+                        finished_at=datetime.now(UTC),
                         first_delta_ms=first_delta_ms,
                         total_ms=total_ms,
                         usage_in=usage_in,
@@ -937,7 +742,6 @@ class TurnEngine:
                         assistant_text_for_persist,
                         started_at,
                         history_already_persisted=recent_history_persisted,
-                        memory_tool_owned_turn=memory_tool_owned_turn,
                     ),
                     name=f"turn-{ti.turn_id}-post-turn",
                 )
@@ -1062,9 +866,8 @@ class TurnEngine:
         started_at: datetime,
         *,
         history_already_persisted: bool = False,
-        memory_tool_owned_turn: bool = False,
     ) -> None:
-        """Background work that runs AFTER DONE was yielded.
+        """Persist recent history after terminal paths that did not do so inline.
 
         Errors here never reach the user; logged + swallowed.
         """
@@ -1079,24 +882,18 @@ class TurnEngine:
                 )
             except Exception:
                 _log.exception("post-turn: persist failed")
-        if not policy.post_turn_side_effects_allowed:
-            return
-        write_trace = _memory_write_trace(
-            ti=ti,
-            assistant_text=assistant_text,
-            policy=policy,
-            mode=self._memory_write_mode,
-            memory_tool_owned_turn=memory_tool_owned_turn,
-        )
-        if not write_trace["fanout_allowed"]:
-            _log.info(
-                "post-turn: skipped memory/persona side effects for turn %s reason=%s",
-                ti.turn_id,
-                write_trace["skipped_reason"],
-            )
-            return
+        del started_at
+
+    async def _publish_memory_observation(
+        self,
+        ti: TurnInput,
+        started_at: datetime,
+    ) -> None:
+        """Publish canonical user evidence without joining the reply path."""
+
+        policy = TurnRuntimePolicy.from_metadata(ti.metadata)
         try:
-            await self._fanout.publish_turn(
+            status = await self._fanout.publish_turn(
                 owner_id=ti.context.owner_id,
                 companion_id=ti.context.companion_id,
                 memory_realm_id=ti.context.memory_realm_id,
@@ -1104,22 +901,23 @@ class TurnEngine:
                 session_id=ti.session_id,
                 turn_id=ti.turn_id,
                 user_text=ti.text or "",
-                assistant_text=assistant_text,
+                assistant_text="",
                 timestamp_iso=started_at.isoformat(),
                 trace_id=ti.context.trace_id,
                 metadata={
-                    "memory_write_disposition": write_trace["disposition"],
-                    "memory_write_reason": write_trace["reason"],
-                    "memory_policy_version": write_trace["policy_version"],
-                    "source_component": "turn_engine",
+                    "memory_ingest_policy": "semantic_steward",
+                    "source_component": "turn_observer",
                     "conversation_id": ti.conversation_id,
                     "genome_id": self._genome_id,
                     "privacy_mode": policy.privacy.mode,
-                    "memory_projection_only": write_trace["projection_only"],
                 },
             )
+            ti.metadata["memory_observation_state"] = getattr(status, "state", None)
+            if getattr(status, "error", None):
+                ti.metadata["memory_observation_error"] = status.error
         except Exception:
-            _log.exception("post-turn: fanout failed")
+            ti.metadata["memory_observation_state"] = "enqueue_failed"
+            _log.exception("memory observation publish failed")
 
     async def _persist_messages(
         self,
@@ -1129,7 +927,7 @@ class TurnEngine:
         *,
         is_private: bool = False,
     ) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if user_text:
             await self._history.append(
                 conversation_id=ti.conversation_id,
@@ -1216,23 +1014,6 @@ def _suppressed_tool_result(call: ToolCall) -> ToolResult:
         ),
         metadata={"repeat_suppressed": True},
     )
-
-
-def _terminal_memory_write_ack(results: list[ToolResult]) -> str | None:
-    """Return a truthful terminal response for simple memory write tools."""
-    write_names = {
-        "memory_assert_fact",
-    }
-    if not results or any(result.name not in write_names for result in results):
-        return None
-    result = results[-1]
-    content = result.content if isinstance(result.content, dict) else {}
-    status = str(content.get("status") or "")
-    if not result.ok:
-        return "这次没有确认写入成功，请稍后再试。"
-    if status == "applied":
-        return "已经记下了。"
-    return "记忆写入请求已提交，正在处理。"
 
 
 def _merge_tool_results(
@@ -1361,65 +1142,32 @@ def _duration(end_ms: int | None, start_ms: int | None) -> int | None:
 def _memory_write_trace(
     *,
     ti: TurnInput,
-    assistant_text: str,
     policy: TurnRuntimePolicy,
     mode: str = "enabled",
-    memory_tool_owned_turn: bool = False,
 ) -> dict:
     mode = _normalize_guard_mode(mode)
-    disposition = None
     skipped_reason: str | None = None
     if mode == "disabled":
         skipped_reason = "policy_disabled"
     elif not ti.text:
         skipped_reason = "empty_user_text"
-    elif not assistant_text:
-        skipped_reason = "empty_assistant_text"
     elif not policy.post_turn_side_effects_allowed:
         skipped_reason = "privacy_policy"
-    else:
-        disposition = classify_memory_write(
-            user_text=ti.text or "",
-            assistant_text=assistant_text,
-        )
-        if mode == "shadow":
-            skipped_reason = "shadow_only"
-        elif (
-            not memory_tool_owned_turn
-            and disposition.kind is MemoryWriteDispositionKind.IGNORE
-        ):
-            skipped_reason = "low_signal"
-        elif (
-            not memory_tool_owned_turn
-            and disposition.kind
-            is MemoryWriteDispositionKind.SENSITIVE_REQUIRES_CONSENT
-        ):
-            skipped_reason = "requires_consent"
-
-    if disposition is None and mode != "disabled":
-        disposition = classify_memory_write(
-            user_text=ti.text or "",
-            assistant_text=assistant_text,
-        )
-    metadata = disposition.to_metadata() if disposition is not None else {}
+    elif mode == "shadow":
+        skipped_reason = "shadow_only"
     return {
-        "trace_kind": "memory_write_intent",
+        "trace_kind": "memory_turn_observation",
         "durable_result": "async_memory_worker",
         "source_turn_id": ti.turn_id,
         "conversation_id": ti.conversation_id,
         "privacy_mode": policy.privacy.mode,
         "mode": mode,
         "shadow_only": mode == "shadow",
-        "disposition": disposition.kind.value if disposition is not None else None,
-        "reason": disposition.reason if disposition is not None else None,
-        "policy_version": metadata.get("memory_policy_version"),
-        # An explicit memory tool has already persisted the user's verbatim
-        # evidence. The completed turn must still reach the steward so the
-        # normal KG/privacy/canonical projections run; the memory service owns
-        # suppressing a duplicate drawer after verifying that evidence exists.
-        "projection_only": memory_tool_owned_turn,
+        "ingest_policy": "semantic_steward",
         "fanout_allowed": skipped_reason is None,
         "skipped_reason": skipped_reason,
+        "enqueue_state": ti.metadata.get("memory_observation_state"),
+        "enqueue_ms": ti.metadata.get("memory_observation_enqueue_ms"),
     }
 
 
@@ -1439,8 +1187,7 @@ def _development_guard_trace(
             "shadow_only": bool(memory_write_trace.get("shadow_only")),
             "fanout_allowed": bool(memory_write_trace.get("fanout_allowed")),
             "skipped_reason": memory_write_trace.get("skipped_reason"),
-            "disposition": memory_write_trace.get("disposition"),
-            "policy_version": memory_write_trace.get("policy_version"),
+            "ingest_policy": memory_write_trace.get("ingest_policy"),
         },
         tool_policy={
             "schema_strict": tool_schema_strict,
@@ -1457,36 +1204,3 @@ def _normalize_guard_mode(mode: str) -> str:
         return mode
     _log.warning("unknown development guard mode=%s; falling back to enabled", mode)
     return "enabled"
-
-
-def _requests_physical_delete(text: str | None) -> bool:
-    lower = (text or "").strip().lower()
-    return any(
-        marker in lower
-        for marker in (
-            "删除",
-            "删掉",
-            "彻底忘记",
-            "永久忘记",
-            "delete",
-            "erase",
-        )
-    )
-
-
-def _is_forget_confirmation(text: str | None) -> bool:
-    normalized = (text or "").strip().lower().strip("，。,.!?！？ ")
-    return normalized in {
-        "确认",
-        "确认删除",
-        "是的，删除",
-        "是的删除",
-        "全部删除",
-        "confirm",
-        "confirm delete",
-    }
-
-
-def _is_forget_cancel(text: str | None) -> bool:
-    normalized = (text or "").strip().lower().strip("，。,.!?！？ ")
-    return normalized in {"取消", "不要删除", "算了", "cancel"}

@@ -14,7 +14,7 @@ import time
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -24,12 +24,7 @@ from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
 from eidolon_agent.core.types.event import Event
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
-from eidolon_agent.core.types.memory import (
-    MemoryForgetCandidate,
-    MemoryForgetOutcome,
-    MemoryForgetPreview,
-    MemoryRecallResult,
-)
+from eidolon_agent.core.types.memory import MemoryRecallResult
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEventKind, TurnInput, TurnTrigger
 from eidolon_agent.core.types.turn_context import TurnContext
@@ -76,28 +71,16 @@ class TurnReplayResult:
             "trace_summary": {
                 "privacy": (trace.get("privacy") or {}).get("mode"),
                 "memory_write": {
-                    "disposition": (trace.get("memory_write_trace") or {}).get(
-                        "disposition"
-                    ),
-                    "fanout_allowed": (trace.get("memory_write_trace") or {}).get(
-                        "fanout_allowed"
-                    ),
-                    "skipped_reason": (trace.get("memory_write_trace") or {}).get(
-                        "skipped_reason"
-                    ),
+                    "ingest_policy": (trace.get("memory_write_trace") or {}).get("ingest_policy"),
+                    "fanout_allowed": (trace.get("memory_write_trace") or {}).get("fanout_allowed"),
+                    "skipped_reason": (trace.get("memory_write_trace") or {}).get("skipped_reason"),
                 },
                 "memory_recall": {
                     "attempted": (trace.get("memory_trace") or {}).get("attempted"),
                     "degraded": (trace.get("memory_trace") or {}).get("degraded"),
-                    "degraded_reason": (trace.get("memory_trace") or {}).get(
-                        "degraded_reason"
-                    ),
-                    "context_injected": (trace.get("memory_trace") or {}).get(
-                        "context_injected"
-                    ),
-                    "kg_triple_count": (trace.get("memory_trace") or {}).get(
-                        "kg_triple_count"
-                    ),
+                    "degraded_reason": (trace.get("memory_trace") or {}).get("degraded_reason"),
+                    "context_injected": (trace.get("memory_trace") or {}).get("context_injected"),
+                    "kg_triple_count": (trace.get("memory_trace") or {}).get("kg_triple_count"),
                 },
                 "context": {
                     "structure_version": trace.get("context_structure_version"),
@@ -113,26 +96,17 @@ class TurnReplayResult:
                     ],
                     "dropped": [
                         s.get("kind")
-                        for s in (trace.get("context_ledger") or {}).get(
-                            "dropped_segments", []
-                        )
+                        for s in (trace.get("context_ledger") or {}).get("dropped_segments", [])
                     ],
                     "degraded_sources": list(
-                        (trace.get("context_ledger") or {}).get("degraded_sources")
-                        or []
+                        (trace.get("context_ledger") or {}).get("degraded_sources") or []
                     ),
                 },
                 "tools": {
                     "visible_names": list(
-                        ((trace.get("harness") or {}).get("tools") or {}).get(
-                            "visible_names"
-                        )
-                        or []
+                        ((trace.get("harness") or {}).get("tools") or {}).get("visible_names") or []
                     ),
-                    "repeat_suppressed_count": trace.get(
-                        "tool_repeat_suppressed_count"
-                    )
-                    or 0,
+                    "repeat_suppressed_count": trace.get("tool_repeat_suppressed_count") or 0,
                 },
             },
         }
@@ -165,7 +139,7 @@ class ScenarioReplayResult:
 
 class ExperienceReplayRunner:
     def __init__(self, *, now: datetime | None = None) -> None:
-        self._now = now or datetime.now(timezone.utc)
+        self._now = now or datetime.now(UTC)
 
     async def run_many(
         self,
@@ -227,20 +201,16 @@ class _ReplayHarness:
 
     async def start(self) -> None:
         await self.event_bus.subscribe(
-            conversation_turn_subject(
-                f"{_REPLAY_TENANT_ID}.{_REPLAY_USER_ID}"
-            ),
+            conversation_turn_subject(f"{_REPLAY_TENANT_ID}.{_REPLAY_USER_ID}"),
             self._on_memory_fanout,
         )
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for idx, item in enumerate(self.scenario.get("history") or []):
             role_name = str(item.get("role") or "user").lower()
             role = MessageRole.ASSISTANT if role_name == "assistant" else MessageRole.USER
             await self.history.append(
                 conversation_id=str(
-                    item.get("conversation_id")
-                    or self.scenario.get("conversation_id")
-                    or "replay"
+                    item.get("conversation_id") or self.scenario.get("conversation_id") or "replay"
                 ),
                 message=ChatMessage(
                     id=str(item.get("id") or f"seed-{idx + 1}"),
@@ -259,9 +229,7 @@ class _ReplayHarness:
             text=str(spec.get("user") or ""),
             turn_id=turn_id,
             conversation_id=str(
-                spec.get("conversation_id")
-                or self.scenario.get("conversation_id")
-                or "replay"
+                spec.get("conversation_id") or self.scenario.get("conversation_id") or "replay"
             ),
             metadata=dict(spec.get("metadata") or {}),
         )
@@ -281,6 +249,11 @@ class _ReplayHarness:
                 total_ms = int((time.monotonic() - t0) * 1000)
         await self.background_tasks.drain(timeout_s=2.0)
         await _drain_background_tasks()
+        if "memory_after" in spec:
+            # The Agent replay owns turn behavior, not semantic extraction.
+            # Projection state is supplied by the fixture instead of inferred
+            # from phrases, so these tests cannot become a second steward.
+            self.memory.context = str(spec.get("memory_after") or "")
 
         result = TurnReplayResult(
             turn_id=turn_id,
@@ -306,13 +279,6 @@ class _ReplayHarness:
     async def _on_memory_fanout(self, ev: Event) -> None:
         payload = dict(ev.payload)
         self.memory_fanouts.append(payload)
-        turn_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
-        disposition = (turn_payload.get("metadata") or {}).get("memory_write_disposition")
-        user_text = str(turn_payload.get("user_text") or "")
-        if disposition == "semantic_upsert":
-            self.memory.context = _semantic_context_from_text(user_text)
-        elif disposition == "promise_create":
-            self.memory.context = "强制承诺: 明天提醒用户喝水"
 
     def _build_engine(self, *, llm: _CapturingLLM) -> TurnEngine:
         registry = ToolRegistry()
@@ -323,9 +289,7 @@ class _ReplayHarness:
             history_manager=self.history,
             memory_port=self.memory,
             context_budget_tokens=(self.scenario.get("context") or {}).get("budget_tokens"),
-            context_budget_mode=(self.scenario.get("context") or {}).get(
-                "budget_mode", "enabled"
-            ),
+            context_budget_mode=(self.scenario.get("context") or {}).get("budget_mode", "enabled"),
         )
         return TurnEngine(
             compiler=compiler,
@@ -340,7 +304,6 @@ class _ReplayHarness:
             event_bus=self.event_bus,
             personas_service=_ReplayPersonas(),
             genome_id=_REPLAY_PERSONA_ID,
-            memory_port=self.memory,
             turn_persister=self._capture_turn,
             background_tasks=self.background_tasks,
         )
@@ -392,7 +355,6 @@ class _ReplayMemory:
         self.context = context
         self.degraded = degraded
         self.raise_on_recall = raise_on_recall
-        self.forget_calls: list[dict[str, Any]] = []
 
     async def recall_context(self, **_: Any):
         if self.raise_on_recall:
@@ -402,47 +364,6 @@ class _ReplayMemory:
             context=self.context,
             hits=hits,
             degraded=self.degraded,
-        )
-
-    async def preview_forget(
-        self,
-        owner_id: str | None,
-        companion_id: str | None,
-        memory_realm_id: str,
-        device_id: str | None,
-        query: str,
-        *,
-        action: str = "archive",
-        session_id: str | None = None,
-    ) -> MemoryForgetPreview:
-        self.forget_calls.append(
-            {
-                "owner_id": owner_id,
-                "companion_id": companion_id,
-                "memory_realm_id": memory_realm_id,
-                "device_id": device_id,
-                "query": query,
-                "action": action,
-                "session_id": session_id,
-            }
-        )
-        if not self.context:
-            return MemoryForgetPreview(status="not_found", target=query, action="archive")
-        return MemoryForgetPreview(
-            status="preview",
-            target=query,
-            action="delete" if action == "delete" else "archive",
-            candidates=[MemoryForgetCandidate("drawer-1", self.context, 1.0)],
-            confirmation_token="token-1",
-        )
-
-    async def confirm_forget(self, *args: Any, **kwargs: Any) -> MemoryForgetOutcome:
-        self.context = ""
-        return MemoryForgetOutcome(
-            status="applied",
-            action="archive",
-            request_id="request-1",
-            drawer_ids=["drawer-1"],
         )
 
 
@@ -577,12 +498,6 @@ def _check_turn_expectations(
             actual <= int(expect["max_tool_repeat_suppressed"]),
             f"got={actual}",
         )
-    if "memory_write_disposition" in expect:
-        add(
-            "memory_write_disposition",
-            write.get("disposition") == expect["memory_write_disposition"],
-            f"got={write.get('disposition')}",
-        )
     if "memory_fanout_allowed" in expect:
         add(
             "memory_fanout_allowed",
@@ -595,8 +510,6 @@ def _check_turn_expectations(
             bool(recall.get("degraded")) is bool(expect["memory_recall_degraded"]),
             f"got={recall.get('degraded')}",
         )
-    if expect.get("forget_called"):
-        add("forget_called", bool(harness.memory.forget_calls))
     if expect.get("memory_context_empty"):
         add("memory_context_empty", harness.memory.context == "")
     if "max_first_delta_ms" in expect:
@@ -632,21 +545,7 @@ def _check_scenario_expectations(
         add(f"scenario_forbidden_prompt:{item}", item not in full_prompt)
     if expect.get("memory_context_empty"):
         add("scenario_memory_context_empty", harness.memory.context == "")
-    if expect.get("forget_called"):
-        add("scenario_forget_called", bool(harness.memory.forget_calls))
     return checks
-
-
-def _semantic_context_from_text(text: str) -> str:
-    if "阿满" in text:
-        return "称呼偏好: 用户希望被叫作阿满"
-    if "小满" in text:
-        return "称呼偏好: 用户希望被叫作小满"
-    if "杭州" in text:
-        return "事实更正: 用户现在住在杭州"
-    if "上海" in text:
-        return "事实: 用户住在上海"
-    return f"用户偏好: {text}"
 
 
 def _merge_expectations(
@@ -654,11 +553,7 @@ def _merge_expectations(
     override: dict[str, Any],
 ) -> dict[str, Any]:
     if override.get("skip_default_expect"):
-        return {
-            key: value
-            for key, value in override.items()
-            if key != "skip_default_expect"
-        }
+        return {key: value for key, value in override.items() if key != "skip_default_expect"}
     merged = dict(base)
     for key, value in override.items():
         if isinstance(value, list) and isinstance(merged.get(key), list):
@@ -703,9 +598,7 @@ def _report_metrics(results: list[ScenarioReplayResult]) -> dict[str, Any]:
         "first_delta_ms": _latency_summary(
             turn.first_delta_ms for turn in turns if turn.first_delta_ms is not None
         ),
-        "total_ms": _latency_summary(
-            turn.total_ms for turn in turns if turn.total_ms is not None
-        ),
+        "total_ms": _latency_summary(turn.total_ms for turn in turns if turn.total_ms is not None),
         "categories": categories,
     }
 

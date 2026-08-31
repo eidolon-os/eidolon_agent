@@ -12,12 +12,7 @@ from sqlalchemy import select
 
 from eidolon_agent.core.types.companion_runtime import CompanionRuntimeConfig
 from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
-from eidolon_agent.core.types.memory import (
-    MemoryForgetCandidate,
-    MemoryForgetOutcome,
-    MemoryForgetPreview,
-    MemoryRecallResult,
-)
+from eidolon_agent.core.types.memory import MemoryRecallResult
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEventKind
 from eidolon_agent.domain.history import HistoryManager
@@ -54,9 +49,7 @@ async def test_tool_call_announces_real_tool_before_dispatch_and_feeds_result_to
 
     tool_call_idx = next(i for i, ev in enumerate(events) if ev.kind is TurnEventKind.TOOL_CALL)
     prior_deltas = [
-        ev.data.get("text", "")
-        for ev in events[:tool_call_idx]
-        if ev.kind is TurnEventKind.DELTA
+        ev.data.get("text", "") for ev in events[:tool_call_idx] if ev.kind is TurnEventKind.DELTA
     ]
     assert prior_deltas[-1] == "收到，我已交给后台 coworker 处理，会继续跟进。"
     tool_results = [ev for ev in events if ev.kind is TurnEventKind.TOOL_RESULT]
@@ -64,7 +57,8 @@ async def test_tool_call_announces_real_tool_before_dispatch_and_feeds_result_to
     assert tool_results[0].data["name"] == "delegate_to_coworker"
     assert len(llm.messages_by_call) == 2
     tool_messages = [
-        msg for msg in llm.messages_by_call[1]
+        msg
+        for msg in llm.messages_by_call[1]
         if msg.role is MessageRole.TOOL and msg.tool_name == "delegate_to_coworker"
     ]
     assert tool_messages
@@ -98,9 +92,7 @@ async def test_llm_selected_long_task_returns_handoff_without_waiting_for_worker
     )
     engine = turn_engine_factory(llm=llm)
 
-    events = [
-        ev async for ev in engine.run(make_turn_input("帮我订下周三去上海的机票"))
-    ]
+    events = [ev async for ev in engine.run(make_turn_input("帮我订下周三去上海的机票"))]
     await _drain_background_tasks()
 
     assert any(
@@ -114,10 +106,7 @@ async def test_llm_selected_long_task_returns_handoff_without_waiting_for_worker
     assert tool_result.data["content"]["accepted"] is True
     handoff = next(ev for ev in events if ev.kind is TurnEventKind.HANDOFF)
     assert handoff.data["task_id"] == tool_result.data["content"]["task_id"]
-    assert (
-        handoff.data["progress_subject"]
-        == tool_result.data["content"]["progress_subject"]
-    )
+    assert handoff.data["progress_subject"] == tool_result.data["content"]["progress_subject"]
     content = tool_result.data["content"]
     assert content["session_key"].startswith("e.alice.")
     assert content["task_key"].startswith(f"{content['session_key']}.")
@@ -148,18 +137,14 @@ async def test_llm_selected_long_task_persists_minimal_receipt_record(
     )
     engine = turn_engine_factory(llm=llm, runtime_store=runtime_store)
 
-    events = [
-        ev async for ev in engine.run(make_turn_input("整理我最近的项目资料"))
-    ]
+    events = [ev async for ev in engine.run(make_turn_input("整理我最近的项目资料"))]
     await _drain_background_tasks()
 
     tool_result = next(ev for ev in events if ev.kind is TurnEventKind.TOOL_RESULT)
     content = tool_result.data["content"]
     async with runtime_store.session_factory() as session:
         row = (
-            await session.execute(
-                select(JobRow).where(JobRow.job_id == content["task_id"])
-            )
+            await session.execute(select(JobRow).where(JobRow.job_id == content["task_id"]))
         ).scalar_one_or_none()
     await runtime_store.close()
 
@@ -202,7 +187,13 @@ async def test_temporary_long_task_does_not_fanout_to_memory(
     await event_bus.subscribe(MEMORY_SUBJECT, _on_memory)
     llm = _ScriptedCapturingLLM(
         [
-            [{"kind": "tool_call", "name": "delegate_to_coworker", "arguments": {"instruction": "整理资料"}}],
+            [
+                {
+                    "kind": "tool_call",
+                    "name": "delegate_to_coworker",
+                    "arguments": {"instruction": "整理资料"},
+                }
+            ],
             [{"kind": "text", "text": "已开始处理。"}],
         ]
     )
@@ -235,9 +226,7 @@ async def test_compiled_prompt_contains_tool_policy(turn_engine_factory) -> None
 
 async def test_builtin_tool_schemas_describe_usage_boundaries(turn_engine_factory) -> None:
     engine = turn_engine_factory()
-    visible, _dynamic = await engine._tool_schemas(
-        make_turn_input(), CompanionRuntimeConfig()
-    )
+    visible, _dynamic = await engine._tool_schemas(make_turn_input(), CompanionRuntimeConfig())
     schemas = {schema.name: schema for schema in visible}
 
     assert "delegate_to_coworker" in schemas
@@ -293,7 +282,8 @@ async def test_turn_trace_contains_harness_snapshot_for_coworker_handoff(
 
 
 async def test_tool_permission_error_is_returned_to_llm_without_side_effect(
-    turn_engine_factory, event_bus,
+    turn_engine_factory,
+    event_bus,
 ) -> None:
     received = []
 
@@ -306,11 +296,13 @@ async def test_tool_permission_error_is_returned_to_llm_without_side_effect(
     dispatcher = ToolDispatcher(reg, allowed_permissions=set())
     llm = FakeLLM(
         script=[
-            [{
-                "kind": "tool_call",
-                "name": "emit_event",
-                "arguments": {"subject": "agent.test.blocked"},
-            }],
+            [
+                {
+                    "kind": "tool_call",
+                    "name": "emit_event",
+                    "arguments": {"subject": "agent.test.blocked"},
+                }
+            ],
             [{"kind": "text", "text": "权限不足。"}],
         ],
         per_token_delay_s=0,
@@ -360,168 +352,6 @@ async def test_private_turn_does_not_fanout_to_memory(turn_engine_factory, event
     assert received == []
 
 
-async def test_forget_intent_calls_memory_port(turn_engine_factory) -> None:
-    class _Memory:
-        def __init__(self):
-            self.calls = []
-
-        async def preview_forget(
-            self,
-            owner_id: str,
-            companion_id: str,
-            memory_realm_id: str,
-            device_id: str | None,
-            query: str,
-            *,
-            action: str = "archive",
-            session_id: str = "default",
-        ) -> MemoryForgetPreview:
-            self.calls.append(
-                (
-                    owner_id,
-                    companion_id,
-                    memory_realm_id,
-                    device_id,
-                    query,
-                    action,
-                    session_id,
-                )
-            )
-            return MemoryForgetPreview(
-                status="preview",
-                target=query,
-                action="archive",
-                candidates=[MemoryForgetCandidate("drawer-1", query, 1.0)],
-                confirmation_token="token-1",
-            )
-
-        async def confirm_forget(self, *args, **kwargs) -> MemoryForgetOutcome:
-            return MemoryForgetOutcome(
-                status="applied",
-                action="archive",
-                request_id="request-1",
-                drawer_ids=["drawer-1"],
-            )
-
-    memory = _Memory()
-    engine = turn_engine_factory(memory_port=memory)
-
-    events = [ev async for ev in engine.run(make_turn_input("请忘记这件事"))]
-
-    done = next(ev for ev in events if ev.kind is TurnEventKind.DONE)
-    assert done.data["action"] == "memory_forget_preview"
-    assert done.data["memory_status"] == "applied"
-    assert done.data["request_id"] == "request-1"
-    assert memory.calls == [
-        (
-            "alice",
-            "companion-test",
-            "realm-test",
-            "device-test",
-            "请忘记这件事",
-            "archive",
-            "s1",
-        )
-    ]
-
-
-async def test_ambiguous_delete_requires_second_turn_and_terminal_status(
-    turn_engine_factory,
-) -> None:
-    class _DeleteMemory:
-        def __init__(self) -> None:
-            self.confirm_calls = 0
-
-        async def preview_forget(self, *args, **kwargs) -> MemoryForgetPreview:
-            return MemoryForgetPreview(
-                status="preview",
-                target="常州",
-                action="delete",
-                candidates=[
-                    MemoryForgetCandidate("drawer-1", "在常州工作", 1.0),
-                    MemoryForgetCandidate("drawer-2", "去常州旅行", 0.8),
-                ],
-                requires_explicit_confirmation=True,
-                confirmation_token="signed-token",
-            )
-
-        async def confirm_forget(self, *args, **kwargs) -> MemoryForgetOutcome:
-            self.confirm_calls += 1
-            return MemoryForgetOutcome(
-                status="applied",
-                action="delete",
-                request_id="delete-request-1",
-                drawer_ids=["drawer-1", "drawer-2"],
-            )
-
-    memory = _DeleteMemory()
-    engine = turn_engine_factory(memory_port=memory)
-    preview_turn = replace(
-        make_turn_input("请删除关于常州的记忆"),
-        turn_id="forget-preview",
-    )
-
-    preview_events = [ev async for ev in engine.run(preview_turn)]
-    preview_done = preview_events[-1]
-    preview_text = "".join(
-        ev.data.get("text", "")
-        for ev in preview_events
-        if ev.kind is TurnEventKind.DELTA
-    )
-    assert preview_done.data["memory_status"] == "confirmation_required"
-    assert preview_done.data["candidate_count"] == 2
-    assert "确认删除" in preview_text
-    assert "已删除" not in preview_text
-    assert memory.confirm_calls == 0
-
-    confirm_turn = replace(make_turn_input("确认删除"), turn_id="forget-confirm")
-    confirm_events = [ev async for ev in engine.run(confirm_turn)]
-    confirm_done = confirm_events[-1]
-    confirm_text = "".join(
-        ev.data.get("text", "")
-        for ev in confirm_events
-        if ev.kind is TurnEventKind.DELTA
-    )
-    assert confirm_done.data["action"] == "memory_forget_confirm"
-    assert confirm_done.data["memory_status"] == "applied"
-    assert confirm_done.data["request_id"] == "delete-request-1"
-    assert "已删除" in confirm_text
-    assert memory.confirm_calls == 1
-
-
-async def test_accepted_forget_never_claims_terminal_completion(
-    turn_engine_factory,
-) -> None:
-    class _AcceptedMemory:
-        async def preview_forget(self, *args, **kwargs) -> MemoryForgetPreview:
-            return MemoryForgetPreview(
-                status="preview",
-                target="小满",
-                action="archive",
-                candidates=[MemoryForgetCandidate("drawer-1", "称呼小满", 1.0)],
-                confirmation_token="signed-token",
-            )
-
-        async def confirm_forget(self, *args, **kwargs) -> MemoryForgetOutcome:
-            return MemoryForgetOutcome(
-                status="accepted",
-                action="archive",
-                request_id="archive-request-1",
-                drawer_ids=["drawer-1"],
-            )
-
-    engine = turn_engine_factory(memory_port=_AcceptedMemory())
-    events = [ev async for ev in engine.run(make_turn_input("请忘记叫我小满"))]
-    text = "".join(
-        ev.data.get("text", "") for ev in events if ev.kind is TurnEventKind.DELTA
-    )
-
-    assert events[-1].data["memory_status"] == "accepted"
-    assert events[-1].data["request_id"] == "archive-request-1"
-    assert "仍在处理中" in text
-    assert "已经归档" not in text
-
-
 async def test_memory_replay_remembers_call_name_preference(
     turn_engine_factory,
     event_bus,
@@ -532,8 +362,7 @@ async def test_memory_replay_remembers_call_name_preference(
     async def _ingest(ev):
         payload = unwrap_memory_payload(ev.payload)
         received.append(payload)
-        if payload["metadata"]["memory_write_disposition"] == "semantic_upsert":
-            memory.context = "称呼偏好: 用户希望被叫作小满"
+        memory.context = "称呼偏好: 用户希望被叫作小满"
 
     await event_bus.subscribe(MEMORY_SUBJECT, _ingest)
     engine = turn_engine_factory(memory_port=memory)
@@ -543,8 +372,9 @@ async def test_memory_replay_remembers_call_name_preference(
     await _drain_background_tasks()
 
     assert events[-1].kind is TurnEventKind.DONE
-    assert received[0]["metadata"]["memory_write_disposition"] == "semantic_upsert"
+    assert received[0]["metadata"]["memory_ingest_policy"] == "semantic_steward"
     assert received[0]["metadata"]["source_turn_id"] == "pref-1"
+    assert received[0]["assistant_text"] == ""
 
     llm = _CapturingLLM()
     followup = replace(make_turn_input("你应该怎么称呼我？"), turn_id="pref-2")
@@ -564,11 +394,10 @@ async def test_memory_replay_user_correction_replaces_old_fact(
     async def _ingest(ev):
         payload = unwrap_memory_payload(ev.payload)
         text = payload["user_text"]
-        if payload["metadata"]["memory_write_disposition"] == "semantic_upsert":
-            if "阿满" in text:
-                memory.context = "称呼偏好: 用户希望被叫作阿满"
-            elif "小满" in text:
-                memory.context = "称呼偏好: 用户希望被叫作小满"
+        if "阿满" in text:
+            memory.context = "称呼偏好: 用户希望被叫作阿满"
+        elif "小满" in text:
+            memory.context = "称呼偏好: 用户希望被叫作小满"
 
     await event_bus.subscribe(MEMORY_SUBJECT, _ingest)
     engine = turn_engine_factory(memory_port=memory)
@@ -600,7 +429,7 @@ async def test_memory_replay_promise_is_labeled_and_forced_into_recall(
     async def _ingest(ev):
         payload = unwrap_memory_payload(ev.payload)
         received.append(payload)
-        if payload["metadata"]["memory_write_disposition"] == "promise_create":
+        if "提醒" in payload["user_text"]:
             memory.context = "强制承诺: 明天提醒用户喝水"
 
     await event_bus.subscribe(MEMORY_SUBJECT, _ingest)
@@ -610,8 +439,7 @@ async def test_memory_replay_promise_is_labeled_and_forced_into_recall(
     [ev async for ev in engine.run(promise)]
     await _drain_background_tasks()
 
-    assert received[0]["metadata"]["memory_write_disposition"] == "promise_create"
-    assert received[0]["metadata"]["memory_write_reason"] == "explicit_promise_or_reminder"
+    assert received[0]["metadata"]["memory_ingest_policy"] == "semantic_steward"
 
     llm = _CapturingLLM()
     followup = replace(make_turn_input("我有什么提醒吗？"), turn_id="promise-2")
@@ -620,26 +448,6 @@ async def test_memory_replay_promise_is_labeled_and_forced_into_recall(
 
     assert events[-1].kind is TurnEventKind.DONE
     assert "提醒用户喝水" in llm.messages[0].content
-
-
-async def test_memory_replay_forget_removes_recalled_context(turn_engine_factory) -> None:
-    memory = _ReplayMemory(context="称呼偏好: 用户希望被叫作小满")
-    engine = turn_engine_factory(memory_port=memory)
-    forget = replace(make_turn_input("请忘记叫我小满"), turn_id="forget-1")
-
-    events = [ev async for ev in engine.run(forget)]
-
-    assert events[-1].data["action"] == "memory_forget_preview"
-    assert events[-1].data["memory_status"] == "applied"
-    assert memory.context == ""
-
-    llm = _CapturingLLM()
-    followup = replace(make_turn_input("你记得怎么叫我吗？"), turn_id="forget-2")
-    engine = turn_engine_factory(llm=llm, memory_port=memory)
-    events = [ev async for ev in engine.run(followup)]
-
-    assert events[-1].kind is TurnEventKind.DONE
-    assert "小满" not in llm.messages[0].content
 
 
 async def test_temporary_turn_does_not_create_memory_replay(
@@ -666,7 +474,7 @@ async def test_temporary_turn_does_not_create_memory_replay(
     assert memory.context == ""
 
 
-async def test_sensitive_memory_candidate_requires_consent_before_fanout(
+async def test_agent_does_not_apply_keyword_sensitive_gating_before_steward(
     turn_engine_factory,
     event_bus,
 ) -> None:
@@ -682,7 +490,7 @@ async def test_sensitive_memory_candidate_requires_consent_before_fanout(
     await _drain_background_tasks()
 
     assert events[-1].kind is TurnEventKind.DONE
-    assert received == []
+    assert len(received) == 1
 
 
 async def test_multiturn_weather_then_counting_keeps_weather_as_background(
@@ -704,9 +512,7 @@ async def test_multiturn_weather_then_counting_keeps_weather_as_background(
         )
     ]
 
-    answer = "".join(
-        ev.data.get("text", "") for ev in events if ev.kind is TurnEventKind.DELTA
-    )
+    answer = "".join(ev.data.get("text", "") for ev in events if ev.kind is TurnEventKind.DELTA)
     system = llm.messages_by_call[0][0].content
     assert "一二三" in answer
     assert "[CURRENT REQUEST]" in system
@@ -746,9 +552,7 @@ async def test_weather_failure_then_correction_answers_current_request(
         )
     ]
     first_errors = [
-        ev.data.get("error")
-        for ev in first_events
-        if ev.kind is TurnEventKind.TOOL_RESULT
+        ev.data.get("error") for ev in first_events if ev.kind is TurnEventKind.TOOL_RESULT
     ]
     assert first_errors == ["weather_lookup_failed", "tool_repeat_suppressed"]
 
@@ -791,13 +595,9 @@ async def test_multiturn_reference_uses_background_without_reexecution(
 
     llm = _AnsweringCaptureLLM("明天常州也要留意降雨。")
     second = turn_engine_factory(llm=llm, history=history)
-    events = [
-        ev async for ev in second.run(replace(make_turn_input("那明天呢？"), turn_id="cz-2"))
-    ]
+    events = [ev async for ev in second.run(replace(make_turn_input("那明天呢？"), turn_id="cz-2"))]
 
-    answer = "".join(
-        ev.data.get("text", "") for ev in events if ev.kind is TurnEventKind.DELTA
-    )
+    answer = "".join(ev.data.get("text", "") for ev in events if ev.kind is TurnEventKind.DELTA)
     system = llm.messages_by_call[0][0].content
     assert "明天常州" in answer
     assert "常州今天白天偏热" in system
@@ -808,43 +608,9 @@ async def test_multiturn_reference_uses_background_without_reexecution(
 class _ReplayMemory:
     def __init__(self, context: str = "") -> None:
         self.context = context
-        self.forget_calls: list[tuple] = []
 
     async def recall_context(self, **_):
         return MemoryRecallResult(context=self.context)
-
-    async def preview_forget(
-        self,
-        owner_id: str,
-        companion_id: str,
-        memory_realm_id: str,
-        device_id: str | None,
-        query: str,
-        *,
-        action: str = "archive",
-        session_id: str = "default",
-    ) -> MemoryForgetPreview:
-        self.forget_calls.append(
-            (owner_id, companion_id, memory_realm_id, device_id, query, action, session_id)
-        )
-        if not self.context:
-            return MemoryForgetPreview(status="not_found", target=query, action="archive")
-        return MemoryForgetPreview(
-            status="preview",
-            target=query,
-            action="delete" if action == "delete" else "archive",
-            candidates=[MemoryForgetCandidate("drawer-1", self.context, 1.0)],
-            confirmation_token="token-1",
-        )
-
-    async def confirm_forget(self, *args, **kwargs) -> MemoryForgetOutcome:
-        self.context = ""
-        return MemoryForgetOutcome(
-            status="applied",
-            action="archive",
-            request_id="request-1",
-            drawer_ids=["drawer-1"],
-        )
 
 
 async def _drain_background_tasks() -> None:

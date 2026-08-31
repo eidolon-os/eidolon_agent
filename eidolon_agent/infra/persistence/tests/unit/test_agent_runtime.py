@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -81,7 +81,7 @@ async def test_turn_persister_writes_agent_runtime_history(
         genome_id="genome-1",
         realm_id="realm-1",
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ti = TurnInput(
         turn_id="turn-1",
         conversation_id="conversation-1",
@@ -110,7 +110,7 @@ async def test_turn_persister_writes_agent_runtime_history(
         usage_in=5,
         usage_out=6,
         error_code=None,
-        timings={"turn_trace": {"memory_write_trace": {"disposition": "skip"}}},
+        timings={"turn_trace": {"memory_write_trace": {"ingest_policy": "semantic_steward"}}},
         user_text="hello",
         assistant_text="hi",
     )
@@ -132,7 +132,10 @@ async def test_turn_persister_writes_agent_runtime_history(
     async with runtime_store.session_factory() as session:
         turn_row = await session.get(TurnRow, "turn-1")
     assert turn_row is not None and turn_row.trace_id == "trace-1"
-    assert rows[0]["metadata_"]["turn_trace"]["memory_write_trace"]["disposition"] == "skip"
+    assert (
+        rows[0]["metadata_"]["turn_trace"]["memory_write_trace"]["ingest_policy"]
+        == "semantic_steward"
+    )
     async with runtime_store.session_factory() as session:
         assert await session.get(RuntimeSessionRow, "session-1") is not None
 
@@ -150,7 +153,7 @@ async def test_turn_failure_stays_in_runtime_history_not_global_audit(
         genome_id="genome-e",
         realm_id="realm-e",
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     def _ti(turn_id: str, text: str) -> TurnInput:
         return TurnInput(
@@ -218,7 +221,7 @@ async def test_turn_failure_stays_in_runtime_history_not_global_audit(
 async def test_turn_persister_records_admin_test_without_device_row(
     runtime_store: AgentRuntimeStore,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ti = TurnInput(
         turn_id="turn-admin",
         conversation_id="conversation-admin",
@@ -272,7 +275,7 @@ async def test_turn_persister_is_idempotent_under_concurrent_first_writes(
         realm_id="realm-race",
     )
     persist = build_agent_turn_persister(runtime_store, model_id_provider=lambda: "fake")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     async def _write(index: int) -> None:
         ti = TurnInput(

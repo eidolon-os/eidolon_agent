@@ -9,7 +9,7 @@ UI will render.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -31,7 +31,9 @@ async def _fresh_app(tmp_path) -> tuple[httpx.AsyncClient, AgentRuntimeStore]:
     app = FastAPI()
     app.state.runtime_store = store
     app.include_router(conv_router.router, prefix="/api/admin")
-    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t", headers=AUTHORITY_HEADERS)
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://t", headers=AUTHORITY_HEADERS
+    )
     return client, store
 
 
@@ -53,9 +55,7 @@ async def _seed_turn(
     genome_id = f"g_{owner_id}_default"
     realm_id = f"r_{owner_id}_default"
     device_id = f"device-{owner_id}"
-    persist = build_agent_turn_persister(
-        store, model_id_provider=lambda: "test/model-1"
-    )
+    persist = build_agent_turn_persister(store, model_id_provider=lambda: "test/model-1")
     await persist(
         ti=TurnInput(
             turn_id=turn_id,
@@ -86,78 +86,78 @@ async def _seed_turn(
         usage_out=15,
         error_code=None,
         timings={
-                    "triage_ms": 5,
-                    "turn_trace": {
-                        "schema_version": "turn_trace.v1",
-                        "boundary": "eidolon_agent.brain",
-                        "turn": {
-                            "turn_id": turn_id,
-                            "trigger": "user_utterance",
-                            "triage": "simple",
+            "triage_ms": 5,
+            "turn_trace": {
+                "schema_version": "turn_trace.v1",
+                "boundary": "eidolon_agent.brain",
+                "turn": {
+                    "turn_id": turn_id,
+                    "trigger": "user_utterance",
+                    "triage": "simple",
+                },
+                "latency": {
+                    "guard_ms": 1,
+                    "triage_ms": 2,
+                    "compile_ms": 3,
+                    "first_delta_ms": 120,
+                    "output_ms": 300,
+                    "tool_ms": 4,
+                    "total_ms": 440,
+                },
+                "context_ledger": {
+                    "segments": [
+                        {
+                            "kind": "persona",
+                            "source": "personas_service",
+                            "token_estimate": 100,
                         },
-                        "latency": {
-                            "guard_ms": 1,
-                            "triage_ms": 2,
-                            "compile_ms": 3,
-                            "first_delta_ms": 120,
-                            "output_ms": 300,
-                            "tool_ms": 4,
-                            "total_ms": 440,
+                        {
+                            "kind": "memory",
+                            "source": "memory",
+                            "token_estimate": 30,
                         },
-                        "context_ledger": {
-                            "segments": [
-                                {
-                                    "kind": "persona",
-                                    "source": "personas_service",
-                                    "token_estimate": 100,
-                                },
-                                {
-                                    "kind": "memory",
-                                    "source": "memory",
-                                    "token_estimate": 30,
-                                },
-                            ],
-                            "dropped_segments": [
-                                {
-                                    "kind": "history",
-                                    "source": "history_manager",
-                                    "token_estimate": 80,
-                                    "reason": "token_budget_exceeded",
-                                }
-                            ],
-                            "degraded_sources": ["memory"],
-                            "total_token_estimate": 130,
-                        },
-                        "memory_trace": {
-                            "attempted": True,
-                            "degraded": True,
-                            "degraded_reason": "no_memory_route",
-                            "hit_count": 1,
-                            "context_injected": True,
-                        },
-                            "memory_write_trace": {
-                                "trace_kind": "memory_write_intent",
-                                "durable_result": "async_memory_worker",
-                                "source_turn_id": turn_id,
-                            "conversation_id": conversation_id,
-                            "privacy_mode": "normal",
-                            "disposition": "semantic_upsert",
-                            "reason": "stable_preference_or_identity",
-                            "policy_version": "agent_memory_policy.v1",
-                            "fanout_allowed": True,
-                            "skipped_reason": None,
-                        },
-                        "tool_trace": [
-                            {
-                                "call_id": "tc-1",
-                                "name": "delegate_to_coworker",
-                                "ok": True,
-                                "latency_ms": 4,
-                                "cached": False,
-                            }
-                        ],
-                        "privacy": {"mode": "normal"},
-                    },
+                    ],
+                    "dropped_segments": [
+                        {
+                            "kind": "history",
+                            "source": "history_manager",
+                            "token_estimate": 80,
+                            "reason": "token_budget_exceeded",
+                        }
+                    ],
+                    "degraded_sources": ["memory"],
+                    "total_token_estimate": 130,
+                },
+                "memory_trace": {
+                    "attempted": True,
+                    "degraded": True,
+                    "degraded_reason": "no_memory_route",
+                    "hit_count": 1,
+                    "context_injected": True,
+                },
+                "memory_write_trace": {
+                    "trace_kind": "memory_write_intent",
+                    "durable_result": "async_memory_worker",
+                    "source_turn_id": turn_id,
+                    "conversation_id": conversation_id,
+                    "privacy_mode": "normal",
+                    "ingest_policy": "semantic_steward",
+                    "reason": "stable_preference_or_identity",
+                    "policy_version": "agent_memory_policy.v1",
+                    "fanout_allowed": True,
+                    "skipped_reason": None,
+                },
+                "tool_trace": [
+                    {
+                        "call_id": "tc-1",
+                        "name": "delegate_to_coworker",
+                        "ok": True,
+                        "latency_ms": 4,
+                        "cached": False,
+                    }
+                ],
+                "privacy": {"mode": "normal"},
+            },
         },
         user_text=user_text,
         assistant_text=assistant_text,
@@ -167,29 +167,38 @@ async def _seed_turn(
 async def test_list_turns_returns_newest_first_and_filters_by_owner(tmp_path) -> None:
     client, store = await _fresh_app(tmp_path)
 
-    t0 = datetime(2026, 6, 3, 9, 0, 0, tzinfo=timezone.utc)
-    t1 = datetime(2026, 6, 3, 10, 0, 0, tzinfo=timezone.utc)
-    t2 = datetime(2026, 6, 3, 11, 0, 0, tzinfo=timezone.utc)
+    t0 = datetime(2026, 6, 3, 9, 0, 0, tzinfo=UTC)
+    t1 = datetime(2026, 6, 3, 10, 0, 0, tzinfo=UTC)
+    t2 = datetime(2026, 6, 3, 11, 0, 0, tzinfo=UTC)
 
     await _seed_turn(
         store,
         owner_id="manson",
-        conversation_id="c-manson", turn_id="t-m-1", seq=0,
-        user_text="铁锤几岁了？", assistant_text="铁锤今年 10 岁。",
+        conversation_id="c-manson",
+        turn_id="t-m-1",
+        seq=0,
+        user_text="铁锤几岁了？",
+        assistant_text="铁锤今年 10 岁。",
         started_at=t0,
     )
     await _seed_turn(
         store,
         owner_id="manson",
-        conversation_id="c-manson", turn_id="t-m-2", seq=1,
-        user_text="今天天气如何？", assistant_text="多云转晴。",
+        conversation_id="c-manson",
+        turn_id="t-m-2",
+        seq=1,
+        user_text="今天天气如何？",
+        assistant_text="多云转晴。",
         started_at=t2,
     )
     await _seed_turn(
         store,
         owner_id="alice",
-        conversation_id="c-alice", turn_id="t-a-1", seq=0,
-        user_text="Hi", assistant_text="Hello!",
+        conversation_id="c-alice",
+        turn_id="t-a-1",
+        seq=0,
+        user_text="Hi",
+        assistant_text="Hello!",
         started_at=t1,
     )
 
@@ -227,7 +236,7 @@ async def test_list_conversations_reads_agent_runtime_authority(tmp_path) -> Non
         seq=0,
         user_text="ping",
         assistant_text="pong",
-        started_at=datetime(2026, 6, 3, 9, 0, tzinfo=timezone.utc),
+        started_at=datetime(2026, 6, 3, 9, 0, tzinfo=UTC),
     )
     await _seed_turn(
         store,
@@ -237,13 +246,11 @@ async def test_list_conversations_reads_agent_runtime_authority(tmp_path) -> Non
         seq=0,
         user_text="hello",
         assistant_text="hi",
-        started_at=datetime(2026, 6, 3, 10, 0, tzinfo=timezone.utc),
+        started_at=datetime(2026, 6, 3, 10, 0, tzinfo=UTC),
     )
 
     async with client:
-        response = await client.get(
-            "/api/admin/conversations?owner_id=manson&limit=20"
-        )
+        response = await client.get("/api/admin/conversations?owner_id=manson&limit=20")
 
     assert response.status_code == 200
     assert response.json()["conversations"] == [
@@ -276,12 +283,15 @@ async def test_list_conversations_reads_agent_runtime_authority(tmp_path) -> Non
 
 async def test_memory_audit_lists_write_candidates_without_message_text(tmp_path) -> None:
     client, store = await _fresh_app(tmp_path)
-    t0 = datetime(2026, 6, 3, 9, 0, 0, tzinfo=timezone.utc)
+    t0 = datetime(2026, 6, 3, 9, 0, 0, tzinfo=UTC)
     await _seed_turn(
         store,
         owner_id="manson",
-        conversation_id="c-1", turn_id="t-1", seq=0,
-        user_text="以后叫我小满", assistant_text="好的，小满。",
+        conversation_id="c-1",
+        turn_id="t-1",
+        seq=0,
+        user_text="以后叫我小满",
+        assistant_text="好的，小满。",
         started_at=t0,
     )
 
@@ -293,7 +303,7 @@ async def test_memory_audit_lists_write_candidates_without_message_text(tmp_path
     assert len(body["rows"]) == 1
     row = body["rows"][0]
     assert row["turn_id"] == "t-1"
-    assert row["disposition"] == "semantic_upsert"
+    assert row["ingest_policy"] == "semantic_steward"
     assert row["trace_kind"] == "memory_write_intent"
     assert row["durable_result"] == "async_memory_worker"
     assert row["fanout_allowed"] is True
@@ -304,12 +314,15 @@ async def test_memory_audit_lists_write_candidates_without_message_text(tmp_path
 
 async def test_get_turn_returns_messages_in_order(tmp_path) -> None:
     client, store = await _fresh_app(tmp_path)
-    t0 = datetime(2026, 6, 3, 9, 0, 0, tzinfo=timezone.utc)
+    t0 = datetime(2026, 6, 3, 9, 0, 0, tzinfo=UTC)
     await _seed_turn(
         store,
         owner_id="manson",
-        conversation_id="c-1", turn_id="t-1", seq=0,
-        user_text="ping", assistant_text="pong",
+        conversation_id="c-1",
+        turn_id="t-1",
+        seq=0,
+        user_text="ping",
+        assistant_text="pong",
         started_at=t0,
     )
 
@@ -332,7 +345,7 @@ async def test_get_turn_returns_messages_in_order(tmp_path) -> None:
     assert summary["memory"]["degraded"] is True
     assert summary["memory"]["degraded_reason"] == "no_memory_route"
     assert summary["memory_write"]["trace_kind"] == "memory_write_intent"
-    assert summary["memory_write"]["disposition"] == "semantic_upsert"
+    assert summary["memory_write"]["ingest_policy"] == "semantic_steward"
     assert summary["tools"]["names"] == ["delegate_to_coworker"]
     assert summary["latency"]["compile_ms"] == 3
     assert "prompt_fingerprint" in summary
@@ -355,14 +368,17 @@ async def test_get_turn_returns_404_for_unknown_id(tmp_path) -> None:
 async def test_list_turns_pagination_cursor(tmp_path) -> None:
     """``before`` filter + ``next_before`` cursor compose into back-paging."""
     client, store = await _fresh_app(tmp_path)
-    base = datetime(2026, 6, 3, 8, 0, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 6, 3, 8, 0, 0, tzinfo=UTC)
     # Seed 3 turns at minute intervals
     for i in range(3):
         await _seed_turn(
             store,
             owner_id="manson",
-            conversation_id=f"c-{i}", turn_id=f"t-{i}", seq=0,
-            user_text=f"q{i}", assistant_text=f"a{i}",
+            conversation_id=f"c-{i}",
+            turn_id=f"t-{i}",
+            seq=0,
+            user_text=f"q{i}",
+            assistant_text=f"a{i}",
             started_at=base.replace(minute=i),
         )
 

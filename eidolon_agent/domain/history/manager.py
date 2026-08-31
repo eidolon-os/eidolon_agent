@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from eidolon_agent.core.types.messages import ChatMessage
 
@@ -40,9 +40,7 @@ class HistoryManager:
                 self._windows[conversation_id] = w
             w.append(message)
 
-    async def recent_window(
-        self, *, conversation_id: str, window: int = 20
-    ) -> list[ChatMessage]:
+    async def recent_window(self, *, conversation_id: str, window: int = 20) -> list[ChatMessage]:
         async with self._lock:
             w = self._windows.get(conversation_id)
             if w is None:
@@ -65,25 +63,7 @@ class HistoryManager:
         async with self._lock:
             self._windows.pop(conversation_id, None)
 
-    async def forget_matching(self, *, conversation_id: str, query: str) -> int:
-        """Best-effort in-process privacy scrub for the current conversation."""
-
-        terms = _forget_terms(query)
-        if not terms:
-            return 0
-        async with self._lock:
-            w = self._windows.get(conversation_id)
-            if w is None:
-                return 0
-            kept = [m for m in w if not any(term in m.content for term in terms)]
-            removed = len(w) - len(kept)
-            w.clear()
-            w.extend(kept)
-            return removed
-
-    async def _hydrate_external(
-        self, *, conversation_id: str, window: int
-    ) -> list[ChatMessage]:
+    async def _hydrate_external(self, *, conversation_id: str, window: int) -> list[ChatMessage]:
         if self._hydrate_messages is None:
             return []
         messages = await self._hydrate_messages(
@@ -95,32 +75,6 @@ class HistoryManager:
 
 def _public_messages(messages: list[ChatMessage]) -> list[ChatMessage]:
     return [m for m in messages if not bool(m.metadata.get("is_private", False))]
-
-
-def _forget_terms(query: str) -> list[str]:
-    """Extract conservative text fragments for local forget scrubbing."""
-
-    cleaned = query.strip()
-    if not cleaned:
-        return []
-    terms = {cleaned}
-    markers = (
-        "忘记",
-        "别记",
-        "不要再提",
-        "不再提",
-        "不要提",
-        "忘掉",
-    )
-    suffix_stoppers = "，。,.!?！？"
-    for marker in markers:
-        if marker not in cleaned:
-            continue
-        suffix = cleaned.split(marker, 1)[1].strip()
-        suffix = suffix.strip(suffix_stoppers).strip()
-        if len(suffix) >= 3:
-            terms.add(suffix)
-    return sorted(terms, key=len, reverse=True)
 
 
 def _merge_tail(
@@ -145,5 +99,5 @@ def _stable_message_key(message: ChatMessage) -> str:
 
 def _utc_sort_key(value: datetime) -> datetime:
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)

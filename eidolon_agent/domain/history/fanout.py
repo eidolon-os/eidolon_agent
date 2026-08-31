@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Protocol
 
 from eidolon_memory_contracts import (
@@ -39,6 +39,19 @@ class MemoryFanoutStatusSink(Protocol):
     async def record_memory_fanout(self, status: MemoryFanoutStatus) -> None: ...
 
 
+class MemoryTurnOutbox(Protocol):
+    async def enqueue(
+        self,
+        *,
+        turn_id: str,
+        owner_id: str,
+        companion_id: str,
+        subject: str,
+        payload: dict,
+        trace_id: str | None,
+    ) -> None: ...
+
+
 class HistoryFanout:
     def __init__(
         self,
@@ -46,10 +59,18 @@ class HistoryFanout:
         event_bus=None,
         memory_routes: MemoryTurnSubjectResolver | None = None,
         status_sink: MemoryFanoutStatusSink | None = None,
+        memory_outbox: MemoryTurnOutbox | None = None,
     ) -> None:
         self._bus = event_bus
         self._memory_routes = memory_routes
         self._status_sink = status_sink
+        self._memory_outbox = memory_outbox
+
+    @property
+    def is_durable(self) -> bool:
+        """Whether publish_turn commits locally before returning."""
+
+        return self._memory_outbox is not None
 
     async def publish_turn(
         self,
@@ -68,7 +89,7 @@ class HistoryFanout:
         metadata: dict | None = None,
     ) -> MemoryFanoutStatus:
         status_subject: str | None = None
-        if self._bus is None:
+        if self._bus is None and self._memory_outbox is None:
             status = self._status(
                 owner_id=owner_id,
                 companion_id=companion_id,
@@ -120,15 +141,27 @@ class HistoryFanout:
                 if self._memory_routes is not None
                 else conversation_turn_subject(context.memory_space_id)
             )
-            await self._bus.publish(
-                Event(
+            if self._memory_outbox is not None:
+                await self._memory_outbox.enqueue(
+                    turn_id=turn_id,
+                    owner_id=owner_id,
+                    companion_id=companion_id,
                     subject=status_subject,
                     payload=memory_payload,
-                    source="history.fanout",
-                    metadata={"msg_id": turn_id},
-                ),
-                persistent=True,
-            )
+                    trace_id=trace_id or turn_id,
+                )
+                state = "queued"
+            else:
+                await self._bus.publish(
+                    Event(
+                        subject=status_subject,
+                        payload=memory_payload,
+                        source="history.fanout",
+                        metadata={"msg_id": turn_id},
+                    ),
+                    persistent=True,
+                )
+                state = "published"
             status = self._status(
                 owner_id=owner_id,
                 companion_id=companion_id,
@@ -136,7 +169,7 @@ class HistoryFanout:
                 memory_space_id=context.memory_space_id,
                 turn_id=turn_id,
                 subject=status_subject,
-                state="published",
+                state=state,
                 error=None,
                 trace_id=trace_id,
             )
@@ -149,7 +182,7 @@ class HistoryFanout:
                 memory_space_id=context.memory_space_id,
                 turn_id=turn_id,
                 subject=status_subject,
-                state="publish_failed",
+                state="delivery_failed",
                 error=str(exc),
                 trace_id=trace_id,
             )
@@ -194,7 +227,7 @@ class HistoryFanout:
             subject=subject,
             state=state,
             error=error,
-            recorded_at=datetime.now(timezone.utc).isoformat(),
+            recorded_at=datetime.now(UTC).isoformat(),
             # Same fallback as the published envelope (line: trace_id or turn_id) so the
             # agent-side status and memory-side absorbed event share one correlation id.
             trace_id=trace_id or turn_id,

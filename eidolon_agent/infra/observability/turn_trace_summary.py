@@ -35,10 +35,7 @@ def build_turn_observability_summary(
         "context_structure_version": trace.get("context_structure_version"),
         "history_presentation": trace.get("history_presentation"),
         "context_tags": list(trace.get("context_tags") or []),
-        "interrupted_context_dropped_count": trace.get(
-            "interrupted_context_dropped_count"
-        )
-        or 0,
+        "interrupted_context_dropped_count": trace.get("interrupted_context_dropped_count") or 0,
         "stale_generation_dropped": trace.get("stale_generation_dropped") or 0,
         "memory": {
             "attempted": bool(memory.get("attempted")),
@@ -50,13 +47,11 @@ def build_turn_observability_summary(
             "context_injected": bool(memory.get("context_injected")),
         },
         "memory_write": {
-            "trace_kind": memory_write.get("trace_kind") or "memory_write_intent",
+            "trace_kind": memory_write.get("trace_kind") or "memory_turn_observation",
             "durable_result": memory_write.get("durable_result") or "async_memory_worker",
-            "disposition": memory_write.get("disposition"),
-            "reason": memory_write.get("reason"),
+            "ingest_policy": memory_write.get("ingest_policy"),
             "fanout_allowed": bool(memory_write.get("fanout_allowed")),
             "skipped_reason": memory_write.get("skipped_reason"),
-            "policy_version": memory_write.get("policy_version"),
         },
         "tools": {
             "count": len(tools),
@@ -160,18 +155,16 @@ def _development_guard_summary(guards: dict[str, Any]) -> dict[str, Any]:
             "schema_count": tool_schema.get("schema_count") or 0,
             "schema_token_estimate": tool_schema.get("schema_token_estimate") or 0,
             "schema_budget_tokens": tool_schema.get("schema_budget_tokens"),
-            "schema_budget_exceeded": bool(
-                tool_schema.get("schema_budget_exceeded")
-            ),
+            "schema_budget_exceeded": bool(tool_schema.get("schema_budget_exceeded")),
         },
         "memory_write_policy": {
-            "trace_kind": memory_write.get("trace_kind") or "memory_write_intent",
+            "trace_kind": memory_write.get("trace_kind") or "memory_turn_observation",
             "durable_result": memory_write.get("durable_result") or "async_memory_worker",
             "mode": memory_write.get("mode"),
             "shadow_only": bool(memory_write.get("shadow_only")),
             "fanout_allowed": bool(memory_write.get("fanout_allowed")),
             "skipped_reason": memory_write.get("skipped_reason"),
-            "disposition": memory_write.get("disposition"),
+            "ingest_policy": memory_write.get("ingest_policy"),
         },
         "tool_policy": {
             "schema_strict": bool(tool.get("schema_strict")),
@@ -191,9 +184,7 @@ def _harness_summary(harness: dict[str, Any]) -> dict[str, Any]:
         "segment_kinds": list(harness.get("segment_kinds") or []),
         "visible_tool_names": list(tools.get("visible_names") or []),
         "handoff_count": len(handoffs),
-        "handoff_tool_names": [
-            item.get("tool_name") for item in handoffs if item.get("tool_name")
-        ],
+        "handoff_tool_names": [item.get("tool_name") for item in handoffs if item.get("tool_name")],
     }
 
 

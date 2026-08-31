@@ -58,7 +58,7 @@ async def test_fanout_payload_round_trips_to_memory_contract() -> None:
         assistant_text="你好呀",
         timestamp_iso="2026-07-03T00:00:00+00:00",
         trace_id="trace-xyz",
-        metadata={"memory_write_disposition": "semantic_upsert"},
+        metadata={"memory_ingest_policy": "semantic_steward"},
     )
     await asyncio.sleep(0)
 
@@ -73,7 +73,7 @@ async def test_fanout_payload_round_trips_to_memory_contract() -> None:
     assert payload.assistant_text == "你好呀"
     # memory_space_id is what the steward keys ingestion on.
     assert payload.context.memory_space_id == derive_memory_space_id(realm)
-    assert payload.metadata["memory_write_disposition"] == "semantic_upsert"
+    assert payload.metadata["memory_ingest_policy"] == "semantic_steward"
 
 
 # --- standalone profile -> eidolon_data (current V2 local composition) -----

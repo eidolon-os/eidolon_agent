@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from eidolon_agent.core.ports.llm import LLMPort
@@ -59,7 +59,7 @@ class BenchmarkReportSummarizer:
         return {
             "status": "ok" if text else "empty",
             "prompt_version": PROMPT_VERSION,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "model_id": getattr(self._llm, "model_id", None),
             "requested_model": model,
             "text": text,
@@ -120,9 +120,7 @@ def build_llm_diagnostic_payload(
         "metrics": report.get("metrics") or {},
         "thresholds": report.get("thresholds") or {},
         "threshold_failures": [
-            check
-            for check in (report.get("threshold_checks") or [])
-            if not check.get("passed")
+            check for check in (report.get("threshold_checks") or []) if not check.get("passed")
         ],
         "baseline": _compact_baseline(report.get("baseline") or {}),
         "failed_checks": failed_checks,
@@ -132,7 +130,7 @@ def build_llm_diagnostic_payload(
 
 
 def _messages_for_summary(payload: dict[str, Any]) -> list[ChatMessage]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     system = (
         "你是 eidolon_agent 的 realtime benchmark 诊断助手。"
         "你会收到一份机器可读 benchmark 诊断 JSON。"
@@ -170,9 +168,9 @@ def _top_dimensions(dimensions: list[dict[str, Any]], limit: int) -> list[dict[s
                 "total_p99_ms": total.get("p99"),
             }
         )
-    return sorted(rows, key=lambda row: _number_or_zero(row.get("first_delta_p95_ms")), reverse=True)[
-        :limit
-    ]
+    return sorted(
+        rows, key=lambda row: _number_or_zero(row.get("first_delta_p95_ms")), reverse=True
+    )[:limit]
 
 
 def _compact_baseline(baseline: dict[str, Any]) -> dict[str, Any] | None:
@@ -199,7 +197,7 @@ def _compact_trace_summary(trace: dict[str, Any]) -> dict[str, Any]:
         "memory_write": {
             key: value
             for key, value in (trace.get("memory_write") or {}).items()
-            if key in {"disposition", "fanout_allowed", "skipped_reason"}
+            if key in {"ingest_policy", "fanout_allowed", "skipped_reason"}
         },
         "tools": trace.get("tools") or {},
     }

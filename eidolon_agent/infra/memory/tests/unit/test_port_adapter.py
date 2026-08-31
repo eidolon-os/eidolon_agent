@@ -27,9 +27,7 @@ def _port(*, session_call=None, session_close=None, pub_methods=None):
 
     pool = MagicMock()
     pool.session_for = AsyncMock(return_value=session)
-    pool.write_session_for = AsyncMock(return_value=session)
     pool.drop_session = AsyncMock(return_value=True)
-    pool.drop_write_session = AsyncMock(return_value=True)
     pool.health = AsyncMock(return_value=True)
     pool.close_all = AsyncMock()
 
@@ -37,21 +35,6 @@ def _port(*, session_call=None, session_close=None, pub_methods=None):
     if pub_methods is None:
         pub_methods = {}
     pub.publish_turn = pub_methods.get("publish_turn", AsyncMock())
-    pub.publish_structured_intent = pub_methods.get(
-        "publish_structured_intent", AsyncMock()
-    )
-    pub.publish_structured_invalidation = pub_methods.get(
-        "publish_structured_invalidation", AsyncMock()
-    )
-    pub.publish_structured_reactivation = pub_methods.get(
-        "publish_structured_reactivation", AsyncMock()
-    )
-    pub.publish_verbatim_intent = pub_methods.get(
-        "publish_verbatim_intent", AsyncMock()
-    )
-    pub.publish_commitment_intent = pub_methods.get(
-        "publish_commitment_intent", AsyncMock()
-    )
 
     return EidolonMemoryPort(pool=pool, publisher=pub), session, pool, pub
 
@@ -80,8 +63,10 @@ def test_records_to_hits_decodes_well_formed_records() -> None:
 
 
 def test_records_to_hits_skips_invalid_kind() -> None:
-    raw = [{"id": "good", "value": "v", "metadata": {"kind": "fragment"}},
-           {"id": "bad", "value": "v", "metadata": {"kind": "not_a_kind"}}]
+    raw = [
+        {"id": "good", "value": "v", "metadata": {"kind": "fragment"}},
+        {"id": "bad", "value": "v", "metadata": {"kind": "not_a_kind"}},
+    ]
     hits = _records_to_hits(raw)
     assert [h.id for h in hits] == ["good"]
 
@@ -94,9 +79,13 @@ def test_records_to_hits_handles_empty_list() -> None:
 
 
 async def test_search_invokes_mcp_search_with_args() -> None:
-    call = AsyncMock(return_value={"records": [
-        {"id": "r1", "value": "hello", "metadata": {"kind": "fragment", "similarity": 0.9}}
-    ]})
+    call = AsyncMock(
+        return_value={
+            "records": [
+                {"id": "r1", "value": "hello", "metadata": {"kind": "fragment", "similarity": 0.9}}
+            ]
+        }
+    )
     port, _, pool, _ = _port(session_call=call)
     hits = await port.search(
         "owner-1",
@@ -125,6 +114,7 @@ async def test_search_invokes_mcp_search_with_args() -> None:
 async def test_search_timeout_does_not_close_the_shared_read_session() -> None:
     async def _slow(name, args):
         import asyncio
+
         await asyncio.sleep(10)
         return {}
 
@@ -145,15 +135,17 @@ async def test_search_retries_once_after_stale_session_unavailable() -> None:
     stale_session = MagicMock()
     stale_session.call_tool = AsyncMock(side_effect=MemoryUnavailableError("stream closed"))
     fresh_session = MagicMock()
-    fresh_session.call_tool = AsyncMock(return_value={
-        "records": [
-            {
-                "id": "r1",
-                "value": "用户叫曼森",
-                "metadata": {"kind": "fact", "similarity": 1.0},
-            }
-        ]
-    })
+    fresh_session.call_tool = AsyncMock(
+        return_value={
+            "records": [
+                {
+                    "id": "r1",
+                    "value": "用户叫曼森",
+                    "metadata": {"kind": "fact", "similarity": 1.0},
+                }
+            ]
+        }
+    )
     port, _, pool, _ = _port()
     pool.session_for = AsyncMock(side_effect=[stale_session, fresh_session])
 
@@ -181,32 +173,34 @@ def _plan() -> MemoryQueryPlan:
 
 
 async def test_recall_context_returns_context_hits_and_degraded_false() -> None:
-    call = AsyncMock(return_value={
-        "context": "prior conversation summary",
-        "records": [
-            {
-                "id": "h1",
-                "value": "fact",
-                "memory_time": "2026-05-18T20:00:00Z",
-                "memory_time_source": "occurred_at",
-                "metadata": {"kind": "fact", "similarity": 0.7},
-            }
-        ],
-        "kg_triples": [
-            {
-                "id": "kg-1",
-                "subject": "pet:铁锤",
-                "predicate": "holds_role",
-                "object": "边境牧羊犬",
-            }
-        ],
-        "degraded": False,
-        "trace": {
-            "embedding_ms": 12.5,
-            "service_total_ms": 42,
-            "unsafe_detail": "must not cross the port",
-        },
-    })
+    call = AsyncMock(
+        return_value={
+            "context": "prior conversation summary",
+            "records": [
+                {
+                    "id": "h1",
+                    "value": "fact",
+                    "memory_time": "2026-05-18T20:00:00Z",
+                    "memory_time_source": "occurred_at",
+                    "metadata": {"kind": "fact", "similarity": 0.7},
+                }
+            ],
+            "kg_triples": [
+                {
+                    "id": "kg-1",
+                    "subject": "pet:铁锤",
+                    "predicate": "holds_role",
+                    "object": "边境牧羊犬",
+                }
+            ],
+            "degraded": False,
+            "trace": {
+                "embedding_ms": 12.5,
+                "service_total_ms": 42,
+                "unsafe_detail": "must not cross the port",
+            },
+        }
+    )
     port, *_ = _port(session_call=call)
     result = await port.recall_context(
         "owner-1",
@@ -292,6 +286,7 @@ async def test_recall_context_returns_degraded_on_exception() -> None:
 async def test_recall_context_timeout_does_not_close_the_shared_read_session() -> None:
     async def _slow(name, args):
         import asyncio
+
         await asyncio.sleep(10)
         return {}
 
@@ -340,16 +335,18 @@ async def test_recall_context_retries_once_after_stale_session_unavailable() -> 
         )
     )
     fresh_session = MagicMock()
-    fresh_session.call_tool = AsyncMock(return_value={
-        "context": "用户叫曼森，在北京化工大学读书。",
-        "records": [
-            {
-                "id": "h1",
-                "value": "用户叫曼森，在北京化工大学读书。",
-                "metadata": {"kind": "fact", "similarity": 1.0},
-            }
-        ],
-    })
+    fresh_session.call_tool = AsyncMock(
+        return_value={
+            "context": "用户叫曼森，在北京化工大学读书。",
+            "records": [
+                {
+                    "id": "h1",
+                    "value": "用户叫曼森，在北京化工大学读书。",
+                    "metadata": {"kind": "fact", "similarity": 1.0},
+                }
+            ],
+        }
+    )
     port, _, pool, _ = _port()
     pool.session_for = AsyncMock(side_effect=[stale_session, fresh_session])
 
@@ -460,9 +457,7 @@ async def test_active_commitments_are_realm_bound_bounded_and_active_only() -> N
 
 
 async def test_active_commitments_fail_closed_on_response_realm_mismatch() -> None:
-    call = AsyncMock(
-        return_value={"memory_space_id": "realm-2", "commitments": []}
-    )
+    call = AsyncMock(return_value={"memory_space_id": "realm-2", "commitments": []})
     port, *_ = _port(session_call=call)
 
     result = await port.read_active_commitments(
@@ -475,13 +470,20 @@ async def test_active_commitments_fail_closed_on_response_realm_mismatch() -> No
     assert result.degraded_reason == "realm_mismatch"
 
 
-# ---- write_turn / assert_fact / forget ------------------------------------
+# ---- write_turn / forget --------------------------------------------------
 
 
 async def test_write_turn_delegates_to_publisher() -> None:
     port, _, _, pub = _port()
     await port.write_turn(
-        "owner-1", "companion-1", "realm-1", "device-1", "s1", "turn-1", "hi", "hello",
+        "owner-1",
+        "companion-1",
+        "realm-1",
+        "device-1",
+        "s1",
+        "turn-1",
+        "hi",
+        "hello",
         metadata={"k": "v"},
     )
     pub.publish_turn.assert_awaited_once_with(
@@ -495,226 +497,6 @@ async def test_write_turn_delegates_to_publisher() -> None:
         assistant_text="hello",
         metadata={"k": "v"},
     )
-
-
-async def test_assert_fact_delegates_to_publisher() -> None:
-    port, _, _, pub = _port()
-    pub.publish_structured_intent.return_value = "request-structured"
-    request_id = await port.assert_fact(
-        "owner-1", "companion-1", "realm-1", "Alice", "lives_in", "Beijing",
-        source_event_id="turn-1",
-        tool_call_id="call-1",
-        confidence=0.75,
-    )
-    pub.publish_structured_intent.assert_awaited_once_with(
-        owner_id="owner-1",
-        companion_id="companion-1",
-        memory_realm_id="realm-1",
-        subject="Alice",
-        predicate="lives_in",
-        object_="Beijing",
-        source_event_id="turn-1",
-        tool_call_id="call-1",
-        confidence=0.75,
-    )
-    assert request_id == "request-structured"
-
-
-@pytest.mark.parametrize(
-    ("method_name", "publisher_name"),
-    (
-        ("invalidate_fact", "publish_structured_invalidation"),
-        ("reactivate_fact", "publish_structured_reactivation"),
-    ),
-)
-async def test_fact_lifecycle_delegates_to_canonical_publisher(
-    method_name: str,
-    publisher_name: str,
-) -> None:
-    port, _, _, pub = _port()
-    getattr(pub, publisher_name).return_value = f"request-{method_name}"
-
-    request_id = await getattr(port, method_name)(
-        "owner-1",
-        "companion-1",
-        "realm-1",
-        "self",
-        "likes",
-        "oolong",
-        source_event_id="turn-1",
-        tool_call_id="call-1",
-        confidence=0.97,
-    )
-
-    getattr(pub, publisher_name).assert_awaited_once_with(
-        owner_id="owner-1",
-        companion_id="companion-1",
-        memory_realm_id="realm-1",
-        subject="self",
-        predicate="likes",
-        object_="oolong",
-        source_event_id="turn-1",
-        tool_call_id="call-1",
-        confidence=0.97,
-    )
-    assert request_id == f"request-{method_name}"
-
-
-async def test_write_confirmed_fact_uses_observable_mcp_command() -> None:
-    command = AsyncMock(
-        return_value={
-            "status": "applied",
-            "request_id": "request-verbatim",
-            "resource_id": "drawer-1",
-        }
-    )
-    port, _, pool, pub = _port(session_call=command)
-    outcome = await port.write_confirmed_fact(
-        "owner-1",
-        "companion-1",
-        "realm-1",
-        "device-1",
-        "s1",
-        "用户 最终验证时间 2026-06-28 20:00",
-        source_event_id="turn-1",
-        tool_call_id="call-1",
-        confidence=0.95,
-        tags=["kg_fallback"],
-    )
-    assert outcome.status == "applied"
-    assert outcome.request_id == "request-verbatim"
-    assert outcome.resource_id == "drawer-1"
-    command.assert_awaited_once()
-    name, arguments = command.await_args.args
-    assert name == "eidolon_memory_user_confirm"
-    assert arguments["text"] == "用户 最终验证时间 2026-06-28 20:00"
-    assert arguments["wing"] == "auto"
-    assert arguments["memory_type"] == "auto"
-    assert arguments["request_id"]
-    pool.write_session_for.assert_awaited_once_with("realm-1")
-    pool.session_for.assert_not_awaited()
-    pub.publish_verbatim_intent.assert_not_awaited()
-
-
-async def test_apply_commitment_delegates_to_publisher() -> None:
-    port, _, _, pub = _port()
-    pub.publish_commitment_intent.return_value = "request-commitment"
-
-    request_id = await port.apply_commitment(
-        "owner-1",
-        "companion-1",
-        "realm-1",
-        "self",
-        "promised",
-        "带 companion-1 去恐龙园",
-        "以后带你去恐龙园",
-        source_event_id="turn-1",
-        tool_call_id="call-1",
-        operation="update",
-        target_id="commitment:abc",
-        participants=["friend:小明"],
-        status="fulfilled",
-        confidence=1.0,
-    )
-
-    assert request_id == "request-commitment"
-    pub.publish_commitment_intent.assert_awaited_once_with(
-        owner_id="owner-1",
-        companion_id="companion-1",
-        memory_realm_id="realm-1",
-        promisor="self",
-        predicate="promised",
-        action="带 companion-1 去恐龙园",
-        raw_claim="以后带你去恐龙园",
-        source_event_id="turn-1",
-        tool_call_id="call-1",
-        operation="update",
-        target_id="commitment:abc",
-        beneficiaries=None,
-        participants=["friend:小明"],
-        condition=None,
-        due_at=None,
-        status="fulfilled",
-        confidence=1.0,
-    )
-
-
-async def test_forget_preview_returns_exact_candidates_without_mutation() -> None:
-    call = AsyncMock(return_value={
-        "status": "preview",
-        "target": "old chat",
-        "action": "delete",
-        "candidates": [
-            {"drawer_id": "drawer-1", "text": "old chat", "score": 1.0}
-        ],
-        "requires_explicit_confirmation": False,
-        "confirmation_token": "token-1",
-        "expires_at": "2026-07-16T12:00:00Z",
-    })
-    port, _, pool, _ = _port(session_call=call)
-    preview = await port.preview_forget(
-        "owner-1",
-        "companion-1",
-        "realm-1",
-        "device-1",
-        "old chat",
-        action="delete",
-        session_id="s1",
-    )
-    assert preview.status == "preview"
-    assert preview.candidates[0].id == "drawer-1"
-    assert preview.confirmation_token == "token-1"
-    name, args = call.await_args.args
-    assert name == "eidolon_memory_forget_preview"
-    assert args == {"target": "old chat", "action": "delete"}
-    pool.write_session_for.assert_awaited_once_with("realm-1")
-
-
-async def test_forget_preview_reports_failure_without_claiming_success() -> None:
-    call = AsyncMock(side_effect=RuntimeError("no such tool"))
-    port, *_ = _port(session_call=call)
-    preview = await port.preview_forget(
-        "owner-1", "companion-1", "realm-1", "device-1", "x"
-    )
-    assert preview.status == "failed"
-
-
-async def test_forget_preview_skips_call_when_capability_absent() -> None:
-    call = AsyncMock(return_value={"removed": 5})
-    port, session, *_ = _port(session_call=call)
-    session.supports = AsyncMock(return_value=False)
-    preview = await port.preview_forget(
-        "owner-1", "companion-1", "realm-1", "device-1", "x"
-    )
-    assert preview.status == "unavailable"
-    call.assert_not_awaited()
-
-
-async def test_forget_confirm_preserves_request_and_terminal_status() -> None:
-    call = AsyncMock(return_value={
-        "status": "applied",
-        "request_id": "request-1",
-        "action": "delete",
-        "drawer_ids": ["drawer-1"],
-    })
-    port, *_ = _port(session_call=call)
-
-    outcome = await port.confirm_forget(
-        "owner-1",
-        "companion-1",
-        "realm-1",
-        "device-1",
-        "token-1",
-        wait_applied_seconds=3.0,
-    )
-
-    assert outcome.status == "applied"
-    assert outcome.request_id == "request-1"
-    assert outcome.drawer_ids == ["drawer-1"]
-    name, args = call.await_args.args
-    assert name == "eidolon_memory_forget_confirm"
-    assert args["confirmation_token"] == "token-1"
-    assert args["wait_applied_seconds"] == 3.0
 
 
 # ---- health / close -------------------------------------------------------

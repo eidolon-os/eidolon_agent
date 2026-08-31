@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import json
 import statistics
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +27,7 @@ def build_realtime_benchmark_report(
     baseline_report: dict[str, Any] | None = None,
     generated_at: datetime | None = None,
 ) -> dict[str, Any]:
-    generated_at = generated_at or datetime.now(timezone.utc)
+    generated_at = generated_at or datetime.now(UTC)
     metrics = {
         field: _latency_stats([turn.get(field) for turn in turns]) for field in _LATENCY_FIELDS
     }
@@ -528,7 +528,7 @@ def _diagnosis_recommendations(categories: list[dict[str, Any]]) -> list[str]:
         )
     if "context_memory" in category_ids:
         recommendations.append(
-            "检查 context segment、memory write disposition、budget shadow 配置与 trace summary。"
+            "检查 context segment、memory observation、budget shadow 配置与 trace summary。"
         )
     if "baseline_regression" in category_ids:
         recommendations.append(

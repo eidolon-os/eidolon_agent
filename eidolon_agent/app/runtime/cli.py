@@ -83,7 +83,7 @@ async def _run(args) -> int:  # type: ignore[no-untyped-def]
     for task in (http_task, admin_task):
         try:
             await asyncio.wait_for(task, timeout=settings.runtime.drain_timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _log.warning("server failed to drain in time")
     if grpc_task is not None:
         grpc_task.cancel()
@@ -95,11 +95,13 @@ async def _run(args) -> int:  # type: ignore[no-untyped-def]
         await long_task_worker.stop()
     if container.background_tasks is not None and hasattr(container.background_tasks, "drain"):
         await container.background_tasks.drain(timeout_s=settings.runtime.drain_timeout_s)
-    audit_dispatch_task = container.extras.get("audit_dispatch_task")
-    if isinstance(audit_dispatch_task, asyncio.Task):
-        audit_dispatch_task.cancel()
+    for task_name in ("memory_turn_dispatch_task", "audit_dispatch_task"):
+        dispatch_task = container.extras.get(task_name)
+        if not isinstance(dispatch_task, asyncio.Task):
+            continue
+        dispatch_task.cancel()
         with suppress(asyncio.CancelledError):
-            await audit_dispatch_task
+            await dispatch_task
     if container.personas_service is not None and hasattr(container.personas_service, "stop"):
         await container.personas_service.stop()
     if container.memory_port is not None and hasattr(container.memory_port, "close"):

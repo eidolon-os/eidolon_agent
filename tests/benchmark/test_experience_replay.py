@@ -18,16 +18,13 @@ async def test_core_experience_replay_fixture_passes() -> None:
     report = await run_replay_files([Path("tests/benchmark/fixtures/core_experience.jsonl")])
 
     assert report["passed"] is True
-    assert report["summary"]["scenario_count"] == 6
+    assert report["summary"]["scenario_count"] == 5
     by_id = {s["scenario_id"]: s for s in report["scenarios"]}
-    assert by_id["forget-privacy"]["passed"] is True
     assert by_id["memory-backend-down"]["passed"] is True
 
 
 async def test_topic_switch_context_replay_fixture_passes() -> None:
-    report = await run_replay_files(
-        [Path("tests/benchmark/fixtures/topic_switch_context.jsonl")]
-    )
+    report = await run_replay_files([Path("tests/benchmark/fixtures/topic_switch_context.jsonl")])
 
     assert report["passed"] is True
     assert report["summary"]["scenario_count"] == 4
