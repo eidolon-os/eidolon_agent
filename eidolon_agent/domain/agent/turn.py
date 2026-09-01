@@ -182,21 +182,23 @@ class TurnEngine:
         post_turn_scheduled = False
         recent_history_persisted = False
 
+        # Establish the persistence boundary before entering the turn body so
+        # every cleanup/finally path has a defined, fail-closed decision.
+        committed_turn = validate_committed_turn(
+            ti.metadata.get("turn_decision"),
+            text=ti.text,
+            input_modality=ti.input_modality,
+        )
+        ti.metadata["committed_turn_decision_valid"] = committed_turn.valid
+        ti.metadata["committed_turn_decision_reason"] = committed_turn.reason
+        ti.metadata["committed_turn_persistence_allowed"] = committed_turn.persistence_allowed
+
         try:
             # Voice crosses the Channel→Agent process boundary and may only
             # become history/memory after Channel publishes an exact,
             # transcript-bound commit. Text/Admin input is synchronous and
             # owns its boundary locally. Invalid voice provenance does not
             # block the reply path, only durable side effects.
-            committed_turn = validate_committed_turn(
-                ti.metadata.get("turn_decision"),
-                text=ti.text,
-                input_modality=ti.input_modality,
-            )
-            ti.metadata["committed_turn_decision_valid"] = committed_turn.valid
-            ti.metadata["committed_turn_decision_reason"] = committed_turn.reason
-            ti.metadata["committed_turn_persistence_allowed"] = committed_turn.persistence_allowed
-
             # ---- Input guardrail --------------------------------------------
             verdict = self._input_g.check(ti.text)
             ts_guard_ms = int((time.monotonic() - t0) * 1000)
