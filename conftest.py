@@ -12,7 +12,6 @@ from eidolon_sdk.biz.persona import (
 )
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
-from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.domain.history import HistoryFanout, HistoryManager
@@ -105,7 +104,6 @@ async def turn_engine_factory(personas_service, event_bus):
             tool_dispatcher=tool_dispatcher,
             history=history,
             fanout=fanout,
-            triage=TaskClassifier(),
             input_guardrail=InputGuardrail(),
             output_guardrail=OutputGuardrail(),
             crisis=CrisisHandler(event_bus=event_bus),

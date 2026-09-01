@@ -28,7 +28,7 @@ from eidolon_agent.core.types.memory import MemoryRecallResult
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEventKind, TurnInput, TurnTrigger
 from eidolon_agent.core.types.turn_context import TurnContext
-from eidolon_agent.domain.agent import TaskClassifier, TurnEngine
+from eidolon_agent.domain.agent import TurnEngine
 from eidolon_agent.domain.context import ContextCompiler
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
 from eidolon_agent.domain.history import HistoryFanout, HistoryManager
@@ -297,7 +297,6 @@ class _ReplayHarness:
             tool_dispatcher=ToolDispatcher(registry),
             history=self.history,
             fanout=HistoryFanout(event_bus=self.event_bus),
-            triage=TaskClassifier(),
             input_guardrail=InputGuardrail(),
             output_guardrail=OutputGuardrail(),
             crisis=CrisisHandler(event_bus=self.event_bus),

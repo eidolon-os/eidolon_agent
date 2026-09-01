@@ -59,7 +59,6 @@ from eidolon_agent.core.types.turn import (
     TurnStatus,
 )
 from eidolon_agent.domain.agent.committed_turn import validate_committed_turn
-from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails.crisis import CrisisHandler
 from eidolon_agent.domain.guardrails.input_filter import InputGuardrail, SafetyAction
@@ -105,7 +104,6 @@ class TurnEngine:
         tool_dispatcher: ToolDispatcher,
         history: HistoryManager,
         fanout: HistoryFanout,
-        triage: TaskClassifier,
         input_guardrail: InputGuardrail,
         output_guardrail: OutputGuardrail,
         crisis: CrisisHandler,
@@ -128,7 +126,6 @@ class TurnEngine:
         self._tools = tool_dispatcher
         self._history = history
         self._fanout = fanout
-        self._triage = triage
         self._input_g = input_guardrail
         self._output_g = output_guardrail
         self._crisis = crisis
@@ -264,8 +261,9 @@ class TurnEngine:
                         name=f"turn-{ti.turn_id}-memory-observation",
                     )
 
-            # ---- Triage -----------------------------------------------------
-            triage_kind = self._triage.classify(ti.text)
+            # Tool use and delegation are selected by the model from typed
+            # schemas. Keep the legacy trace field stable without interpreting
+            # the user's words in a second, phrase-based router.
             ts_triage_ms = int((time.monotonic() - t0) * 1000)
             yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.THINKING, time.time())
 

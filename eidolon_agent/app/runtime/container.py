@@ -35,7 +35,6 @@ class Container:
     crisis_handler: object | None = None
     input_guardrail: object | None = None
     output_guardrail: object | None = None
-    triage_classifier: object | None = None
 
     tool_registry: object | None = None
     tool_dispatcher: object | None = None
