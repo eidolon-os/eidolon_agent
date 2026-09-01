@@ -101,13 +101,13 @@ class _FakeAgentSession:
         self.search_calls += 1
         if self.search_calls == 1:
             return []
-        assert arguments["query"] == "我最喜欢的播客是什么？"
+        assert arguments["query"].startswith("海棠播客")
         published = unwrap_memory_payload(_FakeBus.published[-1][0].payload)
         source_event_id = published["turn_id"]
         return [
             {
                 "key": "drawer-1",
-                "value": "我最喜欢的播客是 Acquired 半导体播客。",
+                "value": "我最近开始追一档播客，名字叫海棠播客。",
                 "metadata": {"source_event_id": source_event_id},
             }
         ]
@@ -249,7 +249,7 @@ async def test_live_local_contract_memory_publish_and_readback(monkeypatch) -> N
     assert persistent is True
     published = unwrap_memory_payload(event.payload)
     assert published["context"]["memory_realm_id"] == "r_contract"
-    assert published["user_text"] == "我最喜欢的播客是 Acquired 半导体播客。"
+    assert published["user_text"].startswith("我最近开始追一档播客，名字叫海棠播客")
     assert "请记住" not in published["user_text"]
     assert published["metadata"] == {
         "source": "eidolon-agent-live-local-contract",
@@ -277,7 +277,7 @@ async def test_live_local_contract_readback_retries_transient_timeout() -> None:
                 "records": [
                     {
                         "key": "drawer-timeout-retry",
-                        "value": "我最喜欢的播客是 Acquired 半导体播客。",
+                        "value": "我最近开始追一档播客，名字叫海棠播客。",
                         "metadata": {"source_event_id": "turn-timeout-retry"},
                     }
                 ]
@@ -553,7 +553,7 @@ async def test_memory_cleanup_uses_exact_source_event_and_proves_absence() -> No
     class _GoneSession:
         async def call_tool(self, name, arguments):
             assert name == "eidolon_memory_search"
-            assert arguments["query"] == "我最喜欢的播客是什么？"
+            assert arguments["query"] == "海棠播客canary是什么？"
             assert arguments["context"]["owner_id"] == "owner_contract"
             assert arguments["context"]["companion_id"] == "companion_contract"
             return []
@@ -565,7 +565,7 @@ async def test_memory_cleanup_uses_exact_source_event_and_proves_absence() -> No
         memory_space_id="r_contract",
         owner_id="owner_contract",
         companion_id="companion_contract",
-        marker="turn-canary",
+        marker="live-local-contract-canary",
         cfg=LiveLocalContractConfig(memory_readback_poll_s=0.001),
     )
 
@@ -574,7 +574,7 @@ async def test_memory_cleanup_uses_exact_source_event_and_proves_absence() -> No
     assert ops.calls == [
         (
             "eidolon_memory_forget_source_event",
-            {"source_event_id": "turn-canary", "wait_applied_seconds": 10.0},
+            {"source_event_id": "live-local-contract-canary", "wait_applied_seconds": 10.0},
         )
     ]
     assert check.details["cleanup_request_id"] == "cleanup-command"

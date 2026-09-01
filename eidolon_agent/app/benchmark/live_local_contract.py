@@ -710,8 +710,8 @@ async def _memory_publish_check(
             device_id=None,
             session_id="live-local-contract",
             turn_id=turn_id,
-            user_text=_memory_contract_owner_text(),
-            assistant_text="Acquired 很适合用来了解科技公司和商业史。",
+            user_text=_memory_contract_owner_text(turn_id),
+            assistant_text="听起来它很适合陪你慢慢了解科技和商业。",
             timestamp_iso=datetime.now(UTC).isoformat(),
             trace_id=turn_id,
             metadata={
@@ -755,12 +755,16 @@ async def _memory_publish_check(
     ), turn_id
 
 
-def _memory_contract_owner_text() -> str:
-    return "我最喜欢的播客是 Acquired 半导体播客。"
+def _memory_contract_label(source_event_id: str) -> str:
+    return f"海棠播客{source_event_id.rsplit('-', 1)[-1][:8]}"
 
 
-def _memory_contract_recall_query() -> str:
-    return "我最喜欢的播客是什么？"
+def _memory_contract_owner_text(source_event_id: str) -> str:
+    return f"我最近开始追一档播客，名字叫{_memory_contract_label(source_event_id)}。"
+
+
+def _memory_contract_recall_query(source_event_id: str) -> str:
+    return f"{_memory_contract_label(source_event_id)}是什么？"
 
 
 async def _memory_readback_check(
@@ -800,7 +804,7 @@ async def _memory_readback_check(
                 session,
                 "eidolon_memory_search",
                 {
-                    "query": _memory_contract_recall_query(),
+                    "query": _memory_contract_recall_query(marker),
                     "context": _memory_canary_context(
                         memory_space_id=memory_space_id,
                         owner_id=owner_id,
@@ -964,7 +968,7 @@ async def _memory_cleanup_check(
                 session,
                 "eidolon_memory_search",
                 {
-                    "query": _memory_contract_recall_query(),
+                    "query": _memory_contract_recall_query(marker),
                     "context": _memory_canary_context(
                         memory_space_id=memory_space_id,
                         owner_id=owner_id,
@@ -1040,6 +1044,7 @@ async def _memory_search_for_companion(
     memory_space_id: str,
     owner_id: str,
     companion_id: str,
+    marker: str,
     cfg: LiveLocalContractConfig,
 ) -> tuple[Any, float]:
     session = await pool.session_for(memory_space_id)
@@ -1048,7 +1053,7 @@ async def _memory_search_for_companion(
         session,
         "eidolon_memory_search",
         {
-            "query": _memory_contract_recall_query(),
+            "query": _memory_contract_recall_query(marker),
             "context": _memory_canary_context(
                 memory_space_id=memory_space_id,
                 owner_id=owner_id,
@@ -1083,6 +1088,7 @@ async def _memory_scope_isolation_check(
                 memory_space_id=memory_space_id,
                 owner_id=owner_id,
                 companion_id=companion_id,
+                marker=marker,
                 cfg=cfg,
             )
             matching = _memory_records_for_source_event(payload, marker)
@@ -1149,6 +1155,7 @@ async def _memory_recall_latency_check(
                 memory_space_id=memory_space_id,
                 owner_id=owner_id,
                 companion_id=companion_id,
+                marker=marker,
                 cfg=cfg,
             )
             samples.append(elapsed_ms)
