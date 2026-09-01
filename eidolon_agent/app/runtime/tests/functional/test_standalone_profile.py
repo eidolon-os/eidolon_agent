@@ -135,8 +135,10 @@ async def test_standalone_preserves_persona_observation_command(
         )
 
 
-async def test_standalone_stop_command_short_circuits_offline(tmp_path, monkeypatch) -> None:
+async def test_standalone_stop_text_is_a_normal_committed_request(tmp_path, monkeypatch) -> None:
     async with _standalone(tmp_path, monkeypatch) as container:
         events = await _run_turn(container, "停，别说了")
         done = [e for e in events if e.kind is TurnEventKind.DONE]
-        assert done and done[0].data.get("termination_cause") == "user_stop"
+        deltas = [e for e in events if e.kind is TurnEventKind.DELTA]
+        assert done and deltas
+        assert "termination_cause" not in done[0].data
