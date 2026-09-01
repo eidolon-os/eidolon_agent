@@ -36,7 +36,6 @@ from eidolon_agent.config.settings import Settings, load_settings
 from eidolon_agent.core.types.tool import Permission
 from eidolon_agent.domain.agent.companion import CompanionAgent
 from eidolon_agent.domain.agent.registry import AgentRegistry
-from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.agent.turn import ToolLatencyPolicy, TurnEngine
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails import CrisisHandler, InputGuardrail, OutputGuardrail
@@ -265,7 +264,6 @@ async def build_application(
     container.crisis_handler = CrisisHandler(event_bus=container.event_bus)
     container.input_guardrail = InputGuardrail()
     container.output_guardrail = OutputGuardrail()
-    container.triage_classifier = TaskClassifier()
 
     # 9. LLM router ------------------------------------------------------------
     llm_router = _build_llm_router(settings)
@@ -482,7 +480,6 @@ def _build_turn_engine(
         tool_dispatcher=container.tool_dispatcher,
         history=container.history_manager,
         fanout=container.history_fanout,
-        triage=container.triage_classifier,
         input_guardrail=container.input_guardrail,
         output_guardrail=container.output_guardrail,
         crisis=container.crisis_handler,

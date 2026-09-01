@@ -125,7 +125,6 @@ def test_build_turn_engine_wires_context_budget() -> None:
     container.llm_router = object()
     container.tool_dispatcher = object()
     container.history_fanout = object()
-    container.triage_classifier = object()
     container.input_guardrail = object()
     container.output_guardrail = object()
     container.crisis_handler = object()
