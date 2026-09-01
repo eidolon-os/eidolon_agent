@@ -433,6 +433,110 @@ async def test_live_local_contract_readback_unavailable_uses_dependency_policy()
     assert check.details["last_error"] == "mcp warming"
 
 
+async def test_memory_scope_isolation_uses_source_identity_not_result_wording() -> None:
+    class ScopedSession:
+        async def call_tool(self, name, arguments):
+            assert name == "eidolon_memory_search"
+            companion_id = arguments["context"]["companion_id"]
+            if companion_id == "companion-primary":
+                return {
+                    "records": [
+                        {
+                            "key": "drawer-primary",
+                            "value": "paraphrased by the steward",
+                            "metadata": {"source_event_id": "turn-scope"},
+                        }
+                    ]
+                }
+            return {
+                "records": [
+                    {
+                        "key": f"unrelated-{companion_id}",
+                        "value": "same search can return unrelated memories",
+                        "metadata": {"source_event_id": "another-turn"},
+                    }
+                ]
+            }
+
+    check = await live_local_contract._memory_scope_isolation_check(
+        pool=_StaticSessionPool(ScopedSession()),
+        memory_space_id="r_contract",
+        marker="turn-scope",
+        owner_id="owner-contract",
+        primary_companion_id="companion-primary",
+        isolation_companion_ids=("companion-a", "companion-b"),
+        cfg=LiveLocalContractConfig(timeout_s=0.1),
+    )
+
+    assert check.status == "passed"
+    assert check.details["leaked_to"] == []
+    assert check.details["results"]["companion-primary"]["matching_source_events"] == 1
+    assert check.details["results"]["companion-a"]["matching_source_events"] == 0
+    assert check.details["results"]["companion-b"]["matching_source_events"] == 0
+
+
+async def test_memory_scope_isolation_reports_cross_companion_leak() -> None:
+    class LeakingSession:
+        async def call_tool(self, name, arguments):
+            assert name == "eidolon_memory_search"
+            return {
+                "records": [
+                    {
+                        "key": arguments["context"]["companion_id"],
+                        "value": "leaked",
+                        "metadata": {"source_event_id": "turn-scope"},
+                    }
+                ]
+            }
+
+    check = await live_local_contract._memory_scope_isolation_check(
+        pool=_StaticSessionPool(LeakingSession()),
+        memory_space_id="r_contract",
+        marker="turn-scope",
+        owner_id="owner-contract",
+        primary_companion_id="companion-primary",
+        isolation_companion_ids=("companion-a", "companion-b"),
+        cfg=LiveLocalContractConfig(timeout_s=0.1),
+    )
+
+    assert check.status == "failed"
+    assert check.details["leaked_to"] == ["companion-a", "companion-b"]
+
+
+async def test_memory_recall_latency_fails_when_source_disappears() -> None:
+    class AlternatingSession:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def call_tool(self, name, arguments):
+            del name, arguments
+            self.calls += 1
+            if self.calls == 2:
+                return {"records": []}
+            return {
+                "records": [
+                    {
+                        "key": "drawer-latency",
+                        "value": "visible",
+                        "metadata": {"source_event_id": "turn-latency"},
+                    }
+                ]
+            }
+
+    check = await live_local_contract._memory_recall_latency_check(
+        pool=_StaticSessionPool(AlternatingSession()),
+        memory_space_id="r_contract",
+        marker="turn-latency",
+        owner_id="owner-contract",
+        companion_id="companion-primary",
+        cfg=LiveLocalContractConfig(memory_recall_samples=3, timeout_s=0.1),
+    )
+
+    assert check.status == "failed"
+    assert check.details["samples"] == 3
+    assert check.details["missing_source_event_samples"] == 1
+
+
 async def test_memory_cleanup_uses_exact_source_event_and_proves_absence() -> None:
     class _OpsSession:
         calls: ClassVar[list[tuple[str, dict]]] = []
