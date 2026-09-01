@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import time
 from dataclasses import asdict, dataclass, field
@@ -74,6 +75,9 @@ class LiveLocalContractConfig:
     memory_space_id: str | None = None
     memory_owner_id: str | None = None
     memory_companion_id: str | None = None
+    memory_isolation_companion_ids: tuple[str, ...] = ()
+    memory_recall_samples: int = 0
+    memory_recall_p95_budget_ms: float | None = None
     require_memory_cleanup: bool = True
     timeout_s: float = 5.0
     memory_route_timeout_s: float = 0.0
@@ -453,6 +457,29 @@ async def _memory_contract_checks(
                 cfg=cfg,
             )
             checks.append(readback)
+            if readback.status == "passed" and cfg.memory_isolation_companion_ids:
+                checks.append(
+                    await _memory_scope_isolation_check(
+                        pool=pool,
+                        memory_space_id=memory_space_id,
+                        marker=turn_id,
+                        owner_id=owner_id,
+                        primary_companion_id=companion_id,
+                        isolation_companion_ids=cfg.memory_isolation_companion_ids,
+                        cfg=cfg,
+                    )
+                )
+            if readback.status == "passed" and cfg.memory_recall_samples > 0:
+                checks.append(
+                    await _memory_recall_latency_check(
+                        pool=pool,
+                        memory_space_id=memory_space_id,
+                        marker=turn_id,
+                        owner_id=owner_id,
+                        companion_id=companion_id,
+                        cfg=cfg,
+                    )
+                )
             checks.append(
                 await _memory_cleanup_check(
                     pool=pool,
@@ -1007,6 +1034,159 @@ def _memory_records_for_source_event(
     ]
 
 
+async def _memory_search_for_companion(
+    *,
+    pool: McpClientPool,
+    memory_space_id: str,
+    owner_id: str,
+    companion_id: str,
+    cfg: LiveLocalContractConfig,
+) -> tuple[Any, float]:
+    session = await pool.session_for(memory_space_id)
+    started = time.perf_counter()
+    payload = await _call_mcp_tool_with_timeout(
+        session,
+        "eidolon_memory_search",
+        {
+            "query": _memory_contract_recall_query(),
+            "context": _memory_canary_context(
+                memory_space_id=memory_space_id,
+                owner_id=owner_id,
+                companion_id=companion_id,
+            ),
+            "top_k": 10,
+        },
+        timeout_s=cfg.timeout_s,
+    )
+    return payload, (time.perf_counter() - started) * 1000
+
+
+async def _memory_scope_isolation_check(
+    *,
+    pool: McpClientPool,
+    memory_space_id: str,
+    marker: str,
+    owner_id: str,
+    primary_companion_id: str,
+    isolation_companion_ids: tuple[str, ...],
+    cfg: LiveLocalContractConfig,
+) -> ContractCheck:
+    """Prove one natural turn is visible only in its authoritative Companion scope."""
+
+    started = time.perf_counter()
+    companion_ids = tuple(dict.fromkeys((primary_companion_id, *isolation_companion_ids)))
+    results: dict[str, dict[str, Any]] = {}
+    try:
+        for companion_id in companion_ids:
+            payload, elapsed_ms = await _memory_search_for_companion(
+                pool=pool,
+                memory_space_id=memory_space_id,
+                owner_id=owner_id,
+                companion_id=companion_id,
+                cfg=cfg,
+            )
+            matching = _memory_records_for_source_event(payload, marker)
+            results[companion_id] = {
+                "matching_source_events": len(matching),
+                "elapsed_ms": round(elapsed_ms, 3),
+            }
+    except Exception as exc:
+        return _check(
+            name="memory_companion_scope_isolation",
+            status="failed",
+            required=True,
+            started=started,
+            summary=f"{type(exc).__name__}: {exc}",
+            details={"marker": marker, "results": results},
+        )
+
+    primary_visible = results[primary_companion_id]["matching_source_events"] > 0
+    leaked_to = [
+        companion_id
+        for companion_id in isolation_companion_ids
+        if results.get(companion_id, {}).get("matching_source_events", 0) > 0
+    ]
+    passed = primary_visible and not leaked_to
+    return _check(
+        name="memory_companion_scope_isolation",
+        status="passed" if passed else "failed",
+        required=True,
+        started=started,
+        summary="primary visible and peers isolated" if passed else "scope isolation violated",
+        details={
+            "marker": marker,
+            "primary_companion_id": primary_companion_id,
+            "leaked_to": leaked_to,
+            "results": results,
+        },
+    )
+
+
+def _nearest_rank_percentile(values: list[float], percentile: float) -> float:
+    ordered = sorted(values)
+    rank = max(1, math.ceil(percentile * len(ordered)))
+    return ordered[rank - 1]
+
+
+async def _memory_recall_latency_check(
+    *,
+    pool: McpClientPool,
+    memory_space_id: str,
+    marker: str,
+    owner_id: str,
+    companion_id: str,
+    cfg: LiveLocalContractConfig,
+) -> ContractCheck:
+    """Measure the real Agent-facing MCP read path, including scope hydration."""
+
+    started = time.perf_counter()
+    samples: list[float] = []
+    missing = 0
+    try:
+        for _ in range(max(1, cfg.memory_recall_samples)):
+            payload, elapsed_ms = await _memory_search_for_companion(
+                pool=pool,
+                memory_space_id=memory_space_id,
+                owner_id=owner_id,
+                companion_id=companion_id,
+                cfg=cfg,
+            )
+            samples.append(elapsed_ms)
+            if not _memory_records_for_source_event(payload, marker):
+                missing += 1
+    except Exception as exc:
+        return _check(
+            name="memory_agent_recall_latency",
+            status="failed",
+            required=True,
+            started=started,
+            summary=f"{type(exc).__name__}: {exc}",
+            details={"samples_completed": len(samples)},
+        )
+
+    p50 = _nearest_rank_percentile(samples, 0.50)
+    p95 = _nearest_rank_percentile(samples, 0.95)
+    p99 = _nearest_rank_percentile(samples, 0.99)
+    budget = cfg.memory_recall_p95_budget_ms
+    passed = missing == 0 and (budget is None or p95 <= budget)
+    return _check(
+        name="memory_agent_recall_latency",
+        status="passed" if passed else "failed",
+        required=True,
+        started=started,
+        summary="recall samples visible and within budget" if passed else "recall SLO violated",
+        details={
+            "samples": len(samples),
+            "missing_source_event_samples": missing,
+            "p50_ms": round(p50, 3),
+            "p95_ms": round(p95, 3),
+            "p99_ms": round(p99, 3),
+            "max_ms": round(max(samples), 3),
+            "p95_budget_ms": budget,
+        },
+    )
+
+
 async def _call_mcp_tool_with_timeout(
     session: Any,
     name: str,
@@ -1155,6 +1335,14 @@ def main(argv: list[str] | None = None) -> int:
         "--memory-companion-id",
         default=os.getenv("EIDOLON_AGENT_LIVE_MEMORY_COMPANION_ID", ""),
     )
+    parser.add_argument(
+        "--memory-isolation-companion-id",
+        action="append",
+        default=[],
+        help="Companion ID that must not see the primary canary; repeatable.",
+    )
+    parser.add_argument("--memory-recall-samples", type=int, default=0)
+    parser.add_argument("--memory-recall-p95-budget-ms", type=float, default=None)
     parser.add_argument("--timeout-s", type=float, default=5.0)
     parser.add_argument("--memory-route-timeout-s", type=float, default=0.0)
     parser.add_argument("--memory-readback-timeout-s", type=float, default=30.0)
@@ -1184,6 +1372,9 @@ def main(argv: list[str] | None = None) -> int:
                 memory_space_id=args.memory_space_id or None,
                 memory_owner_id=args.memory_owner_id or None,
                 memory_companion_id=args.memory_companion_id or None,
+                memory_isolation_companion_ids=tuple(args.memory_isolation_companion_id),
+                memory_recall_samples=max(0, args.memory_recall_samples),
+                memory_recall_p95_budget_ms=args.memory_recall_p95_budget_ms,
                 require_memory_cleanup=not args.no_memory_cleanup,
                 timeout_s=args.timeout_s,
                 memory_route_timeout_s=args.memory_route_timeout_s,
