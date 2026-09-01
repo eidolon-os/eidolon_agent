@@ -463,6 +463,8 @@ async def _memory_contract_checks(
                 cfg=cfg,
             )
             checks.append(readback)
+            if readback.status == "passed":
+                checks.append(_memory_materialization_budget_check(readback, cfg))
             if readback.status == "passed" and cfg.memory_isolation_companion_ids:
                 checks.append(
                     await _memory_scope_isolation_check(
@@ -851,24 +853,20 @@ async def _memory_readback_check(
         matching = _memory_records_for_source_event(payload, marker)
         if matching:
             record = matching[0]
-            materialization_s = time.perf_counter() - started
-            budget_s = cfg.memory_materialization_budget_s
-            within_budget = budget_s is None or materialization_s <= budget_s
             return _check(
                 name="memory_nats_readback",
-                # The write did land. Reporting it as passed anyway would make
-                # the budget advisory, and an advisory latency gate is how the
-                # 18s-to-59s drift got through the previous run.
-                status="passed" if within_budget else "failed",
+                # One question: did the write land. How long it took is a
+                # separate check, so a slow write does not stop the isolation
+                # and recall checks that only run when the record was found.
+                status="passed",
                 required=required,
                 started=started,
-                summary="ok" if within_budget else "materialization exceeded budget",
+                summary="ok",
                 details={
                     "memory_space_id": memory_space_id,
                     "marker": marker,
                     "record_key": record.get("key") or record.get("id"),
-                    "materialization_s": round(materialization_s, 3),
-                    "materialization_budget_s": budget_s,
+                    "materialization_s": round(time.perf_counter() - started, 3),
                 },
             )
         await asyncio.sleep(
@@ -893,6 +891,54 @@ async def _memory_readback_check(
             "timeout_s": cfg.memory_readback_timeout_s,
             "last_payload": last_payload,
             "last_error": last_error,
+        },
+    )
+
+
+def _memory_materialization_budget_check(
+    readback: ContractCheck,
+    cfg: LiveLocalContractConfig,
+) -> ContractCheck:
+    """How long the background write took to become readable.
+
+    Separate from the readback because they answer different questions and one
+    of them must not gate the other. The readback timeout only says when to
+    give up waiting, so without this every materialisation under it reported
+    the same passed — which is how a write that slowed from 18s to 59s crossed
+    a release without failing anything.
+    """
+
+    started = time.perf_counter()
+    budget_s = cfg.memory_materialization_budget_s
+    elapsed_s = readback.details.get("materialization_s")
+    if budget_s is None:
+        return _check(
+            name="memory_materialization_budget",
+            status="skipped",
+            required=False,
+            started=started,
+            summary="no budget configured",
+            details={"materialization_s": elapsed_s},
+        )
+    if not isinstance(elapsed_s, int | float):
+        return _check(
+            name="memory_materialization_budget",
+            status="failed",
+            required=True,
+            started=started,
+            summary="readback reported no materialization time",
+            details={"materialization_budget_s": budget_s},
+        )
+    within = float(elapsed_s) <= budget_s
+    return _check(
+        name="memory_materialization_budget",
+        status="passed" if within else "failed",
+        required=True,
+        started=started,
+        summary="ok" if within else "materialization exceeded budget",
+        details={
+            "materialization_s": elapsed_s,
+            "materialization_budget_s": budget_s,
         },
     )
 

@@ -240,10 +240,20 @@ async def test_live_local_contract_memory_publish_and_readback(monkeypatch) -> N
         "memory_mcp_status",
         "memory_nats_publish",
         "memory_nats_readback",
+        # Present even with no budget set, carrying the elapsed time: the
+        # measurement is what a budget eventually gets chosen from.
+        "memory_materialization_budget",
         "memory_marker_cleanup",
     ]
-    assert all(check.status == "passed" for check in report.checks[:-1])
-    assert report.checks[-1].status == "skipped"
+    by_name = {check.name: check for check in report.checks}
+    assert all(
+        check.status == "passed"
+        for check in report.checks
+        if check.name not in {"memory_materialization_budget", "memory_marker_cleanup"}
+    )
+    assert by_name["memory_materialization_budget"].status == "skipped"
+    assert by_name["memory_materialization_budget"].details["materialization_s"] >= 0.0
+    assert by_name["memory_marker_cleanup"].status == "skipped"
     assert _FakeBus.published
     event, persistent = _FakeBus.published[-1]
     assert persistent is True
@@ -735,18 +745,13 @@ async def test_live_local_contract_nats_unavailable_uses_dependency_policy(
     assert report.passed is False
 
 
-async def test_readback_that_lands_too_late_fails_instead_of_passing_quietly() -> None:
-    """A budget the check declines to enforce is a number in a report, not a gate.
-
-    The readback timeout only says when to give up waiting. Everything under it
-    reported ``passed`` identically, which is how a background write that
-    slowed from 18s to 59s crossed a release without failing anything.
-    """
+async def _readback_after(delay_s: float, budget_s: float | None):
+    """Run the readback against a store that answers after ``delay_s``."""
 
     class SlowSession:
         async def call_tool(self, name, arguments):
             assert name == "eidolon_memory_search"
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(delay_s)
             return {
                 "records": [
                     {
@@ -757,57 +762,59 @@ async def test_readback_that_lands_too_late_fails_instead_of_passing_quietly() -
                 ]
             }
 
-    check = await live_local_contract._memory_readback_check(
+    cfg = LiveLocalContractConfig(
+        memory_readback_timeout_s=5.0,
+        memory_readback_poll_s=0.001,
+        memory_materialization_budget_s=budget_s,
+    )
+    readback = await live_local_contract._memory_readback_check(
         pool=_StaticSessionPool(SlowSession()),
         tool_names={"eidolon_memory_search"},
         memory_space_id="r_contract",
         marker="turn-slow",
         owner_id="owner-contract",
         companion_id="companion-contract",
-        cfg=LiveLocalContractConfig(
-            memory_readback_timeout_s=5.0,
-            memory_readback_poll_s=0.001,
-            memory_materialization_budget_s=0.01,
-        ),
+        cfg=cfg,
     )
-
-    assert check.status == "failed"
-    assert check.summary == "materialization exceeded budget"
-    # The write did land — the failure is about when, so the evidence that it
-    # landed has to survive into the report.
-    assert check.details["record_key"] == "drawer-slow"
-    assert check.details["materialization_s"] > 0.01
+    return readback, live_local_contract._memory_materialization_budget_check(readback, cfg)
 
 
-async def test_readback_reports_how_long_materialization_took_even_when_fast() -> None:
+async def test_a_write_that_lands_too_late_fails_its_own_check() -> None:
+    """A budget nothing enforces is a number in a report, not a gate.
+
+    The readback timeout only says when to give up waiting. Everything under it
+    reported ``passed`` identically, which is how a background write that
+    slowed from 18s to 59s crossed a release without failing anything.
+    """
+
+    readback, budget = await _readback_after(0.05, 0.01)
+
+    assert budget.status == "failed"
+    assert budget.summary == "materialization exceeded budget"
+    assert budget.details["materialization_s"] > 0.01
+    # The write did land, and the readback has to keep saying so. Failing it
+    # here would skip the isolation and recall checks that only run when the
+    # record was found — a slow write would stop us verifying correctness.
+    assert readback.status == "passed"
+    assert readback.details["record_key"] == "drawer-slow"
+
+
+async def test_a_write_within_budget_reports_how_long_it_took() -> None:
     """Reported on the passing path too, or a trend has no data points."""
 
-    class FastSession:
-        async def call_tool(self, name, arguments):
-            return {
-                "records": [
-                    {
-                        "key": "drawer-fast",
-                        "value": "我最近开始追一档播客，名字叫海棠播客。",
-                        "metadata": {"source_event_id": "turn-fast"},
-                    }
-                ]
-            }
+    readback, budget = await _readback_after(0.0, 10.0)
 
-    check = await live_local_contract._memory_readback_check(
-        pool=_StaticSessionPool(FastSession()),
-        tool_names={"eidolon_memory_search"},
-        memory_space_id="r_contract",
-        marker="turn-fast",
-        owner_id="owner-contract",
-        companion_id="companion-contract",
-        cfg=LiveLocalContractConfig(
-            memory_readback_timeout_s=5.0,
-            memory_readback_poll_s=0.001,
-            memory_materialization_budget_s=10.0,
-        ),
-    )
+    assert readback.status == "passed"
+    assert budget.status == "passed"
+    assert budget.details["materialization_budget_s"] == 10.0
+    assert budget.details["materialization_s"] >= 0.0
 
-    assert check.status == "passed"
-    assert check.details["materialization_budget_s"] == 10.0
-    assert check.details["materialization_s"] >= 0.0
+
+async def test_without_a_budget_the_measurement_is_still_reported() -> None:
+    """Skipped, not absent: the number is what a budget gets chosen from."""
+
+    _, budget = await _readback_after(0.0, None)
+
+    assert budget.status == "skipped"
+    assert budget.required is False
+    assert budget.details["materialization_s"] >= 0.0
