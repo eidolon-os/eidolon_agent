@@ -683,8 +683,8 @@ async def _memory_publish_check(
             device_id=None,
             session_id="live-local-contract",
             turn_id=turn_id,
-            user_text=_memory_contract_owner_text(turn_id),
-            assistant_text="记住了：你偏好把重要的技术验收记录写成短清单。",
+            user_text=_memory_contract_owner_text(),
+            assistant_text="Acquired 很适合用来了解科技公司和商业史。",
             timestamp_iso=datetime.now(UTC).isoformat(),
             trace_id=turn_id,
             metadata={
@@ -728,12 +728,12 @@ async def _memory_publish_check(
     ), turn_id
 
 
-def _memory_contract_owner_text(turn_id: str) -> str:
-    return (
-        "我喜欢把重要的技术验收记录写成短清单，"
-        "尤其偏好用 Acquired 半导体播客做灵感来源。"
-        f"这次验收的唯一标记是 {turn_id}。"
-    )
+def _memory_contract_owner_text() -> str:
+    return "我最喜欢的播客是 Acquired 半导体播客。"
+
+
+def _memory_contract_recall_query() -> str:
+    return "我最喜欢的播客是什么？"
 
 
 async def _memory_readback_check(
@@ -773,7 +773,7 @@ async def _memory_readback_check(
                 session,
                 "eidolon_memory_search",
                 {
-                    "query": marker,
+                    "query": _memory_contract_recall_query(),
                     "context": _memory_canary_context(
                         memory_space_id=memory_space_id,
                         owner_id=owner_id,
@@ -811,7 +811,7 @@ async def _memory_readback_check(
         last_payload = payload
         last_error = None
         last_dependency_unavailable = False
-        matching = _memory_records_containing(payload, marker)
+        matching = _memory_records_for_source_event(payload, marker)
         if matching:
             record = matching[0]
             return _check(
@@ -937,7 +937,7 @@ async def _memory_cleanup_check(
                 session,
                 "eidolon_memory_search",
                 {
-                    "query": marker,
+                    "query": _memory_contract_recall_query(),
                     "context": _memory_canary_context(
                         memory_space_id=memory_space_id,
                         owner_id=owner_id,
@@ -947,7 +947,7 @@ async def _memory_cleanup_check(
                 },
                 timeout_s=cfg.timeout_s,
             )
-            if not _memory_records_containing(last_payload, marker):
+            if not _memory_records_for_source_event(last_payload, marker):
                 return _check(
                     name="memory_marker_cleanup",
                     status="passed",
@@ -989,15 +989,21 @@ def _memory_canary_context(
     }
 
 
-def _memory_records_containing(payload: Any, marker: str) -> list[dict[str, Any]]:
-    """Return only user-visible records whose projected value contains the canary."""
+def _memory_records_for_source_event(
+    payload: Any,
+    source_event_id: str,
+) -> list[dict[str, Any]]:
+    """Correlate recall with the durable source event, independent of wording."""
 
-    if not isinstance(payload, list):
+    records = payload.get("records") if isinstance(payload, dict) else payload
+    if not isinstance(records, list):
         return []
     return [
         record
-        for record in payload
-        if isinstance(record, dict) and marker in str(record.get("value") or "")
+        for record in records
+        if isinstance(record, dict)
+        and isinstance(record.get("metadata"), dict)
+        and record["metadata"].get("source_event_id") == source_event_id
     ]
 
 

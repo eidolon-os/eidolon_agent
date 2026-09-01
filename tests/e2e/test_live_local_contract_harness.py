@@ -101,7 +101,16 @@ class _FakeAgentSession:
         self.search_calls += 1
         if self.search_calls == 1:
             return []
-        return [{"key": "drawer-1", "value": f"验收标记 {arguments['query']}"}]
+        assert arguments["query"] == "我最喜欢的播客是什么？"
+        published = unwrap_memory_payload(_FakeBus.published[-1][0].payload)
+        source_event_id = published["turn_id"]
+        return [
+            {
+                "key": "drawer-1",
+                "value": "我最喜欢的播客是 Acquired 半导体播客。",
+                "metadata": {"source_event_id": source_event_id},
+            }
+        ]
 
 
 class _FakeOpsSession:
@@ -240,8 +249,7 @@ async def test_live_local_contract_memory_publish_and_readback(monkeypatch) -> N
     assert persistent is True
     published = unwrap_memory_payload(event.payload)
     assert published["context"]["memory_realm_id"] == "r_contract"
-    assert "Acquired" in published["user_text"]
-    assert published["turn_id"] in published["user_text"]
+    assert published["user_text"] == "我最喜欢的播客是 Acquired 半导体播客。"
     assert "请记住" not in published["user_text"]
     assert published["metadata"] == {
         "source": "eidolon-agent-live-local-contract",
@@ -265,12 +273,15 @@ async def test_live_local_contract_readback_retries_transient_timeout() -> None:
             self.calls += 1
             if self.calls == 1:
                 raise TimeoutError()
-            return [
-                {
-                    "key": "drawer-timeout-retry",
-                    "value": f"contains {arguments['query']}",
-                }
-            ]
+            return {
+                "records": [
+                    {
+                        "key": "drawer-timeout-retry",
+                        "value": "我最喜欢的播客是 Acquired 半导体播客。",
+                        "metadata": {"source_event_id": "turn-timeout-retry"},
+                    }
+                ]
+            }
 
     session = TimeoutThenRecordSession()
     pool = _StaticSessionPool(session)
@@ -307,7 +318,8 @@ async def test_live_local_contract_readback_retries_cancelled_mcp_call() -> None
             return [
                 {
                     "key": "drawer-cancel-retry",
-                    "value": f"contains {arguments['query']}",
+                    "value": "我最喜欢的播客是 Acquired 半导体播客。",
+                    "metadata": {"source_event_id": "turn-cancel-retry"},
                 }
             ]
 
@@ -437,7 +449,7 @@ async def test_memory_cleanup_uses_exact_source_event_and_proves_absence() -> No
     class _GoneSession:
         async def call_tool(self, name, arguments):
             assert name == "eidolon_memory_search"
-            assert arguments["query"] == "turn-canary"
+            assert arguments["query"] == "我最喜欢的播客是什么？"
             assert arguments["context"]["owner_id"] == "owner_contract"
             assert arguments["context"]["companion_id"] == "companion_contract"
             return []
