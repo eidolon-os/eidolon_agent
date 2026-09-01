@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
+from eidolon_sdk.biz.dialogue_control import CommittedTurnDecision, TurnCommitBoundary
 
 from eidolon_agent.core.types.companion_runtime import CompanionRuntimeConfig
 from eidolon_agent.core.types.messages import MessageRole
@@ -12,6 +15,32 @@ from eidolon_agent.infra.llm.providers.fake import FakeLLM
 from tests.helpers import make_turn_input
 
 pytestmark = pytest.mark.functional
+
+
+def _attach_committed_decision(ti) -> None:
+    ti.metadata["turn_decision"] = CommittedTurnDecision.create(
+        text=ti.text or "",
+        boundary=TurnCommitBoundary.FRAMEWORK_COMPLETED,
+        eot_score=0.8,
+    ).as_metadata()
+
+
+class _RecordingFanout:
+    is_durable = True
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def publish_turn(self, **kwargs):
+        self.calls.append(kwargs)
+        return SimpleNamespace(state="published", error=None)
+
+
+def _voice_turn(text: str, *, committed: bool) -> object:
+    ti = replace(make_turn_input(text), input_modality="voice")
+    if committed:
+        _attach_committed_decision(ti)
+    return ti
 
 
 @pytest.mark.asyncio
@@ -185,27 +214,95 @@ async def test_turn_completed_publish_runs_after_stream_completion(turn_engine_f
 
 
 @pytest.mark.asyncio
-async def test_stop_utterance_short_circuits_without_llm(turn_engine_factory):
-    """ "停，别说了" must not reach the LLM and returns user_stop."""
-
-    class _BoomLLM:
-        model_id = "fake:boom"
-
-        async def stream(self, *_args, **_kwargs):
-            raise AssertionError("LLM must not be called for a stop command")
-            yield  # pragma: no cover
-
-    engine = turn_engine_factory(llm=_BoomLLM())
-    ti = make_turn_input("停，别说了")
+async def test_committed_stop_text_is_handled_as_a_normal_request(turn_engine_factory):
+    engine = turn_engine_factory()
+    ti = _voice_turn("停，别说了", committed=True)
     events = [ev async for ev in engine.run(ti)]
 
-    assert [e for e in events if e.kind.value == "delta"] == []
-    done = [e for e in events if e.kind.value == "done"]
-    assert done and done[0].data["termination_cause"] == "user_stop"
-    assert done[0].data["control_intent"] == "hard_stop"
-    # Observable end to end: the control decision lands on the turn trace.
-    assert ti.metadata["control_intent"] == "hard_stop"
-    assert ti.metadata["termination_cause"] == "user_stop"
+    assert [event for event in events if event.kind.value == "delta"]
+    assert ti.metadata["committed_turn_decision_valid"] is True
+    assert "control_intent" not in ti.metadata
+    assert "termination_cause" not in ti.metadata
+
+
+@pytest.mark.asyncio
+async def test_untyped_stop_text_does_not_gain_control_authority(turn_engine_factory):
+    engine = turn_engine_factory()
+    ti = make_turn_input("停，别说了")
+
+    events = [ev async for ev in engine.run(ti)]
+
+    assert [event for event in events if event.kind.value == "delta"]
+    assert ti.metadata["committed_turn_decision_valid"] is False
+    assert ti.metadata["committed_turn_persistence_allowed"] is True
+    assert ti.metadata["committed_turn_decision_reason"] == "synchronous_text_boundary"
+
+
+@pytest.mark.asyncio
+async def test_uncommitted_voice_replies_but_skips_history_and_memory(turn_engine_factory):
+    engine = turn_engine_factory()
+    fanout = _RecordingFanout()
+    engine._fanout = fanout
+    ti = _voice_turn("以后请叫我小满", committed=False)
+
+    events = [event async for event in engine.run(ti)]
+    await engine._background.drain(timeout_s=1)
+    recent = await engine._history.recent_window(
+        conversation_id=ti.conversation_id,
+        window=10,
+    )
+
+    assert events[-1].kind.value == "done"
+    assert fanout.calls == []
+    assert recent == []
+    assert ti.metadata["committed_turn_persistence_allowed"] is False
+    assert ti.metadata["memory_write_trace"]["skipped_reason"] == "uncommitted_voice_turn"
+
+
+@pytest.mark.asyncio
+async def test_mismatched_voice_commit_skips_history_and_memory(turn_engine_factory):
+    engine = turn_engine_factory()
+    fanout = _RecordingFanout()
+    engine._fanout = fanout
+    ti = _voice_turn("以后请叫我小满", committed=False)
+    ti.metadata["turn_decision"] = CommittedTurnDecision.create(
+        text="另一个转写",
+        boundary=TurnCommitBoundary.FRAMEWORK_COMPLETED,
+        eot_score=0.8,
+    ).as_metadata()
+
+    _events = [event async for event in engine.run(ti)]
+    await engine._background.drain(timeout_s=1)
+    recent = await engine._history.recent_window(
+        conversation_id=ti.conversation_id,
+        window=10,
+    )
+
+    assert fanout.calls == []
+    assert recent == []
+    assert ti.metadata["committed_turn_decision_reason"] == ("committed_turn_transcript_mismatch")
+
+
+@pytest.mark.asyncio
+async def test_valid_voice_commit_enables_history_and_memory(turn_engine_factory):
+    engine = turn_engine_factory()
+    fanout = _RecordingFanout()
+    engine._fanout = fanout
+    ti = _voice_turn("以后请叫我小满", committed=True)
+
+    _events = [event async for event in engine.run(ti)]
+    await engine._background.drain(timeout_s=1)
+    recent = await engine._history.recent_window(
+        conversation_id=ti.conversation_id,
+        window=10,
+    )
+
+    assert len(fanout.calls) == 1
+    assert [message.role for message in recent] == [
+        MessageRole.USER,
+        MessageRole.ASSISTANT,
+    ]
+    assert ti.metadata["committed_turn_persistence_allowed"] is True
 
 
 @pytest.mark.asyncio
@@ -244,12 +341,13 @@ async def test_persona_phrase_overrides_hot_path_line(turn_engine_factory):
 
 
 @pytest.mark.asyncio
-async def test_topic_switch_is_tagged_on_turn_input(turn_engine_factory):
+async def test_topic_switch_text_has_no_fixed_phrase_side_channel(turn_engine_factory):
     engine = turn_engine_factory()
-    ti = make_turn_input("我们换个话题吧")
+    ti = _voice_turn("我们换个话题吧", committed=True)
     _events = [ev async for ev in engine.run(ti)]
-    assert ti.metadata.get("topic_switch") is True
-    assert ti.metadata.get("control_intent") == "topic_switch"
+    assert ti.metadata["committed_turn_decision_valid"] is True
+    assert "topic_switch" not in ti.metadata
+    assert "control_intent" not in ti.metadata
 
 
 @pytest.mark.asyncio
