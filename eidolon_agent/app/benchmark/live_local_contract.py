@@ -78,6 +78,12 @@ class LiveLocalContractConfig:
     memory_isolation_companion_ids: tuple[str, ...] = ()
     memory_recall_samples: int = 0
     memory_recall_p95_budget_ms: float | None = None
+    # How long the background write may take to become readable. Distinct from
+    # ``memory_readback_timeout_s``, which is only how long this harness waits
+    # before giving up: without a budget, every materialisation under that
+    # ceiling reports the same ``passed``, so a write that slowed from 18s to
+    # 59s stays invisible until it crosses two minutes.
+    memory_materialization_budget_s: float | None = None
     require_memory_cleanup: bool = True
     timeout_s: float = 5.0
     memory_route_timeout_s: float = 0.0
@@ -845,16 +851,24 @@ async def _memory_readback_check(
         matching = _memory_records_for_source_event(payload, marker)
         if matching:
             record = matching[0]
+            materialization_s = time.perf_counter() - started
+            budget_s = cfg.memory_materialization_budget_s
+            within_budget = budget_s is None or materialization_s <= budget_s
             return _check(
                 name="memory_nats_readback",
-                status="passed",
+                # The write did land. Reporting it as passed anyway would make
+                # the budget advisory, and an advisory latency gate is how the
+                # 18s-to-59s drift got through the previous run.
+                status="passed" if within_budget else "failed",
                 required=required,
                 started=started,
-                summary="ok",
+                summary="ok" if within_budget else "materialization exceeded budget",
                 details={
                     "memory_space_id": memory_space_id,
                     "marker": marker,
                     "record_key": record.get("key") or record.get("id"),
+                    "materialization_s": round(materialization_s, 3),
+                    "materialization_budget_s": budget_s,
                 },
             )
         await asyncio.sleep(
@@ -1353,6 +1367,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout-s", type=float, default=5.0)
     parser.add_argument("--memory-route-timeout-s", type=float, default=0.0)
     parser.add_argument("--memory-readback-timeout-s", type=float, default=30.0)
+    parser.add_argument("--memory-materialization-budget-s", type=float, default=None)
     parser.add_argument("--no-agent", action="store_true")
     parser.add_argument("--no-admin-gateway", action="store_true")
     parser.add_argument("--no-memory", action="store_true")
@@ -1382,6 +1397,7 @@ def main(argv: list[str] | None = None) -> int:
                 memory_isolation_companion_ids=tuple(args.memory_isolation_companion_id),
                 memory_recall_samples=max(0, args.memory_recall_samples),
                 memory_recall_p95_budget_ms=args.memory_recall_p95_budget_ms,
+                memory_materialization_budget_s=args.memory_materialization_budget_s,
                 require_memory_cleanup=not args.no_memory_cleanup,
                 timeout_s=args.timeout_s,
                 memory_route_timeout_s=args.memory_route_timeout_s,

@@ -733,3 +733,81 @@ async def test_live_local_contract_nats_unavailable_uses_dependency_policy(
     assert by_name["memory_nats_publish"].status == "skipped"
     assert report.summary["skipped_required"] == ["memory_nats_publish"]
     assert report.passed is False
+
+
+async def test_readback_that_lands_too_late_fails_instead_of_passing_quietly() -> None:
+    """A budget the check declines to enforce is a number in a report, not a gate.
+
+    The readback timeout only says when to give up waiting. Everything under it
+    reported ``passed`` identically, which is how a background write that
+    slowed from 18s to 59s crossed a release without failing anything.
+    """
+
+    class SlowSession:
+        async def call_tool(self, name, arguments):
+            assert name == "eidolon_memory_search"
+            await asyncio.sleep(0.05)
+            return {
+                "records": [
+                    {
+                        "key": "drawer-slow",
+                        "value": "我最近开始追一档播客，名字叫海棠播客。",
+                        "metadata": {"source_event_id": "turn-slow"},
+                    }
+                ]
+            }
+
+    check = await live_local_contract._memory_readback_check(
+        pool=_StaticSessionPool(SlowSession()),
+        tool_names={"eidolon_memory_search"},
+        memory_space_id="r_contract",
+        marker="turn-slow",
+        owner_id="owner-contract",
+        companion_id="companion-contract",
+        cfg=LiveLocalContractConfig(
+            memory_readback_timeout_s=5.0,
+            memory_readback_poll_s=0.001,
+            memory_materialization_budget_s=0.01,
+        ),
+    )
+
+    assert check.status == "failed"
+    assert check.summary == "materialization exceeded budget"
+    # The write did land — the failure is about when, so the evidence that it
+    # landed has to survive into the report.
+    assert check.details["record_key"] == "drawer-slow"
+    assert check.details["materialization_s"] > 0.01
+
+
+async def test_readback_reports_how_long_materialization_took_even_when_fast() -> None:
+    """Reported on the passing path too, or a trend has no data points."""
+
+    class FastSession:
+        async def call_tool(self, name, arguments):
+            return {
+                "records": [
+                    {
+                        "key": "drawer-fast",
+                        "value": "我最近开始追一档播客，名字叫海棠播客。",
+                        "metadata": {"source_event_id": "turn-fast"},
+                    }
+                ]
+            }
+
+    check = await live_local_contract._memory_readback_check(
+        pool=_StaticSessionPool(FastSession()),
+        tool_names={"eidolon_memory_search"},
+        memory_space_id="r_contract",
+        marker="turn-fast",
+        owner_id="owner-contract",
+        companion_id="companion-contract",
+        cfg=LiveLocalContractConfig(
+            memory_readback_timeout_s=5.0,
+            memory_readback_poll_s=0.001,
+            memory_materialization_budget_s=10.0,
+        ),
+    )
+
+    assert check.status == "passed"
+    assert check.details["materialization_budget_s"] == 10.0
+    assert check.details["materialization_s"] >= 0.0
