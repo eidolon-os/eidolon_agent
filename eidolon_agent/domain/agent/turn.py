@@ -29,8 +29,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from eidolon_sdk.biz.chat_stream import DeltaRole, TerminationCause
-from eidolon_sdk.biz.dialogue_control import InterruptIntent
+from eidolon_sdk.biz.chat_stream import DeltaRole
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
 from eidolon_agent.core.errors import GuardrailBlockedError, TurnCancelledError
@@ -59,7 +58,7 @@ from eidolon_agent.core.types.turn import (
     TurnInput,
     TurnStatus,
 )
-from eidolon_agent.domain.agent.control_intent import ControlIntentClassifier
+from eidolon_agent.domain.agent.committed_turn import validate_committed_turn
 from eidolon_agent.domain.agent.triage import TaskClassifier
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails.crisis import CrisisHandler
@@ -110,7 +109,6 @@ class TurnEngine:
         input_guardrail: InputGuardrail,
         output_guardrail: OutputGuardrail,
         crisis: CrisisHandler,
-        control_classifier: ControlIntentClassifier | None = None,
         event_bus=None,
         personas_service=None,
         genome_id: str | None = None,
@@ -134,7 +132,6 @@ class TurnEngine:
         self._input_g = input_guardrail
         self._output_g = output_guardrail
         self._crisis = crisis
-        self._control = control_classifier or ControlIntentClassifier()
         self._bus = event_bus
         self._personas = personas_service
         self._genome_id = genome_id
@@ -186,6 +183,20 @@ class TurnEngine:
         recent_history_persisted = False
 
         try:
+            # Voice crosses the Channel→Agent process boundary and may only
+            # become history/memory after Channel publishes an exact,
+            # transcript-bound commit. Text/Admin input is synchronous and
+            # owns its boundary locally. Invalid voice provenance does not
+            # block the reply path, only durable side effects.
+            committed_turn = validate_committed_turn(
+                ti.metadata.get("turn_decision"),
+                text=ti.text,
+                input_modality=ti.input_modality,
+            )
+            ti.metadata["committed_turn_decision_valid"] = committed_turn.valid
+            ti.metadata["committed_turn_decision_reason"] = committed_turn.reason
+            ti.metadata["committed_turn_persistence_allowed"] = committed_turn.persistence_allowed
+
             # ---- Input guardrail --------------------------------------------
             verdict = self._input_g.check(ti.text)
             ts_guard_ms = int((time.monotonic() - t0) * 1000)
@@ -209,10 +220,16 @@ class TurnEngine:
                     resources=list(crisis.crisis_resources),
                 )
                 # Persist user + crisis assistant message after DONE, but do NOT fan out.
-                self._background.create(
-                    self._persist_messages(ti, ti.text or "", crisis.text, is_private=True),
-                    name=f"turn-{ti.turn_id}-crisis-history",
-                )
+                if committed_turn.persistence_allowed:
+                    self._background.create(
+                        self._persist_messages(
+                            ti,
+                            ti.text or "",
+                            crisis.text,
+                            is_private=True,
+                        ),
+                        name=f"turn-{ti.turn_id}-crisis-history",
+                    )
                 return
             if verdict.action is SafetyAction.REFUSE:
                 refuse = "我不能那样做，不过我可以继续陪你聊点别的。"
@@ -220,29 +237,6 @@ class TurnEngine:
                 yield TurnEvent.delta(ti.turn_id, seq.next(), refuse, time.time())
                 yield TurnEvent.done(ti.turn_id, seq.next(), TurnStatus.OK, time.time())
                 return
-            # ---- Reflex control intent (stop / topic switch) ---------------
-            # Runs before triage on the final utterance. A whole-utterance
-            # stop must never reach the LLM: emit a DONE tagged
-            # ``termination_cause="user_stop"`` so the upstream channel can
-            # circuit-break TTS/rendering. A topic switch tags the TurnInput
-            # so the context compiler can fence off the prior topic. Mirrors
-            # the channel's Tier0 fast-path via the shared SDK taxonomy.
-            control = self._control.classify(ti.text)
-            ti.metadata["control_intent"] = control.intent.value
-            if control.short_circuit:
-                ti.metadata["termination_cause"] = TerminationCause.USER_STOP.value
-                yield TurnEvent.done(
-                    ti.turn_id,
-                    seq.next(),
-                    TurnStatus.OK,
-                    time.time(),
-                    termination_cause=TerminationCause.USER_STOP.value,
-                    control_intent=control.intent.value,
-                )
-                return
-            if control.intent is InterruptIntent.TOPIC_SWITCH:
-                ti.metadata["topic_switch"] = True
-
             # A committed user turn is the only input to long-term extraction.
             # Publish it independently of context compilation, LLM generation,
             # tools and TTS; the Memory service owns semantic relevance,
@@ -253,6 +247,7 @@ class TurnEngine:
                 policy=runtime_policy,
                 mode=self._memory_write_mode,
             )
+            ti.metadata["memory_write_trace"] = memory_observation
             if not speculative and memory_observation["fanout_allowed"]:
                 ti.metadata["memory_observation_scheduled"] = True
                 if getattr(self._fanout, "is_durable", False):
@@ -532,12 +527,12 @@ class TurnEngine:
             assistant_text_for_persist = final_text
             ts_output_ms = int((time.monotonic() - t0) * 1000)
             # Speculative turns never persist/fan out (unconfirmed guess).
-            post_turn_allowed = not speculative
+            post_turn_allowed = not speculative and committed_turn.persistence_allowed
 
             # Keep recent history deterministic for the next turn. This is a
             # cheap in-memory append, not durable persistence; durable SQLite
             # writes and external fanout remain after DONE.
-            if not speculative:
+            if not speculative and committed_turn.persistence_allowed:
                 try:
                     await self._persist_messages(
                         ti,
@@ -575,7 +570,7 @@ class TurnEngine:
 
             # User has their answer; durable persistence can take its time.
             # Speculative turns are ephemeral — skip entirely.
-            if not speculative:
+            if not speculative and committed_turn.persistence_allowed:
                 post_turn_scheduled = True
                 self._background.create(
                     self._post_turn(
@@ -606,7 +601,7 @@ class TurnEngine:
             # Let the heard exchange reach memory/history via the standard
             # post-turn path (skipped when nothing heard, or when speculative —
             # an unconfirmed guess never persists even the part that streamed).
-            if heard_text and not speculative:
+            if heard_text and not speculative and committed_turn.persistence_allowed:
                 post_turn_allowed = True
             yield TurnEvent.error(ti.turn_id, seq.next(), error_code, "cancelled", time.time())
             raise
@@ -631,6 +626,7 @@ class TurnEngine:
                     policy=runtime_policy,
                     mode=self._memory_write_mode,
                 )
+                ti.metadata["memory_write_trace"] = memory_write_trace
                 development_guards = _development_guard_trace(
                     ti=ti,
                     memory_write_trace=memory_write_trace,
@@ -729,8 +725,10 @@ class TurnEngine:
                         usage_out=usage_out,
                         error_code=error_code,
                         timings=timings,
-                        user_text=ti.text or "",
-                        assistant_text=assistant_text_for_persist,
+                        user_text=(ti.text or "") if committed_turn.persistence_allowed else "",
+                        assistant_text=(
+                            assistant_text_for_persist if committed_turn.persistence_allowed else ""
+                        ),
                         is_private=runtime_policy.mark_messages_private,
                     ),
                     name=f"turn-{ti.turn_id}-persist-turn",
@@ -745,7 +743,7 @@ class TurnEngine:
                     ),
                     name=f"turn-{ti.turn_id}-post-turn",
                 )
-            if self._bus is not None and not speculative:
+            if self._bus is not None and not speculative and committed_turn.persistence_allowed:
                 self._background.create(
                     self._publish_turn_completed(
                         ti=ti,
@@ -1149,6 +1147,11 @@ def _memory_write_trace(
     skipped_reason: str | None = None
     if mode == "disabled":
         skipped_reason = "policy_disabled"
+    elif (
+        ti.input_modality == "voice"
+        and ti.metadata.get("committed_turn_persistence_allowed") is not True
+    ):
+        skipped_reason = "uncommitted_voice_turn"
     elif not ti.text:
         skipped_reason = "empty_user_text"
     elif not policy.post_turn_side_effects_allowed:
