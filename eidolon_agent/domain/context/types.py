@@ -44,6 +44,40 @@ def segment_volatility(kind: ContextSegmentKind) -> str:
     return _SEGMENT_VOLATILITY.get(kind, "volatile")
 
 
+#: The order segments are assembled in, and the one place the trade-off behind
+#: it is decided.
+#:
+#: A prefix is reusable only up to the first byte that changed, so a volatile
+#: segment costs every token *after* it as well as itself. Ordering by
+#: volatility therefore is not a preference — it is what decides how much of a
+#: turn's prompt has to be re-read. Measured on RK3588 with a `realtime` block
+#: whose only change is a two-decimal float: with `append_only` history behind
+#: it, 113 tokens were re-read (5.65 s); with history in front of it, 27 tokens
+#: (1.69 s). One float, four seconds.
+#:
+#: `append_only` sits ahead of `volatile` for that reason, and this is the cost
+#: of the choice: recent history moves away from the question, and a model
+#: attends most to what is nearest it. That effect is not measured here — it
+#: needs a listening test, not a token count. If it turns out to matter, the
+#: answer is to change this tuple, and only this tuple.
+#:
+#: `current` is last because it is the question, and the answer must not be
+#: predicted from stale context sitting after it.
+SEGMENT_ORDER: tuple[str, ...] = ("stable", "append_only", "volatile", "current")
+
+
+def volatility_rank(kind: ContextSegmentKind) -> int:
+    """Where a segment sorts. Derived from its class, never chosen per segment.
+
+    A rank that has to be looked up here is a rank nobody can quietly invert by
+    inserting an `append(...)` in a place that reads well — which is how
+    `realtime` came to sit in front of `history` and cost four seconds a turn
+    without anything recording that it did.
+    """
+
+    return SEGMENT_ORDER.index(segment_volatility(kind))
+
+
 @dataclass(frozen=True, slots=True)
 class ContextSegment:
     kind: ContextSegmentKind

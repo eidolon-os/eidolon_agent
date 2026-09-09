@@ -35,6 +35,7 @@ from eidolon_agent.domain.context.types import (
     ContextLedger,
     ContextSegment,
     ContextSegmentKind,
+    volatility_rank,
 )
 from eidolon_agent.domain.harness import (
     HARNESS_POLICY_SOURCE,
@@ -583,8 +584,15 @@ class ContextCompiler:
 
         # ---- Assemble messages ---------------------------------------------
         now = datetime.now(UTC)
-        system_parts = [
-            system_parts_by_segment[id(seg)]
+        # Assembled by volatility rank, not by the order the segments were
+        # appended above. A prefix is reusable only up to its first changed
+        # byte, so a volatile segment costs every token after it too — which
+        # made a two-decimal float in `realtime` re-read the whole history
+        # block, four seconds a turn on RK3588. The order lives in
+        # SEGMENT_ORDER and nowhere else; a stable sort keeps the within-class
+        # order the code above reads in.
+        ranked_parts: list[tuple[int, str]] = [
+            (volatility_rank(seg.kind), system_parts_by_segment[id(seg)])
             for seg in kept_segments
             if id(seg) in system_parts_by_segment
         ]
@@ -595,10 +603,19 @@ class ContextCompiler:
             history
         ) - _interrupted_history_count(kept_history)
         if kept_history:
-            system_parts.insert(
-                _background_insert_index(system_parts),
-                _background_context_block(kept_history),
+            # Ranked like any other segment rather than inserted at a position
+            # chosen by scanning for `[CURRENT REQUEST]`. History is
+            # `append_only`: older entries stay byte-identical, so it belongs
+            # in the reusable part of the prefix — but only if nothing volatile
+            # precedes it, which is exactly what the rank decides.
+            ranked_parts.append(
+                (
+                    volatility_rank(ContextSegmentKind.HISTORY),
+                    _background_context_block(kept_history),
+                )
             )
+        ranked_parts.sort(key=lambda item: item[0])
+        system_parts = [text for _rank, text in ranked_parts]
         out: list[ChatMessage] = [
             ChatMessage(
                 id=uuid.uuid4().hex,
