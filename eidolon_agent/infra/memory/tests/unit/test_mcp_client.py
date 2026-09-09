@@ -117,12 +117,6 @@ async def test_session_for_unknown_user_raises_unavailable() -> None:
             ),
             "memory_route_disabled",
         ),
-        (
-            MemoryRoute(
-                memory_space_id="default.alice.default", mcp_url="http://a/mcp", reachable=False
-            ),
-            "memory_route_unreachable",
-        ),
     ],
 )
 async def test_session_for_unavailable_route_carries_reason(
@@ -565,3 +559,42 @@ async def test_transient_session_closes_on_exit() -> None:
         assert isinstance(sess, McpUserSession)
         sess.close = AsyncMock()  # swap before exit so we can observe
     sess.close.assert_awaited_once()
+
+
+async def test_failed_discovery_probe_does_not_close_a_working_read_pool(monkeypatch) -> None:
+    from eidolon_agent.infra.memory.discovery import DiscoveryResponse
+
+    route = MemoryRoute(memory_space_id="default.alice.default", mcp_url="http://a/mcp")
+    routes = _routes(route)
+    pool = McpClientPool(routes=routes)
+    session = await pool.session_for(route.memory_space_id)
+
+    async def call_tool(self, name, arguments):
+        return {"records": [{"memory_id": "remembered"}]}
+
+    monkeypatch.setattr(McpUserSession, "call_tool", call_tool)
+    try:
+        for reachable in (False, True):
+            await routes.replace_from_discovery(
+                DiscoveryResponse.model_validate(
+                    {
+                        "nats": {"url": "nats://x"},
+                        "memory_realms": [
+                            {
+                                "memory_space_id": route.memory_space_id,
+                                "mcp_http_url": route.mcp_url,
+                                "ops_mcp_http_url": route.mcp_url,
+                                "agent_reachable": reachable,
+                            }
+                        ],
+                    }
+                )
+            )
+            assert await pool.health() is reachable
+            current = await pool.session_for(route.memory_space_id)
+            assert current is session
+            assert await asyncio.wait_for(current.call_tool("recall", {}), 0.5) == {
+                "records": [{"memory_id": "remembered"}]
+            }
+    finally:
+        await pool.close_all()

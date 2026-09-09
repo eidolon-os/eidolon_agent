@@ -110,12 +110,13 @@ async def test_discovery_replaces_routes_and_filters_unreachable(monkeypatch):
     assert alice.ops_mcp_url == "http://127.0.0.1:8031/ops/mcp"
     assert alice.bearer_token == "secret"
     assert await routes.route_for("r_benchmark_disabled") is None
-    assert await routes.route_for("r_benchmark_unreachable") is None
+    assert await routes.route_for("r_benchmark_unreachable") is not None
     bob_route, bob_reason = await routes.route_status_for("r_benchmark_disabled")
     charlie_route, charlie_reason = await routes.route_status_for("r_benchmark_unreachable")
     ghost_route, ghost_reason = await routes.route_status_for("r_benchmark_ghost")
     assert bob_route is None and bob_reason == "memory_route_disabled"
-    assert charlie_route is None and charlie_reason == "memory_route_unreachable"
+    assert charlie_route is not None and charlie_reason is None
+    assert charlie_route.reachable is False  # Preserve the health observation.
     assert ghost_route is None and ghost_reason == "no_memory_route"
     assert await routes.endpoint_count() == 1
     assert await routes.memory_space_ids() == ["r_benchmark_default"]

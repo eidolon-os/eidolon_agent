@@ -10,7 +10,7 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 from eidolon_memory_contracts import memory_space_subject_token
@@ -55,7 +55,7 @@ class DiscoveryResponse(BaseModel):
 
     version: int = 2
     generated_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     )
     nats: DiscoveryNats
     memory_realms: list[DiscoveryMemoryRealm] = Field(default_factory=list)
@@ -159,8 +159,10 @@ class MemoryRoutingTable:
                 return None, "no_memory_route"
             if not route.enabled:
                 return None, "memory_route_disabled"
-            if not route.reachable:
-                return None, "memory_route_unreachable"
+            # Discovery owns identity and enablement. Reachability is only a
+            # sampled observation: a failed probe must not revoke this route
+            # until the next refresh. The bounded MCP call measures availability
+            # for this request; health/warmup still use the observation below.
             return route, None
 
     async def endpoint_count(self) -> int:
@@ -284,7 +286,7 @@ class MemoryDiscoveryRefresher:
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self._interval)
                 return
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             await self.refresh_once()
 
