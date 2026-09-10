@@ -20,6 +20,9 @@ class CompanionRuntimeConfig:
     tool_deny: frozenset[str] = frozenset()
     allow_body_control: bool = True
     max_tool_iters: int | None = None
+    # Optional provider-tested cap, not a substitute for reply style. Models
+    # sharing reasoning/output limits must be calibrated before enabling it.
+    max_output_tokens: int | None = None
 
     @classmethod
     def from_authority(cls, raw: object) -> CompanionRuntimeConfig:
@@ -60,7 +63,14 @@ class CompanionRuntimeConfig:
         ):
             raise ValueError("runtime_config.max_tool_iters must be a positive integer")
 
+        output_limit = raw.get("max_output_tokens")
+        if output_limit is not None and (
+            isinstance(output_limit, bool) or not isinstance(output_limit, int) or output_limit < 1
+        ):
+            raise ValueError("runtime_config.max_output_tokens must be a positive integer")
+
         return cls(
+            max_output_tokens=output_limit,
             model=model,
             temperature=temperature,
             tool_allow=tool_allow,

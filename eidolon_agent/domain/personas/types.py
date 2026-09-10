@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Literal
 
-from eidolon_sdk.biz.persona import PersonaEvidenceRef, PersonaGenome
+from eidolon_sdk.biz.persona import ConversationPreferences, PersonaEvidenceRef, PersonaGenome
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -124,6 +124,8 @@ class StoredPersonaGenome(BaseModel):
     version: int = Field(ge=1)
     status: str = "committed"
     genome: PersonaGenome
+    conversation_preferences: ConversationPreferences = Field(default_factory=ConversationPreferences)
+    preference_revision: int = 1
 
 
 class PersonaSnapshot(BaseModel):
@@ -161,6 +163,7 @@ class RealizedPersona(BaseModel):
     spoken_phrases: dict[str, str] = Field(default_factory=dict)
     evidence_refs: tuple[PersonaEvidenceRef, ...] = ()
     debug_trace: tuple[str, ...] = ()
+    stored: StoredPersonaGenome | None = Field(default=None, exclude=True)
 
 
 class PersonaSignalInput(BaseModel):

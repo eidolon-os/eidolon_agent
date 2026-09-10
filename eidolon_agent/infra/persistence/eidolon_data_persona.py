@@ -127,6 +127,8 @@ class RuntimeAuthorityPersonaGenomeStore:
 
 def _stored(facts: CompanionRuntimeFacts) -> StoredPersonaGenome:
     return StoredPersonaGenome(
+        conversation_preferences=facts.runtime_config.get("conversation_preferences", {}),
+        preference_revision=facts.runtime_config.get("preference_revision", 1),
         owner_id=facts.owner_id,
         companion_id=facts.companion_id,
         genome_id=facts.genome_id,

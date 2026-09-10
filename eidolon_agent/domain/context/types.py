@@ -10,6 +10,7 @@ from typing import Any
 class ContextSegmentKind(str, Enum):
     PERSONA = "persona"
     HARNESS_POLICY = "harness_policy"
+    RESPONSE_POLICY = "response_policy"
     # Per-turn persona state (mood/energy + per-turn memory/realtime) split out
     # of PERSONA so the identity prefix stays byte-stable for KV-cache reuse.
     PERSONA_STATE = "persona_state"
@@ -30,6 +31,7 @@ class ContextSegmentKind(str, Enum):
 _SEGMENT_VOLATILITY: dict[ContextSegmentKind, str] = {
     ContextSegmentKind.PERSONA: "stable",
     ContextSegmentKind.HARNESS_POLICY: "stable",
+    ContextSegmentKind.RESPONSE_POLICY: "volatile",
     ContextSegmentKind.PERSONA_STATE: "volatile",
     ContextSegmentKind.HISTORY: "append_only",
     ContextSegmentKind.SUMMARY: "volatile",

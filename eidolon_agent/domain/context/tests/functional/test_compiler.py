@@ -934,6 +934,10 @@ async def test_interrupted_history_is_background_only_with_status_tag() -> None:
 
 
 async def test_budget_keeps_recent_history_before_older_history() -> None:
+    from eidolon_sdk.biz.persona import ConversationPreferences
+
+    from eidolon_agent.domain.context.compiler import _estimate_tokens
+    from eidolon_agent.domain.context.response_policy import response_policy_prompt
     history = HistoryManager()
     await history.append(
         conversation_id="c1",
@@ -959,7 +963,9 @@ async def test_budget_keeps_recent_history_before_older_history() -> None:
         history_manager=history,
         # Leave room for exactly one 32-token history item after the current
         # persona, harness policy, and request segments.
-        context_budget_tokens=304,
+        context_budget_tokens=304 + _estimate_tokens(
+            response_policy_prompt(ConversationPreferences(), modality="text")
+        ),
     )
 
     ti = make_turn_input("now")

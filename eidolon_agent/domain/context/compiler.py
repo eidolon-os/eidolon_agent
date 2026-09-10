@@ -21,6 +21,8 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Protocol
 
+from eidolon_sdk.biz.persona import ConversationPreferences
+
 from eidolon_agent.core.types.memory import (
     ActiveCommitment,
     ActiveCommitmentReadResult,
@@ -30,6 +32,10 @@ from eidolon_agent.core.types.memory import (
 )
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnInput
+from eidolon_agent.domain.context.response_policy import (
+    RESPONSE_POLICY_VERSION,
+    response_policy_prompt,
+)
 from eidolon_agent.domain.context.types import (
     ContextBudget,
     ContextLedger,
@@ -126,6 +132,7 @@ class ContextCompiler:
                 user_text=ti.text or "",
                 realtime=_realtime_dict(ti.realtime),
                 dry_run_memory=[],
+                modality=ti.input_modality,
             ),
         )
         memory_timeout_s = self._memory_timeout_s
@@ -311,6 +318,27 @@ class ContextCompiler:
             "actionability=may_answer_from\n"
             f"{harness_policy}"
         )
+
+        stored = getattr(persona, "stored", None)
+        preferences = stored.conversation_preferences if stored else ConversationPreferences()
+        response_policy = response_policy_prompt(preferences, modality=ti.input_modality)
+        policy_segment = ContextSegment(
+            kind=ContextSegmentKind.RESPONSE_POLICY,
+            content="",
+            source=RESPONSE_POLICY_VERSION,
+            token_estimate=_estimate_tokens(response_policy),
+            droppable=False,
+        )
+        segments.append(policy_segment)
+        system_parts_by_segment[id(policy_segment)] = response_policy
+        ti.metadata["response_policy"] = {
+            "version": RESPONSE_POLICY_VERSION,
+            "modality": ti.input_modality,
+            "preference_revision": stored.preference_revision if stored else 1,
+            "preferences": preferences.model_dump(mode="json"),
+            "genome_id": getattr(persona, "genome_id", genome_id),
+            "realizer_revision": "persona_realizer.v2",
+        }
 
         summary_degraded = isinstance(summary_text, BaseException)
         summary_segment: ContextSegment | None = None

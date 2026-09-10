@@ -306,6 +306,7 @@ class TurnEngine:
                     tools=tools,
                     model=cfg.model,
                     temperature=cfg.temperature,
+                    **({"max_tokens": cfg.max_output_tokens} if cfg.max_output_tokens else {}),
                     request_id=ti.turn_id,
                 ):
                     if delta.activity is not None:
@@ -371,6 +372,8 @@ class TurnEngine:
                     if delta.finish is not None:
                         finish_reason = delta.finish
 
+                if finish_reason is LLMFinishReason.LENGTH:
+                    ti.metadata["output_truncated"] = True
                 if finish_reason is LLMFinishReason.TOOL_CALLS and tool_calls:
                     if tool_iters >= self._max_tool_iters:
                         yield TurnEvent.error(

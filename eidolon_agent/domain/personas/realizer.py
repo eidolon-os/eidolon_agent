@@ -39,6 +39,7 @@ class PersonaRealizer:
             block for block in (runtime_state_block, memory_block, realtime_block) if block
         )
         return RealizedPersona(
+            stored=stored,
             owner_id=stored.owner_id,
             companion_id=stored.companion_id,
             genome_id=stored.genome_id,

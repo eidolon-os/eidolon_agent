@@ -5,6 +5,7 @@ from __future__ import annotations
 from eidolon_sdk.biz.persona import (
     PersonaEvolutionProposalEvent,
     PersonaObservationEvent,
+    validate_persona_evolution,
 )
 
 from eidolon_agent.core.errors import ValidationError
@@ -118,7 +119,7 @@ class PersonasService:
         adds relationship-specific guidance and auditable evidence references;
         it never mutates the stored genome.
         """
-        stored = await self._store.load_pinned(
+        stored = persona.stored or await self._store.load_pinned(
             persona.owner_id,
             persona.companion_id,
             persona.genome_id,
@@ -235,28 +236,10 @@ def _validate_evolution(
     base: StoredPersonaGenome,
     proposal: PersonaEvolutionProposalEvent,
 ) -> None:
-    current = base.genome
-    candidate = proposal.proposed_genome
-    if not proposal.rationale.strip():
-        raise ValidationError("persona evolution proposal requires a rationale")
-    if candidate.constitution != current.constitution:
-        raise ValidationError("memory-driven evolution cannot rewrite the constitution")
-
-    max_delta = current.evolution_policy.max_delta_per_commit
-    for key, before in current.character.traits.items():
-        after = candidate.character.traits.get(key)
-        if after is None:
-            raise ValidationError(f"persona evolution cannot remove trait {key}")
-        if abs(after.value - before.value) > max_delta:
-            raise ValidationError(
-                f"persona trait delta exceeds max_delta_per_commit: {key}"
-            )
-
-    stages = ("new", "familiar", "trusted", "deep")
-    before_stage = stages.index(current.relationship.stage)
-    after_stage = stages.index(candidate.relationship.stage)
-    if after_stage < before_stage or after_stage - before_stage > 1:
-        raise ValidationError("relationship stage evolution must move forward one step at most")
+    try:
+        validate_persona_evolution(base.genome, proposal)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
 
 
 __all__ = ["PersonasService"]

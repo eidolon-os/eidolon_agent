@@ -17,6 +17,33 @@ from tests.helpers import make_turn_input
 pytestmark = pytest.mark.functional
 
 
+@pytest.mark.asyncio
+async def test_provider_cap_and_length_finish_are_observable(turn_engine_factory):
+    from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
+
+    class CappedLLM:
+        seen = []
+
+        async def stream(self, messages, **kwargs):
+            self.seen.append(kwargs)
+            yield LLMDelta(text_delta="部分回答")
+            yield LLMDelta(finish=LLMFinishReason.LENGTH)
+
+    provider = CappedLLM()
+    engine = turn_engine_factory(llm=provider)
+    turn = replace(
+        make_turn_input("详细解释"), runtime_config=CompanionRuntimeConfig(max_output_tokens=512)
+    )
+    events = [event async for event in engine.run(turn)]
+    assert provider.seen[0]["max_tokens"] == 512
+    assert turn.metadata["output_truncated"] is True
+    assert any(event.data.get("text") == "部分回答" for event in events)
+
+    default_turn = make_turn_input("你好")
+    _ = [event async for event in engine.run(default_turn)]
+    assert provider.seen[-1].get("max_tokens") is None
+
+
 def _attach_committed_decision(ti) -> None:
     ti.metadata["turn_decision"] = CommittedTurnDecision.create(
         text=ti.text or "",

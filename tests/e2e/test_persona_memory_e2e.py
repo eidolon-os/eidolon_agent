@@ -212,7 +212,8 @@ async def test_observation_proposal_approval_session_pin_reject_and_rollback(per
         companion_id=workspace.companion.companion_id,
         genome_id=base.stored.genome_id,
     )
-    assert rolled_back.genome_id == base.stored.genome_id
+    assert rolled_back.genome_id not in {base.stored.genome_id, committed.genome_id}
+    assert rolled_back.genome.character == base.stored.genome.character
 
     event_types = {event.action for event in await store.audit_outbox.list_pending(limit=100)}
     assert {
