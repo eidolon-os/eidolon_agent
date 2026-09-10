@@ -377,6 +377,7 @@ async def build_application(
 
     http_app = build_http_app(readiness=lambda: True)
     admin_app = build_admin_app(
+        llm_router=container.llm_router,
         settings=settings,
         agent_registry=agent_registry,
         personas_service=personas_service,

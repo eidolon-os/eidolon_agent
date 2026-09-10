@@ -1,15 +1,15 @@
 # Companion / Persona 执行记录
 
-日期：2026-09-10。范围：SDK、Data、Admin、Agent、Mobile 的本地工作区，以及已配置模型的合成场景验证。已按仓库分别提交；未推送、未部署、未修改用户数据库。Mobile 原有设备路由评审文档改动保留。
+日期：2026-09-10。范围：SDK、Data、Admin、Agent、Mobile 的本地工作区，以及已配置模型的合成场景验证。本轮已按精简范围完成并分别提交；未推送、未部署、未修改用户数据库。Mobile 原有设备路由评审文档改动保留。
 
 ## 提交记录
 
 | 仓库 | 提交 |
 |---|---|
-| SDK | `23ad317` |
-| Data | `40bf867` |
-| Admin | `470cdb8` |
-| Mobile | `a832cac` |
+| SDK | `2239fd3`（此前 `23ad317`） |
+| Data | `3bb4ed2`（此前 `40bf867`） |
+| Admin | `3e9d2b2`（此前 `470cdb8`） |
+| Mobile | `c3581ae`（此前 `a832cac`） |
 | Agent | 本执行记录与 Agent 实现同次提交 |
 
 其他任务的架构分析文档、Mobile 设备路由评审改动未纳入这些提交。
@@ -21,10 +21,10 @@
 - **回复偏好独立存储**：`conversation_preferences` / `preference_revision` 位于 Companion 的 `runtime_config_json`，不是 genome。可选简短/适中/详细、主动建议、主动延伸话题。创建时与 Companion、初始 genome 同事务保存。
 - **每轮策略**：首次人格实现传入正确媒介；每轮固定一次偏好快照；新增 `response_policy.v2` 易变段，稳定人格和 Harness 前缀不变。明确要求详细时完整回答；不默认附加建议和追问。
 - **输出预算**：支持可选 `max_output_tokens`，默认不限制。`finish_reason=length` 标记 `output_truncated`，保留已有输出；未设置全局低 token 限制，也未增加二次 LLM 压缩或 TTS 截断。
-- **改名和恢复**：改名在同一事务更新 Companion 名字并追加同名 genome；restore、rollback、reset 都使用追加版本语义。恢复保留当前名字、pinned facts 和 owner preferences；历史显示被恢复版本，lineage 指向恢复前当前版本。
+- **改名和恢复**：改名在同一事务更新 Companion 名字并追加同名 genome；restore、rollback、reset 都使用追加版本语义。恢复保留当前名字和独立存储的回复偏好；改名和恢复通过同一个双版本、操作 ID 写入协议；历史显示被恢复版本，lineage 指向恢复前当前版本。
 - **Data 命令边界**：写入由 `PersonaService` 承担；Repository 保留读取；旧读写 API 由服务层兼容门面组合，未引入 Repository → Service 反向依赖。
 - **演化保护**：SDK 提供共享校验，Data 在提议与批准时再次执行。检查 enabled、证据、身份/关系保护、策略不被反思改写、trait 集合与变化幅度、关系阶段变化、当前 base。批准不能通过省略 expected base 绕过陈旧检查。
-- **Mobile**：名字/起点/一句话画像 → 确认与回复偏好，两步创建；详细字段折叠。Data 提供三个带 revision 的起点和静态对话示例，明确示例不反映自定义修改。创建提交实际起点内容；编辑冲突保留草稿，读取最新内容后显示冲突，用户检查后再保存。
+- **Mobile**：名字/起点/一句话画像 → 确认与回复偏好，两步创建；详细字段折叠。Data 提供三个带 revision 的起点和静态对话示例，明确示例不反映自定义修改。创建提交实际起点内容；创建与编辑支持真实模型独立试聊，旧预览随草稿修改失效；编辑冲突保留草稿，读取最新内容后显示冲突，用户检查后再保存。
 
 ## 当前字段归属和生效点
 
@@ -34,7 +34,7 @@
 | 性格、语气、价值观 | 不可变 genome / Data persona commands | Agent Realizer | 下次对话；旧会话继续 pin |
 | 回复详略、建议、追问 | Companion runtime config / Data edit command | 每轮 pinned genome 读取时一并取当前偏好 | 下一轮开始；不改变正在流式输出的一轮 |
 | 情绪、精力等短期状态 | Agent 进程运行态 | Realizer volatile context | 按现有衰减和更新机制 |
-| 旧 pinned facts、owner preferences、关系约定 | 当前仍在 genome | 原 Realizer / Memory adapter | 尚未迁移；恢复人格不会复活旧 facts/preferences |
+| 用户事实、具体承诺 | 现有 Memory / ActiveCommitment | Memory adapter / 执行链路 | genome 与表单已删除 commitments、pinned_facts、owner_preferences；不迁移旧数据 |
 | trait 数值 | genome | 校验、诊断；不新增数值→prompt 映射 | 不宣称数值变化自动产生人格成长 |
 | 工具权限 | 既有 Harness / runtime policy | TurnEngine | 原有权限边界；persona prose 不授予权限 |
 
@@ -45,6 +45,8 @@
 ```json
 {
   "genome_id": "g_current",
+  "display_name": "小南",
+  "companion_revision": 2,
   "persona": {"voice_portrait": "温暖、清晰"},
   "preferences": {"response_length": "brief", "advice": "when_asked", "follow_up": "when_needed"},
   "preference_revision": 1
@@ -65,7 +67,11 @@
 
 `preferences` 可以省略，`persona` 可以为空对象。请求必须携带两个读取到的版本，不允许服务端替陈旧客户端猜测。Admin 各层转发时保留字段是否省略的语义。新增 `GET /persona-presets`；原 template 接口保留。
 
-OpenAPI、Dart、TypeScript 契约已重新生成并验证。**这是编辑接口的破坏性升级，SDK / Data / Admin / Mobile 必须协调发布**；旧客户端不能继续按旧的裸 authoring 请求保存。无 schema migration，新字段使用现有 JSON 存储；旧 Companion 未配置偏好时使用明确的简短默认值，原 genome 不被批量改写。
+同一 PUT 请求支持 `action=edit|rename|restore`。改名提交 `display_name`，恢复提交 `restore_genome_id`，两者 persona 为 `{}`，不能夹带其他编辑。旧的裸改名、恢复 HTTP 入口返回 410，停止写入。恢复历史只追加新版本，当前名字和回复偏好不回退。
+
+`POST /persona-preview` 接收当前 name/persona/preferences/text。编辑已有伙伴时携带 companion_id/base_genome_id；Agent 按已认证 Owner 读取完整 base 并检查版本，叠加草稿。创建草稿使用默认完整 genome。两者都使用生产 Compiler/Realizer/Harness，不创建 Companion、运行状态、历史或记忆，不执行工具；返回 draft_digest、回复和截断标记。每次独立单轮，30 秒生成超时，试聊不可用仍可保存。
+
+OpenAPI、Dart、TypeScript 契约已重新生成并验证。**这是编辑接口的破坏性升级，SDK / Data / Admin / Mobile 必须协调发布**；旧客户端不能继续按旧的裸 authoring 请求保存。按用户最新指示，不做旧数据迁移；直接删除旧字段与旧读取，移除迁移审查脚本。含旧字段的 genome 不再符合新合同，没有兼容转换；本轮没有清理实际数据库。
 
 ## 实际模型验证
 
@@ -96,21 +102,23 @@ OpenAPI、Dart、TypeScript 契约已重新生成并验证。**这是编辑接�
 
 ## 验证
 
-- Data 自己的虚拟环境全量测试：199 passed。此前借用 Agent 环境全量跑时触发事件循环 ResourceWarning；Data 本地环境最终全量通过。
-- Agent Persona / Compiler / Turn / E2E / benchmark 定向回归：97 passed。
-- Admin 管理、创建、权限与 persona 定向回归：93 passed。全量首轮其余 853 条通过、5 跳过；3 条旧 persona fixture 已迁移并包含在最终定向回归中。
-- SDK 既有 persona 构建/投影测试：10 passed。
-- Mobile 创建、人格编辑、请求契约、对话入口及三模式：67 passed；`flutter analyze --no-pub` 无问题。
+- Data 本地虚拟环境全量：199 passed。
+- Agent Persona / Compiler / Admin / E2E 定向回归：141 passed，包含版本化改名/恢复、旧操作延迟重试、双版本冲突和预览鉴权。
+- Admin 最终全量：859 passed、5 skipped；管理接口定向回归 99 passed。
+- SDK persona：11 passed；相关 Dart 合同检查重跑 21 passed。完整 SDK 初轮有 411 项通过，另 3 项因沙箱阻止 Flutter 缓存更新失败；三项均在权限允许的重跑中通过。
+- Mobile 全量：996 passed、5 skipped；新增草稿预览 2 项通过，验证草稿变更后丢弃迟到回答、输入修改后清空结果、失败允许重试。最终静态分析无问题。
 - Admin Web 类型检查与生产构建通过；OpenAPI、Dart、TypeScript 生成一致性检查通过。
-- Data 依赖方向测试通过。Agent import-linter 仍有既存 `domain.agent.companion → infra.observability` 违规，已核对 HEAD 中存在，本次没有新增该依赖。
-- 新增临时 SQLite 测试验证隐藏字段、旧快照不可变、并发 CAS、延迟重试、同 ID 不同请求、偏好冲突、改名/恢复、创建偏好同事务及四种 Memory 分支下的 voice 规则。
+- 修改文件的 Ruff 与 git diff whitespace 检查通过。Agent 已有的 import-linter `domain.agent.companion → infra.observability` 违规不在本次修改范围。
 
-## 尚未关闭的计划条件
+新增真实模型试聊使用三个起点 × 两个合成问题：全部 6 次正常结束，无 length 截断。普通情绪回应分别为 24、12、17 字符；明确请求详细解释时分别为 718、704、660 字符。这里只验证表达长度和链路可用性，不作为知识事实准确性或音频性能评分。结果见 [试聊记录](./persona-preview-smoke.jsonl)。
 
-1. **真实 Memory 迁移与停止双读**：未把旧事实直接提升为 Owner 共享记忆，也未把关系约定自动变成任务。提供 [只读迁移审查工具](../../scripts/audit_persona_legacy_fields.py)，对导出的 genome 标记原始路径、内容摘要、Companion audience、待确认冲突；不执行写入。正式迁移必须先读取目标 Memory、审查范围与冲突并核对回读，再移除旧读取。
-2. **全部命令统一并发/重试协议**：author/edit 已有完整双版本与持久回执。restore/rollback/reset 已统一追加语义和事务；恢复、改名的对外 API 尚未全部携带等价的 expected base / operation ID，不能把所有命令的晚到重试保证一并宣称完成。
-3. **设备与长期质量**：还需真实 Companion、不同起点、10 轮连续对话、Memory 健康/降级、三种通话模式、取消恢复与 TTS 跨批实测。首音 6 秒、Channel 实验 30 秒、Local TTS 单批 60 字符保持原有定义，未以文字模型结果替代验收。
-4. **动态隔离试聊**：首版采用计划允许的静态示例；未来动态预览仍需同一 Realizer/Harness、草稿 digest 和无工具/记忆写入保障。
-5. **生产自动演化**：没有新增自动批准或跨进程成长消费者。权威保护已补，但长期一致性、用户审阅/撤回和真实证据闭环尚未完成，不向产品宣称自动成长已启用。
+## 本轮范围收尾
 
-这些项目保留在原计划的后续退出条件中；本记录不等于四批全部验收完成。
+用户明确不迁移旧数据、直接修改、不要过度设计。据此调整原计划：
+
+- 取消旧数据迁移与兼容层，直接收敛字段归属，删除审查脚本。
+- 完成对外编辑、改名、恢复的统一 CAS 与持久回执；Mobile 重试保留原操作 ID，冲突不自动覆盖。
+- 完成真实模型草稿试聊；不引入独立预览存储或第二套 prompt。
+- 自动演化默认 `auto_apply_low_risk=false`，保留现有提议/审批校验。本轮不增加自动成长消费者，不将其列为当前上线所需功能。未来若启用，仍须独立验证证据、长期一致性和撤回能力。
+
+本轮代码范围已收敛。部署和真机语音验收仍未执行；三种通话模式、Memory 健康/降级、连续 10 轮与 TTS 播放的实际表现不能用单轮文本模型试聊替代。既有首音 6 秒、Channel 等待 30 秒、Local TTS 单批 60 字符指标没有因本轮而改变。

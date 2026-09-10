@@ -43,6 +43,10 @@ class PersonasService:
     async def stop(self) -> None:
         return None
 
+    async def get_preview_base(self, *, owner_id: str, companion_id: str):
+        """Read the standing genome without creating runtime state or memory."""
+        return await self._store.load_current(owner_id, companion_id)
+
     async def get_snapshot(
         self,
         *,

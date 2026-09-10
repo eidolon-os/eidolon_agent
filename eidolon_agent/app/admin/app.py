@@ -22,6 +22,7 @@ from eidolon_agent.app.admin.routers import (
     conversations,
     long_tasks,
     owner_runtime,
+    persona_preview,
     reports,
 )
 from eidolon_agent.config.settings import Settings
@@ -39,6 +40,7 @@ def build_admin_app(
     memory_routes=None,
     memory_discovery_refresher=None,
     live_turns=None,
+    llm_router=None,
 ) -> FastAPI:
     app = FastAPI(
         title="eidolon-agent admin",
@@ -57,6 +59,7 @@ def build_admin_app(
     app.state.settings = settings
     app.state.agent_registry = agent_registry
     app.state.personas_service = personas_service
+    app.state.llm_router = llm_router
     # Phase 33.B1: expose the DEVICE_REVOCATIONS KV so the admin
     # /users/{id}/revoke-sessions route can write user-level
     # revocation keys. Verifier reads via its own ``revocation_kv``
@@ -81,6 +84,7 @@ def build_admin_app(
         tags=["owner-runtime"],
     )
     app.include_router(chat_test.router, prefix="/api/admin", tags=["chat-test"])
+    app.include_router(persona_preview.router, prefix="/api/admin", tags=["persona-preview"])
     app.include_router(conversations.router, prefix="/api/admin", tags=["conversations"])
     app.include_router(long_tasks.router, prefix="/api/admin", tags=["long-tasks"])
     app.include_router(reports.router, prefix="/api/admin", tags=["reports"])

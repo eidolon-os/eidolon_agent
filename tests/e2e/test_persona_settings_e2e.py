@@ -32,7 +32,6 @@ async def settings_stack(tmp_path):
     await store.owner_commands.create_owner(owner_id="owner-e2e")
     genome = build_default_persona_genome(name="Original")
     genome.relationship.stage = "trusted"
-    genome.relationship.owner_preferences = {"test": "keep"}
     genome.character.tensions = ["keep tension"]
     genome.expression.signature_phrases = {"test": "keep phrase"}
     genome.expression.modality_notes = {"voice": "VOICE_ONLY", "text": "TEXT_ONLY"}
@@ -122,19 +121,93 @@ async def test_noop_receipt_survives_later_edits(settings_stack):
     assert await store.persona_commands.edit(companion_id="companion-e2e", request=request) == first
 
 
-async def test_rename_and_restore_preserve_current_name_and_facts(settings_stack):
+async def test_versioned_rename_restore_and_lost_response_replay(settings_stack):
+    store, _, _ = settings_stack
+    before = await store.persona_commands.read_edit_snapshot("companion-e2e")
+    rename = PersonaEditRequest(
+        **{
+            **edit(before, "rename").model_dump(exclude_unset=True),
+            "action": "rename",
+            "display_name": "New Name",
+        }
+    )
+    named = await store.persona_commands.edit(companion_id="companion-e2e", request=rename)
+    assert named.display_name == "New Name"
+    assert named.companion_revision == before.companion_revision + 1
+    with pytest.raises(PersonaGenomeConflict, match="changed"):
+        await store.persona_commands.edit(
+            companion_id="companion-e2e", request=edit(before, "stale", voice_portrait="stale")
+        )
+    modified = await store.persona_commands.edit(
+        companion_id="companion-e2e",
+        request=PersonaEditRequest(
+            **{
+                **edit(named, "changed", voice_portrait="New voice").model_dump(exclude_unset=True),
+                "preferences": ConversationPreferences(response_length="detailed"),
+            }
+        ),
+    )
+    restore = PersonaEditRequest(
+        **{
+            **edit(modified, "restore").model_dump(exclude_unset=True),
+            "action": "restore",
+            "restore_genome_id": before.genome_id,
+        }
+    )
+    restored = await store.persona_commands.edit(companion_id="companion-e2e", request=restore)
+    assert restored.display_name == "New Name"
+    assert restored.persona == before.persona
+    assert restored.preferences.response_length == "detailed"
+    assert restored.genome_id not in {before.genome_id, modified.genome_id}
+    assert await store.persona_commands.edit(companion_id="companion-e2e", request=rename) == named
+    assert (
+        await store.persona_commands.edit(companion_id="companion-e2e", request=restore) == restored
+    )
+    assert (
+        await store.persona_genomes.get_current("companion-e2e")
+    ).genome_id == restored.genome_id
+
+
+@pytest.mark.parametrize("action", ["rename", "restore"])
+async def test_actions_reject_stale_preferences(settings_stack, action):
+    store, _, _ = settings_stack
+    before = await store.persona_commands.read_edit_snapshot("companion-e2e")
+    await store.persona_commands.edit(
+        companion_id="companion-e2e",
+        request=PersonaEditRequest(
+            **{
+                **edit(before, "prefs").model_dump(exclude_unset=True),
+                "preferences": ConversationPreferences(response_length="detailed"),
+            }
+        ),
+    )
+    request = PersonaEditRequest(
+        **{
+            **edit(before, action).model_dump(exclude_unset=True),
+            "action": action,
+            **(
+                {"display_name": "Other"}
+                if action == "rename"
+                else {"restore_genome_id": before.genome_id}
+            ),
+        }
+    )
+    with pytest.raises(PersonaGenomeConflict, match="preferences changed"):
+        await store.persona_commands.edit(companion_id="companion-e2e", request=request)
+
+
+async def test_rename_and_restore_preserve_current_name(settings_stack):
     store, _, _ = settings_stack
     await store.companions.rename("companion-e2e", "New Name")
     base = await store.persona_commands.read_edit_snapshot("companion-e2e")
     changed = await store.persona_commands.edit(
-        companion_id="companion-e2e", request=edit(base, "forget", pinned_facts=[])
+        companion_id="companion-e2e", request=edit(base, "voice", voice_portrait="Changed")
     )
     restored = await store.persona_commands.restore_chapter(
         companion_id="companion-e2e", genome_id="origin"
     )
     saved = normalize_persona_genome(restored.genome_json)
     assert saved.constitution.name == "New Name"
-    assert saved.relationship.pinned_facts == []
     assert restored.genome_id not in {"origin", changed.genome_id}
     assert restored.base_genome_id == changed.genome_id
     assert restored.source_json["restored_from"] == "origin"

@@ -112,17 +112,6 @@ def _relationship_block(genome: PersonaGenome) -> str:
     lines = [f"你与 owner 的关系阶段：{relationship.stage}"]
     if relationship.narrative:
         lines.append("你们的关系：" + relationship.narrative)
-    if relationship.commitments:
-        lines.append("你对这段关系的承诺：")
-        lines.extend(f"- {item}" for item in relationship.commitments)
-    if relationship.pinned_facts:
-        lines.append("owner 已确认且需要保持连续性的事实：")
-        lines.extend(f"- {item}" for item in relationship.pinned_facts)
-    if relationship.owner_preferences:
-        lines.append("owner 明确表达的偏好：")
-        lines.extend(
-            f"- {key}: {value}" for key, value in relationship.owner_preferences.items()
-        )
     if relationship.safety_boundaries:
         lines.append("这段关系的安全边界：")
         lines.extend(f"- {item}" for item in relationship.safety_boundaries)
