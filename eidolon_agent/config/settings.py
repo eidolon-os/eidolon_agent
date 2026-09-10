@@ -309,10 +309,12 @@ class TurnSettings(BaseModel):
     slow_tool_hint_delay_ms: int = 1500
     first_delta_slo_p50_ms: int = 200
     first_delta_slo_p95_ms: int = 300
-    history_context_window: int = 4
+    # Message count, not turn count: retain up to ten recent exchanges before
+    # the existing token budget trims history. Recall may legitimately be empty.
+    history_context_window: int = 20
     # Widened recent-conversation window used when long-term memory recall
     # degrades, so a long chat doesn't go amnesiac when memory is unavailable.
-    degraded_history_context_window: int = 12
+    degraded_history_context_window: int = 20
     max_tool_iters: int = 4
     max_token_budget: int = 6000
     tool_schema_budget_tokens: int = 800

@@ -33,7 +33,7 @@ def test_default_budget_is_realtime_safe() -> None:
 
     assert budget.memory_timeout_ms == 200
     assert budget.history_timeout_ms == 50
-    assert budget.history_window == 4
+    assert budget.history_window == 20
     assert budget.first_delta_budget_ms == 300
     assert budget.tool_schema_budget_tokens == 800
     assert budget.output_reserve_tokens == 500

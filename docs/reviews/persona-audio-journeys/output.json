@@ -1,0 +1,51 @@
+{
+  "stt": "bailian",
+  "tts": "bailian",
+  "results": [
+    {
+      "case": "reply-emotion",
+      "text": "嗯，听着呢。累了就说，不用顾虑什么。",
+      "tts_path": "sdk_filtered_stream",
+      "transcript": "嗯，听着呢。累了就说。不用顾虑什么。",
+      "wav": "/Users/manson/ai/eidolon/eidolon_agent/docs/reviews/persona-audio-journeys/reply-emotion.wav",
+      "tts_first_frame_ms": 434,
+      "round_trip_ms": 3837,
+      "audio_ms": 4640,
+      "frames": 27,
+      "recognition_scope": "full",
+      "similarity": 1.0,
+      "tail_match": 1.0,
+      "nonempty": true
+    },
+    {
+      "case": "reply-detail",
+      "text": "准备自我介绍，可以分三步走。\n\n**第一步：先定\"你要对方记住你哪一点\"。**\n不要想着把自己全讲一遍，先选一个核心定位——你最想让对方带走的那句话。后面所有内容都围绕它服务。\n例子：如果应聘的是运营岗，你定的核心是\"我能把冷启动项目从 0 做到有留存\"。那自我介绍里所有经历都往\"从零搭建、看数据、做留存\"上靠，其他不相关的经历就略过。\n\n**第二步：用\"现在—过去—为什么是这里\"的结构搭骨架。**\n现在：你是谁、当前在做什么（一两句）。过去：一段最能支撑你定位的经历，讲清情境、你做了什么、结果如何。为什么是这里：说明你为什么来面这个岗位/加入这个团队，把定位和对方的需求接上。\n例子：\n- 现在：\"我是做用户增长的，目前在一家做工具类 App 的公司负责拉新和留存。\"\n- 过去：\"去年我接手一个几乎没自然流量的新功能，从零搭了内容渠道，三个月把日活从 200 做到 3000，次月留存稳定在 40%。\"\n- 为什么是这里：\"我看到你们这个岗位要的是能独立跑通冷启动的人，这正好是我过去一年在做的事。\"\n\n**第三步：写出来、掐时间、练到能自然说出口。**\n先写成文字稿，控制在 1 分半到 2 分钟（大概 250–350 字），然后删掉所有\"其实、就是、然后\"这类填充词。练的时候不要背逐字稿，记住每段的\"关键词锚点\"，用口语讲出来，录音回听一遍，改掉卡壳和啰嗦的地方。\n例子：稿子写完后你录一遍，发现自己开头绕了 20 秒才进正题——那就把开头砍到两句，直接说\"我是做用户增长的\"，把省下的时间留给那段最有说服力的经历。\n\n一句话收尾：定位决定你讲什么，结构决定你怎么讲，练习决定你讲得顺不顺。",
+      "tts_path": "sdk_filtered_stream",
+      "transcript": "直接说我是做用户增长的，把省下的时间留给那段最有说服力的经历。一句话收尾。定位决定你讲什么。结构决定你怎么讲。练习决定你讲得顺不顺。",
+      "wav": "/Users/manson/ai/eidolon/eidolon_agent/docs/reviews/persona-audio-journeys/reply-detail.wav",
+      "tts_first_frame_ms": 419,
+      "round_trip_ms": 55008,
+      "audio_ms": 141710,
+      "frames": 713,
+      "recognition_scope": "last_15_seconds",
+      "similarity": null,
+      "tail_match": 1.0,
+      "nonempty": true
+    },
+    {
+      "case": "reply-task",
+      "text": "今晚实在去不了了，临时有点事走不开，抱歉啊。你们吃好喝好，下次我请。",
+      "tts_path": "sdk_filtered_stream",
+      "transcript": "今晚实在去不了了。啊，没。临时有点事走不开。抱歉啊，你们吃好喝好。下次我请。",
+      "wav": "/Users/manson/ai/eidolon/eidolon_agent/docs/reviews/persona-audio-journeys/reply-task.wav",
+      "tts_first_frame_ms": 494,
+      "round_trip_ms": 5701,
+      "audio_ms": 8850,
+      "frames": 48,
+      "recognition_scope": "full",
+      "similarity": 0.967,
+      "tail_match": 1.0,
+      "nonempty": true
+    }
+  ]
+}

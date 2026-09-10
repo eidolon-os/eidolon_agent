@@ -1,0 +1,45 @@
+{
+  "stt": "bailian",
+  "tts": "bailian",
+  "results": [
+    {
+      "case": "reply-emotion",
+      "text": "嗯，听着呢。累了就说出来，不用整理成什么样子。",
+      "transcript": "嗯，听着呢。累了就说出来。不用整理成什么样子。",
+      "wav": "/Users/manson/ai/eidolon/eidolon_agent/docs/reviews/persona-audio-journeys/reply-emotion.wav",
+      "tts_first_frame_ms": 358,
+      "round_trip_ms": 9668,
+      "audio_ms": 4950,
+      "frames": 33,
+      "similarity": 1.0,
+      "tail_match": 1.0,
+      "nonempty": true
+    },
+    {
+      "case": "reply-detail",
+      "text": "准备自我介绍，可以分三步走。\n\n**第一步：先定结构，别急着写词。**\n把内容压成三段：现在是谁、过去做过什么、为什么来这里。结构定了，词就好填。\n例：面试运营岗，先写「我是做用户增长的，做了三年，现在想专注在内容运营方向」——一句话把身份、年限、方向都框住。\n\n**第二步：用具体事例替换形容词。**\n把「我很有责任心」这类话，换成一件你亲手做过的事，讲清情境、你做了什么、结果如何。\n例：不说「我擅长拉新」，而说「上一份工作我负责一个冷启动项目，三个月把日活从 0 做到 8000，主要靠社群裂变」。\n\n**第三步：控时并练到自然。**\n写成 60–90 秒的口语稿，读出来计时，删掉绕口和多余的句子，练到能脱稿说、不背稿。\n例：录一遍自己的音频，听到「然后、就是」这类口头禅就删掉，反复两三遍，直到听起来像在聊天而不是背诵。\n\n三步的顺序别颠倒：先搭骨架，再填血肉，最后打磨节奏。",
+      "transcript": "准备自我介绍，可以分三步走。第一步，先定结构。别急着写词。把内容压成三段。现在是谁，过去做过什么。为什么来这里？结构定了，词就好填。面试运营岗，先写我是做用户增长的。做了三年，现在想专注在内容运营方向。一句话把身份、年限、方向都框住。第二步。用具体示例替换形容词。把我很有责任心这类话。换成一件你亲手做过的事。讲清情境，你。",
+      "wav": "/Users/manson/ai/eidolon/eidolon_agent/docs/reviews/persona-audio-journeys/reply-detail.wav",
+      "tts_first_frame_ms": 572,
+      "round_trip_ms": 33806,
+      "audio_ms": 33054,
+      "frames": 174,
+      "similarity": 0.623,
+      "tail_match": 0.056,
+      "nonempty": true
+    },
+    {
+      "case": "reply-task",
+      "text": "今晚实在抱歉，临时有事去不了了，你们好好聚，下次我请。",
+      "transcript": "今晚实在抱歉，临时有事去不了了。你们好好聚。下次我请。",
+      "wav": "/Users/manson/ai/eidolon/eidolon_agent/docs/reviews/persona-audio-journeys/reply-task.wav",
+      "tts_first_frame_ms": 612,
+      "round_trip_ms": 5473,
+      "audio_ms": 5250,
+      "frames": 35,
+      "similarity": 1.0,
+      "tail_match": 1.0,
+      "nonempty": true
+    }
+  ]
+}

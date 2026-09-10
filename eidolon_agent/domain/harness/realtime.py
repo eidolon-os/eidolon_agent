@@ -15,7 +15,7 @@ HARNESS_POLICY_SOURCE = "realtime_agent_harness"
 class HarnessBudget:
     memory_timeout_ms: int = 200
     history_timeout_ms: int = 50
-    history_window: int = 4
+    history_window: int = 20
     max_tool_iters: int = 4
     first_delta_budget_ms: int = 300
     message_budget_tokens: int = 1800

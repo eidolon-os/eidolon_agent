@@ -1,0 +1,32 @@
+{
+  "stt": "bailian",
+  "tts": "bailian",
+  "results": [
+    {
+      "case": "speech-emotion",
+      "text": "今天工作有点累，我只是想说说，不需要建议。",
+      "transcript": "今天工作有点累。我只是想说说。不需要建议。",
+      "wav": "/Users/manson/ai/eidolon/eidolon_agent/docs/reviews/persona-audio-journeys/speech-emotion.wav",
+      "tts_first_frame_ms": 370,
+      "round_trip_ms": 4188,
+      "audio_ms": 4850,
+      "frames": 33,
+      "similarity": 1.0,
+      "tail_match": 1.0,
+      "nonempty": true
+    },
+    {
+      "case": "speech-detail",
+      "text": "请详细解释怎么准备自我介绍，分三个步骤，每步给一个例子。",
+      "transcript": "请详细解释怎么准备自我介绍。分三个步骤。每步给一个例子。",
+      "wav": "/Users/manson/ai/eidolon/eidolon_agent/docs/reviews/persona-audio-journeys/speech-detail.wav",
+      "tts_first_frame_ms": 456,
+      "round_trip_ms": 9796,
+      "audio_ms": 6130,
+      "frames": 39,
+      "similarity": 1.0,
+      "tail_match": 1.0,
+      "nonempty": true
+    }
+  ]
+}
