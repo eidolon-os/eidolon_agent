@@ -10,7 +10,10 @@ conversation while it is happening, and there are exactly two places that could
 know: inside the 640-line engine method, at five separate call sites that would
 drift apart, or once around the stream every transport already consumes. The
 second one cannot miss a turn and cannot change one — see
-:mod:`eidolon_agent.infra.observability.live_turns`.
+:mod:`eidolon_agent.infra.observability.live_turns`, which is what a Host
+supplies for the :class:`~eidolon_agent.domain.agent.ports.LiveTurnObserver`
+port below. Named as a port rather than imported: a turn's single entry point
+must not have a telemetry component on its import path.
 """
 
 from __future__ import annotations
@@ -18,8 +21,8 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from eidolon_agent.core.types.turn import TurnEvent, TurnInput
+from eidolon_agent.domain.agent.ports import LiveTurnObserver
 from eidolon_agent.domain.agent.turn import TurnEngine
-from eidolon_agent.infra.observability import LiveTurnBoard
 
 
 class CompanionAgent:
@@ -28,7 +31,7 @@ class CompanionAgent:
         *,
         companion_id: str,
         turn_engine: TurnEngine,
-        live_turns: LiveTurnBoard | None = None,
+        live_turns: LiveTurnObserver | None = None,
     ) -> None:
         self.companion_id = companion_id
         self._engine = turn_engine
