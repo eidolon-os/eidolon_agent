@@ -394,7 +394,7 @@ source = { editable = "../eidolon_data" }
 dependencies = [
     { name = "aiosqlite" },
     { name = "alembic" },
-    { name = "eidolon-sdk" },
+    { name = "eidolon-sdk", extra = ["audit"] },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
@@ -405,7 +405,7 @@ dependencies = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20" },
     { name = "alembic", specifier = ">=1.13" },
-    { name = "eidolon-sdk", editable = "../eidolon_sdk" },
+    { name = "eidolon-sdk", extras = ["audit"], editable = "../eidolon_sdk" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.110" },
     { name = "fastapi", marker = "extra == 'dev'", specifier = ">=0.110" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
@@ -457,6 +457,11 @@ dependencies = [
     { name = "sqlalchemy", extra = ["asyncio"] },
 ]
 
+[package.optional-dependencies]
+audit = [
+    { name = "nats-py" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20" },
@@ -474,6 +479,7 @@ requires-dist = [
     { name = "livekit-api", specifier = ">=0.5" },
     { name = "livekit-api", marker = "extra == 'livekit'", specifier = ">=0.5" },
     { name = "nats-py", marker = "extra == 'audit'", specifier = ">=2.9" },
+    { name = "nats-py", marker = "extra == 'dev'", specifier = ">=2.9" },
     { name = "protobuf", specifier = ">=4.25" },
     { name = "protobuf", marker = "extra == 'grpc'", specifier = ">=4.25" },
     { name = "pydantic", specifier = ">=2.8" },
