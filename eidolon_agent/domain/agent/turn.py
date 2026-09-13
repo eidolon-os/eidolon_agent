@@ -648,7 +648,6 @@ class TurnEngine:
                     input_modality=ti.input_modality,
                     model=getattr(self._llm, "model_id", None),
                     trace_id=ti.context.trace_id,
-                    control_intent=ti.metadata.get("control_intent"),
                     termination_cause=ti.metadata.get("termination_cause"),
                     latency=LatencyBreakdown(
                         guard_ms=_duration(ts_guard_ms, None),

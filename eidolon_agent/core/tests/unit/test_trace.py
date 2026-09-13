@@ -35,8 +35,7 @@ def test_turn_trace_metadata_shape_is_prompt_safe() -> None:
         tool_trace=[ToolTrace(call_id="tc1", name="delegate_to_coworker", ok=True, latency_ms=2)],
         persona=PersonaTrace(companion_id="inst", genome_id="tpl"),
         trace_id="trace-abc",
-        control_intent="hard_stop",
-        termination_cause="user_stop",
+        termination_cause="client_cancel",
         usage={"tokens_in": 10, "tokens_out": 5},
     ).to_metadata()
 
@@ -44,8 +43,7 @@ def test_turn_trace_metadata_shape_is_prompt_safe() -> None:
     assert trace["boundary"] == "eidolon_agent.brain"
     assert trace["turn"]["turn_id"] == "t1"
     assert trace["turn"]["trace_id"] == "trace-abc"
-    assert trace["turn"]["control_intent"] == "hard_stop"
-    assert trace["turn"]["termination_cause"] == "user_stop"
+    assert trace["turn"]["termination_cause"] == "client_cancel"
     assert trace["latency"]["compile_ms"] == 20
     assert trace["memory_trace"]["hit_ids"] == ["m1"]
     assert trace["commitment_context_trace"]["commitment_ids"] == ["commitment-1"]
@@ -54,7 +52,7 @@ def test_turn_trace_metadata_shape_is_prompt_safe() -> None:
     assert "prompt" not in str(trace).lower()
 
 
-def test_turn_trace_control_fields_default_none() -> None:
+def test_turn_trace_termination_cause_defaults_none() -> None:
     trace = TurnTrace(
         turn_id="t1",
         conversation_id="c1",
@@ -65,5 +63,4 @@ def test_turn_trace_control_fields_default_none() -> None:
         model="fake",
         latency=LatencyBreakdown(),
     ).to_metadata()
-    assert trace["turn"]["control_intent"] is None
     assert trace["turn"]["termination_cause"] is None

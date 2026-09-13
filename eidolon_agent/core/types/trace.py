@@ -116,9 +116,9 @@ class TurnTrace:
     # Cross-hop correlation id (channel->agent->memory). Persisted in the turn
     # trace so a turn can be joined to its channel origin and memory ingestion.
     trace_id: str | None = None
-    # Reflex-layer control classification (P0-A) + why the turn ended, so a
-    # STOP short-circuit or topic switch is observable end to end.
-    control_intent: str | None = None
+    # Why the turn ended, so a cancel is observable end to end. There is no
+    # agent-side control classification to record: the channel owns the
+    # interruption verdict and this side only validates its typed commitment.
     termination_cause: str | None = None
     context_ledger: dict[str, Any] | None = None
     memory_trace: dict[str, Any] | None = None
@@ -154,7 +154,6 @@ class TurnTrace:
                 "input_modality": self.input_modality,
                 "model": self.model,
                 "trace_id": self.trace_id,
-                "control_intent": self.control_intent,
                 "termination_cause": self.termination_cause,
             },
             "latency": self.latency.to_metadata(),
