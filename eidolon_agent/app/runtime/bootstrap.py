@@ -26,6 +26,7 @@ import httpx
 from eidolon_sdk.biz.runtime import RuntimeTokenVerifier
 from eidolon_sdk.biz.system_data import SystemDataRuntimeClient
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
+from eidolon_sdk.integrations.audit import require_audit_transport
 
 from eidolon_agent.app.admin import build_admin_app
 from eidolon_agent.app.runtime.container import Container
@@ -245,6 +246,11 @@ async def build_application(
     )
     background_tasks = BackgroundTaskRunner(component="agent")
     if not standalone:
+        # Same reason as Data's: a dispatcher task that cannot publish reports
+        # that only into its outbox's ``last_error``, which looks like a bus
+        # outage until somebody reads the column. Asked in front of the task, a
+        # missing transport stops start-up while somebody is still watching.
+        require_audit_transport()
         container.extras["audit_dispatch_task"] = asyncio.create_task(
             run_agent_audit_dispatcher(
                 runtime_store,
