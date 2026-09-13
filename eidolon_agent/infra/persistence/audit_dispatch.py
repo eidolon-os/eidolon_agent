@@ -11,6 +11,7 @@ from eidolon_sdk.biz.audit import AuditPublisher
 from eidolon_sdk.integrations.audit import (
     AuditNatsPublisherSettings,
     JetStreamAuditPublisher,
+    should_report_publish_failure,
 )
 
 from eidolon_agent.infra.persistence.runtime_store import AgentRuntimeStore
@@ -42,6 +43,16 @@ class AgentAuditDispatcher:
         try:
             acknowledged = await self._publisher.publish_many(batch.events)
         except Exception as exc:  # transport failure must not kill Agent
+            # Not killing Agent and not telling anyone are different things. The
+            # outbox column this writes is not a surface anybody reads.
+            attempt = batch.max_attempt_count + 1
+            if should_report_publish_failure(attempt):
+                logger.warning(
+                    "audit publish failed (attempt %d, %d event(s) waiting): %s",
+                    attempt,
+                    len(batch.events),
+                    exc,
+                )
             await self._outbox.mark_failed(
                 event_ids,
                 error=f"{type(exc).__name__}: {exc}",
