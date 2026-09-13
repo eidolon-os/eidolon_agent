@@ -4,7 +4,7 @@ from eidolon_sdk.biz.persona import PersonaPreviewRequest, PersonaPreviewRespons
 from fastapi import APIRouter, HTTPException, Request
 
 from eidolon_agent.app.admin.authority import AUTHORITY_DEPENDENCIES
-from eidolon_agent.domain.personas.preview import preview_persona
+from eidolon_agent.domain.personas import preview_persona
 
 router = APIRouter(dependencies=AUTHORITY_DEPENDENCIES)
 

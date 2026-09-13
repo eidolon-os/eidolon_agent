@@ -2,6 +2,7 @@
 
 from eidolon_agent.domain.personas.memory_adapter import PersonaMemoryAdapter
 from eidolon_agent.domain.personas.ports import PersonaGenomeStore
+from eidolon_agent.domain.personas.preview import preview_persona
 from eidolon_agent.domain.personas.realizer import PersonaRealizer
 from eidolon_agent.domain.personas.runtime_state import PersonaRuntimeStateStore
 from eidolon_agent.domain.personas.service import PersonasService
@@ -40,4 +41,5 @@ __all__ = [
     "RealizedPersona",
     "StoredPersonaGenome",
     "card_from_genome",
+    "preview_persona",
 ]
