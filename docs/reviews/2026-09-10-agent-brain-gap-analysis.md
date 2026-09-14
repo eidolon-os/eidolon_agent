@@ -5,8 +5,9 @@
 性质：**代码评审与方案，不是已实施变更**。对标对象为同类顶级实现（实时语音助理、
 陪伴类产品、记忆框架、Agent 框架、OS 级助理），用于定位能力坐标，不逐条复制它们的形态。
 
-配套架构立场见 `docs/architecture/multi-loop-cognition.md`（四回路与预算边界）与
-`docs/architecture/tool-plane-mcp.md`（MCP 工具面）、`docs/architecture/wait-speech-policy.md`（等待话术）。
+计划见 [`docs/plan/brain-optimization-plan.md`](../plan/brain-optimization-plan.md)——
+回路归属与不变量、MCP 工具面目标形状、等待话术机制都已并入该计划，不再单独成篇
+（长版见 `b07fb0b`）。
 
 本文与 `2026-09-09-companion-persona-review.md` 互补：那篇聚焦 Companion/Genome/Persona
 编辑链路的确定性缺陷（F1–F8），本篇聚焦**大脑本身的认知回路、能力面、顶层架构与工程底座**。
@@ -200,7 +201,7 @@ history 窗口按 conversation_id 存在内存；换设备/换房间= 冷启动�
 `domain/context/response_policy.py` + `RESPONSE_POLICY` volatile 段，按 modality 分档，
 偏好来自 SDK `ConversationPreferences`，并带 `expected_preference_revision` 乐观并发
 （同时覆盖上一篇评审的 F2 陈旧编辑覆盖）。** 剩余未闭合：静默策略、打断后恢复策略、
-工具等待话术（见 `wait-speech-policy.md`）、以及把详略合规做成可测指标进基准套件。
+工具等待话术（见计划 T4）、以及把详略合规做成可测指标进基准套件。
 
 **F9. 群体/多人场景无语义。** 一个房间里两个人、家庭共享伴侣：无说话人区分、无多 owner
 上下文。可以是明确的 non-goal，但应写成 non-goal。
@@ -274,52 +275,12 @@ memory/system-data 时也能和真模型说话」这个形态**不存在**。必
 
 ## 8. 优化方案
 
-原则：**先让现有链路诚实可测（P0），再补中期记忆与自救（P1），再从反应式走向有生命
-（P2），最后铺工具生态与演化闭环（P3）。** 安全工作横穿全程，不排在最后。
+**已迁出。** 排序、验收门与范围裁剪现在只存在于
+[`docs/plan/brain-optimization-plan.md`](../plan/brain-optimization-plan.md)。
 
-### P0 — 诚实与可控（≈2 周，无新产品能力）
-
-| # | 动作 | 验收 |
-|---|---|---|
-| P0-1 | 统一延迟契约：一处定义 first-delta 预算并推导 recall/compile 子预算；README、settings、SDK `turn_latency` 三处对齐 | 三处数字来自同一常量；冲突有测试阻塞 |
-| P0-2 | 下发 `max_tokens`：按 modality 分档（voice 更短），`output_reserve_tokens` 真正生效 | 语音轮输出 token p95 有上限断言 |
-| P0-3 | OTel span（guard/compile/recall/tool/stream）+ Prometheus 直方图挂在健康 HTTP 上；填充并上报 prompt cache 命中 | `/metrics` 可抓；channel→agent→memory 单条 trace 可串 |
-| P0-4 | 准入控制：每 owner 并发上限、LLM 并发信号量、background task 上限 + 拒绝路径；超限返回明确错误而非排队膨胀 | 压测下 p99 不雪崩，拒绝率可观测 |
-| P0-5 | 成本核算：每轮 token→价格→per-owner 日累计 + 软上限 | admin 可查；超限有事件 |
-| P0-6 | 死代码决议（T9 逐项 wire-or-delete，写进 ADR） | 仓库内不存在「有配置无实现」的能力 |
-| P0-7 | **本地优先档位**：standalone 允许真实 LLM，memory/NATS 缺失时降级而非启动失败 | 无 NATS/无 memory/无 system-data 时可完成一次真模型对话 |
-
-### P1 — 中期记忆与记忆自救（≈3–4 周）
-
-| # | 动作 | 验收 |
-|---|---|---|
-| P1-1 | 滚动摘要写入器（慢回路）：每 N 轮或话题切换后生成，写入 agent 库；接到已有 `summary_provider` 接缝 | 50 轮对话中第 5 轮事实在第 45 轮可被正确引用；不污染稳定前缀（缓存命中率不下降） |
-| P1-2 | `recall_memory` 工具：模型可在预取未命中时主动检索一次（预算内、可关闭） | 「预取 miss + 工具命中」场景准确率提升；无工具时行为不回归 |
-| P1-3 | 召回质量：查询改写（轻量）、多路并发替代串行两跳、实体/时间归一 | 同一 deadline 下召回命中率提升；p95 compile 不上升 |
-| P1-4 | Owner 偏好层（A3 的 ②）：慢变、可编辑、热生效，含 taboos，接 `taboos_provider` | 「以后回答短一点」当轮生效、跨会话保持、不产生 genome 新版本 |
-| P1-5 | `dialogue_policy`：目标长度/追问/建议**已落地**（`68f0f46`）；剩余为静默策略、打断后恢复、可测指标 | 详略/追问有可测指标并进基准套件 |
-
-### P2 — 从反应式到有生命（≈4–6 周）
-
-| # | 动作 | 验收 |
-|---|---|---|
-| P2-1 | **慢回路运行时**（A1）：按 `multi-loop-cognition.md` 拆为 L2 轮间位与 L3 后台回路，各自预算与 SLO | 关停任意慢回路，L1 行为不回归（不变量 I2） |
-| P2-2 | 主动性：订阅 `eidolon.memory.event.*`(promise_due) + 调度器 + 主动决策（人格 + 策略 + 抑制 + 免打扰），经既有 `PROACTIVE` trigger 与 `SubscribeProactive` 下发 | 提醒/回访 E2E 通；误触发率有门槛；静默期与「用户不在场」被尊重 |
-| P2-3 | 承诺写工具 + 计时器（F4） | 「明天提醒我」端到端成立，可取消，可审计 |
-| P2-4 | 接入 `sense.*`（F5）：作为 SignalBus 生产者，在场/疲劳/注意力驱动主动性门控与问候；同时决定 `PushSignal` 是留还是删 | 用户离开不打断；回来一次自然招呼；无信号时行为不回归 |
-| P2-5 | 安全升级（A8 第一批）：分类器替代关键词、分级处置、危机升级记录 + 后续跟进、越狱评测集 | 危机召回率/误报率双门槛；升级有可审计记录 |
-
-### P3 — 工具生态与演化闭环（≈6 周+）
-
-| # | 动作 | 验收 |
-|---|---|---|
-| P3-1 | **MCP 工具平面**：agent 作为 MCP host，per-companion allowlist，工具不再硬编码注册；`get_time`/`get_weather` 迁过去 | 新增一个第三方工具无需改 `bootstrap.py` |
-| P3-2 | 许可 + 审计平面（A4）：动作前确认契约、owner 可见动作流水、可撤销 | 每个 side-effect 工具都有 owner 可见记录 |
-| P3-3 | 模型分层（A6）：快/深双档 + 端侧路径预留；按「是否需要工具/长度/复杂度」路由（用小模型或结构化判据，不要退回词法规则） | 短轮 TTFT 与成本双降，质量不回归 |
-| P3-4 | 人格演化闭环：System Data command port + proposal/approve + owner 同意；反馈信号（P0-3 采集）驱动慢速偏好学习 | 一次完整「观察→提案→批准→生效→可回滚」 |
-| P3-5 | 线上评测闭环：抽样真实轮次做 LLM 评审（人格一致/详略合规/记忆正确/安全）+ `EIDOLON_EXP` A/B | 每周质量报表；回归可归因到某次改动 |
-
----
+本文自此只保留**发现与证据**（带日期，会随代码过期）；计划不在这里维护，
+避免出现第二套排序。原 P0–P3 共 22 条与 MCP 的 M0–M4 已合并为该计划的 T1–T4，
+并按「不能变成门禁的条目不进计划」裁剪；被裁掉的部分见其 §5。
 
 ## 9. 明确不建议做的事
 
