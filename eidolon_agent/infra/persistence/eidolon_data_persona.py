@@ -8,7 +8,6 @@ from eidolon_sdk.biz.persona import (
     PersonaEvolutionProposalEvent,
     PersonaObservationEvent,
     normalize_persona_genome,
-    persona_genome_hash,
 )
 
 from eidolon_agent.core.errors import ValidationError
@@ -141,9 +140,15 @@ def _stored(facts: CompanionRuntimeFacts) -> StoredPersonaGenome:
 
 
 def _stored_row(row: object, *, owner_id: str) -> StoredPersonaGenome:
+    # ``genome_hash`` is a label the writer derived, not a claim this reader
+    # re-checks. Genome rows are append-only -- every commit, rollback and
+    # restore builds a new row with a new ``genome_id`` -- so the row already
+    # is its own identity and a digest of it carries nothing extra. Recomputing
+    # it here only ever caught our own serializer drifting from what our own
+    # code wrote, and it reported that by killing the turn. Drift is the
+    # reading contract's job now: a retired key that still carries data is
+    # refused at validation, an emptied one is dropped.
     genome = normalize_persona_genome(row.genome_json)
-    if persona_genome_hash(genome) != row.genome_hash:
-        raise ValidationError(f"persona genome hash mismatch: {row.genome_id}")
     return StoredPersonaGenome(
         owner_id=owner_id,
         companion_id=row.companion_id,

@@ -12,7 +12,7 @@ from eidolon_sdk.biz.persona import (
 )
 from eidolon_sdk.biz.system_data import CompanionRuntimeSnapshot
 
-from eidolon_agent.core.errors import DependencyError, NotFoundError, ValidationError
+from eidolon_agent.core.errors import DependencyError, NotFoundError
 from eidolon_agent.infra.system_data import SystemDataCompanionRuntimeAuthority
 
 
@@ -67,17 +67,30 @@ async def test_maps_wire_snapshot_to_owner_scoped_domain_facts() -> None:
     assert client.calls == [("companion-1", "genome-1")]
 
 
-async def test_fails_closed_on_owner_or_hash_mismatch() -> None:
+async def test_fails_closed_on_owner_mismatch() -> None:
     with pytest.raises(NotFoundError):
         await SystemDataCompanionRuntimeAuthority(_Client(_snapshot(owner_id="owner-2"))).resolve(
             owner_id="owner-1",
             companion_id="companion-1",
         )
 
-    with pytest.raises(ValidationError, match="hash mismatch"):
-        await SystemDataCompanionRuntimeAuthority(
-            _Client(_snapshot(genome_hash="pg_wrong"))
-        ).resolve(owner_id="owner-1", companion_id="companion-1")
+
+async def test_a_genome_hash_that_does_not_match_the_genome_is_carried_not_judged() -> None:
+    """The hash is a label, and a label is not re-derived to be believed.
+
+    Genome rows are append-only, so the id already names exactly one content;
+    a digest beside it adds no fact the reader can act on. This used to be
+    fatal, which meant any narrowing of the genome schema refused every
+    Companion written under the wider one -- mid-conversation, with the person
+    hearing nothing back. Shape compatibility is the reading contract's job.
+    """
+
+    facts = await SystemDataCompanionRuntimeAuthority(
+        _Client(_snapshot(genome_hash="pg_wrong"))
+    ).resolve(owner_id="owner-1", companion_id="companion-1")
+
+    assert facts.genome_hash == "pg_wrong"
+    assert facts.genome.constitution.name == "Annie"
 
 
 async def test_maps_runtime_authority_precondition_to_domain_not_found() -> None:

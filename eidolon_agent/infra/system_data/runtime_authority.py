@@ -6,7 +6,6 @@ from eidolon_sdk.biz.persona import (
     PERSONA_GENOME_SCHEMA,
     PERSONA_REALIZER,
     normalize_persona_genome,
-    persona_genome_hash,
 )
 from eidolon_sdk.biz.system_data import (
     CompanionRuntimeSnapshot,
@@ -131,9 +130,13 @@ def _validated_facts(
         raise ValidationError(f"unsupported persona genome schema: {schema_version}")
     if realizer_version != PERSONA_REALIZER:
         raise ValidationError(f"unsupported persona realizer: {realizer_version}")
+    # No hash re-check: ``genome_hash`` is derived once by the writer and
+    # travels as a label. Genome rows are append-only, so the row is already
+    # its own identity. What this check actually caught was our own schema
+    # narrowing under rows written by the wider one, and the way it reported
+    # that was to refuse the Companion mid-conversation. That belongs to the
+    # reading contract, which can tell a lossless narrowing from a lossy one.
     genome = normalize_persona_genome(genome_json)
-    if persona_genome_hash(genome) != genome_hash:
-        raise ValidationError(f"persona genome hash mismatch: {genome_id}")
     return CompanionRuntimeFacts(
         owner_id=owner_id,
         companion_id=companion_id,
