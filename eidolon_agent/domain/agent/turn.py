@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from eidolon_sdk.biz.chat_stream import DeltaRole
+from eidolon_sdk.biz.presentation import FACE_PROFILE, ResponseIntent
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
 from eidolon_agent.core.errors import GuardrailBlockedError, TurnCancelledError
@@ -59,6 +60,12 @@ from eidolon_agent.core.types.turn import (
     TurnStatus,
 )
 from eidolon_agent.domain.agent.committed_turn import validate_committed_turn
+from eidolon_agent.domain.agent.presentation import (
+    RESPONSE_SCHEMA,
+    RESPONSE_TOOL,
+    InvalidPresentationError,
+    validate_response,
+)
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails.crisis import CrisisHandler
 from eidolon_agent.domain.guardrails.input_filter import InputGuardrail, SafetyAction
@@ -175,6 +182,10 @@ class TurnEngine:
         # no memory fanout, no persona interaction. Nothing about an unconfirmed
         # guess may leak into memory/history.
         speculative = bool(ti.metadata.get("speculative"))
+        presentation_mode = ti.metadata.get("presentation_profile") == FACE_PROFILE
+        response_candidate = None
+        response_intent = None
+        completed_outcomes: dict[str, ToolResult] = {}
         post_turn_allowed = False
         post_turn_scheduled = False
         recent_history_persisted = False
@@ -209,6 +220,11 @@ class TurnEngine:
                 runtime_policy = TurnRuntimePolicy.from_metadata(ti.metadata)
                 assistant_text_for_persist = crisis.text
                 yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.SPEAKING, time.time())
+                if presentation_mode and not speculative:
+                    safe_intent = ResponseIntent(intent="comfort", response_id=f"response:{ti.turn_id}",
+                        turn_id=ti.turn_id, session_id=ti.session_id)
+                    yield TurnEvent(ti.turn_id, seq.next(), TurnEventKind.PRESENTATION,
+                                    safe_intent.model_dump(mode="json"), time.time())
                 yield TurnEvent.delta(ti.turn_id, seq.next(), crisis.text, time.time())
                 yield TurnEvent.done(
                     ti.turn_id,
@@ -233,6 +249,11 @@ class TurnEngine:
             if verdict.action is SafetyAction.REFUSE:
                 refuse = "我不能那样做，不过我可以继续陪你聊点别的。"
                 assistant_text_for_persist = refuse
+                if presentation_mode and not speculative:
+                    safe_intent = ResponseIntent(intent="decline", response_id=f"response:{ti.turn_id}",
+                        turn_id=ti.turn_id, session_id=ti.session_id)
+                    yield TurnEvent(ti.turn_id, seq.next(), TurnEventKind.PRESENTATION,
+                                    safe_intent.model_dump(mode="json"), time.time())
                 yield TurnEvent.delta(ti.turn_id, seq.next(), refuse, time.time())
                 yield TurnEvent.done(ti.turn_id, seq.next(), TurnStatus.OK, time.time())
                 return
@@ -283,6 +304,14 @@ class TurnEngine:
 
             # ---- LLM stream (with tool loop) -------------------------------
             tools, extra_tools = await self._tool_schemas(ti, cfg)
+            if presentation_mode:
+                if any(tool.name == RESPONSE_TOOL for tool in tools):
+                    raise ValueError("RESERVED_RESPONSE_TOOL_COLLISION")
+                tools = [*tools, RESPONSE_SCHEMA]
+                messages = [*messages, ChatMessage(
+                    id=uuid.uuid4().hex, role=MessageRole.SYSTEM,
+                    content=RESPONSE_SCHEMA.description, created_at=datetime.now(UTC),
+                )]
             tool_budget = self._harness.tool_schema_budget(tools)
             ti.metadata.setdefault("development_guards", {})["tool_schema_budget"] = tool_budget
             _update_harness_snapshot_tools(
@@ -323,14 +352,15 @@ class TurnEngine:
                             data={"phase": "model", "kind": activity_kind},
                             ts=time.time(),
                         )
-                    if delta.text_delta:
+                    if delta.text_delta and not presentation_mode:
                         if first_delta_ms is None:
                             first_delta_ms = int((time.monotonic() - t0) * 1000)
                         assistant_text_parts.append(delta.text_delta)
                         yield TurnEvent.delta(ti.turn_id, seq.next(), delta.text_delta, time.time())
                     if delta.tool_call is not None:
                         tool_calls.append(delta.tool_call)
-                        answer_announcement = _tool_answer_announcement(delta.tool_call, ti)
+                    if delta.tool_call is not None and (not presentation_mode or delta.tool_call.name != RESPONSE_TOOL):
+                        answer_announcement = None if presentation_mode else _tool_answer_announcement(delta.tool_call, ti)
                         if answer_announcement and answer_announcement not in announced_answers:
                             announced_answers.add(answer_announcement)
                             if first_delta_ms is None:
@@ -372,6 +402,15 @@ class TurnEngine:
                     if delta.finish is not None:
                         finish_reason = delta.finish
 
+                terminal_calls = [call for call in tool_calls if call.name == RESPONSE_TOOL] if presentation_mode else []
+                if terminal_calls:
+                    if len(tool_calls) != 1 or finish_reason is not LLMFinishReason.TOOL_CALLS:
+                        raise InvalidPresentationError("TERMINAL_RESPONSE_MUST_BE_COMPLETE_AND_ALONE")
+                    response_candidate, response_intent = validate_response(
+                        terminal_calls[0].arguments, turn_id=ti.turn_id,
+                        session_id=ti.session_id, outcomes=completed_outcomes,
+                    )
+                    break
                 if finish_reason is LLMFinishReason.LENGTH:
                     ti.metadata["output_truncated"] = True
                 if finish_reason is LLMFinishReason.TOOL_CALLS and tool_calls:
@@ -417,7 +456,7 @@ class TurnEngine:
                         try:
                             slow_hint_delay_s = self._tool_latency_policy.slow_hint_delay_s
                             if (
-                                not slow_tool_hint_emitted
+                                not slow_tool_hint_emitted and not presentation_mode
                                 and slow_hint_delay_s > 0
                                 and any(
                                     call.name != DELEGATE_TO_COWORKER_TOOL
@@ -473,6 +512,7 @@ class TurnEngine:
                     now = datetime.now(UTC)
                     tool_result_messages: list[ChatMessage] = []
                     for r in results:
+                        completed_outcomes[r.call_id] = r
                         yield TurnEvent(
                             turn_id=ti.turn_id,
                             seq=seq.next(),
@@ -519,14 +559,37 @@ class TurnEngine:
                 break
 
             # ---- Output guardrail ------------------------------------------
-            final_text = "".join(assistant_text_parts)
+            if presentation_mode and response_intent is None:
+                raise InvalidPresentationError("STRUCTURED_RESPONSE_REQUIRED")
+            final_text = (response_candidate.public_text or "") if response_candidate else "".join(assistant_text_parts)
             out_v = self._output_g.check(output_text=final_text, taboos=self._taboos_provider())
             if out_v.action is SafetyAction.SOFTEN:
                 # Crude soften: prefix; production would re-prompt LLM. The
                 # prefix is persona-overridable via the genome's spoken_phrases.
                 soften_prefix = _persona_phrase(ti, "soften_prefix", "（让我换个说法）")
                 final_text = soften_prefix + final_text
-                yield TurnEvent.delta(ti.turn_id, seq.next(), soften_prefix, time.time())
+                if not presentation_mode:
+                    yield TurnEvent.delta(ti.turn_id, seq.next(), soften_prefix, time.time())
+            if response_intent is not None and not speculative:
+                # The event is semantic intent, not a claim that the screen has
+                # displayed it. Channel owns the subsequent presentation receipt.
+                ti.metadata["response_intent"] = response_intent.model_dump(mode="json")
+                ti.metadata["presentation_delivery"] = "unconfirmed"
+                feedback = ti.presentation_feedback
+                if feedback is not None and response_intent.intent != "none":
+                    feedback.expect(response_intent)
+                yield TurnEvent(ti.turn_id, seq.next(), TurnEventKind.PRESENTATION,
+                                response_intent.model_dump(mode="json"), time.time())
+                receipt = await feedback.wait() if feedback is not None and response_intent.intent != "none" else None
+                if receipt is not None:
+                    ti.metadata["presentation_delivery"] = receipt.status
+                    ti.metadata["presentation_receipt"] = receipt.model_dump(mode="json")
+                if final_text:
+                    yield TurnEvent.delta(ti.turn_id, seq.next(), final_text, time.time())
+                # Keep history honest for a nonverbal response. Public text is
+                # optional renderable content; device delivery is not yet known.
+                delivery_state = ti.metadata["presentation_delivery"]
+                final_text = f"[表达意图：{response_intent.intent}；设备展示状态：{delivery_state}]"
             assistant_text_for_persist = final_text
             ts_output_ms = int((time.monotonic() - t0) * 1000)
             # Speculative turns never persist/fan out (unconfirmed guess).
@@ -608,6 +671,10 @@ class TurnEngine:
                 post_turn_allowed = True
             yield TurnEvent.error(ti.turn_id, seq.next(), error_code, "cancelled", time.time())
             raise
+        except InvalidPresentationError as exc:
+            status = TurnStatus.ERRORED
+            error_code = "invalid_presentation"
+            yield TurnEvent.error(ti.turn_id, seq.next(), error_code, str(exc), time.time())
         except GuardrailBlockedError as exc:
             status = TurnStatus.ERRORED
             error_code = exc.code

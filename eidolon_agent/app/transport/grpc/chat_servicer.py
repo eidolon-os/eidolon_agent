@@ -14,6 +14,8 @@ import uuid
 
 import grpc
 from eidolon_sdk.biz.chat_stream import TerminationCause
+from eidolon_sdk.biz.presentation import PresentationReceipt
+from eidolon_agent.core.types.presentation import PresentationFeedback
 
 from eidolon_agent.app.transport.grpc.codec import struct_to_dict, turn_event_to_proto
 from eidolon_agent.app.transport.grpc.interceptors import current_identity
@@ -139,6 +141,20 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                             )
                         )
                     continue
+                if payload == "presentation_feedback":
+                    feedback = frame.presentation_feedback
+                    target = input_by_turn.get(feedback.turn_id)
+                    if target is not None and target.presentation_feedback is not None:
+                        value = feedback.receipt
+                        try:
+                            receipt = PresentationReceipt(schema_version=value.schema_version,
+                                presentation_id=value.presentation_id, response_id=value.response_id,
+                                status=value.status, sequence=value.sequence, reason=value.reason,
+                                elapsed_ms=value.elapsed_ms)
+                            target.presentation_feedback.accept(receipt)
+                        except ValueError:
+                            _log.warning("invalid presentation receipt turn=%s", feedback.turn_id)
+                    continue
                 if payload == "signal":
                     await self._signals.publish(
                         scope.session_id,
@@ -198,6 +214,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     turn_id=start.turn_id or uuid.uuid4().hex,
                     conversation_id=conversation_id,
                     session_id=scope.session_id,
+                    presentation_feedback=PresentationFeedback(),
                     context=TurnContext(
                         owner_id=scope.owner_id,
                         companion_id=inst.companion_id,

@@ -19,6 +19,7 @@ _KIND_TO_PROTO = {
     TurnEventKind.ERROR: pb.TurnEvent.ERROR,
     TurnEventKind.ACK: pb.TurnEvent.ACK,
     TurnEventKind.PROGRESS: pb.TurnEvent.PROGRESS,
+    TurnEventKind.PRESENTATION: pb.TurnEvent.PRESENTATION,
     TurnEventKind.HANDOFF: pb.TurnEvent.HANDOFF,
 }
 
@@ -30,7 +31,12 @@ def turn_event_to_proto(ev: TurnEvent) -> pb.TurnEvent:
         kind=_KIND_TO_PROTO.get(ev.kind, pb.TurnEvent.KIND_UNSPECIFIED),
         ts=ev.ts,
     )
-    out.data.update(ev.data)
+    if ev.kind is TurnEventKind.PRESENTATION:
+        from eidolon_sdk.biz.presentation import ResponseIntent
+        intent = ResponseIntent.model_validate(ev.data)
+        out.presentation.CopyFrom(pb.ResponseIntent(**intent.model_dump(exclude_none=True)))
+    else:
+        out.data.update(ev.data)
     return out
 
 

@@ -13,6 +13,7 @@ from enum import Enum
 from typing import Any
 
 from eidolon_agent.core.types.companion_runtime import CompanionRuntimeConfig
+from eidolon_agent.core.types.presentation import PresentationFeedback
 from eidolon_agent.core.types.signal import SignalDigest
 from eidolon_agent.core.types.turn_context import InputModality, TurnContext
 
@@ -53,6 +54,7 @@ class TurnEventKind(str, Enum):
     ERROR = "error"
     ACK = "ack"  # complex task accepted
     PROGRESS = "progress"  # streaming progress from a background worker
+    PRESENTATION = "presentation"
     HANDOFF = "handoff"  # delegated to a background worker
 
 
@@ -90,6 +92,7 @@ class TurnInput:
     realtime: SignalDigest | None = None
     attachments: tuple[dict, ...] = ()  # opaque; modality-specific
     metadata: dict = field(default_factory=dict)
+    presentation_feedback: PresentationFeedback | None = None
 
     def is_user_turn(self) -> bool:
         return self.trigger in (TurnTrigger.USER_UTTERANCE, TurnTrigger.CONTINUATION)
