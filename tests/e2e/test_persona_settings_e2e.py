@@ -258,10 +258,10 @@ async def test_stale_preference_edit_is_rejected_without_changing_genome(setting
 async def test_creation_persists_preset_and_preferences_together(settings_stack):
     from uuid import uuid4
 
-    from eidolon_sdk.biz.persona import persona_preset_catalog
+    from eidolon_data.services.persona_presets import load_persona_presets
 
     store, _, _ = settings_stack
-    preset = persona_preset_catalog().presets[1]
+    preset = next(p for p in load_persona_presets().presets if p.preset_id == "direct")
     preferences = ConversationPreferences(response_length="balanced")
     request = dict(
         owner_id="owner-e2e",

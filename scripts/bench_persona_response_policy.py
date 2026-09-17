@@ -2,6 +2,7 @@
 
 No user database, tools, microphone or memory writes. --execute explicitly calls
 the configured model; without it this only writes the compiled test manifest.
+Supply --preset-catalog with a Data persona-presets JSON response or package export.
 This measures model text, not end-to-end voice latency or playback continuity.
 """
 
@@ -20,9 +21,9 @@ from eidolon_sdk.biz.persona import (
     PERSONA_REALIZER,
     ConversationPreferences,
     PersonaAuthoringDraft,
+    PersonaPresetCatalog,
     build_persona_genome_from_draft,
     persona_genome_hash,
-    persona_preset_catalog,
 )
 
 from eidolon_agent.config import load_settings
@@ -83,14 +84,23 @@ class DraftPersona:
         )
 
 
+def load_benchmark_preset(path: Path, preset_id: str):
+    """Read an explicit Data catalogue snapshot; no SDK or local fallback."""
+    catalog = PersonaPresetCatalog.model_validate_json(path.read_text(encoding="utf-8"))
+    matches = [preset for preset in catalog.presets if preset.preset_id == preset_id]
+    if len(matches) != 1:
+        raise ValueError(f"expected exactly one preset {preset_id!r} in {path}")
+    return matches[0]
+
+
 async def run(args):
+    preset = load_benchmark_preset(args.preset_catalog, args.preset)
     settings = load_settings()
     router = None
     if args.execute:
         from eidolon_agent.app.runtime.bootstrap import _build_llm_router
 
         router = _build_llm_router(settings)
-    preset = next(p for p in persona_preset_catalog().presets if p.preset_id == args.preset)
     genome = build_persona_genome_from_draft(
         PersonaAuthoringDraft.for_companion(preset.persona, name="测试伙伴")
     )
@@ -203,7 +213,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--limit", type=int, default=32)
-    parser.add_argument("--preset", choices=["gentle", "direct", "playful"], default="gentle")
+    parser.add_argument(
+        "--preset-catalog",
+        type=Path,
+        required=True,
+        help="JSON response from Data's persona-presets endpoint (or a Data package export)",
+    )
+    parser.add_argument("--preset", default="gentle", help="Preset id in the supplied catalogue")
     parser.add_argument("--modality", choices=["voice", "text"], default="voice")
     parser.add_argument("--timeout", type=float, default=45)
     parser.add_argument("--output", type=Path, required=True)
