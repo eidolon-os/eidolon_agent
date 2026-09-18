@@ -11,7 +11,8 @@ from tests.helpers import make_turn_input
 class ResponseLLM:
     model_id = "fake:presentation"
 
-    def __init__(self, intent="acknowledge", raw=False):
+    def __init__(self, intent="acknowledge", raw=False, public_text=None):
+        self.public_text = public_text
         self.intent, self.raw = intent, raw
 
     async def count_tokens(self, messages):
@@ -25,7 +26,9 @@ class ResponseLLM:
         else:
             yield LLMDelta(
                 tool_call=ToolCall(
-                    "response", RESPONSE_TOOL, {"presentation": {"intent": self.intent}}
+                    "response",
+                    RESPONSE_TOOL,
+                    {"presentation": {"intent": self.intent}, "public_text": self.public_text},
                 ),
                 finish=LLMFinishReason.TOOL_CALLS,
             )
@@ -106,3 +109,84 @@ async def test_history_waits_for_terminal_device_feedback(turn_engine_factory):
     assert events[-1].kind.value == "done"
     assert ti.metadata["presentation_delivery"] == "completed"
     assert ti.metadata["presentation_receipt"]["sequence"] == 3
+
+
+@pytest.mark.asyncio
+async def test_language_and_generation_done_do_not_wait_for_expression(turn_engine_factory):
+    import asyncio
+    from dataclasses import replace
+
+    from eidolon_sdk.biz.presentation import PresentationReceipt
+
+    from eidolon_agent.core.types.presentation import PresentationFeedback
+
+    engine = turn_engine_factory(llm=ResponseLLM(public_text="你好，我在这里。"))
+    ti = replace(make_turn_input("你好"), presentation_feedback=PresentationFeedback())
+    ti.metadata.update(
+        presentation_profile=FACE_PROFILE, selected_outputs={"speech": True, "expression": True}
+    )
+    events = []
+    stream = engine.run(ti)
+    while True:
+        event = await asyncio.wait_for(anext(stream), timeout=0.5)
+        events.append(event)
+        if event.kind.value == "done":
+            break
+    assert [e.data["text"] for e in events if e.kind.value == "delta"] == ["你好，我在这里。"]
+    assert ti.metadata["presentation_delivery"] == "unconfirmed"
+    # Failure evidence arrives after DONE and remains distinct from language.
+    ti.presentation_feedback.accept(
+        PresentationReceipt(
+            presentation_id=f"face:{ti.turn_id}",
+            response_id=f"response:{ti.turn_id}",
+            status="rejected",
+            sequence=1,
+            reason="COMMAND_CLOCK_UNAVAILABLE",
+        )
+    )
+    assert [e async for e in stream] == []
+    assert ti.metadata["presentation_delivery"] == "rejected"
+    assert ti.metadata["language_delivery"] == "unconfirmed"
+
+
+def test_response_schema_distinguishes_mixed_from_strict_silent():
+    from eidolon_sdk.biz.presentation import OutputSelection
+
+    from eidolon_agent.domain.agent.presentation import response_schema
+
+    mixed = OutputSelection(speech=True, expression=True)
+    silent = OutputSelection(expression=True)
+    assert (
+        response_schema(mixed).json_schema["properties"]["public_text"]["anyOf"][0]["type"]
+        == "string"
+    )
+    assert response_schema(silent).json_schema["properties"]["public_text"]["type"] == "null"
+    with pytest.raises(ValueError, match="PUBLIC_ANSWER_REQUIRED"):
+        validate_response(
+            {"presentation": {"intent": "acknowledge"}},
+            turn_id="t",
+            session_id="s",
+            outcomes={},
+            outputs=mixed,
+        )
+    candidate, _ = validate_response(
+        {"presentation": {"intent": "acknowledge"}, "public_text": "不得存成说过的话"},
+        turn_id="t",
+        session_id="s",
+        outcomes={},
+        outputs=silent,
+    )
+    assert candidate.public_text is None
+
+
+def test_explicit_suppression_remains_allowed_in_voice_session():
+    from eidolon_sdk.biz.presentation import OutputSelection
+
+    candidate, intent = validate_response(
+        {"presentation": {"intent": "none"}, "public_text": None},
+        turn_id="t",
+        session_id="s",
+        outcomes={},
+        outputs=OutputSelection(speech=True, expression=True),
+    )
+    assert candidate.public_text is None and intent.intent == "none"

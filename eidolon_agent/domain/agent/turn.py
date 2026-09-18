@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from eidolon_sdk.biz.chat_stream import DeltaRole
-from eidolon_sdk.biz.presentation import FACE_PROFILE, ResponseIntent
+from eidolon_sdk.biz.presentation import FACE_PROFILE, OutputSelection, ResponseIntent
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
 from eidolon_agent.core.errors import GuardrailBlockedError, TurnCancelledError
@@ -61,9 +61,9 @@ from eidolon_agent.core.types.turn import (
 )
 from eidolon_agent.domain.agent.committed_turn import validate_committed_turn
 from eidolon_agent.domain.agent.presentation import (
-    RESPONSE_SCHEMA,
     RESPONSE_TOOL,
     InvalidPresentationError,
+    response_schema,
     validate_response,
 )
 from eidolon_agent.domain.context.compiler import ContextCompiler
@@ -307,10 +307,18 @@ class TurnEngine:
             if presentation_mode:
                 if any(tool.name == RESPONSE_TOOL for tool in tools):
                     raise ValueError("RESERVED_RESPONSE_TOOL_COLLISION")
-                tools = [*tools, RESPONSE_SCHEMA]
+                selected_outputs = (OutputSelection.model_validate(ti.metadata["selected_outputs"])
+                                    if "selected_outputs" in ti.metadata else None)
+                schema = response_schema(selected_outputs)
+                tools = [*tools, schema]
                 messages = [*messages, ChatMessage(
                     id=uuid.uuid4().hex, role=MessageRole.SYSTEM,
-                    content=RESPONSE_SCHEMA.description, created_at=datetime.now(UTC),
+                    content=(schema.description + " Selected outputs: "
+                             + str(ti.metadata.get("selected_outputs", {}))
+                             + ". If speech or dialogue_text is selected, provide the public answer "
+                               "in public_text. If neither is selected, use null public_text; "
+                               "use clarify when expression alone cannot convey the answer."),
+                    created_at=datetime.now(UTC),
                 )]
             tool_budget = self._harness.tool_schema_budget(tools)
             ti.metadata.setdefault("development_guards", {})["tool_schema_budget"] = tool_budget
@@ -408,7 +416,7 @@ class TurnEngine:
                         raise InvalidPresentationError("TERMINAL_RESPONSE_MUST_BE_COMPLETE_AND_ALONE")
                     response_candidate, response_intent = validate_response(
                         terminal_calls[0].arguments, turn_id=ti.turn_id,
-                        session_id=ti.session_id, outcomes=completed_outcomes,
+                        session_id=ti.session_id, outcomes=completed_outcomes, outputs=selected_outputs,
                     )
                     break
                 if finish_reason is LLMFinishReason.LENGTH:
@@ -580,16 +588,15 @@ class TurnEngine:
                     feedback.expect(response_intent)
                 yield TurnEvent(ti.turn_id, seq.next(), TurnEventKind.PRESENTATION,
                                 response_intent.model_dump(mode="json"), time.time())
-                receipt = await feedback.wait() if feedback is not None and response_intent.intent != "none" else None
-                if receipt is not None:
-                    ti.metadata["presentation_delivery"] = receipt.status
-                    ti.metadata["presentation_receipt"] = receipt.model_dump(mode="json")
+                # Language delivery never waits for a different output's ACK.
+                # Preserve public text in context; generation is not evidence
+                # that either the speaker or the screen delivered it.
                 if final_text:
+                    ti.metadata["language_delivery"] = "unconfirmed"
+                    assistant_text_parts[:] = [final_text]
                     yield TurnEvent.delta(ti.turn_id, seq.next(), final_text, time.time())
-                # Keep history honest for a nonverbal response. Public text is
-                # optional renderable content; device delivery is not yet known.
-                delivery_state = ti.metadata["presentation_delivery"]
-                final_text = f"[表达意图：{response_intent.intent}；设备展示状态：{delivery_state}]"
+                else:
+                    final_text = f"[表达意图：{response_intent.intent}；设备展示状态：unconfirmed]"
             assistant_text_for_persist = final_text
             ts_output_ms = int((time.monotonic() - t0) * 1000)
             # Speculative turns never persist/fan out (unconfirmed guess).
@@ -634,7 +641,18 @@ class TurnEngine:
                 first_delta_ms=first_delta_ms,
             )
 
-            # User has their answer; durable persistence can take its time.
+            # DONE closes generation, not device output. Keep the existing
+            # bounded feedback rendezvous alive for persistence, outside the
+            # text stream, so a missing face ACK cannot delay TTS flushing.
+            if response_intent is not None and not speculative:
+                feedback = ti.presentation_feedback
+                receipt = (await feedback.wait() if feedback is not None
+                           and response_intent.intent != "none" else None)
+                if receipt is not None:
+                    ti.metadata["presentation_delivery"] = receipt.status
+                    ti.metadata["presentation_receipt"] = receipt.model_dump(mode="json")
+
+            # Generation finished; durable persistence can take its time.
             # Speculative turns are ephemeral — skip entirely.
             if not speculative and committed_turn.persistence_allowed:
                 post_turn_scheduled = True
