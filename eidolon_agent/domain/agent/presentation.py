@@ -4,7 +4,10 @@ Uses the existing provider tool schema mechanism: one terminal response function
 not another model call or an emotion classifier. It never enters ToolDispatcher.
 """
 
-from eidolon_sdk.biz.presentation import AssistantResponseCandidate, ResponseIntent
+from copy import deepcopy
+from dataclasses import replace
+
+from eidolon_sdk.biz.presentation import AssistantResponseCandidate, OutputSelection, ResponseIntent
 from pydantic import ValidationError
 
 from eidolon_agent.core.types.tool import ToolResult, ToolSchema
@@ -22,20 +25,59 @@ RESPONSE_SCHEMA = ToolSchema(
         "Call this alone after all needed tools finish. Do not output raw text. "
         "acknowledge means heard, not done or memorized. confirm/celebrate require "
         "outcome_ref pointing to a successful, completed tool call in this turn. "
-        "Use clarify when an expression cannot communicate the answer. "
+        "Use public_text for the answer when language output is selected. "
+        "Expression is supplementary and never substitutes for a verbal answer. "
         "Do not claim memory was saved merely because a background write was queued."
     ),
     json_schema=AssistantResponseCandidate.model_json_schema(),
 )
 
 
+def response_schema(outputs: OutputSelection | None) -> ToolSchema:
+    """Specialize the existing final-response schema for the selected outputs.
+
+    A speech/text conversation needs a public answer. A face profile only says
+    how to render expression; it must not silently turn voice into silent mode.
+    Legacy callers without selection retain the optional public_text contract.
+    """
+    if outputs is None:
+        return RESPONSE_SCHEMA
+    schema = deepcopy(RESPONSE_SCHEMA.json_schema)
+    language = outputs.speech or outputs.dialogue_text
+    schema["properties"]["public_text"] = (
+        {
+            "anyOf": [{"type": "string", "minLength": 1, "maxLength": 8192}, {"type": "null"}],
+            "description": "The public answer to speak or display. Null only for intentional intent=none suppression; expression otherwise supplements the answer.",
+        }
+        if language
+        else {"type": "null", "description": "No language output selected."}
+    )
+    schema["required"] = list(dict.fromkeys([*schema.get("required", []), "public_text"]))
+    return replace(RESPONSE_SCHEMA, json_schema=schema)
+
+
 def validate_response(
-    arguments: dict, *, turn_id: str, session_id: str, outcomes: dict[str, ToolResult]
+    arguments: dict,
+    *,
+    turn_id: str,
+    session_id: str,
+    outcomes: dict[str, ToolResult],
+    outputs: OutputSelection | None = None,
 ) -> tuple[AssistantResponseCandidate, ResponseIntent]:
     try:
         candidate = AssistantResponseCandidate.model_validate(arguments)
     except ValidationError as exc:
         raise InvalidPresentationError("INVALID_RESPONSE_CANDIDATE") from exc
+    if outputs is not None:
+        if outputs.speech or outputs.dialogue_text:
+            if candidate.presentation.intent != "none" and (
+                not candidate.public_text or not candidate.public_text.strip()
+            ):
+                raise InvalidPresentationError("PUBLIC_ANSWER_REQUIRED")
+        elif candidate.public_text is not None:
+            # The output boundary also enforces selection. Do not place a
+            # shadow, unspoken answer into history in a strict silent session.
+            candidate = candidate.model_copy(update={"public_text": None})
     presentation = candidate.presentation
     outcome = outcomes.get(presentation.outcome_ref or "")
     # Tool success alone may only mean a request was accepted. Completion is an
