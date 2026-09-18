@@ -603,6 +603,39 @@ class AgentConversationReader:
             rows = await session.scalars(stmt.limit(limit))
             return list(rows)
 
+    async def last_conversation_at(self, *, owner_id: str) -> dict[str, datetime]:
+        """When each of this Owner's Companions was last spoken to.
+
+        One aggregate rather than a page of conversations. A roster asks about
+        every Companion at once, and a page answers about whichever ones happen
+        to be recent — so a Companion nobody has talked to in a year would be
+        missing from the page and indistinguishable from one nobody has ever
+        talked to. Those are different sentences on a screen.
+
+        The instant is ``conversations.updated_at``, which a turn stamps as it is
+        persisted. Speculative turns are never persisted, so nothing counted here
+        is a turn that was warmed on a half-heard sentence and thrown away: every
+        row means somebody actually said something and got an answer.
+
+        A Companion absent from the result has never been spoken to. That is an
+        answer, not a gap — the gap is this read failing, which the caller sees
+        as an exception rather than as an empty mapping.
+        """
+
+        async with self._runtime_store.read_session_factory() as session:
+            stmt = (
+                select(
+                    ConversationRow.companion_id,
+                    func.max(ConversationRow.updated_at),
+                )
+                .where(ConversationRow.owner_id == owner_id)
+                .group_by(ConversationRow.companion_id)
+            )
+            rows = (await session.execute(stmt)).all()
+        return {
+            companion_id: last for companion_id, last in rows if companion_id and last is not None
+        }
+
     async def list_turns_by_owner(
         self,
         *,

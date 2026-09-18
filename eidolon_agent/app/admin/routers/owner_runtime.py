@@ -1,4 +1,23 @@
-"""Owner-scoped Agent runtime revocation and deletion endpoints."""
+"""Owner-scoped Agent runtime reads, revocation, and deletion endpoints.
+
+Two of these routes look alike and answer different questions, so they are kept
+next to each other rather than apart:
+
+``runtime-companions`` reads the in-process registry — which Companions this
+Agent holds a live runtime object for, *right now, in this process*. It is true
+for this run and nothing else: restarting the Agent empties it, and the first
+thing said to a Companion afterwards fills it again in milliseconds.
+
+``companion-activity`` reads the conversation store — when each Companion was
+last actually spoken to. It survives restarts, because it is a record of
+something that happened rather than of something currently in memory.
+
+The first is an engineering fact and belongs on an operator surface. The second
+is the one a person means by "have I used this Eidolon lately", and it is what a
+roster should be composed from. They were conflated once: the live registry was
+projected to the phone as 「运行中 / 未运行」, which told people that Eidolons
+they had merely not spoken to since the last deploy were somehow not working.
+"""
 
 from __future__ import annotations
 
@@ -9,8 +28,23 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
 from eidolon_agent.app.admin.authority import AUTHORITY_DEPENDENCIES
+from eidolon_agent.infra.persistence import AgentConversationReader
 
 router = APIRouter(dependencies=AUTHORITY_DEPENDENCIES)
+
+
+def _utc_iso(value: datetime) -> str:
+    """An instant on the wire, always carrying its offset.
+
+    The store declares these columns ``timezone=True`` and SQLite hands them back
+    naive, so ``isoformat()`` straight off a row produces a string a reader is
+    free to read as local time — and a phone that renders 「上次对话」 from it
+    would be wrong by the reader's own timezone. Everything written here is UTC
+    (``runtime_store.utc_now``), so the offset restored here is not a guess; it
+    is the one the file dropped on the way in.
+    """
+
+    return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).isoformat()
 
 
 class RevokeOwnerSessionsResponse(BaseModel):
@@ -100,6 +134,71 @@ async def list_owner_runtime_companions(
                 last_active_at=(inst.last_active_at or inst.created_at).isoformat(),
             )
             for inst in registry.for_owner(owner_id)
+        ],
+    )
+
+
+class CompanionActivityResponse(BaseModel):
+    """One Companion of this Owner, and when it was last spoken to."""
+
+    companion_id: str
+    #: The last persisted turn's instant, in UTC. Present because the Companion
+    #: has been talked to; a Companion that never has is simply not in the list.
+    last_conversation_at: str
+
+
+class OwnerCompanionActivityResponse(BaseModel):
+    """When this Owner last spoke to each of their Companions.
+
+    **Absence means never, not "not now".** That is the whole difference from
+    ``runtime-companions`` above, and the reason a roster must be composed from
+    this one: "我还没跟它聊过" is a true sentence that leads somewhere, while
+    「未运行」 was a true sentence about a process cache that led nowhere.
+
+    Only Companions with at least one persisted turn appear, and the ids are
+    whatever the conversation store holds — this route does not know which
+    Companions exist. The authority that does is the one composing the roster,
+    and a second list of them here would be a second thing to be wrong about.
+    """
+
+    owner_id: str
+    companions: list[CompanionActivityResponse]
+
+
+@router.get(
+    "/owners/{owner_id}/companion-activity",
+    response_model=OwnerCompanionActivityResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def list_owner_companion_activity(
+    owner_id: str,
+    request: Request,
+) -> OwnerCompanionActivityResponse:
+    """Read the conversation store, aggregated per Companion.
+
+    One query for the whole Owner rather than one per Companion: a roster page
+    asks about all of them at once, and the alternative is a read that grows with
+    how many Eidolons somebody has.
+    """
+
+    runtime_store = getattr(request.app.state, "runtime_store", None)
+    if runtime_store is None:
+        raise HTTPException(
+            status_code=503,
+            detail="runtime_store not configured; conversation history cannot be read",
+        )
+    last_seen = await AgentConversationReader(runtime_store).last_conversation_at(owner_id=owner_id)
+    return OwnerCompanionActivityResponse(
+        owner_id=owner_id,
+        companions=[
+            CompanionActivityResponse(
+                companion_id=companion_id,
+                last_conversation_at=_utc_iso(instant),
+            )
+            # Newest first, so a caller that truncates keeps the useful end.
+            for companion_id, instant in sorted(
+                last_seen.items(), key=lambda row: row[1], reverse=True
+            )
         ],
     )
 
