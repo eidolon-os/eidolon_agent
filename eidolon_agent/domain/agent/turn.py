@@ -182,7 +182,11 @@ class TurnEngine:
         # no memory fanout, no persona interaction. Nothing about an unconfirmed
         # guess may leak into memory/history.
         speculative = bool(ti.metadata.get("speculative"))
-        presentation_mode = ti.metadata.get("presentation_profile") == FACE_PROFILE
+        selected_outputs = (OutputSelection.model_validate(ti.metadata["selected_outputs"])
+                            if "selected_outputs" in ti.metadata else None)
+        presentation_mode = (ti.metadata.get("presentation_profile") == FACE_PROFILE or
+                             (selected_outputs is not None and (selected_outputs.motion or
+                              not (selected_outputs.speech or selected_outputs.dialogue_text))))
         response_candidate = None
         response_intent = None
         completed_outcomes: dict[str, ToolResult] = {}
@@ -314,10 +318,7 @@ class TurnEngine:
                 messages = [*messages, ChatMessage(
                     id=uuid.uuid4().hex, role=MessageRole.SYSTEM,
                     content=(schema.description + " Selected outputs: "
-                             + str(ti.metadata.get("selected_outputs", {}))
-                             + ". If speech or dialogue_text is selected, provide the public answer "
-                               "in public_text. If neither is selected, use null public_text; "
-                               "use clarify when expression alone cannot convey the answer."),
+                             + str(ti.metadata.get("selected_outputs", {}))),
                     created_at=datetime.now(UTC),
                 )]
             tool_budget = self._harness.tool_schema_budget(tools)

@@ -23,7 +23,7 @@ class PresentationFeedback:
             return False
         if (
             receipt.response_id != self.intent.response_id
-            or receipt.presentation_id != f"face:{self.intent.turn_id}"
+            or receipt.presentation_id not in {f"face:{self.intent.turn_id}", f"head:{self.intent.turn_id}"}
         ):
             return False
         if receipt.status not in {"completed", "cancelled", "failed", "rejected"}:

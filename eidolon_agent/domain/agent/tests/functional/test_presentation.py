@@ -190,3 +190,30 @@ def test_explicit_suppression_remains_allowed_in_voice_session():
         outputs=OutputSelection(speech=True, expression=True),
     )
     assert candidate.public_text is None and intent.intent == "none"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('motion', [False, True])
+async def test_no_language_selection_finishes_without_reply_tokens_or_face_dependency(turn_engine_factory, motion):
+    from eidolon_sdk.biz.presentation import OutputSelection
+    from eidolon_agent.domain.agent.presentation import response_schema
+    outputs = OutputSelection(motion=motion)
+    schema = response_schema(outputs).json_schema
+    if not motion:
+        assert schema['properties'] == {} and schema['required'] == []
+    else:
+        assert schema['properties']['public_text']['type'] == 'null'
+    engine = turn_engine_factory(llm=ResponseLLM())
+    ti = make_turn_input('你好')
+    ti.metadata['selected_outputs'] = outputs.model_dump()
+    events = [event async for event in engine.run(ti)]
+    assert not any(e.kind.value in {'delta', 'error'} for e in events)
+    assert any(e.kind.value == 'done' for e in events)
+    response = next(e for e in events if e.kind.value == 'presentation')
+    assert response.data['intent'] == ('acknowledge' if motion else 'none')
+
+
+def test_language_only_schema_does_not_request_expressive_tokens():
+    from eidolon_sdk.biz.presentation import OutputSelection
+    from eidolon_agent.domain.agent.presentation import response_schema
+    assert 'presentation' not in response_schema(OutputSelection(speech=True)).json_schema['properties']

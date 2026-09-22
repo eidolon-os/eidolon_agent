@@ -44,6 +44,18 @@ def response_schema(outputs: OutputSelection | None) -> ToolSchema:
         return RESPONSE_SCHEMA
     schema = deepcopy(RESPONSE_SCHEMA.json_schema)
     language = outputs.speech or outputs.dialogue_text
+    if not outputs.expression and not outputs.motion:
+        # No expressive output was selected: do not ask the model to generate
+        # gesture/stance/intensity fields that would only be discarded.
+        schema["properties"].pop("presentation", None)
+        schema.pop("$defs", None)
+        schema["required"] = [key for key in schema.get("required", []) if key != "presentation"]
+        if not language:
+            schema["properties"].pop("public_text", None)
+            schema["properties"].pop("schema_version", None)
+            schema["required"] = []
+            return replace(RESPONSE_SCHEMA, json_schema=schema,
+                description="Finish this turn without a public response. Call this alone with {} after all needed tools finish. Do not generate reply text or expressive intent.")
     schema["properties"]["public_text"] = (
         {
             "anyOf": [{"type": "string", "minLength": 1, "maxLength": 8192}, {"type": "null"}],
@@ -52,7 +64,8 @@ def response_schema(outputs: OutputSelection | None) -> ToolSchema:
         if language
         else {"type": "null", "description": "No language output selected."}
     )
-    schema["required"] = list(dict.fromkeys([*schema.get("required", []), "public_text"]))
+    schema["required"] = list(dict.fromkeys([*schema.get("required", []), "public_text",
+        *(["presentation"] if outputs.expression or outputs.motion else [])]))
     return replace(RESPONSE_SCHEMA, json_schema=schema)
 
 
@@ -78,6 +91,9 @@ def validate_response(
             # The output boundary also enforces selection. Do not place a
             # shadow, unspoken answer into history in a strict silent session.
             candidate = candidate.model_copy(update={"public_text": None})
+    if outputs is not None and not (outputs.expression or outputs.motion):
+        from eidolon_sdk.biz.presentation import PresentationCandidate
+        candidate = candidate.model_copy(update={"presentation": PresentationCandidate(intent="none")})
     presentation = candidate.presentation
     outcome = outcomes.get(presentation.outcome_ref or "")
     # Tool success alone may only mean a request was accepted. Completion is an
