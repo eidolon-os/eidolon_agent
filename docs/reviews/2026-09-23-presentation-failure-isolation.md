@@ -25,3 +25,9 @@ gRPC stream contract suites 59 passed. New turn regressions cover unsupported
 confirm/celebrate, unknown expression intent, successful language completion with
 rejected expression, and rejection of malformed public text. Physical queue
 congestion is a separate open investigation; this fix is not evidence of its cure.
+
+Deployment: runtime commit dd298a2 activated on eidolon-opi5max as
+`rk3588-presentation-isolation-20260923-1`; doctor and app-ready gates passed.
+A direct check against the installed Agent package confirmed that an ungrounded
+confirm returns the public text with intent=none and the rejection reason.
+Human acoustic/device acceptance remains separate.
