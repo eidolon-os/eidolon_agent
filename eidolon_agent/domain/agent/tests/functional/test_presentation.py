@@ -217,3 +217,38 @@ def test_language_only_schema_does_not_request_expressive_tokens():
     from eidolon_sdk.biz.presentation import OutputSelection
     from eidolon_agent.domain.agent.presentation import response_schema
     assert 'presentation' not in response_schema(OutputSelection(speech=True)).json_schema['properties']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('intent', ['confirm', 'celebrate', 'not-an-intent'])
+async def test_invalid_expression_does_not_cancel_valid_language(turn_engine_factory, intent):
+    from dataclasses import replace
+    from eidolon_agent.core.types.presentation import PresentationFeedback
+    engine = turn_engine_factory(llm=ResponseLLM(intent=intent, public_text='可以，我再教你一个顺口溜。'))
+    ti = replace(make_turn_input('再教我一个'), presentation_feedback=PresentationFeedback())
+    ti.metadata.update(presentation_profile=FACE_PROFILE,
+                       selected_outputs={'speech': True, 'dialogue_text': True, 'expression': True, 'motion': True})
+    events = [event async for event in engine.run(ti)]
+    assert not any(event.kind.value == 'error' for event in events)
+    assert [event.data['text'] for event in events if event.kind.value == 'delta'] == ['可以，我再教你一个顺口溜。']
+    assert any(event.kind.value == 'done' for event in events)
+    presentation = next(event for event in events if event.kind.value == 'presentation')
+    assert presentation.data['intent'] == 'none'
+    assert presentation.data['outcome_ref'] is None
+    assert ti.metadata['presentation_delivery'] == 'rejected'
+    assert ti.metadata['presentation_error']
+    assert ti.metadata['language_delivery'] == 'unconfirmed'
+
+
+def test_expression_isolation_does_not_relax_language_schema_or_invent_success():
+    from eidolon_agent.domain.agent.presentation import resolve_response
+    from eidolon_sdk.biz.presentation import OutputSelection
+    context = dict(turn_id='t', session_id='s', outcomes={},
+                   outputs=OutputSelection(speech=True, expression=True))
+    for invalid_text in [12, {'text': 'bad'}, 'x' * 8193]:
+        with pytest.raises(ValueError):
+            resolve_response({'public_text': invalid_text, 'presentation': {'intent': 'confirm'}}, **context)
+    resolved = resolve_response({'public_text': '我可以帮你处理。',
+                                 'presentation': {'intent': 'confirm', 'outcome_ref': 'missing'}}, **context)
+    assert resolved.presentation_error == 'OUTCOME_NOT_COMPLETED_IN_THIS_TURN'
+    assert resolved.intent.intent == 'none' and resolved.intent.outcome_ref is None

@@ -64,7 +64,7 @@ from eidolon_agent.domain.agent.presentation import (
     RESPONSE_TOOL,
     InvalidPresentationError,
     response_schema,
-    validate_response,
+    resolve_response,
 )
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails.crisis import CrisisHandler
@@ -415,10 +415,16 @@ class TurnEngine:
                 if terminal_calls:
                     if len(tool_calls) != 1 or finish_reason is not LLMFinishReason.TOOL_CALLS:
                         raise InvalidPresentationError("TERMINAL_RESPONSE_MUST_BE_COMPLETE_AND_ALONE")
-                    response_candidate, response_intent = validate_response(
+                    resolved = resolve_response(
                         terminal_calls[0].arguments, turn_id=ti.turn_id,
                         session_id=ti.session_id, outcomes=completed_outcomes, outputs=selected_outputs,
                     )
+                    response_candidate, response_intent = resolved.candidate, resolved.intent
+                    if resolved.presentation_error:
+                        ti.metadata["presentation_error"] = resolved.presentation_error
+                        ti.metadata["presentation_delivery"] = "rejected"
+                        _log.warning("presentation rejected; preserving language turn=%s reason=%s",
+                                     ti.turn_id, resolved.presentation_error)
                     break
                 if finish_reason is LLMFinishReason.LENGTH:
                     ti.metadata["output_truncated"] = True
@@ -583,7 +589,7 @@ class TurnEngine:
                 # The event is semantic intent, not a claim that the screen has
                 # displayed it. Channel owns the subsequent presentation receipt.
                 ti.metadata["response_intent"] = response_intent.model_dump(mode="json")
-                ti.metadata["presentation_delivery"] = "unconfirmed"
+                ti.metadata.setdefault("presentation_delivery", "unconfirmed")
                 feedback = ti.presentation_feedback
                 if feedback is not None and response_intent.intent != "none":
                     feedback.expect(response_intent)

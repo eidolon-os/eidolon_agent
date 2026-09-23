@@ -5,7 +5,7 @@ not another model call or an emotion classifier. It never enters ToolDispatcher.
 """
 
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from eidolon_sdk.biz.presentation import AssistantResponseCandidate, OutputSelection, ResponseIntent
 from pydantic import ValidationError
@@ -15,6 +15,42 @@ from eidolon_agent.core.types.tool import ToolResult, ToolSchema
 
 class InvalidPresentationError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class ResolvedResponse:
+    candidate: AssistantResponseCandidate
+    intent: ResponseIntent
+    presentation_error: str | None = None
+
+
+def resolve_response(
+    arguments: dict,
+    *,
+    turn_id: str,
+    session_id: str,
+    outcomes: dict[str, ToolResult],
+    outputs: OutputSelection | None = None,
+) -> ResolvedResponse:
+    """Isolate optional expression failure from a valid public answer.
+
+    The strict validator remains the authority for expression facts. A rejected
+    expression is omitted, never relabelled as a successful action. Language
+    still passes its own schema and the turn's normal output guardrail.
+    """
+    context = dict(turn_id=turn_id, session_id=session_id, outcomes=outcomes, outputs=outputs)
+    try:
+        candidate, intent = validate_response(arguments, **context)
+        return ResolvedResponse(candidate, intent)
+    except InvalidPresentationError as error:
+        candidate, intent = validate_response(
+            {**arguments, "presentation": {"intent": "none"}}, **context
+        )
+        # Nothing independently deliverable remains. Do not turn a malformed
+        # response or a silent expression-only failure into a successful answer.
+        if not candidate.public_text or not candidate.public_text.strip():
+            raise error
+        return ResolvedResponse(candidate, intent, str(error))
 
 
 RESPONSE_TOOL = "eidolon_respond"
