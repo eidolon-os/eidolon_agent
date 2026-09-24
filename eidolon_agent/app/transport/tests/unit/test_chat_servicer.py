@@ -85,6 +85,7 @@ def _scripted_agent(events):
 
 def _stub_instance(agent):
     return SimpleNamespace(
+        owner_id="owner-1",
         companion_id="companion-1",
         genome_id="genome-1",
         agent=agent,
@@ -479,3 +480,40 @@ async def test_push_signal_unknown_modality_falls_back_to_ambient() -> None:
     await svc.PushSignal(req, _make_context())
     _, sig = signals.publish.await_args.args
     assert sig.modality is SignalModality.AMBIENT
+
+
+@pytest.mark.parametrize("field,value", [
+    ("owner_id", "another-owner"),
+    ("companion_id", "another-companion"),
+    ("genome_id", "another-genome"),
+])
+async def test_chat_rejects_mismatched_registry_before_running_model(field, value):
+    called = False
+
+    async def turn(_ti):
+        nonlocal called
+        called = True
+        if False:
+            yield
+
+    instance = _stub_instance(SimpleNamespace(run_turn=turn))
+    setattr(instance, field, value)
+    svc = EidolonAgentServicer(
+        agent_registry=SimpleNamespace(resolve_runtime=AsyncMock(return_value=instance)),
+        signals_bus=SimpleNamespace(recent=AsyncMock(return_value=[])),
+        proactive_bus=MagicMock(),
+        runtime_sessions=_runtime_sessions(),
+    )
+
+    async def requests():
+        yield pb.ChatRequest(start=pb.StartTurn(
+            conversation_id="conversation", text="hello", input_modality="text"))
+
+    ctx = _make_context()
+    ctx.cancelled = lambda: False
+    with pytest.raises(grpc.RpcError):
+        await svc.Chat(requests(), ctx)
+    ctx.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED, "registry returned runtime outside authorized scope")
+    assert not called
+    ctx.write.assert_not_awaited()

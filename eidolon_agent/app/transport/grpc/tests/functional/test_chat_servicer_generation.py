@@ -293,6 +293,7 @@ class _Registry:
         self._idx += 1
         return SimpleNamespace(
             instance_id="inst",
+            owner_id="owner-1",
             companion_id="companion-1",
             genome_id="genome-1",
             agent=agent,

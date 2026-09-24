@@ -11,12 +11,13 @@ import asyncio
 import logging
 import time
 import uuid
+from datetime import UTC
 
 import grpc
 from eidolon_sdk.biz.chat_stream import TerminationCause
 from eidolon_sdk.biz.presentation import PresentationReceipt
-from eidolon_agent.core.types.presentation import PresentationFeedback
 
+from eidolon_agent.app.interaction import AcceptReply, ReplyRequest
 from eidolon_agent.app.transport.grpc.codec import struct_to_dict, turn_event_to_proto
 from eidolon_agent.app.transport.grpc.interceptors import current_identity
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
@@ -32,9 +33,8 @@ from eidolon_agent.core.types.turn import (
     TurnEvent,
     TurnEventKind,
     TurnInput,
-    TurnTrigger,
 )
-from eidolon_agent.core.types.turn_context import InputModality, TurnContext
+from eidolon_agent.core.types.turn_context import InputModality
 from eidolon_agent.domain.signals import SignalFuser
 
 _log = logging.getLogger(__name__)
@@ -51,6 +51,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         personas_service=None,
     ) -> None:
         self._registry = agent_registry
+        self._reply_ingress = AcceptReply(agent_registry)
         self._signals = signals_bus
         self._bus = proactive_bus
         self._personas = personas_service
@@ -67,7 +68,6 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         if identity is None:
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "no identity")
         scope = await self._authorize_runtime(identity, context)
-        runtime = scope.runtime
         active_turns: set[asyncio.Task] = set()
         active_by_conversation: dict[str, asyncio.Task] = {}
         conversation_by_turn: dict[str, str] = {}
@@ -174,22 +174,6 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     previous.cancel()
                 generation = generation_by_conversation.get(conversation_id, 0) + 1
                 generation_by_conversation[conversation_id] = generation
-                try:
-                    inst = await self._registry.resolve_runtime(
-                        owner_id=runtime.owner_id,
-                        companion_id=runtime.companion_id,
-                        genome_id=runtime.genome_id,
-                    )
-                    agent = inst.agent
-                except NotFoundError as exc:
-                    await context.abort(grpc.StatusCode.FAILED_PRECONDITION, exc.message)
-
-                start_metadata = struct_to_dict(start.metadata)
-                # Preemptive/speculative turn: warm the LLM on a partial
-                # transcript; the turn engine keeps it ephemeral (no persist /
-                # fanout) until it would be confirmed.
-                if start.speculative:
-                    start_metadata["speculative"] = True
                 realtime = _digest_from_dict(struct_to_dict(start.realtime))
                 if realtime is None:
                     recent_signals = await self._signals.recent(
@@ -210,32 +194,26 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     or uuid.uuid4().hex
                 )
 
-                ti = TurnInput(
-                    turn_id=start.turn_id or uuid.uuid4().hex,
-                    conversation_id=conversation_id,
-                    session_id=scope.session_id,
-                    presentation_feedback=PresentationFeedback(),
-                    context=TurnContext(
-                        owner_id=scope.owner_id,
-                        companion_id=inst.companion_id,
-                        device_id=scope.device_id,
-                        memory_realm_id=runtime.memory_realm_id,
-                        genome_id=inst.genome_id,
-                        trace_id=trace_id,
-                        request_id=dict(context.invocation_metadata()).get(
-                            "x-request-id", uuid.uuid4().hex
+                try:
+                    prepared = await self._reply_ingress.prepare(
+                        scope,
+                        ReplyRequest(
+                            turn_id=start.turn_id,
+                            conversation_id=conversation_id,
+                            text=start.text,
+                            input_modality=input_modality,
+                            speculative=start.speculative,
+                            realtime=realtime,
+                            metadata=struct_to_dict(start.metadata),
+                            trace_id=trace_id,
+                            request_id=dict(context.invocation_metadata()).get("x-request-id", ""),
                         ),
-                        schema_version=runtime.schema_version,
-                        genome_hash=runtime.genome_hash,
-                        realizer_version=runtime.realizer_version,
-                    ),
-                    input_modality=input_modality,
-                    trigger=TurnTrigger.USER_UTTERANCE,
-                    runtime_config=scope.config,
-                    text=start.text,
-                    realtime=realtime,
-                    metadata=start_metadata,
-                )
+                    )
+                except PermissionDeniedError as exc:
+                    await context.abort(grpc.StatusCode.PERMISSION_DENIED, exc.message)
+                except NotFoundError as exc:
+                    await context.abort(grpc.StatusCode.FAILED_PRECONDITION, exc.message)
+                agent, ti = prepared.agent, prepared.turn
 
                 async def _emit_turn(_agent=agent, _ti=ti, _generation=generation) -> None:
                     try:
@@ -292,7 +270,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         self, request: pb.SignalRequest, context: grpc.aio.ServicerContext
     ) -> pb.Ack:
         # The signals bus expects a RealtimeSignal; we adapt opportunistically.
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from eidolon_agent.core.types.signal import RealtimeSignal, SignalModality
 
@@ -305,7 +283,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         except ValueError:
             modality = SignalModality.AMBIENT
         sig = RealtimeSignal(
-            ts=datetime.now(timezone.utc),
+            ts=datetime.now(UTC),
             modality=modality,
             label=request.signal.label,
             confidence=float(request.signal.confidence),
@@ -417,7 +395,7 @@ def _input_modality(raw: str) -> InputModality:
 
 
 def _signal_from_proto(signal) -> object:  # type: ignore[no-untyped-def]
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from eidolon_agent.core.types.signal import RealtimeSignal, SignalModality
 
@@ -426,7 +404,7 @@ def _signal_from_proto(signal) -> object:  # type: ignore[no-untyped-def]
     except ValueError:
         modality = SignalModality.AMBIENT
     return RealtimeSignal(
-        ts=datetime.now(timezone.utc),
+        ts=datetime.now(UTC),
         modality=modality,
         label=signal.label,
         confidence=float(signal.confidence),
