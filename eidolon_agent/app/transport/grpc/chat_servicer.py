@@ -8,6 +8,7 @@ to the :class:`CompanionAgent`. All business logic lives behind the ports.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 import uuid
@@ -73,6 +74,10 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         conversation_by_turn: dict[str, str] = {}
         input_by_turn: dict[str, TurnInput] = {}
         generation_by_conversation: dict[str, int] = {}
+        # One accepted turn id identifies one immutable StartTurn on this RPC.
+        # Keep only digests, including terminal turns: replaying tokens on retry
+        # would replay speech. This is not cross-RPC or durable idempotency.
+        accepted_starts: dict[str, bytes] = {}
         write_lock = asyncio.Lock()
         signal_fuser = SignalFuser()
 
@@ -165,6 +170,16 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     continue
 
                 start = frame.start
+                start_digest = hashlib.sha256(
+                    start.SerializeToString(deterministic=True)
+                ).digest()
+                if start.turn_id and start.turn_id in accepted_starts:
+                    if accepted_starts[start.turn_id] != start_digest:
+                        await context.abort(
+                            grpc.StatusCode.ALREADY_EXISTS,
+                            "turn_id was already accepted with different content",
+                        )
+                    continue
                 try:
                     conversation_id = validate_conversation_id(start.conversation_id)
                 except ValueError as exc:
@@ -214,6 +229,8 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 except NotFoundError as exc:
                     await context.abort(grpc.StatusCode.FAILED_PRECONDITION, exc.message)
                 agent, ti = prepared.agent, prepared.turn
+                if start.turn_id:
+                    accepted_starts[start.turn_id] = start_digest
 
                 async def _emit_turn(_agent=agent, _ti=ti, _generation=generation) -> None:
                     try:

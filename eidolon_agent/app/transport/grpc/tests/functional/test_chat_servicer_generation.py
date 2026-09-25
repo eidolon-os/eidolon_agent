@@ -385,3 +385,85 @@ class _Context:
 
     async def abort(self, *_args):
         raise AssertionError("abort should not be called")
+
+
+@pytest.mark.parametrize("completed", [False, True])
+async def test_exact_start_retry_generates_once_without_replaying_output(monkeypatch, completed):
+    monkeypatch.setattr(chat_servicer, "current_identity", _identity)
+    released = asyncio.Event()
+    started = asyncio.Event()
+    finished = asyncio.Event()
+    calls = []
+
+    class Agent:
+        async def run_turn(self, ti):
+            calls.append(ti.turn_id)
+            started.set()
+            await released.wait()
+            yield TurnEvent.delta(ti.turn_id, 0, "one answer", 0.0)
+            yield TurnEvent.done(ti.turn_id, 1, TurnStatus.OK, 0.0)
+            finished.set()
+
+    frame = pb.ChatRequest(start=pb.StartTurn(
+        turn_id="one-turn", conversation_id="conv", text="one question", input_modality="voice"
+    ))
+
+    async def requests():
+        yield frame
+        await started.wait()
+        if completed:
+            released.set()
+            await finished.wait()
+        yield frame
+        released.set()
+
+    registry = _Registry([Agent()])
+    context = _Context()
+    service = EidolonAgentServicer(agent_registry=registry, signals_bus=_Signals(),
+        proactive_bus=None, runtime_sessions=_runtime_sessions())
+    await asyncio.wait_for(service.Chat(requests(), context), 2)
+    assert calls == ["one-turn"]
+    assert registry._idx == 1
+    assert [e.data["text"] for e in context.written if e.kind == pb.TurnEvent.DELTA] == ["one answer"]
+
+
+@pytest.mark.parametrize("changed", [{"text": "different"}, {"conversation_id": "other"}, {"speculative": True}])
+async def test_turn_id_cannot_be_reused_for_changed_input(monkeypatch, changed):
+    monkeypatch.setattr(chat_servicer, "current_identity", _identity)
+    registry = _Registry([_ImmediateAgent("answer")])
+    import grpc
+
+    class Refused(Exception):
+        pass
+
+    class Context(_Context):
+        async def abort(self, code, detail):
+            assert code == grpc.StatusCode.ALREADY_EXISTS
+            assert "different content" in detail
+            raise Refused()
+
+    context = Context()
+    service = EidolonAgentServicer(agent_registry=registry, signals_bus=_Signals(),
+        proactive_bus=None, runtime_sessions=_runtime_sessions())
+    original = dict(turn_id="same", conversation_id="conv", text="first", input_modality="voice")
+    with pytest.raises(Refused):
+        await service.Chat(_YieldingRequests([
+            pb.ChatRequest(start=pb.StartTurn(**original)),
+            pb.ChatRequest(start=pb.StartTurn(**(original | changed))),
+        ]), context)
+    assert registry._idx == 1
+
+
+async def test_retry_does_not_resurrect_cancelled_turn(monkeypatch):
+    monkeypatch.setattr(chat_servicer, "current_identity", _identity)
+    registry = _Registry([_CapturingLateAgent()])
+    context = _Context()
+    service = EidolonAgentServicer(agent_registry=registry, signals_bus=_Signals(),
+        proactive_bus=None, runtime_sessions=_runtime_sessions())
+    start = pb.ChatRequest(start=pb.StartTurn(turn_id="cancelled", conversation_id="conv",
+                                              text="question", input_modality="voice"))
+    await service.Chat(_YieldingRequests([
+        start, pb.ChatRequest(cancel=pb.CancelTurn(turn_id="cancelled")), start,
+    ]), context)
+    assert registry._idx == 1
+    assert all(event.kind == pb.TurnEvent.ACK for event in context.written)
