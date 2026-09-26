@@ -146,6 +146,14 @@ def test_socket_requires_existing_service_authority(monkeypatch):
 
 
 def test_actual_socket_serializes_replies_until_matching_played_receipt(monkeypatch):
+    from eidolon_agent.app.admin.routers import role_groups
+    original_timeout = role_groups.asyncio.timeout
+    def operation_timeout(seconds):
+        # This route may bound preparation, never the active team's lifetime.
+        assert seconds <= 10
+        return original_timeout(seconds)
+    monkeypatch.setattr(role_groups, "asyncio", SimpleNamespace(
+        **(vars(role_groups.asyncio) | {"timeout": operation_timeout})))
     monkeypatch.setenv(SERVICE_TOKEN_ENV, TOKEN)
     instance, turns = app()
     with (

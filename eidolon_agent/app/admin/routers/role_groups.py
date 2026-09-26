@@ -76,10 +76,11 @@ async def role_group_stream(socket: WebSocket):
             asyncio.create_task(bridge.write_to(socket.send_json)),
             asyncio.create_task(bridge.closed.wait()),
         ]
-        async with asyncio.timeout(3600):
-            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            for task in done:
-                task.result()
+        # Explicit close or connection loss owns team lifetime. Preparation
+        # and per-operation deadlines remain bounded; silence is not an exit.
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            task.result()
         await socket.close(code=1000)
     except WebSocketDisconnect:
         pass
