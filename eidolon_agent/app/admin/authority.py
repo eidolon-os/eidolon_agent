@@ -34,18 +34,20 @@ from __future__ import annotations
 import hmac
 import os
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, status
+from starlette.requests import HTTPConnection
 
 #: Where the credential comes from. The value never appears in settings YAML:
 #: the same discipline every other secret here follows — the file names the
 #: variable, the environment holds the secret.
 SERVICE_TOKEN_ENV = "EIDOLON_AGENT_ADMIN_API_TOKEN"
 
+
 def expected_token() -> str:
     return (os.environ.get(SERVICE_TOKEN_ENV) or "").strip()
 
 
-def presented_token(request: Request) -> str:
+def presented_token(request: HTTPConnection) -> str:
     header = request.headers.get("authorization") or ""
     scheme, separator, token = header.partition(" ")
     if separator != " " or scheme.lower() != "bearer":
@@ -53,7 +55,7 @@ def presented_token(request: Request) -> str:
     return token.strip()
 
 
-async def require_service_token(request: Request) -> None:
+async def require_service_token(request: HTTPConnection) -> None:
     """Refuse anything that does not carry this Host's Agent credential.
 
     ``503`` when the Host has none configured, ``401`` when the caller's does not

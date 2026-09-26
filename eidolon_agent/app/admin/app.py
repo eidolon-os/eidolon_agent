@@ -24,6 +24,7 @@ from eidolon_agent.app.admin.routers import (
     owner_runtime,
     persona_preview,
     reports,
+    role_groups,
 )
 from eidolon_agent.config.settings import Settings
 
@@ -56,6 +57,7 @@ def build_admin_app(
         allow_credentials=False,
     )
 
+    app.state.role_group_connections = role_groups.SceneConnections()
     app.state.settings = settings
     app.state.agent_registry = agent_registry
     app.state.personas_service = personas_service
@@ -83,6 +85,7 @@ def build_admin_app(
         prefix="/api/admin",
         tags=["owner-runtime"],
     )
+    app.include_router(role_groups.router, prefix="/api/admin", tags=["role-groups"])
     app.include_router(chat_test.router, prefix="/api/admin", tags=["chat-test"])
     app.include_router(persona_preview.router, prefix="/api/admin", tags=["persona-preview"])
     app.include_router(conversations.router, prefix="/api/admin", tags=["conversations"])

@@ -107,6 +107,8 @@ class CoordinatedReplies:
                         fragments.append(event.data.get("text", ""))
                     if event.kind is TurnEventKind.DONE:
                         completed = event.data.get("status") == "ok"
+                        if not completed:
+                            raise RuntimeError("Companion reply did not complete successfully")
                     yield event
                 exhausted = True
             finally:
