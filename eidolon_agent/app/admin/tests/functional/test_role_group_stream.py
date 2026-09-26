@@ -109,6 +109,9 @@ def utterance(socket, capture="one", text="hello"):
 def stops(socket):
     for _ in range(2):
         frame = socket.receive_json()
+        if frame["type"] == "capturing":
+            assert frame["epoch"] > 0
+            frame = socket.receive_json()
         assert frame["type"] == "stop", frame
         receipt(socket, frame)
 
@@ -183,6 +186,8 @@ def test_wrong_device_receipt_closes_scene_without_generating(monkeypatch):
         socket.send_json(opening())
         socket.receive_json()
         utterance(socket)
+        capturing = socket.receive_json()
+        assert capturing["type"] == "capturing"
         stop = socket.receive_json()
         stop["device_id"] = named_device_instance_id("not-selected")
         receipt(socket, stop)

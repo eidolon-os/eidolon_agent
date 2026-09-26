@@ -212,6 +212,9 @@ class CoordinationStream:
                     self._transcript.cancel()
                 self._capture_id = frame.capture_id
                 self._released = False
+                self.emit(
+                    "capturing", urgent=True, capture_id=frame.capture_id, epoch=self.session.epoch
+                )
                 self._transcript = asyncio.get_running_loop().create_future()
             elif self._released:
                 raise ValueError("capture id replayed after release")
