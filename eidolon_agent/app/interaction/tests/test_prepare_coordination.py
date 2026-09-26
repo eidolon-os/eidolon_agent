@@ -125,3 +125,30 @@ async def test_missing_authenticated_owner_is_rejected_before_runtime_resolution
     with pytest.raises(PermissionDeniedError):
         await prepare_session(selection(), **args)
     assert not authorized
+
+
+async def test_each_scheduled_companion_receives_all_preceding_public_replies():
+    selected = selection(discussion=True, reply_budget=5)
+    args, agents, _, played, _ = dependencies()
+    args['decide'] = MockDecision(('a', 'b'))
+    session = await prepare_session(selected, **args)
+    try:
+        source = selected.input_device.device_instance_id
+        session.press(device_id=source, capture_id='user-question')
+        await session.release(device_id=source, capture_id='user-question')
+        assert [key for key, _ in played] == ['a', 'b', 'a', 'b', 'a']
+        turns = [agents['a'].turns[0], agents['b'].turns[0],
+                 agents['a'].turns[1], agents['b'].turns[1], agents['a'].turns[2]]
+        for index, turn in enumerate(turns):
+            # Includes the original user's question and every earlier completed
+            # speaker, with its own author identity and exact generated text.
+            assert turn.coordination.public_context.recent_messages == tuple(
+                session.history[:index + 1])
+            if index >= 2:
+                assert turn.coordination.trigger == session.history[index]
+                assert turn.text == ''  # Peer speech is never user input/memory.
+        args['transcribe'].assert_awaited_once_with('user-question')
+        assert turns[0].conversation_id != turns[1].conversation_id
+        assert turns[0].conversation_id == turns[2].conversation_id
+    finally:
+        await session.close()
