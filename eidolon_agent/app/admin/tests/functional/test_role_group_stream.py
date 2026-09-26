@@ -43,7 +43,8 @@ def opening():
             scenario="ip_role_group",
             session_id="scene",
             input_device=ref("input"),
-            members=[dict(companion_id=k, output_device=ref(k)) for k in ("a", "b")],
+            members=[dict(companion_id=k, output_device=ref(k),
+                          role=dict(name="孙悟空" if k == "a" else "猪八戒")) for k in ("a", "b")],
         ),
     )
 
@@ -58,6 +59,8 @@ def app(*, done_status=TurnStatus.OK):
             public = json.loads(messages[1].content.split('\n', 1)[1])
             turns.append(SimpleNamespace(context=SimpleNamespace(
                 companion_id=rules['speaker_companion_id']), text=public['trigger']['text']))
+            assert rules['speaker_role']['name'] == (
+                '孙悟空' if rules['speaker_companion_id'] == 'a' else '猪八戒')
             assert kwargs['tools'] == []
             yield LLMDelta(text_delta='hello')
             yield LLMDelta(finish=LLMFinishReason.STOP if done_status == TurnStatus.OK else LLMFinishReason.ERROR)
