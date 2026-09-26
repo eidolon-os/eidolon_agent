@@ -59,6 +59,7 @@ async def evaluate(config):
         )
     cases = [
         ("fruit", "你们讨论一下最喜欢的水果。", False),
+        ("identity", "你们各自介绍一下自己是谁。", False),
         ("whole_script", "孙悟空和猪八戒来回聊三轮，给我一整段有两个人台词的对话。", False),
         ("after_window", "接着说说周末去哪里玩，回应上一位的建议。", True),
     ]
