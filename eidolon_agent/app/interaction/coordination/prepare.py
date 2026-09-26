@@ -1,5 +1,6 @@
-"""Prepare the existing executor from an authorized scene selection.
+"""Prepare the IP role-group executor from an authorized group selection.
 
+Solo conversations continue through their existing entrypoint and input mode.
 The caller must authenticate the Owner and validate every current DeviceRef and
 PTT/output capability before invoking this use case. This is not a public API:
 selection fields alone cannot grant device access. Companion authorization uses

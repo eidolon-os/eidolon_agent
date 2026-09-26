@@ -27,6 +27,7 @@ def selection(**options):
 
     return CoordinationSelection.model_validate(
         dict(
+            scenario="ip_role_group",
             session_id="scene",
             input_device=ref("input"),
             members=[
