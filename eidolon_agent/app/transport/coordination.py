@@ -181,6 +181,8 @@ class CoordinationStream:
             pending = self._pending.get(frame.request_id)
             if pending is None:  # late/duplicate receipt cannot advance a new request
                 return
+            if pending.permit is None and frame.completion_basis != "device_ack":
+                raise ValueError("stop requires device acknowledgement")
             if pending.device_id != frame.device_id:
                 raise ValueError("receipt endpoint mismatch")
             if frame.result == "completed" and not pending.completion_allowed:
