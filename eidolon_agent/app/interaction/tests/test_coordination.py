@@ -342,3 +342,21 @@ async def test_close_revokes_current_output_and_rejects_new_input():
     with pytest.raises(ValueError):
         h.press("after-close")
     await h.session.close()
+
+
+async def test_playout_longer_than_decision_deadline_still_advances_with_context():
+    h = Harness(stage_timeout=0.01)
+    original = h.reply
+    async def long_reply(member, request, permit):
+        await asyncio.sleep(0.04)  # Normal speech can outlast an ASR/decision RPC.
+        return await original(member, request, permit)
+    from dataclasses import replace
+    h.session.ports = replace(h.session.ports, reply=long_reply)
+    try:
+        h.press()
+        await h.release()
+        assert [x for x in h.log if x[0] == 'reply'] == [('reply', 'a'), ('reply', 'b')]
+        assert h.requests[1].public_context.recent_messages[-1].author_id == 'a'
+        assert h.session.state == 'waiting'
+    finally:
+        await h.session.close()

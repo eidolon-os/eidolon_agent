@@ -10,6 +10,7 @@ than replaying old output. This module does not expose an unauthenticated API.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from uuid import uuid4
@@ -129,6 +130,8 @@ class CoordinationSession:
         # Bounded diagnostic history; never stores captured audio or credentials.
         self.events.append(dict(event=kind, epoch=self.epoch, **facts))
         del self.events[:-512]
+        logging.getLogger(__name__).info("coordination session=%s event=%s epoch=%s facts=%s",
+            self.session_id, kind, self.epoch, facts)
 
     def _spawn(self, coroutine) -> asyncio.Task:
         task = asyncio.create_task(coroutine)
@@ -290,8 +293,11 @@ class CoordinationSession:
                         trigger=request.trigger,
                         public_context=Context(recent_messages=tuple(self.history[-16:])),
                     )
-                    async with asyncio.timeout(self.stage_timeout):
-                        played = await self.ports.reply(member, turn_request, permit)
+                    # The reply owns generation and native playout. Their own
+                    # failure/cancellation contracts govern completion; the short
+                    # ASR/decision RPC deadline must not truncate audible speech.
+                    # PTT, close and transport loss still revoke this permit.
+                    played = await self.ports.reply(member, turn_request, permit)
                     permit.check()
                     self._active_turn = None
                     if not played.completed:
