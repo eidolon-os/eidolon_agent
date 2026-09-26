@@ -1,10 +1,12 @@
 """Real ASGI socket drives scene preparation, reply streaming and receipts."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
 from eidolon_sdk.biz.control.coordination_stream import ROLE_GROUP_STREAM_PATH
 from eidolon_sdk.biz.dialogue_control import CommittedTurnDecision, TurnCommitBoundary
+from eidolon_sdk.biz.persona import build_default_persona_genome
 from eidolon_sdk.device_foundation.v1.testing import named_device_instance_id
 from fastapi.routing import APIWebSocketRoute
 from fastapi.testclient import TestClient
@@ -14,7 +16,8 @@ from starlette.websockets import WebSocketDisconnect
 from eidolon_agent.app.admin.app import build_admin_app
 from eidolon_agent.app.admin.authority import SERVICE_TOKEN_ENV, require_service_token
 from eidolon_agent.config.settings import Settings
-from eidolon_agent.core.types.turn import TurnEvent, TurnStatus
+from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
+from eidolon_agent.core.types.turn import TurnStatus
 from tests.helpers import make_turn_input
 
 pytestmark = pytest.mark.functional
@@ -49,17 +52,22 @@ def app(*, done_status=TurnStatus.OK):
     turns = []
     context = make_turn_input().context
 
-    class Agent:
-        async def run_turn(self, turn):
-            turns.append(turn)
-            yield TurnEvent.delta(turn.turn_id, 0, "hello", 0)
-            yield TurnEvent.done(turn.turn_id, 1, done_status, 0)
+    class Model:
+        async def stream(self, messages, **kwargs):
+            rules = json.loads('{' + messages[0].content.split('\n{', 1)[1].split('\n公开消息')[0])
+            public = json.loads(messages[1].content.split('\n', 1)[1])
+            turns.append(SimpleNamespace(context=SimpleNamespace(
+                companion_id=rules['speaker_companion_id']), text=public['trigger']['text']))
+            assert kwargs['tools'] == []
+            yield LLMDelta(text_delta='hello')
+            yield LLMDelta(finish=LLMFinishReason.STOP if done_status == TurnStatus.OK else LLMFinishReason.ERROR)
 
     async def resolve(owner_id, companion_id):
         return SimpleNamespace(
             owner_id=owner_id,
             companion_id=companion_id,
             genome_id=context.genome_id,
+            genome=build_default_persona_genome(name="Test Companion"), genome_version=1,
             memory_realm_id="realm-" + companion_id,
             schema_version=context.schema_version,
             genome_hash=context.genome_hash,
@@ -67,14 +75,10 @@ def app(*, done_status=TurnStatus.OK):
             runtime_config={},
         )
 
-    async def runtime(owner_id, companion_id, genome_id):
-        return SimpleNamespace(
-            owner_id=owner_id, companion_id=companion_id, genome_id=genome_id, agent=Agent()
-        )
-
     instance = build_admin_app(
         settings=Settings(),
-        agent_registry=SimpleNamespace(resolve_runtime=runtime),
+        agent_registry=None,
+        llm_router=Model(),
         runtime_authority=SimpleNamespace(resolve=resolve),
     )
     return instance, turns

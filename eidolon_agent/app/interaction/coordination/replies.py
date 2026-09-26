@@ -1,4 +1,4 @@
-"""Bridge coordinated replies into the existing authorized Companion pipeline.
+"""Bridge scene replies into the independent role executor and shared presentation.
 
 The caller binds pre-authorized runtime scopes and the existing streaming
 presentation facility. This adapter does not resolve devices, mint credentials,
@@ -8,17 +8,17 @@ create an LLM/TTS client, or treat model completion as audible completion.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from hashlib import sha256
 
-from eidolon_agent.app.interaction import AcceptReply, PreparedReply, ReplyRequest
+from eidolon_sdk.biz.control.coordination import SceneRole
+
 from eidolon_agent.core.errors import PermissionDeniedError
-from eidolon_agent.core.types.coordination import CoordinatedInput
 from eidolon_agent.core.types.turn import TurnEvent, TurnEventKind
 from eidolon_agent.domain.runtime_session import AuthorizedRuntimeSession
 
 from . import Member, Permit, PlayedReply, ReplyTask
+from .role_reply import RoleMember, RoleReplyExecutor, RoleReplyRequest
 
-Presenter = Callable[[Member, PreparedReply, AsyncIterator[TurnEvent], Permit], Awaitable[bool]]
+Presenter = Callable[[Member, RoleReplyRequest, AsyncIterator[TurnEvent], Permit], Awaitable[bool]]
 
 
 class CoordinatedReplies:
@@ -28,7 +28,7 @@ class CoordinatedReplies:
         context_ref: str,
         input_device_id: str,
         bindings: tuple[tuple[Member, AuthorizedRuntimeSession], ...],
-        accept: AcceptReply,
+        executor: RoleReplyExecutor,
         present: Presenter,
     ):
         if not context_ref or not input_device_id or not bindings:
@@ -50,7 +50,9 @@ class CoordinatedReplies:
             devices.add(member.device_id)
         self._context_ref = context_ref
         self._input_device_id = input_device_id
-        self._accept, self._present = accept, present
+        self._executor, self._present = executor, present
+        self._roles = tuple(RoleMember(member.companion_id, member.role or SceneRole(
+            name=scope.runtime.genome.constitution.name)) for member, scope in bindings)
 
     async def __call__(self, member: Member, task: ReplyTask, permit: Permit) -> PlayedReply:
         permit.check()
@@ -65,25 +67,10 @@ class CoordinatedReplies:
             or source.author_kind == "system"
         ):
             raise PermissionDeniedError("unrecognized coordination source")
-        # A separate stable conversation per Owner/Companion/group prevents
-        # peer-private context from being mixed into another Companion's turn.
-        namespace = "\0".join((scope.owner_id, scope.companion_id, self._context_ref))
-        conversation_id = "coord:" + sha256(namespace.encode()).hexdigest()
-        coordinated = CoordinatedInput(self._context_ref, source, task.public_context)
-        prepared = await self._accept.prepare(
-            scope,
-            ReplyRequest(
-                conversation_id=conversation_id,
-                text=coordinated.user_text,
-                input_modality="text",
-                turn_id=permit.turn_id,
-                coordination=coordinated,
-                metadata={
-                    "coordination_context_ref": self._context_ref,
-                    "coordination_decision_id": task.decision_id,
-                    "coordination_source": source.model_dump(exclude={"text"}),
-                },
-            ),
+        prepared = RoleReplyRequest(
+            scope=scope, context_ref=self._context_ref, turn_id=permit.turn_id,
+            assignment_revision=1, members=self._roles,
+            trigger=source, public_context=task.public_context,
         )
         permit.check()
         fragments = []
@@ -92,7 +79,7 @@ class CoordinatedReplies:
 
         async def events():
             nonlocal completed, exhausted
-            stream = prepared.agent.run_turn(prepared.turn)
+            stream = self._executor.run(prepared)
             try:
                 async for event in stream:
                     permit.check()

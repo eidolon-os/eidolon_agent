@@ -21,10 +21,10 @@ from eidolon_sdk.biz.control.coordination_stream import (
     Transcript,
 )
 
-from eidolon_agent.app.interaction import AcceptReply
 from eidolon_agent.app.interaction.coordination import Member, Permit
 from eidolon_agent.app.interaction.coordination.mock_decision import MockDecision
 from eidolon_agent.app.interaction.coordination.prepare import prepare_session
+from eidolon_agent.app.interaction.coordination.role_reply import RoleReplyExecutor
 from eidolon_agent.core.types.turn import TurnEventKind
 from eidolon_agent.domain.runtime_session import RuntimeSessionAuthorizer
 
@@ -53,12 +53,12 @@ class CoordinationStream:
         self._closing: asyncio.Task | None = None
         self.closed = asyncio.Event()
 
-    async def prepare(self, *, registry, runtime_authority) -> None:
+    async def prepare(self, *, llm, runtime_authority) -> None:
         self.session = await prepare_session(
             self.opened.selection,
             authenticated_owner_id=self.opened.owner_id,
             runtime_sessions=RuntimeSessionAuthorizer(runtime_authority),
-            accept=AcceptReply(registry),
+            executor=RoleReplyExecutor(llm),
             present=self.present,
             decide=MockDecision(self.opened.mock_order),
             stop=self.stop,

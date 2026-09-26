@@ -6,7 +6,6 @@ from eidolon_sdk.biz.control.coordination import CoordinationSelection
 from eidolon_sdk.device_foundation.v1.testing import named_device_instance_id
 from test_coordinated_replies import Agent, scope
 
-from eidolon_agent.app.interaction import AcceptReply
 from eidolon_agent.app.interaction.coordination.mock_decision import MockDecision
 from eidolon_agent.app.interaction.coordination.prepare import prepare_session
 from eidolon_agent.core.errors import PermissionDeniedError
@@ -51,14 +50,6 @@ def dependencies(*, refused=None):
         facts.runtime_config = {}
         return facts
 
-    async def resolve_runtime(owner_id, companion_id, genome_id):
-        return SimpleNamespace(
-            owner_id=owner_id,
-            companion_id=companion_id,
-            genome_id=genome_id,
-            agent=agents[companion_id],
-        )
-
     played = []
 
     async def present(member, prepared, stream, permit):
@@ -67,11 +58,15 @@ def dependencies(*, refused=None):
         played.append((member.companion_id, member.device_id))
         return True
 
-    registry = SimpleNamespace(resolve_runtime=AsyncMock(side_effect=resolve_runtime))
+    class Executor:
+        async def run(self, request):
+            async for event in agents[request.scope.companion_id].run(request):
+                yield event
+    registry = SimpleNamespace(resolve_runtime=AsyncMock())
     args = dict(
         authenticated_owner_id="alice",
         runtime_sessions=RuntimeSessionAuthorizer(SimpleNamespace(resolve=resolve)),
-        accept=AcceptReply(registry),
+        executor=Executor(),
         present=present,
         decide=MockDecision(("b", "a")),
         stop=AsyncMock(),
@@ -80,7 +75,7 @@ def dependencies(*, refused=None):
     return args, agents, authorized, played, registry
 
 
-async def test_selection_authorizes_all_members_then_runs_existing_reply_pipeline():
+async def test_selection_authorizes_all_members_then_runs_role_executor():
     selected = selection(discussion=True, reply_budget=3)
     args, agents, authorized, played, registry = dependencies()
     session = await prepare_session(selected, **args)
@@ -100,10 +95,10 @@ async def test_selection_authorizes_all_members_then_runs_existing_reply_pipelin
         args["transcribe"].assert_awaited_once_with("capture")
         for key, agent in agents.items():
             for turn in agent.turns:
-                assert turn.context.owner_id == "alice"
-                assert turn.context.companion_id == key
-                assert turn.context.device_id == device_id
-        assert agents["b"].turns[-1].coordination.trigger.author_kind == "companion"
+                assert turn.scope.owner_id == "alice"
+                assert turn.scope.companion_id == key
+                assert turn.scope.device_id == device_id
+        assert agents["b"].turns[-1].trigger.author_kind == "companion"
     finally:
         await session.close()
 
@@ -142,13 +137,13 @@ async def test_each_scheduled_companion_receives_all_preceding_public_replies():
         for index, turn in enumerate(turns):
             # Includes the original user's question and every earlier completed
             # speaker, with its own author identity and exact generated text.
-            assert turn.coordination.public_context.recent_messages == tuple(
+            assert turn.public_context.recent_messages == tuple(
                 session.history[:index + 1])
             if index >= 2:
-                assert turn.coordination.trigger == session.history[index]
-                assert turn.text == ''  # Peer speech is never user input/memory.
+                assert turn.trigger == session.history[index]
+                assert turn.trigger.author_kind == 'companion'
         args['transcribe'].assert_awaited_once_with('user-question')
-        assert turns[0].conversation_id != turns[1].conversation_id
-        assert turns[0].conversation_id == turns[2].conversation_id
+        assert turns[0].scope.companion_id != turns[1].scope.companion_id
+        assert turns[0].scope.companion_id == turns[2].scope.companion_id
     finally:
         await session.close()

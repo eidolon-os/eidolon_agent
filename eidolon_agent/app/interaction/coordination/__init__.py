@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from uuid import uuid4
 
+from eidolon_sdk.biz.control.coordination import SceneRole
 from eidolon_sdk.biz.participation import (
     Candidate,
     Constraints,
@@ -31,6 +32,7 @@ class Member:
     companion_id: str
     device_id: str
     description: str = ""
+    role: SceneRole | None = None
 
 
 @dataclass(frozen=True)

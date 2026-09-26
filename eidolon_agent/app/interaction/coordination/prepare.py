@@ -12,12 +12,12 @@ from collections.abc import Awaitable, Callable
 from eidolon_sdk.biz.control.coordination import CoordinationSelection
 from eidolon_sdk.biz.participation import DecisionRequest, DecisionResult
 
-from eidolon_agent.app.interaction import AcceptReply
 from eidolon_agent.core.errors import PermissionDeniedError
 from eidolon_agent.domain.runtime_session import RuntimeSessionAuthorizer
 
 from . import CoordinationSession, Member, Ports
 from .replies import CoordinatedReplies, Presenter
+from .role_reply import RoleReplyExecutor
 
 
 async def prepare_session(
@@ -25,7 +25,7 @@ async def prepare_session(
     *,
     authenticated_owner_id: str,
     runtime_sessions: RuntimeSessionAuthorizer,
-    accept: AcceptReply,
+    executor: RoleReplyExecutor,
     present: Presenter,
     decide: Callable[[DecisionRequest], Awaitable[DecisionResult]],
     stop: Callable[[Member, int], Awaitable[None]],
@@ -42,7 +42,10 @@ async def prepare_session(
             device_id=input_id,
             session_id=selection.session_id,
         )
-        member = Member(selected.companion_id, selected.output_device.device_instance_id)
+        role = selected.role
+        description = role.name if role else scope.runtime.genome.constitution.name
+        member = Member(selected.companion_id, selected.output_device.device_instance_id,
+                        description=description, role=role)
         bindings.append((member, scope))
     # No device preparation, model turn or output occurs during the loop above.
     # One refused Companion rejects the whole configuration, not a silent subset.
@@ -50,7 +53,7 @@ async def prepare_session(
         context_ref=selection.session_id,
         input_device_id=input_id,
         bindings=tuple(bindings),
-        accept=accept,
+        executor=executor,
         present=present,
     )
     return CoordinationSession(

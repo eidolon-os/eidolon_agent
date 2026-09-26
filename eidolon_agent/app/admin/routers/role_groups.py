@@ -63,7 +63,7 @@ async def role_group_stream(socket: WebSocket):
             reserved = True
             bridge = CoordinationStream(opened)
             await bridge.prepare(
-                registry=socket.app.state.agent_registry,
+                llm=socket.app.state.llm_router,
                 runtime_authority=socket.app.state.runtime_authority,
             )
 
