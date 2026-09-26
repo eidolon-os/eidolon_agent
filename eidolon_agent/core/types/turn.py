@@ -13,6 +13,7 @@ from enum import Enum
 from typing import Any
 
 from eidolon_agent.core.types.companion_runtime import CompanionRuntimeConfig
+from eidolon_agent.core.types.coordination import CoordinatedInput
 from eidolon_agent.core.types.presentation import PresentationFeedback
 from eidolon_agent.core.types.signal import SignalDigest
 from eidolon_agent.core.types.turn_context import InputModality, TurnContext
@@ -23,6 +24,7 @@ class TurnTrigger(str, Enum):
     CONTINUATION = "continuation"  # follow-up in same conversation
     PROACTIVE = "proactive"  # agent-initiated (timer / signal / promise)
     SIGNAL_ONLY = "signal_only"  # PushSignal without a user message
+    COORDINATED_REPLY = "coordinated_reply"  # reply to attributed public discussion
     SYSTEM = "system"  # internal (warmup, health, etc.)
 
 
@@ -93,6 +95,11 @@ class TurnInput:
     attachments: tuple[dict, ...] = ()  # opaque; modality-specific
     metadata: dict = field(default_factory=dict)
     presentation_feedback: PresentationFeedback | None = None
+    coordination: CoordinatedInput | None = None
+
+    def __post_init__(self) -> None:
+        if self.coordination is not None and (self.text or "") != self.coordination.user_text:
+            raise ValueError("coordinated user text must match the attributed source")
 
     def is_user_turn(self) -> bool:
         return self.trigger in (TurnTrigger.USER_UTTERANCE, TurnTrigger.CONTINUATION)

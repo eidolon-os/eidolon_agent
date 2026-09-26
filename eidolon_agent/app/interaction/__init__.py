@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from eidolon_agent.core.errors import NotFoundError, PermissionDeniedError
 from eidolon_agent.core.types.conversation import validate_conversation_id
+from eidolon_agent.core.types.coordination import CoordinatedInput
 from eidolon_agent.core.types.presentation import PresentationFeedback
 from eidolon_agent.core.types.signal import SignalDigest
 from eidolon_agent.core.types.turn import TurnInput, TurnTrigger
@@ -42,6 +43,7 @@ class ReplyRequest:
     speculative: bool = False
     realtime: SignalDigest | None = None
     metadata: dict = field(default_factory=dict)
+    coordination: CoordinatedInput | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +98,13 @@ class AcceptReply:
                 realizer_version=runtime.realizer_version,
             ),
             input_modality=modality,
-            trigger=TurnTrigger.USER_UTTERANCE,
+            trigger=(
+                TurnTrigger.COORDINATED_REPLY
+                if request.coordination is not None
+                and request.coordination.trigger.author_kind != "user"
+                else TurnTrigger.USER_UTTERANCE
+            ),
+            coordination=request.coordination,
             runtime_config=scope.config,
             text=request.text,
             realtime=request.realtime,

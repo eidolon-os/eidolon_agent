@@ -63,8 +63,8 @@ from eidolon_agent.domain.agent.committed_turn import validate_committed_turn
 from eidolon_agent.domain.agent.presentation import (
     RESPONSE_TOOL,
     InvalidPresentationError,
-    response_schema,
     resolve_response,
+    response_schema,
 )
 from eidolon_agent.domain.context.compiler import ContextCompiler
 from eidolon_agent.domain.guardrails.crisis import CrisisHandler
@@ -307,7 +307,10 @@ class TurnEngine:
             cfg = ti.runtime_config
 
             # ---- LLM stream (with tool loop) -------------------------------
-            tools, extra_tools = await self._tool_schemas(ti, cfg)
+            # Shared statements authorize a reply, not duplicate tool actions.
+            tools, extra_tools = (
+                ([], {}) if ti.coordination is not None else await self._tool_schemas(ti, cfg)
+            )
             if presentation_mode:
                 if any(tool.name == RESPONSE_TOOL for tool in tools):
                     raise ValueError("RESERVED_RESPONSE_TOOL_COLLISION")
@@ -429,6 +432,8 @@ class TurnEngine:
                 if finish_reason is LLMFinishReason.LENGTH:
                     ti.metadata["output_truncated"] = True
                 if finish_reason is LLMFinishReason.TOOL_CALLS and tool_calls:
+                    if ti.coordination is not None:
+                        raise PermissionError("coordinated replies do not authorize tool actions")
                     if tool_iters >= self._max_tool_iters:
                         yield TurnEvent.error(
                             ti.turn_id,
