@@ -13,9 +13,10 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -365,6 +366,22 @@ class ParticipationSettings(BaseModel):
     # Full endpoint implementing the SDK v2 contract. Empty disables teams.
     url: str = ""
     token: str = ""
+
+    @field_validator("url")
+    @classmethod
+    def require_v2_endpoint(cls, value: str) -> str:
+        if not value:
+            return value
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.path != "/v1/participation/decide"
+            or parsed.query or parsed.fragment
+            or parsed.username or parsed.password
+        ):
+            raise ValueError("participation.url must be the full participation v2 endpoint")
+        return value
 
 
 class Settings(BaseSettings):
