@@ -38,7 +38,6 @@ def opening():
     return dict(
         type="open",
         owner_id="alice",
-        mock_order=["b", "a"],
         selection=dict(
             scenario="ip_role_group",
             session_id="scene",
@@ -49,7 +48,7 @@ def opening():
     )
 
 
-def app(*, done_status=TurnStatus.OK):
+def app(*, done_status=TurnStatus.OK, decision_port=None):
     turns = []
     context = make_turn_input().context
 
@@ -57,8 +56,10 @@ def app(*, done_status=TurnStatus.OK):
         async def stream(self, messages, **kwargs):
             rules = json.loads('{' + messages[0].content.split('\n{', 1)[1].split('\n公开消息')[0])
             public = json.loads(messages[1].content.split('\n', 1)[1])
+            task = json.loads(messages[2].content[messages[2].content.index('{'):])
             turns.append(SimpleNamespace(context=SimpleNamespace(
-                companion_id=rules['speaker_companion_id']), text=public['trigger']['text']))
+                companion_id=rules['speaker_companion_id']), text=public['user_request']['text'],
+                action=task['action'], instruction=task['task']))
             assert rules['speaker_role']['name'] == (
                 '孙悟空' if rules['speaker_companion_id'] == 'a' else '猪八戒')
             assert kwargs['tools'] == []
@@ -78,8 +79,17 @@ def app(*, done_status=TurnStatus.OK):
             runtime_config={},
         )
 
+    from tests.decision_helpers import decided
+    async def decision(request):
+        if request.trigger.author_kind == 'user':
+            return decided(request, speaker='b')
+        if request.trigger.author_id == 'b':
+            return decided(request, speaker='a')
+        return decided(request, 'finish')
+
     instance = build_admin_app(
         settings=Settings(),
+        participation_decision=decision_port if decision_port is not None else decision,
         agent_registry=None,
         llm_router=Model(),
         runtime_authority=SimpleNamespace(resolve=resolve),

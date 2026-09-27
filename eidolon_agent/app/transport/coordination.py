@@ -51,10 +51,9 @@ class CoordinationStream:
         self.closed = asyncio.Event()
 
     async def prepare(self, *, application: IpTeamApplication) -> None:
-        prepared = await application.prepare_demo(
+        prepared = await application.prepare(
             self.opened.selection,
             authenticated_owner_id=self.opened.owner_id,
-            order=self.opened.mock_order,
             present=self.present,
             stop=self.stop,
             transcribe=self.transcribe,
@@ -221,7 +220,9 @@ class CoordinationStream:
                 self._released = True
                 task = self.session.release(device_id=source, capture_id=frame.capture_id)
                 if task is not None:
-                    task.add_done_callback(self._round_done)
+                    task.add_done_callback(
+                        lambda done, capture_id=frame.capture_id: self._round_done(done, capture_id)
+                    )
         elif isinstance(frame, Transcript):
             if frame.capture_id != self._capture_id:
                 return
@@ -233,14 +234,17 @@ class CoordinationStream:
             else:
                 self._transcript.set_result(frame.text)
 
-    def _round_done(self, task):
-        if self._connected and not task.cancelled():
+    def _round_done(self, task, capture_id):
+        if self._connected and capture_id == self._capture_id and not task.cancelled():
             try:
                 self.emit(
                     "state",
+                    capture_id=capture_id,
                     state=self.session.state,
                     members=dict(self.session.member_states),
                     epoch=self.session.epoch,
+                    outcome=self.session.outcome,
+                    error_code=self.session.error_code,
                 )
             except (ConnectionError, asyncio.QueueFull):
                 self._connected = False

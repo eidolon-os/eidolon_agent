@@ -41,11 +41,17 @@ class RoleReplyRequest:
     members: tuple[RoleMember, ...]
     trigger: Message
     public_context: Context
+    action: str = "respond"
+    instruction: str = ""
+    user_request: Message | None = None
+    scene_goal: str = ""
 
     def __post_init__(self):
         ids = [m.companion_id for m in self.members]
         if (
-            self.scope.session_id != self.context_ref
+            self.action not in {"respond", "clarify"}
+            or (self.action == "clarify" and not self.instruction.strip())
+            or self.scope.session_id != self.context_ref
             or not self.turn_id
             or self.assignment_revision != 1
             or len(set(ids)) != len(ids)
@@ -104,6 +110,8 @@ class RoleContextBuilder:
             {
                 "trigger": request.trigger.model_dump(mode="json"),
                 "public_context": request.public_context.model_dump(mode="json"),
+                "user_request": (request.user_request or request.trigger).model_dump(mode="json"),
+                "scene_goal": request.scene_goal,
             },
             ensure_ascii=False,
         )
@@ -125,10 +133,13 @@ class RoleContextBuilder:
                 request.turn_id + ":task",
                 MessageRole.SYSTEM,
                 "[现在执行本轮发言]\n"
-                "依据公开对话中的用户目标与同伴已说的内容，由当前角色直接接着说。"
+                + ("只提出一个澄清问题，等待用户回答；不要猜测答案或继续展开讨论。\n"
+                   if request.action == "clarify" else "")
+                + "依据公开对话中的用户目标与同伴已说的内容，由当前角色直接接着说。"
                 "交付物仅为这一位的台词正文，不附说明、标题、规则解释或其他人的台词。\n"
                 + json.dumps(
-                    {"speaker_companion_id": runtime.companion_id, "speaker_role": own.role.name},
+                    {"speaker_companion_id": runtime.companion_id, "speaker_role": own.role.name,
+                     "action": request.action, "task": request.instruction},
                     ensure_ascii=False,
                 ),
                 now,

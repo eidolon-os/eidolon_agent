@@ -7,6 +7,12 @@
 
 env: dev
 
+# Model-neutral SDK participation v2 endpoint; empty means teams are unavailable.
+# Test fixtures implement the identical contract; no built-in ordering fallback.
+participation:
+  url: ""
+  token: ""
+
 grpc:
   tcp_host: 127.0.0.1
   tcp_port: 45051

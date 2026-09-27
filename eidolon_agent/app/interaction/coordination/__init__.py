@@ -26,6 +26,8 @@ from eidolon_sdk.biz.participation import (
     validate_proposal,
 )
 
+from eidolon_agent.core.ports.participation import DecisionUnavailable
+
 
 @dataclass(frozen=True)
 class Member:
@@ -71,6 +73,10 @@ class ReplyTask:
     context_ref: str
     trigger: Message
     public_context: Context
+    action: str = "respond"
+    instruction: str = ""
+    user_request: Message | None = None
+    scene_goal: str = ""
 
 
 @dataclass(frozen=True)
@@ -93,7 +99,7 @@ class CoordinationSession:
         input_device_id: str,
         members: tuple[Member, ...],
         ports: Ports,
-        discussion: bool = False,
+        goal: str = "",
         reply_budget: int = 8,
         stop_timeout: float = 2.0,
         stage_timeout: float = 30.0,
@@ -111,10 +117,12 @@ class CoordinationSession:
             raise ValueError("bounded positive budgets required")
         self.session_id, self.input_device_id = session_id, input_device_id
         self.members, self.ports = members, ports
-        self.discussion, self.reply_budget = discussion, reply_budget
+        self.goal, self.reply_budget = goal, reply_budget
         self.stop_timeout, self.stage_timeout = stop_timeout, stage_timeout
         self.epoch = 0
         self.state = "waiting"
+        self.outcome = "waiting"
+        self.error_code = ""
         self.member_states = {m.companion_id: "waiting" for m in members}
         self.failures: dict[str, str] = {}
         self.history: list[Message] = []
@@ -166,6 +174,7 @@ class CoordinationSession:
         if self._round is not None:
             self._round.cancel()
         self.state = "recording"
+        self.outcome, self.error_code = "waiting", ""
         self.member_states = {
             m.companion_id: "failed" if m.companion_id in self.failures else "waiting"
             for m in self.members
@@ -232,17 +241,20 @@ class CoordinationSession:
                 raise RuntimeError("not all response devices confirmed silence")
             if not text.strip():
                 self.state = "waiting"
+                self.outcome = "empty_input"
                 self._event("empty_input")
                 return
             trigger = Message(
                 message_id=capture, author_kind="user", author_id=self.input_device_id, text=text
             )
             self.history.append(trigger)
+            user_request = trigger
             remaining = self.reply_budget
             while remaining:
                 self._check(epoch)
                 candidates = tuple(
-                    Candidate(companion_id=m.companion_id, description=m.description)
+                    Candidate(companion_id=m.companion_id, description=m.description,
+                              display_name=m.role.name if m.role else m.description)
                     for m in self.members
                     if m.companion_id not in self.failures
                 )
@@ -256,9 +268,11 @@ class CoordinationSession:
                     membership_revision=1,
                     cancellation_epoch=epoch,
                     trigger=trigger,
-                    context=Context(recent_messages=tuple(self.history[-16:])),
+                    user_request=user_request,
+                    scene_goal=self.goal,
+                    context=Context(recent_messages=tuple(self.history[-64:])),
                     candidates=candidates,
-                    constraints=Constraints(max_next_speakers=min(remaining, len(candidates))),
+                    constraints=Constraints(remaining_replies=remaining),
                     timeout_ms=min(60000, max(1, int(self.stage_timeout * 1000))),
                 )
                 async with asyncio.timeout(self.stage_timeout):
@@ -266,57 +280,71 @@ class CoordinationSession:
                 self._check(epoch)
                 validate_proposal(request, result)
                 proposal = result.proposal
-                if proposal is None or proposal.action in {"wait", "finish"}:
+                if proposal is None:
+                    self.outcome = "abstained"
                     break
-                self._event("decision", participants=list(proposal.participants))
-                for companion_id in proposal.participants:
-                    self._check(epoch)
-                    if companion_id in self.failures:
-                        raise RuntimeError("response device is quarantined")
-                    member = next(m for m in self.members if m.companion_id == companion_id)
-                    turn_id = uuid4().hex
-                    self._active_turn = turn_id
-                    permit = Permit(
-                        turn_id,
-                        epoch,
-                        lambda e=epoch, c=companion_id, t=turn_id: (
-                            self._valid(e) and self._active_turn == t and c not in self.failures
-                        ),
-                        lambda phase, c=companion_id: self._phase(c, phase),
-                    )
-                    self.state = "responding"
-                    self.member_states[companion_id] = "thinking"
-                    self._event("reply_started", companion_id=companion_id, turn_id=turn_id)
-                    # Include preceding public replies in ordered execution without
-                    # rerouting or sharing any member's private conversation state.
-                    turn_request = ReplyTask(
-                        decision_id=request.decision_id,
-                        context_ref=self.session_id,
-                        trigger=request.trigger,
-                        public_context=Context(recent_messages=tuple(self.history[-16:])),
-                    )
-                    # The reply owns generation and native playout. Their own
-                    # failure/cancellation contracts govern completion; the short
-                    # ASR/decision RPC deadline must not truncate audible speech.
-                    # PTT, close and transport loss still revoke this permit.
-                    played = await self.ports.reply(member, turn_request, permit)
-                    permit.check()
-                    self._active_turn = None
-                    if not played.completed:
-                        raise RuntimeError("reply did not finish playback")
-                    trigger = Message(
-                        message_id=turn_id,
-                        author_kind="companion",
-                        author_id=companion_id,
-                        text=played.text,
-                    )
-                    self.history.append(trigger)
-                    remaining -= 1
-                    self.member_states[companion_id] = "waiting"
-                    self._event("reply_played", companion_id=companion_id)
-                # Explicit discussion only; a normal question does not self-loop.
-                if not self.discussion or proposal.action == "clarify":
+                self._event("decision", action=proposal.action,
+                            participants=list(proposal.participants),
+                            policy_version=result.policy_version, model_version=result.model_version)
+                if proposal.action in {"wait", "finish"}:
+                    self.outcome = "finished" if proposal.action == "finish" else "waiting"
                     break
+                companion_id = proposal.participants[0]
+                self._check(epoch)
+                if companion_id in self.failures:
+                    raise RuntimeError("response device is quarantined")
+                member = next(m for m in self.members if m.companion_id == companion_id)
+                turn_id = uuid4().hex
+                self._active_turn = turn_id
+                permit = Permit(
+                    turn_id,
+                    epoch,
+                    lambda e=epoch, c=companion_id, t=turn_id: (
+                        self._valid(e) and self._active_turn == t and c not in self.failures
+                    ),
+                    lambda phase, c=companion_id: self._phase(c, phase),
+                )
+                self.state = "responding"
+                self.member_states[companion_id] = "thinking"
+                self._event("reply_started", companion_id=companion_id, turn_id=turn_id)
+                # The new decision sees only completed public replies. No private
+                # conversation state is shared between member executions.
+                turn_request = ReplyTask(
+                    decision_id=request.decision_id,
+                    context_ref=self.session_id,
+                    trigger=request.trigger,
+                    public_context=Context(recent_messages=tuple(self.history[-64:])),
+                    action=proposal.action,
+                    instruction=proposal.instruction,
+                    user_request=user_request,
+                    scene_goal=self.goal,
+                )
+                # The reply owns generation and native playout. Their own
+                # failure/cancellation contracts govern completion; the short
+                # ASR/decision RPC deadline must not truncate audible speech.
+                # PTT, close and transport loss still revoke this permit.
+                played = await self.ports.reply(member, turn_request, permit)
+                permit.check()
+                self._active_turn = None
+                if not played.completed:
+                    raise RuntimeError("reply did not finish playback")
+                trigger = Message(
+                    message_id=turn_id,
+                    author_kind="companion",
+                    author_id=companion_id,
+                    text=played.text,
+                )
+                self.history.append(trigger)
+                remaining -= 1
+                self.member_states[companion_id] = "waiting"
+                self._event("reply_played", companion_id=companion_id)
+                # A clarification yields to the user after exactly one question.
+                # Otherwise reevaluate actual played content, never an old queue.
+                if proposal.action == "clarify":
+                    self.outcome = "clarification"
+                    break
+            else:
+                self.outcome = "budget_exhausted"
             self._check(epoch)
             self.state = "waiting"
             self._event("waiting", remaining_budget=remaining)
@@ -326,7 +354,10 @@ class CoordinationSession:
             raise
         except Exception as exc:
             if self._valid(epoch):
-                self._fail_round(type(exc).__name__)
+                code = (exc.code if isinstance(exc, DecisionUnavailable) else
+                        "DECISION_TIMEOUT" if isinstance(exc, TimeoutError) and self.state == "deciding"
+                        else "TEAM_ROUND_FAILED")
+                self._fail_round(code)
         finally:
             if epoch == self.epoch:
                 for key in self.member_states:
@@ -339,6 +370,7 @@ class CoordinationSession:
 
     def _fail_round(self, reason: str) -> None:
         self.state = "failed"
+        self.outcome, self.error_code = "error", reason
         self._event("round_failed", reason=reason)
         self.epoch += 1
         self._active_turn = None

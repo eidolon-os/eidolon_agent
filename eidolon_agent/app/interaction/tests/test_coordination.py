@@ -9,7 +9,7 @@ from eidolon_agent.app.interaction.coordination import (
     PlayedReply,
     Ports,
 )
-from eidolon_agent.app.interaction.coordination.mock_decision import MockDecision
+from tests.decision_helpers import decided
 
 pytestmark = pytest.mark.unit
 
@@ -19,7 +19,6 @@ class Harness:
         self.log = []
         self.permits = []
         self.requests = []
-        self.policy = MockDecision(("a", "b"))
         self.session = CoordinationSession(
             session_id="demo",
             input_device_id="waveshare",
@@ -27,6 +26,13 @@ class Harness:
             ports=Ports(self.decide, self.reply, self.stop, self.asr),
             **options,
         )
+
+    async def policy(self, request):
+        if request.trigger.author_kind == 'user':
+            return decided(request, speaker='a')
+        if request.trigger.author_id == 'a':
+            return decided(request, speaker='b')
+        return decided(request, 'finish')
 
     async def decide(self, request):
         return await self.policy(request)
@@ -74,7 +80,10 @@ async def test_single_input_serial_replies_public_context_and_no_live_old_permit
 
 
 async def test_discussion_uses_companion_text_without_asr_and_stops_at_budget():
-    h = Harness(discussion=True, reply_budget=5)
+    h = Harness(reply_budget=5)
+    async def continuous(request):
+        return decided(request, speaker='b' if request.trigger.author_id == 'a' else 'a')
+    h.policy = continuous
     try:
         h.press()
         await h.release()
@@ -360,3 +369,19 @@ async def test_playout_longer_than_decision_deadline_still_advances_with_context
         assert h.session.state == 'waiting'
     finally:
         await h.session.close()
+
+
+async def test_late_failed_round_cannot_publish_current_capture_completion():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from eidolon_agent.app.transport.coordination import CoordinationStream
+    # A provider may convert cancellation into an ordinary failure. Even then,
+    # its done callback has no authority over the newer capture's UI.
+    stream = CoordinationStream(None)
+    stream._capture_id = 'new'
+    stream.session = SimpleNamespace(state='transcribing', member_states={},
+                                     epoch=2, outcome='waiting', error_code='')
+    stream.emit = Mock()
+    old = SimpleNamespace(cancelled=lambda: False)
+    stream._round_done(old, 'old')
+    stream.emit.assert_not_called()

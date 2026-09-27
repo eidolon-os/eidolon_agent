@@ -71,6 +71,8 @@ class CoordinatedReplies:
             scope=scope, context_ref=self._context_ref, turn_id=permit.turn_id,
             assignment_revision=1, members=self._roles,
             trigger=source, public_context=task.public_context,
+            action=task.action, instruction=task.instruction,
+            user_request=task.user_request, scene_goal=task.scene_goal,
         )
         permit.check()
         fragments = []

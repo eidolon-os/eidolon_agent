@@ -361,6 +361,12 @@ _SETTINGS_YAML = _REPO_ROOT / "config" / "settings.yaml"
 _DEFAULT_ENV = _REPO_ROOT / "config" / ".env"
 
 
+class ParticipationSettings(BaseModel):
+    # Full endpoint implementing the SDK v2 contract. Empty disables teams.
+    url: str = ""
+    token: str = ""
+
+
 class Settings(BaseSettings):
     """Process-level settings. One instance per process (cached singleton)."""
 
@@ -376,6 +382,7 @@ class Settings(BaseSettings):
     nats: NatsSettings = Field(default_factory=NatsSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
+    participation: ParticipationSettings = Field(default_factory=ParticipationSettings)
     long_task: LongTaskSettings = Field(default_factory=LongTaskSettings)
     body_control: BodyControlSettings = Field(default_factory=BodyControlSettings)
     persona: PersonaSettings = Field(default_factory=PersonaSettings)

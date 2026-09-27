@@ -43,7 +43,8 @@ async def prepare_session(
             session_id=selection.session_id,
         )
         role = selected.role
-        description = role.name if role else scope.runtime.genome.constitution.name
+        description = (f"{role.name}\n{role.description}" if role
+                       else scope.runtime.genome.constitution.name)
         member = Member(selected.companion_id, selected.output_device.device_instance_id,
                         description=description, role=role)
         bindings.append((member, scope))
@@ -61,6 +62,6 @@ async def prepare_session(
         input_device_id=input_id,
         members=tuple(member for member, _ in bindings),
         ports=Ports(decide=decide, reply=reply, stop=stop, transcribe=transcribe),
-        discussion=selection.discussion,
+        goal=selection.goal,
         reply_budget=selection.reply_budget,
     )

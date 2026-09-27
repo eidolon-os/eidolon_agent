@@ -28,6 +28,7 @@ from eidolon_agent.app.admin.routers import (
 )
 from eidolon_agent.app.interaction.coordination.application import IpTeamApplication
 from eidolon_agent.config.settings import Settings
+from eidolon_agent.infra.participation import HttpParticipationDecision
 
 
 def build_admin_app(
@@ -43,6 +44,7 @@ def build_admin_app(
     memory_discovery_refresher=None,
     live_turns=None,
     llm_router=None,
+    participation_decision=None,
 ) -> FastAPI:
     app = FastAPI(
         title="eidolon-agent admin",
@@ -61,6 +63,10 @@ def build_admin_app(
     app.state.role_group_connections = role_groups.SceneConnections()
     app.state.ip_team_application = IpTeamApplication(
         llm=llm_router, runtime_authority=runtime_authority,
+        decide=participation_decision if participation_decision is not None else (
+            HttpParticipationDecision(settings.participation.url, token=settings.participation.token)
+            if settings.participation.url else None
+        ),
     )
     app.state.settings = settings
     app.state.agent_registry = agent_registry

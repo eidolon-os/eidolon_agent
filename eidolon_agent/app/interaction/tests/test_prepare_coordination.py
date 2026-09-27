@@ -6,7 +6,7 @@ from eidolon_sdk.biz.control.coordination import CoordinationSelection
 from eidolon_sdk.device_foundation.v1.testing import named_device_instance_id
 from test_coordinated_replies import Agent, scope
 
-from eidolon_agent.app.interaction.coordination.mock_decision import MockDecision
+from tests.decision_helpers import decided
 from eidolon_agent.app.interaction.coordination.prepare import prepare_session
 from eidolon_agent.core.errors import PermissionDeniedError
 from eidolon_agent.domain.runtime_session import RuntimeSessionAuthorizer
@@ -50,6 +50,9 @@ def dependencies(*, refused=None):
         facts.runtime_config = {}
         return facts
 
+    async def decide(request):
+        return decided(request, speaker='a' if request.trigger.author_id == 'b' else 'b')
+
     played = []
 
     async def present(member, prepared, stream, permit):
@@ -68,7 +71,7 @@ def dependencies(*, refused=None):
         runtime_sessions=RuntimeSessionAuthorizer(SimpleNamespace(resolve=resolve)),
         executor=Executor(),
         present=present,
-        decide=MockDecision(("b", "a")),
+        decide=decide,
         stop=AsyncMock(),
         transcribe=AsyncMock(return_value="hello"),
     )
@@ -76,7 +79,7 @@ def dependencies(*, refused=None):
 
 
 async def test_selection_authorizes_all_members_then_runs_role_executor():
-    selected = selection(discussion=True, reply_budget=3)
+    selected = selection(reply_budget=3)
     args, agents, authorized, played, registry = dependencies()
     session = await prepare_session(selected, **args)
     assert authorized == [("alice", "a"), ("alice", "b")]
@@ -123,9 +126,11 @@ async def test_missing_authenticated_owner_is_rejected_before_runtime_resolution
 
 
 async def test_each_scheduled_companion_receives_all_preceding_public_replies():
-    selected = selection(discussion=True, reply_budget=5)
+    selected = selection(reply_budget=5)
     args, agents, _, played, _ = dependencies()
-    args['decide'] = MockDecision(('a', 'b'))
+    async def decide(request):
+        return decided(request, speaker='b' if request.trigger.author_id == 'a' else 'a')
+    args['decide'] = decide
     session = await prepare_session(selected, **args)
     try:
         source = selected.input_device.device_instance_id
