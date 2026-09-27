@@ -21,7 +21,7 @@ from eidolon_sdk.biz.control.coordination_stream import (
     Transcript,
 )
 
-from eidolon_agent.app.interaction.coordination import Member, Permit
+from eidolon_agent.app.interaction.coordination import CoordinationFailure, Member, Permit
 from eidolon_agent.app.interaction.coordination.application import IpTeamApplication
 from eidolon_agent.core.types.turn import TurnEventKind
 
@@ -32,6 +32,7 @@ class PendingReceipt:
     future: asyncio.Future
     permit: Permit | None = None
     completion_allowed: bool = True
+    error_code: str = ""
 
 
 class CoordinationStream:
@@ -44,6 +45,7 @@ class CoordinationStream:
         self._sequence = 0
         self._pending: dict[str, PendingReceipt] = {}
         self._capture_id: str | None = None
+        self._capture_epochs: dict[int, str] = {}
         self._transcript: asyncio.Future | None = None
         self._released = False
         self._connected = True
@@ -115,10 +117,11 @@ class CoordinationStream:
         self._pending[request_id] = pending
         try:
             self.emit(
-                "stop", urgent=True, request_id=request_id, device_id=member.device_id, epoch=epoch
+                "stop", urgent=True, request_id=request_id, device_id=member.device_id, epoch=epoch,
+                capture_id=self._capture_epochs.get(epoch),
             )
             if not await pending.future:
-                raise RuntimeError("device refused stop")
+                raise RuntimeError(pending.error_code or "TEAM_STOP_UNCONFIRMED")
         finally:
             self._pending.pop(request_id, None)
 
@@ -143,6 +146,8 @@ class CoordinationStream:
             )
             async for event in events:
                 permit.check()
+                if pending.future.done() and not pending.future.result():
+                    raise CoordinationFailure(pending.error_code or "TEAM_PLAYBACK_UNCONFIRMED")
                 # This interface carries speech text only. Existing business tool
                 # results/private trace records never become a public group message.
                 if (
@@ -167,7 +172,9 @@ class CoordinationStream:
                 epoch=permit.epoch,
                 device_id=member.device_id,
             )
-            return await pending.future
+            if not await pending.future:
+                raise CoordinationFailure(pending.error_code or "TEAM_PLAYBACK_UNCONFIRMED")
+            return True
         finally:
             self._pending.pop(request_id, None)
 
@@ -185,6 +192,7 @@ class CoordinationStream:
             if pending.permit is not None and not pending.permit.current():
                 return
             if not pending.future.done():
+                pending.error_code = frame.error_code
                 pending.future.set_result(frame.result == "completed")
             return
         if isinstance(frame, Speaking):
@@ -207,6 +215,7 @@ class CoordinationStream:
                 self.session.press(device_id=source, capture_id=frame.capture_id)
                 if self._transcript is not None and not self._transcript.done():
                     self._transcript.cancel()
+                self._capture_epochs[self.session.epoch] = frame.capture_id
                 self._capture_id = frame.capture_id
                 self._released = False
                 self.emit(

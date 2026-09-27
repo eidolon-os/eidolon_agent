@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from uuid import uuid4
 
-from eidolon_sdk.biz.control.coordination import SceneRole
+from eidolon_sdk.biz.control.coordination import SceneRole, STOP_RECEIPT_TIMEOUT
 from eidolon_sdk.biz.participation import (
     Candidate,
     Constraints,
@@ -27,6 +27,12 @@ from eidolon_sdk.biz.participation import (
 )
 
 from eidolon_agent.core.ports.participation import DecisionUnavailable
+
+
+class CoordinationFailure(RuntimeError):
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -101,7 +107,7 @@ class CoordinationSession:
         ports: Ports,
         goal: str = "",
         reply_budget: int = 8,
-        stop_timeout: float = 2.0,
+        stop_timeout: float = STOP_RECEIPT_TIMEOUT,
         stage_timeout: float = 30.0,
     ):
         if not session_id or not input_device_id or not members:
@@ -194,13 +200,17 @@ class CoordinationSession:
                 async with asyncio.timeout(self.stop_timeout):
                     await self.ports.stop(member, epoch)
             except Exception as exc:
-                # A failed endpoint stays quarantined for this session. Recovery
-                # requires fresh preparation, not a later unrelated receipt.
-                self.failures[member.companion_id] = f"stop:{type(exc).__name__}"
+                # Only the current silence barrier can change endpoint health.
+                # Late failures and successes cannot poison or heal a newer round.
                 if epoch == self.epoch:
+                    self.failures[member.companion_id] = f"stop:{type(exc).__name__}:{exc}"
                     self.member_states[member.companion_id] = "failed"
-                self._event("stop_failed", device_id=member.device_id, stop_epoch=epoch)
+                self._event("stop_failed", device_id=member.device_id, stop_epoch=epoch,
+                            error_type=type(exc).__name__, reason=str(exc))
             else:
+                if epoch == self.epoch:
+                    self.failures.pop(member.companion_id, None)
+                    self.member_states[member.companion_id] = "waiting"
                 self._event("stopped", device_id=member.device_id, stop_epoch=epoch)
 
         await asyncio.gather(*(stop(member) for member in self.members))
@@ -235,10 +245,10 @@ class CoordinationSession:
                 await asyncio.shield(asyncio.gather(*stops))
             self._check(epoch)
             if self.failures:
-                # An unconfirmed stop may still be audible. Starting a healthy
-                # endpoint would violate global serial playback too. Keep input
-                # available, but require fresh preparation before any new output.
-                raise RuntimeError("not all response devices confirmed silence")
+                # A new explicit PTT may establish a fresh silence barrier. This
+                # round cannot skip the unconfirmed member and speak elsewhere.
+                self._fail_round("TEAM_STOP_UNCONFIRMED", stop=False)
+                return
             if not text.strip():
                 self.state = "waiting"
                 self.outcome = "empty_input"
@@ -327,7 +337,7 @@ class CoordinationSession:
                 permit.check()
                 self._active_turn = None
                 if not played.completed:
-                    raise RuntimeError("reply did not finish playback")
+                    raise CoordinationFailure("TEAM_PLAYBACK_UNCONFIRMED")
                 trigger = Message(
                     message_id=turn_id,
                     author_kind="companion",
@@ -354,7 +364,8 @@ class CoordinationSession:
             raise
         except Exception as exc:
             if self._valid(epoch):
-                code = (exc.code if isinstance(exc, DecisionUnavailable) else
+                self._event("round_error", error_type=type(exc).__name__, reason=str(exc))
+                code = (exc.code if isinstance(exc, (DecisionUnavailable, CoordinationFailure)) else
                         "DECISION_TIMEOUT" if isinstance(exc, TimeoutError) and self.state == "deciding"
                         else "TEAM_ROUND_FAILED")
                 self._fail_round(code)
@@ -368,7 +379,7 @@ class CoordinationSession:
         self.member_states[companion_id] = phase
         self._event("reply_phase", companion_id=companion_id, phase=phase)
 
-    def _fail_round(self, reason: str) -> None:
+    def _fail_round(self, reason: str, *, stop: bool = True) -> None:
         self.state = "failed"
         self.outcome, self.error_code = "error", reason
         self._event("round_failed", reason=reason)
@@ -377,7 +388,8 @@ class CoordinationSession:
         for key in self.member_states:
             if self.member_states[key] in {"thinking", "speaking"}:
                 self.member_states[key] = "failed"
-        self._dispatch_stop()
+        if stop:
+            self._dispatch_stop()
 
     async def close(self) -> None:
         if self._closed:

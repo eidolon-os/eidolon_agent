@@ -385,3 +385,38 @@ async def test_late_failed_round_cannot_publish_current_capture_completion():
     old = SimpleNamespace(cancelled=lambda: False)
     stream._round_done(old, 'old')
     stream.emit.assert_not_called()
+
+
+async def test_new_ptt_recovers_only_after_fresh_silence_confirmation():
+    h = Harness()
+    fail = True
+    async def stop(member, epoch):
+        if fail:
+            raise RuntimeError("TEAM_STOP_REJECTED")
+    h.session.ports = Ports(h.decide, h.reply, stop, h.asr)
+    try:
+        h.press()
+        await h.release()
+        assert h.session.error_code == "TEAM_STOP_UNCONFIRMED"
+        assert not [x for x in h.log if x[0] == "reply"]
+        fail = False
+        h.press("retry")
+        await h.release("retry")
+        assert not h.session.failures
+        assert [x for x in h.log if x[0] == "reply"]
+    finally:
+        await h.session.close()
+
+
+async def test_obsolete_stop_failure_cannot_poison_current_epoch():
+    h = Harness()
+    async def stop(member, epoch):
+        if epoch == 1:
+            raise RuntimeError("old failure")
+    h.session.ports = Ports(h.decide, h.reply, stop, h.asr)
+    try:
+        h.session.epoch = 2
+        await h.session._stop_all(1)
+        assert not h.session.failures
+    finally:
+        await h.session.close()

@@ -334,3 +334,36 @@ def test_failed_model_completion_stops_without_requesting_played_receipt(monkeyp
         stops(socket)
         with pytest.raises(WebSocketDisconnect):
             socket.receive_json()
+
+
+def test_stop_failure_is_round_scoped_and_next_capture_recovers_on_same_socket(monkeypatch):
+    monkeypatch.setenv(SERVICE_TOKEN_ENV, TOKEN)
+    instance, turns = app()
+    with TestClient(instance) as client, client.websocket_connect(
+        ROLE_GROUP_STREAM_PATH, headers=HEADERS
+    ) as socket:
+        socket.send_json(opening())
+        socket.receive_json()
+        utterance(socket, capture="failed")
+        assert socket.receive_json()["type"] == "capturing"
+        for _ in range(2):
+            stop = socket.receive_json()
+            assert stop["type"] == "stop" and stop["capture_id"] == "failed"
+            socket.send_json(dict(type="receipt", request_id=stop["request_id"],
+                device_id=stop["device_id"], result="failed", error_code="TEAM_STOP_TIMEOUT"))
+        state = socket.receive_json()
+        assert state["outcome"] == "error"
+        assert state["error_code"] == "TEAM_STOP_UNCONFIRMED"
+        assert not turns
+        utterance(socket, capture="retry")
+        stops(socket)
+        receipt(socket, reply(socket, "b"))
+        receipt(socket, reply(socket, "a"))
+        assert socket.receive_json()["outcome"] == "finished"
+        socket.send_json({"type": "close"})
+        for _ in range(2):
+            stop = socket.receive_json()
+            assert stop["type"] == "stop" and stop["capture_id"] is None
+            receipt(socket, stop)
+        with pytest.raises(WebSocketDisconnect):
+            socket.receive_json()
