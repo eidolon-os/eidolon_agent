@@ -26,6 +26,7 @@ from eidolon_agent.app.admin.routers import (
     reports,
     role_groups,
 )
+from eidolon_agent.app.interaction.coordination.application import IpTeamApplication
 from eidolon_agent.config.settings import Settings
 
 
@@ -58,6 +59,9 @@ def build_admin_app(
     )
 
     app.state.role_group_connections = role_groups.SceneConnections()
+    app.state.ip_team_application = IpTeamApplication(
+        llm=llm_router, runtime_authority=runtime_authority,
+    )
     app.state.settings = settings
     app.state.agent_registry = agent_registry
     app.state.personas_service = personas_service

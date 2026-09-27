@@ -19,8 +19,7 @@ from eidolon_agent.core.types.presentation import PresentationFeedback
 from eidolon_agent.core.types.signal import SignalDigest
 from eidolon_agent.core.types.turn import TurnInput, TurnTrigger
 from eidolon_agent.core.types.turn_context import TurnContext
-from eidolon_agent.domain.agent.companion import CompanionAgent
-from eidolon_agent.domain.agent.registry import AgentInstance
+from eidolon_agent.domain.agent import AgentInstance, CompanionAgent
 from eidolon_agent.domain.runtime_session import AuthorizedRuntimeSession
 
 

@@ -25,6 +25,19 @@ ROOT = Path(__file__).resolve().parent.parent / "eidolon_agent"
 _WIRING_EXEMPT = frozenset({"eidolon_agent.app.runtime.bootstrap"})
 
 
+def test_team_transport_does_not_assemble_business_executors() -> None:
+    """A protocol change must not select models, policies or runtime authority."""
+    source = ROOT / "app/transport/coordination.py"
+    forbidden = {"MockDecision", "RoleReplyExecutor", "RuntimeSessionAuthorizer", "prepare_session"}
+    tree = ast.parse(source.read_text())
+    names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    imports = {
+        alias.name for node in ast.walk(tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names
+    }
+    assert not forbidden & (names | imports)
+
+
 def _top_modules() -> dict[str, Path]:
     """Map ``eidolon_agent.<layer>.<module>`` → directory."""
     out: dict[str, Path] = {}

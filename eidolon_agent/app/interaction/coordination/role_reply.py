@@ -21,7 +21,7 @@ from eidolon_agent.core.ports.llm import LLMPort
 from eidolon_agent.core.types.llm import LLMFinishReason
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.turn import TurnEvent, TurnStatus
-from eidolon_agent.domain.personas.realizer import PersonaRealizer
+from eidolon_agent.domain.personas import PersonaRealizer
 from eidolon_agent.domain.personas.types import StoredPersonaGenome
 from eidolon_agent.domain.runtime_session import AuthorizedRuntimeSession
 

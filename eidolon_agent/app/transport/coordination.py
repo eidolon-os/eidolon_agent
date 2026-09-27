@@ -22,11 +22,8 @@ from eidolon_sdk.biz.control.coordination_stream import (
 )
 
 from eidolon_agent.app.interaction.coordination import Member, Permit
-from eidolon_agent.app.interaction.coordination.mock_decision import MockDecision
-from eidolon_agent.app.interaction.coordination.prepare import prepare_session
-from eidolon_agent.app.interaction.coordination.role_reply import RoleReplyExecutor
+from eidolon_agent.app.interaction.coordination.application import IpTeamApplication
 from eidolon_agent.core.types.turn import TurnEventKind
-from eidolon_agent.domain.runtime_session import RuntimeSessionAuthorizer
 
 
 @dataclass
@@ -53,19 +50,18 @@ class CoordinationStream:
         self._closing: asyncio.Task | None = None
         self.closed = asyncio.Event()
 
-    async def prepare(self, *, llm, runtime_authority) -> None:
-        self.session = await prepare_session(
+    async def prepare(self, *, application: IpTeamApplication) -> None:
+        prepared = await application.prepare_demo(
             self.opened.selection,
             authenticated_owner_id=self.opened.owner_id,
-            runtime_sessions=RuntimeSessionAuthorizer(runtime_authority),
-            executor=RoleReplyExecutor(llm),
+            order=self.opened.mock_order,
             present=self.present,
-            decide=MockDecision(self.opened.mock_order),
             stop=self.stop,
             transcribe=self.transcribe,
         )
+        self.session = prepared.session
         self.emit(
-            "prepared", urgent=True, policy="explicit-demo-order-v1", physical_devices_ready=False
+            "prepared", urgent=True, policy=prepared.policy_version, physical_devices_ready=False
         )
 
     def emit(self, kind, *, permit=None, urgent=False, reply_slot=False, **data):

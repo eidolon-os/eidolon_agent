@@ -4,6 +4,8 @@ from eidolon_sdk.biz.participation import DecisionRequest, DecisionResult, Propo
 
 
 class MockDecision:
+    policy_version = "explicit-demo-order-v1"
+
     def __init__(self, order: tuple[str, ...]):
         if not order or len(set(order)) != len(order):
             raise ValueError("explicit unique demo order required")
@@ -25,6 +27,6 @@ class MockDecision:
             **{key: getattr(request, key) for key in Snapshot.model_fields},
             status="decided",
             proposal=proposal,
-            policy_version="explicit-demo-order-v1",
+            policy_version=self.policy_version,
             model_version="mock-no-model",
         )
