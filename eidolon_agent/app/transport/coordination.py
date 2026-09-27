@@ -272,6 +272,7 @@ class CoordinationStream:
         self._connected = False
         for pending in self._pending.values():
             if not pending.future.done():
+                pending.error_code = "TEAM_CONTROL_DISCONNECTED"
                 pending.future.set_result(False)
         if self._closing is not None:
             await self._closing

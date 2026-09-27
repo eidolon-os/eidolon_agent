@@ -367,3 +367,20 @@ def test_stop_failure_is_round_scoped_and_next_capture_recovers_on_same_socket(m
             receipt(socket, stop)
         with pytest.raises(WebSocketDisconnect):
             socket.receive_json()
+
+
+@pytest.mark.asyncio
+async def test_disconnect_retains_transport_cause_for_pending_stop_receipts():
+    import asyncio
+    from eidolon_agent.app.transport.coordination import CoordinationStream
+    from eidolon_agent.app.interaction.coordination import Member
+    from eidolon_sdk.biz.control.coordination_stream import OpenScene
+    stream = CoordinationStream(OpenScene.model_validate(opening()))
+    tasks = [asyncio.create_task(stream.stop(Member(m.companion_id,
+        m.output_device.device_instance_id), 1)) for m in stream.opened.selection.members]
+    await asyncio.sleep(0)
+    assert len(stream._pending) == 2
+    await stream.disconnect()
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    assert all(isinstance(r, RuntimeError) and str(r) == 'TEAM_CONTROL_DISCONNECTED' for r in results)
+    assert not stream._pending
