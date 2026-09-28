@@ -1,4 +1,4 @@
-"""Agent's narrow client for the Host smart-home Capability Runtime."""
+"""Agent's narrow client for the Hub device execution authority."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from eidolon_sdk.biz.smarthome import ExecuteRequest, ExecuteResult, Registry
 from eidolon_agent.domain.smarthome import DeviceStatus, HomeSnapshot, SmartHomeUnavailable
 
 
-class ChannelSmartHomeClient:
+class HubSmartHomeClient:
     def __init__(self, *, base_url: str, token: str) -> None:
         self._base_url = base_url.rstrip("/")
         self._token = token
@@ -16,7 +16,7 @@ class ChannelSmartHomeClient:
     async def _post(self, action: str, body: dict) -> dict:
         async with httpx.AsyncClient(trust_env=False, timeout=5) as client:
             response = await client.post(
-                f"{self._base_url}/v1/smarthome/{action}",
+                f"{self._base_url}/api/smarthome/v1/{action}",
                 headers={"Authorization": f"Bearer {self._token}"},
                 json=body,
             )

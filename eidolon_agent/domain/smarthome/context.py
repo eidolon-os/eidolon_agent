@@ -32,6 +32,7 @@ class HomeContext:
     pending: bool = False
     expires_at: float = 0
     active: bool = True
+    revision: int = 0
 
     def clear(self) -> None:
         self.utterance = ""

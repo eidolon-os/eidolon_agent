@@ -141,19 +141,27 @@ class SmartHomeCommand:
 
     async def handle(
         self, owner_id: str, device_ref: str | None, turn_id: str, utterance: str,
-        *, context: HomeContext | None = None,
+        *, context: HomeContext | None = None, revision: int | None = None,
     ) -> VoiceResult:
         context = context if context is not None else HomeContext()
-        previous = context.snapshot()
+        revision = context.revision if revision is None else revision
+        def is_current() -> bool:
+            return context.active and context.revision == revision
+        previous = context.snapshot() if is_current() else None
         heard = " ".join(utterance.split())
         card = _Card(turn_id, heard[:MAX_SHOWN])
+        if not is_current():
+            return card("unavailable", "本轮已被新的输入替代或会话已结束")
         if not heard:
             return card("failed", NOT_UNDERSTOOD)
         try:
             home = await self._directory.snapshot(owner_id)
         except SmartHomeUnavailable:
-            context.clear()
+            if is_current():
+                context.clear()
             return card("unavailable", UNAVAILABLE)
+        if not is_current():
+            return card("unavailable", "本轮已被新的输入替代或会话已结束")
         request = interpretation_request(
             home.registry,
             interpretation_id=turn_id,
@@ -164,11 +172,12 @@ class SmartHomeCommand:
         try:
             proposal = await self._understand(request, context=previous)
         except InterpretationError as exc:
-            context.clear()
+            if is_current():
+                context.clear()
             _log.warning("smarthome understanding turn=%s unavailable code=%s", turn_id, exc.code)
             return card("unavailable", "家居指令理解服务暂不可用，请稍后重试")
-        if not context.active:
-            return card("unavailable", "本次语音会话已结束")
+        if not is_current():
+            return card("unavailable", "本轮已被新的输入替代或会话已结束")
         if isinstance(proposal, HomeCancellation):
             context.clear()
             return card("answered", "已取消，本次没有执行设备操作")
@@ -180,8 +189,8 @@ class SmartHomeCommand:
                     current = await self._directory.snapshot(owner_id)
                 except SmartHomeUnavailable:
                     return card("unavailable", UNAVAILABLE)
-                if not context.active:
-                    return card("unavailable", "本次语音会话已结束")
+                if not is_current():
+                    return card("unavailable", "本轮已被新的输入替代或会话已结束")
                 selection = Proposal(intent="control", target_status="ambiguous",
                                      targets=proposal.targets, action=proposal.action)
                 result = await self._ambiguous(card, owner_id, device_ref, current.registry,
@@ -212,8 +221,8 @@ class SmartHomeCommand:
             return card("unavailable", UNAVAILABLE)
         if any(find_target(home.registry, ref) is None for ref in proposal.targets):
             return card("not_found", NO_SUCH_DEVICE)
-        if not context.active:
-            return card("unavailable", "本次语音会话已结束")
+        if not is_current():
+            return card("unavailable", "本轮已被新的输入替代或会话已结束")
         if proposal.intent == "query":
             result = self._answer(card, home, proposal)
             if result.outcome == "answered":
@@ -231,10 +240,10 @@ class SmartHomeCommand:
             plan = plan_action(home.registry, proposal.targets, proposal.action)
         except SmartHomeError:
             return card("failed", NOT_UNDERSTOOD)
-        if not context.active:
-            return card("unavailable", "本次语音会话已结束")
+        if not is_current():
+            return card("unavailable", "本轮已被新的输入替代或会话已结束")
         result = await self._run(card, owner_id, device_ref, plan)
-        if context.active and result.outcome == "executed":
+        if is_current() and result.outcome == "executed":
             context.remember(heard, proposal)
         return result
 

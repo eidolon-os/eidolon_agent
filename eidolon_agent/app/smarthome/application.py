@@ -17,8 +17,7 @@ from eidolon_agent.infra.interpretation import (
     LayaInterpreter,
     RulesInterpreter,
 )
-from eidolon_agent.infra.smarthome.channel import ChannelSmartHomeClient
-from eidolon_agent.infra.smarthome.llm_fallback import LlmHomeFallback
+from eidolon_agent.infra.smarthome import HubSmartHomeClient, LlmHomeFallback
 
 _log = logging.getLogger(__name__)
 
@@ -48,11 +47,14 @@ class SmartHomeApplication:
             result = await self._command.handle(owner_id, device_ref, turn_id, utterance)
         else:
             session = self._sessions.get(owner_id, device_ref, session_id)
+            # Invalidate in-flight interpretation before waiting for serialized state updates.
+            session.context.revision += 1
+            revision = session.context.revision
             async with session.lock:
                 if not session.context.active:
                     raise HomeSessionUnavailable("home session is closed")
                 result = await self._command.handle(
-                    owner_id, device_ref, turn_id, utterance, context=session.context,
+                    owner_id, device_ref, turn_id, utterance, context=session.context, revision=revision,
                 )
         _log.info("home turn=%s session=%s elapsed_ms=%d result=%s", turn_id, session_id,
                   (time.monotonic() - start) * 1000, result.model_dump_json())
@@ -71,7 +73,7 @@ class SmartHomeApplication:
 
 def build_smart_home_application(llm: LLMPort | None = None) -> SmartHomeApplication | None:
     """Build at Agent startup, separately from the Companion and Admin apps."""
-    token = os.environ.get("EIDOLON_CHANNEL_PROVIDER_TOKEN", "")
+    token = os.environ.get("EIDOLON_HUB_SMARTHOME_TOKEN", "")
     if len(token) < 32:
         return None
     interpreter_name = os.environ.get("EIDOLON_SMARTHOME_INTERPRETER", "rules").strip().lower()
@@ -90,8 +92,8 @@ def build_smart_home_application(llm: LLMPort | None = None) -> SmartHomeApplica
         interpreter = RulesInterpreter()
     else:
         raise ValueError("EIDOLON_SMARTHOME_INTERPRETER must be rules or laya")
-    client = ChannelSmartHomeClient(
-        base_url=os.environ.get("EIDOLON_CHANNEL_PROVIDER_URL", "http://127.0.0.1:8767"),
+    client = HubSmartHomeClient(
+        base_url=os.environ.get("EIDOLON_SMARTHOME_HUB_URL", "http://127.0.0.1:8082"),
         token=token,
     )
     fallback = LlmHomeFallback(llm) if llm is not None and llm.model_id != "fake" else None

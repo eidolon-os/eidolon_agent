@@ -550,3 +550,40 @@ async def test_question_never_executes_when_only_one_candidate_remains_capable(d
     assert result.outcome == "clarification"
     assert not result.candidates
     assert not executor.requests
+
+async def test_new_input_invalidates_inflight_interpretation_before_execution(directory, executor):
+    import asyncio
+    from eidolon_agent.app.smarthome.application import SmartHomeApplication
+    entered, release = asyncio.Event(), asyncio.Event()
+    class SlowRules:
+        calls = 0
+        async def interpret(self, request):
+            self.calls += 1
+            if self.calls == 1:
+                entered.set()
+                await release.wait()
+            return await RulesInterpreter().interpret(request)
+    interpreter = SlowRules()
+    app = SmartHomeApplication(_command(directory, executor, interpreter=interpreter), interpreter=interpreter)
+    first = asyncio.create_task(app.handle(OWNER, 'panel-living', 'old', '打开客厅灯', session_id='s'))
+    await entered.wait()
+    second = asyncio.create_task(app.handle(OWNER, 'panel-living', 'new', '关闭客厅灯', session_id='s'))
+    await asyncio.sleep(0)
+    release.set()
+    old, new = await asyncio.gather(first, second)
+    assert old.outcome == 'unavailable'
+    assert new.outcome == 'executed'
+    assert len(executor.requests) == 1 and executor.requests[0].request_id == 'voice:new'
+
+async def test_new_input_during_submitted_command_does_not_pretend_to_undo_it(directory, executor):
+    import asyncio
+    from eidolon_agent.app.smarthome.application import SmartHomeApplication
+    executor.delay_s = 0.05
+    app = SmartHomeApplication(_command(directory, executor), interpreter=RulesInterpreter())
+    first = asyncio.create_task(app.handle(OWNER, 'panel-living', 'submitted', '打开客厅灯', session_id='s'))
+    while not executor.requests:
+        await asyncio.sleep(0)
+    second = asyncio.create_task(app.handle(OWNER, 'panel-living', 'correction', '关闭客厅灯', session_id='s'))
+    old,new = await asyncio.gather(first,second)
+    assert old.outcome == new.outcome == 'executed'
+    assert [r.request_id for r in executor.requests] == ['voice:submitted','voice:correction']

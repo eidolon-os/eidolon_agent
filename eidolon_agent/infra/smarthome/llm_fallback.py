@@ -33,7 +33,7 @@ from eidolon_agent.core.ports.llm import LLMPort
 from eidolon_agent.core.types.llm import LLMFinishReason
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.tool import ToolSchema
-from eidolon_agent.domain.smarthome.context import (
+from eidolon_agent.domain.smarthome import (
     HomeCancellation,
     HomeClarification,
     HomeUnderstanding,

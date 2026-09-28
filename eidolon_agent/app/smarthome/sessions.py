@@ -6,7 +6,7 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 
-from eidolon_agent.domain.smarthome.context import HomeContext
+from eidolon_agent.domain.smarthome import HomeContext
 
 
 class HomeSessionUnavailable(Exception):
