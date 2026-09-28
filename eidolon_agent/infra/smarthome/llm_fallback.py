@@ -8,9 +8,11 @@ asks the Provider to execute anything.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 
 from eidolon_sdk.biz.interpretation import (
+    ERROR_INVALID_PROPOSAL,
     ERROR_UNAVAILABLE,
     InterpretationError,
     InterpretationRequest,
@@ -23,36 +25,52 @@ from eidolon_sdk.biz.smarthome import (
     SCENE_TRAIT,
     TRAIT_COMMANDS,
 )
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from eidolon_agent.core.errors import LLMUnavailableError
 from eidolon_agent.core.ports.llm import LLMPort
+from eidolon_agent.core.types.llm import LLMFinishReason
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.tool import ToolSchema
+from eidolon_agent.domain.smarthome.context import (
+    HomeCancellation,
+    HomeClarification,
+    HomeUnderstanding,
+)
+
+_log = logging.getLogger(__name__)
+
+
+class _ProposalArguments(BaseModel):
+    """One wire contract for both the advertised tool and response validation."""
+
+    model_config = ConfigDict(extra="forbid")
+    proposal: Proposal | None
+
+
+class _ClarificationArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1, max_length=100)
+
+
+class _CancelArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
 
 _PROPOSAL_TOOL = ToolSchema(
     name="propose_home_action",
     description="提出一次家居意图、目标和动作；此工具不会执行设备命令。",
-    json_schema={
-        "type": "object",
-        "properties": {"proposal": {
-            "type": "object",
-            "properties": {
-                "intent": {"type": "string", "enum": ["control", "query", "unrelated"]},
-                "target_status": {"type": "string", "enum": ["resolved", "ambiguous", "none"]},
-                "targets": {"type": "array", "items": {"type": "string"}},
-                "action": {"type": "object", "properties": {
-                    "trait": {"type": "string"}, "command": {"type": "string"},
-                    "slots": {"type": "array", "items": {"type": "object", "properties": {
-                        "name": {"type": "string"}, "value": {"type": ["string", "number", "boolean"]},
-                    }, "required": ["name", "value"]}},
-                }, "required": ["trait", "command"]},
-                "mention": {"type": "string"},
-            },
-            "required": ["intent", "target_status", "targets"],
-        }},
-        "required": ["proposal"],
-        "additionalProperties": False,
-    },
+    json_schema=_ProposalArguments.model_json_schema(),
+)
+_CLARIFICATION_TOOL = ToolSchema(
+    name="ask_home_clarification",
+    description="缺少明确目标或动作时，向用户问一个简短问题；不执行设备。",
+    json_schema=_ClarificationArguments.model_json_schema(),
+)
+_CANCEL_TOOL = ToolSchema(
+    name="cancel_home_command",
+    description="用户取消或放弃之前的家居请求，清除待确认操作，不执行设备。",
+    json_schema=_CancelArguments.model_json_schema(),
 )
 
 
@@ -60,7 +78,7 @@ class LlmHomeFallback:
     def __init__(self, llm: LLMPort) -> None:
         self._llm = llm
 
-    async def propose(self, request: InterpretationRequest) -> Proposal | None:
+    async def propose(self, request: InterpretationRequest, *, context: dict | None = None) -> HomeUnderstanding:
         rooms = {area.area_id: area.name for area in request.areas}
         candidates = [
             {
@@ -84,7 +102,22 @@ class LlmHomeFallback:
                 role=MessageRole.SYSTEM,
                 content=(
                     "只解释用户这一次智能家居话语。只可选所给 ref 和命令。"
-                    "无法确定设备或动作时不要调用工具。需要执行时调用一次 propose_home_action，"
+                    "只调用一个工具返回本次理解结果，工具本身不执行。"
+                    "能够形成完整提案时用 propose_home_action。"
+                    "明确设备时 resolved；多个合理候选时 ambiguous 并列出候选 ref，不猜选一个。"
+                    "用户明确要求同时控制多台时，resolved 可包含多个 ref。"
+                    "用户明确说出不存在的设备时 none；目标或动作缺失、无法确定时，"
+                    "用 ask_home_clarification 提问，不调用 propose_home_action。"
+                    "不得把信息不足当成设备不存在。"
+                    "闲聊用 unrelated、target_status=none、targets=[]、action=null。"
+                    "mention 仅在 target_status=none 时用于不存在的设备名称，其余情况必须省略或为 null。"
+                    "origin_area 只帮助解释没有指明房间的请求，不覆盖用户明确说出的房间。"
+                    "context 是本次会话近期上下文，可能为空。pending=true 表示上次操作尚未执行，"
+                    "回答‘客厅那个’等应补全那次待确认操作；只有回答足够明确才能 resolved。"
+                    "用户说‘算了/取消’时用 cancel_home_command，不执行。"
+                    "pending=false 的提案是最近已成功执行或回答的对象，可解释‘它/再暗一点’，"
+                    "新指令明确的目标和动作优先；闲聊或换话题不能触发旧操作。"
+                    "无上下文时不能猜代词或省略指向，也不能假定设备所在房间。"
                     "参数 proposal 遵循 intent(control/query/unrelated)、"
                     "target_status(resolved/ambiguous/none)、targets、action(trait,command,slots) "
                     "的结构；slots 是 {name,value} 数组。不要执行命令或编造设备。"
@@ -96,28 +129,64 @@ class LlmHomeFallback:
                 role=MessageRole.USER,
                 content=json.dumps(
                     {"utterance": request.utterance, "origin_area": rooms.get(request.origin.area_id or ""),
-                     "candidates": candidates},
+                     "candidates": candidates, "context": context},
                     ensure_ascii=False,
                 ),
                 created_at=now,
             ),
         ]
-        proposals: list[Proposal] = []
+        proposals: list[HomeUnderstanding] = []
+        finish = None
         try:
             async for delta in self._llm.stream(
                 messages,
-                tools=[_PROPOSAL_TOOL],
+                tools=[_PROPOSAL_TOOL, _CLARIFICATION_TOOL, _CANCEL_TOOL],
                 temperature=0,
                 max_tokens=400,
                 request_id=request.interpretation_id,
             ):
                 call = delta.tool_call
+                if delta.finish is not None:
+                    finish = delta.finish
                 if call is not None:
-                    if call.name != _PROPOSAL_TOOL.name:
-                        return None
-                    proposals.append(Proposal.model_validate(call.arguments.get("proposal")))
+                    if call.name == _PROPOSAL_TOOL.name:
+                        proposals.append(_ProposalArguments.model_validate(call.arguments).proposal)
+                    elif call.name == _CLARIFICATION_TOOL.name:
+                        proposals.append(HomeClarification(_ClarificationArguments.model_validate(call.arguments).question))
+                    elif call.name == _CANCEL_TOOL.name:
+                        _CancelArguments.model_validate(call.arguments)
+                        proposals.append(HomeCancellation())
+                    else:
+                        raise InterpretationError(ERROR_INVALID_PROPOSAL, "unexpected_tool")
         except LLMUnavailableError as exc:
             raise InterpretationError(ERROR_UNAVAILABLE, "home LLM unavailable") from exc
-        except ValueError:
+        except ValidationError as exc:
+            # Do not log raw arguments/user text. Preserve the field and error
+            # category so malformed output is distinguishable from abstention.
+            errors = [{"loc": list(e["loc"]), "type": e["type"], "message": e["msg"]} for e in exc.errors()]
+            _log.warning("home fallback turn=%s rejected=%s", request.interpretation_id, errors)
+            raise InterpretationError(ERROR_INVALID_PROPOSAL, "invalid_tool_arguments") from exc
+        if finish not in (LLMFinishReason.STOP, LLMFinishReason.TOOL_CALLS):
+            raise InterpretationError(ERROR_INVALID_PROPOSAL, f"incomplete_stream:{finish}")
+        if len(proposals) > 1:
+            raise InterpretationError(ERROR_INVALID_PROPOSAL, "multiple_proposals")
+        if not proposals:
+            _log.info("home fallback turn=%s outcome=abstained", request.interpretation_id)
             return None
-        return proposals[0] if len(proposals) == 1 else None
+        result = proposals[0]
+        if isinstance(result, HomeCancellation):
+            _log.info("home fallback turn=%s outcome=cancelled", request.interpretation_id)
+            return result
+        if isinstance(result, HomeClarification):
+            _log.info("home fallback turn=%s outcome=clarification", request.interpretation_id)
+            return result
+        proposal = result
+        if proposal is None:
+            _log.info("home fallback turn=%s outcome=abstained", request.interpretation_id)
+            return None
+        _log.info(
+            "home fallback turn=%s outcome=proposed intent=%s target_status=%s targets=%s action=%s",
+            request.interpretation_id, proposal.intent, proposal.target_status, proposal.targets,
+            (proposal.action.trait, proposal.action.command) if proposal.action else None,
+        )
+        return proposal

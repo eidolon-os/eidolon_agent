@@ -15,6 +15,7 @@ from eidolon_sdk.biz.interpretation import (
 from eidolon_sdk.biz.smarthome import Command, Registry, Scene, VoiceResult
 
 from eidolon_agent.domain.smarthome import DeviceStatus, SmartHomeCommand
+from eidolon_agent.domain.smarthome.context import HomeCancellation, HomeClarification, HomeContext
 from eidolon_agent.domain.smarthome.tests.conftest import OWNER
 from eidolon_agent.infra.interpretation import RulesInterpreter
 
@@ -66,9 +67,11 @@ class _Fallback:
         self.proposal = proposal
         self.error = error
         self.calls = 0
+        self.contexts = []
 
-    async def propose(self, request: InterpretationRequest) -> Proposal | None:
+    async def propose(self, request: InterpretationRequest, *, context=None) -> Proposal | None:
         self.calls += 1
+        self.contexts.append(context)
         if self.error is not None:
             raise self.error
         return self.proposal
@@ -371,7 +374,7 @@ async def test_interpreter_failure_is_not_read_as_unrelated(directory, executor)
     assert (result.outcome, result.message) == ("failed", "没听明白，换个说法试试")
 
 
-async def test_fallback_errors_and_invalid_proposals_are_not_understood(
+async def test_fallback_service_error_is_not_blame_for_user_wording(
     directory, executor
 ) -> None:
     outside = Proposal(
@@ -389,7 +392,8 @@ async def test_fallback_errors_and_invalid_proposals_are_not_understood(
 
     result = await _say(command, "打开车库门")
 
-    assert result.message == "没听明白，换个说法试试"
+    assert result.outcome == "unavailable"
+    assert result.message == "家居指令理解服务暂不可用，请稍后重试"
     assert executor.requests == []
 
 
@@ -430,3 +434,73 @@ async def test_long_utterance_is_clipped_for_the_card(directory, executor) -> No
 
     assert result.outcome == "unrelated"
     assert len(result.utterance) == 200
+
+
+async def test_clarification_reply_resumes_pending_action_then_relative_followup(directory, executor):
+    ambiguous = Proposal(intent="control", target_status="ambiguous",
+                         targets=("living.ac", "master.ac"), action=Action(trait="on_off", command="off"))
+    interpreter = _Fixed(ambiguous)
+    fallback = _Fallback(Proposal(intent="control", target_status="resolved", targets=("living.ac",),
+                                  action=Action(trait="on_off", command="off")))
+    command = _command(directory, executor, interpreter=interpreter, fallback=fallback)
+    context = HomeContext()
+    first = await command.handle(OWNER, "unplaced", "t1", "关闭空调", context=context)
+    assert first.outcome == "ambiguous"
+    assert not executor.requests
+    second = await command.handle(OWNER, "unplaced", "t2", "客厅那个", context=context)
+    assert second.outcome == "executed"
+    assert fallback.contexts[0]["pending"] is True
+    assert fallback.contexts[0]["proposal"]["action"]["command"] == "off"
+    assert len(interpreter.requests) == 1  # a short reply must not go to single-turn Laya
+    assert executor.commands == [("living.ac", "on_off", "off", {})]
+    fallback.proposal = Proposal(intent="control", target_status="resolved", targets=("living.ac",),
+                                action=Action(trait="thermostat", command="step", slots=(Slot(name="delta", value=-2),)))
+    third = await command.handle(OWNER, "unplaced", "t3", "再低两度", context=context)
+    assert third.outcome == "executed"
+    assert fallback.contexts[-1]["pending"] is False
+    assert fallback.contexts[-1]["proposal"]["targets"] == ["living.ac"]
+
+
+async def test_missing_action_asks_question_and_cancellation_clears_pending(directory, executor):
+    fallback = _Fallback(HomeClarification("想对客厅灯做什么？"))
+    command = _command(directory, executor, interpreter=_Fixed(), fallback=fallback)
+    context = HomeContext()
+    result = await command.handle(OWNER, "p", "t1", "客厅灯", context=context)
+    assert result.outcome == "clarification"
+    assert context.pending
+    assert not executor.requests
+    fallback.proposal = HomeCancellation()
+    result = await command.handle(OWNER, "p", "t2", "算了", context=context)
+    assert result.outcome == "answered"
+    assert context.snapshot() is None
+    assert not executor.requests
+
+
+async def test_expired_or_closed_context_cannot_trigger_pending_action(directory, executor):
+    context = HomeContext()
+    context.remember("关闭灯", None, question="哪盏？")
+    context.expires_at = 0
+    fallback = _Fallback()
+    command = _command(directory, executor, interpreter=_Fixed(), fallback=fallback)
+    await command.handle(OWNER, "p", "t1", "那个", context=context)
+    assert fallback.contexts == [None]
+    context.active = False
+    fallback.proposal = Proposal(intent="control", target_status="resolved", targets=("living.ac",),
+                                action=Action(trait="on_off", command="off"))
+    result = await command.handle(OWNER, "p", "t2", "关闭空调", context=context)
+    assert result.outcome == "unavailable"
+    assert not executor.requests
+
+
+async def test_new_topic_clears_context_and_outside_candidate_never_executes(directory, executor):
+    context = HomeContext()
+    context.remember("关闭灯", None, question="哪盏？")
+    fallback = _Fallback(Proposal(intent="unrelated", target_status="none"))
+    command = _command(directory, executor, interpreter=_Fixed(), fallback=fallback)
+    assert (await command.handle(OWNER, "p", "t1", "讲个笑话", context=context)).outcome == "unrelated"
+    assert context.snapshot() is None
+    fallback.proposal = Proposal(intent="control", target_status="resolved", targets=("foreign.device",),
+                                action=Action(trait="on_off", command="on"))
+    result = await command.handle(OWNER, "p", "t2", "打开灯", context=context)
+    assert result.outcome == "unavailable"
+    assert not executor.requests

@@ -11,8 +11,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from eidolon_sdk.biz.interpretation import InterpretationRequest, Proposal
+from eidolon_sdk.biz.interpretation import InterpretationRequest
 from eidolon_sdk.biz.smarthome import ExecuteRequest, ExecuteResult, Registry, StateValue
+
+from eidolon_agent.domain.smarthome.context import HomeUnderstanding
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +54,7 @@ class SmartHomeExecutePort(Protocol):
 
 
 class SmartHomeFallbackPort(Protocol):
-    async def propose(self, request: InterpretationRequest) -> Proposal | None:
+    async def propose(self, request: InterpretationRequest, *, context: dict | None = None) -> HomeUnderstanding:
         """Asked when the interpreter abstains or fails (e.g. an LLM holding only
         the smart-home tools, for 有点热). ``None`` means still not understood.
         May raise ``InterpretationError``; the proposal is validated like any other.

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 
 from eidolon_sdk.biz.smarthome import VoiceResult
 
+from eidolon_agent.app.smarthome.sessions import HomeSessions, HomeSessionUnavailable
 from eidolon_agent.core.ports.llm import LLMPort
 from eidolon_agent.domain.interpretation import InterpretationConfig, InterpretationService
 from eidolon_agent.domain.smarthome import SmartHomeCommand
@@ -16,6 +19,8 @@ from eidolon_agent.infra.interpretation import (
 )
 from eidolon_agent.infra.smarthome.channel import ChannelSmartHomeClient
 from eidolon_agent.infra.smarthome.llm_fallback import LlmHomeFallback
+
+_log = logging.getLogger(__name__)
 
 
 class SmartHomeApplication:
@@ -31,13 +36,33 @@ class SmartHomeApplication:
         self._command = command
         self._interpreter = interpreter
         self._laya = laya
+        self._sessions = HomeSessions()
 
     async def handle(
-        self, owner_id: str, device_ref: str, turn_id: str, utterance: str
+        self, owner_id: str, device_ref: str, turn_id: str, utterance: str,
+        *, session_id: str | None = None,
     ) -> VoiceResult:
-        return await self._command.handle(owner_id, device_ref, turn_id, utterance)
+        start = time.monotonic()
+        # Older callers remain single-turn; never infer a session from device id.
+        if session_id is None:
+            result = await self._command.handle(owner_id, device_ref, turn_id, utterance)
+        else:
+            session = self._sessions.get(owner_id, device_ref, session_id)
+            async with session.lock:
+                if not session.context.active:
+                    raise HomeSessionUnavailable("home session is closed")
+                result = await self._command.handle(
+                    owner_id, device_ref, turn_id, utterance, context=session.context,
+                )
+        _log.info("home turn=%s session=%s elapsed_ms=%d result=%s", turn_id, session_id,
+                  (time.monotonic() - start) * 1000, result.model_dump_json())
+        return result
+
+    def end_session(self, owner_id: str, device_ref: str, session_id: str) -> None:
+        self._sessions.close(owner_id, device_ref, session_id)
 
     async def close(self) -> None:
+        self._sessions.clear()
         if isinstance(self._interpreter, InterpretationService):
             await self._interpreter.drain()
         if self._laya is not None:

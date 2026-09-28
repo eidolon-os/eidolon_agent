@@ -15,6 +15,8 @@ import asyncio
 import logging
 
 from eidolon_sdk.biz.interpretation import (
+    ERROR_INVALID_PROPOSAL,
+    ERROR_TIMEOUT,
     Area,
     Candidate,
     InterpretationError,
@@ -38,6 +40,12 @@ from eidolon_sdk.biz.smarthome import (
 from eidolon_sdk.biz.smarthome import Origin as ExecuteOrigin
 
 from eidolon_agent.core.ports.interpretation import InteractionInterpretationPort
+from eidolon_agent.domain.smarthome.context import (
+    HomeCancellation,
+    HomeClarification,
+    HomeContext,
+    HomeUnderstanding,
+)
 from eidolon_agent.domain.smarthome.errors import SmartHomeUnavailable
 from eidolon_agent.domain.smarthome.messages import (
     NO_SUCH_DEVICE,
@@ -132,8 +140,11 @@ class SmartHomeCommand:
         self._actuator = HomeActuator(executor, deadline_ms=execute_deadline_ms)
 
     async def handle(
-        self, owner_id: str, device_ref: str | None, turn_id: str, utterance: str
+        self, owner_id: str, device_ref: str | None, turn_id: str, utterance: str,
+        *, context: HomeContext | None = None,
     ) -> VoiceResult:
+        context = context if context is not None else HomeContext()
+        previous = context.snapshot()
         heard = " ".join(utterance.split())
         card = _Card(turn_id, heard[:MAX_SHOWN])
         if not heard:
@@ -141,6 +152,7 @@ class SmartHomeCommand:
         try:
             home = await self._directory.snapshot(owner_id)
         except SmartHomeUnavailable:
+            context.clear()
             return card("unavailable", UNAVAILABLE)
         request = interpretation_request(
             home.registry,
@@ -149,7 +161,27 @@ class SmartHomeCommand:
             device_ref=device_ref,
             timeout_ms=self._interpretation_timeout_ms,
         )
-        proposal = await self._understand(request)
+        try:
+            proposal = await self._understand(request, context=previous)
+        except InterpretationError as exc:
+            context.clear()
+            _log.warning("smarthome understanding turn=%s unavailable code=%s", turn_id, exc.code)
+            return card("unavailable", "家居指令理解服务暂不可用，请稍后重试")
+        if not context.active:
+            return card("unavailable", "本次语音会话已结束")
+        if isinstance(proposal, HomeCancellation):
+            context.clear()
+            return card("answered", "已取消，本次没有执行设备操作")
+        if isinstance(proposal, HomeClarification):
+            # Retain an unfinished request across a further clarification, but
+            # never turn the conversation into an unbounded chat history.
+            unfinished = (
+                f"{previous['previous_utterance']}；补充：{heard}"[:MAX_UTTERANCE]
+                if previous and previous['pending'] else heard
+            )
+            context.remember(unfinished, None, question=proposal.question)
+            return card("clarification", proposal.question)
+        context.clear()
         if proposal is None:
             return card("failed", NOT_UNDERSTOOD)
         if proposal.intent == "unrelated":
@@ -164,38 +196,69 @@ class SmartHomeCommand:
             return card("unavailable", UNAVAILABLE)
         if any(find_target(home.registry, ref) is None for ref in proposal.targets):
             return card("not_found", NO_SUCH_DEVICE)
+        if not context.active:
+            return card("unavailable", "本次语音会话已结束")
         if proposal.intent == "query":
-            return self._answer(card, home, proposal)
+            result = self._answer(card, home, proposal)
+            if result.outcome == "answered":
+                context.remember(heard, proposal)
+            return result
         assert proposal.action is not None  # a control proposal always carries one
         if proposal.target_status == "ambiguous":
-            return await self._ambiguous(card, owner_id, device_ref, home.registry, proposal)
+            result = await self._ambiguous(card, owner_id, device_ref, home.registry, proposal)
+            if result.outcome == "ambiguous":
+                context.remember(heard, proposal, question=result.message)
+            # _ambiguous may execute the sole capable device. Do not remember
+            # the original ambiguous proposal as a confirmed target.
+            return result
         try:
             plan = plan_action(home.registry, proposal.targets, proposal.action)
         except SmartHomeError:
             return card("failed", NOT_UNDERSTOOD)
-        return await self._run(card, owner_id, device_ref, plan)
+        if not context.active:
+            return card("unavailable", "本次语音会话已结束")
+        result = await self._run(card, owner_id, device_ref, plan)
+        if context.active and result.outcome == "executed":
+            context.remember(heard, proposal)
+        return result
 
-    async def _understand(self, request: InterpretationRequest) -> Proposal | None:
+    async def _understand(self, request: InterpretationRequest, *, context: dict | None = None) -> HomeUnderstanding:
+        # Laya's trained contract is single-turn. Context-dependent replies must
+        # reach the contextual interpreter even if Laya would label them unrelated.
+        if context is not None and self._fallback is not None:
+            _log.info("home interpretation turn=%s route=llm reason=context", request.interpretation_id)
+            return await self._fallback_proposal(request, context=context)
         proposal: Proposal | None = None
         try:
             result = await self._interpreter.interpret(request)
         except InterpretationError as exc:
             # A failed interpreter is "not understood yet", never "unrelated".
             _log.info("smarthome interpretation %s failed: %s", request.interpretation_id, exc)
+            if self._fallback is None:
+                raise
         else:
             if self._confident(result):
                 proposal = _accepted(request, result)
         if proposal is not None or self._fallback is None:
+            _log.info("home interpretation turn=%s route=primary proposal=%s", request.interpretation_id,
+                      proposal.model_dump_json() if proposal else None)
             return proposal
+        _log.info("home interpretation turn=%s route=llm reason=primary_not_accepted", request.interpretation_id)
+        return await self._fallback_proposal(request)
+
+    async def _fallback_proposal(self, request: InterpretationRequest, *, context: dict | None = None) -> HomeUnderstanding:
+        assert self._fallback is not None
         try:
             async with asyncio.timeout(self._fallback_timeout_s):
-                suggested = await self._fallback.propose(request)
-        except (InterpretationError, TimeoutError) as exc:
+                suggested = await self._fallback.propose(request, context=context)
+        except TimeoutError as exc:
+            raise InterpretationError(ERROR_TIMEOUT, "home fallback deadline") from exc
+        except InterpretationError as exc:
             _log.info("smarthome fallback %s failed: %r", request.interpretation_id, exc)
-            return None
-        if suggested is None:
-            return None
-        return _accepted(
+            raise
+        if not isinstance(suggested, Proposal):
+            return suggested
+        accepted = _accepted(
             request,
             InterpretationResult(
                 interpretation_id=request.interpretation_id,
@@ -205,6 +268,9 @@ class SmartHomeCommand:
                 model_version="fallback",
             ),
         )
+        if accepted is None:
+            raise InterpretationError(ERROR_INVALID_PROPOSAL, "fallback_outside_request")
+        return accepted
 
     def _confident(self, result: InterpretationResult) -> bool:
         if self._min_confidence == 0 or result.proposal is None:
