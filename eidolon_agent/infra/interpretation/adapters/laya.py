@@ -156,6 +156,9 @@ class LayaInterpreter:
         diagnostics = _diagnostics(payload, answers)
         model = payload.get("model")
         model_version = model if isinstance(model, str) and model.strip() else self._model_version
+        revision = payload.get("revision")
+        if isinstance(revision, str) and revision.strip():
+            model_version = f"{model_version}@{revision.strip()}"
 
         proposal: Proposal | None
         if _INTENTS[intent] == "unrelated":

@@ -46,6 +46,7 @@ def _reply(intent: str, device: str, action: str = "打开或启动", **extra) -
 
     return {
         "model": "laya-multilingual",
+        "revision": "test-revision",
         "answers": {
             "intent": answer(intent),
             "device": answer(device, 0.7),
@@ -103,7 +104,7 @@ async def test_control_answer_becomes_a_proposal() -> None:
     result = await laya.interpret(_request("打开空调"))
 
     assert result.status == "decided"
-    assert result.model_version == "laya-multilingual"
+    assert result.model_version == "laya-multilingual@test-revision"
     assert result.policy_version == "laya-smarthome-v1"
     proposal = result.proposal
     assert (proposal.intent, proposal.target_status, proposal.targets) == (
