@@ -6,6 +6,7 @@ import os
 
 from eidolon_sdk.biz.smarthome import VoiceResult
 
+from eidolon_agent.core.ports.llm import LLMPort
 from eidolon_agent.domain.interpretation import InterpretationConfig, InterpretationService
 from eidolon_agent.domain.smarthome import SmartHomeCommand
 from eidolon_agent.infra.interpretation import (
@@ -15,7 +16,6 @@ from eidolon_agent.infra.interpretation import (
 )
 from eidolon_agent.infra.smarthome.channel import ChannelSmartHomeClient
 from eidolon_agent.infra.smarthome.llm_fallback import LlmHomeFallback
-from eidolon_agent.core.ports.llm import LLMPort
 
 
 class SmartHomeApplication:

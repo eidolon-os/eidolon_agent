@@ -29,7 +29,6 @@ from eidolon_agent.core.ports.llm import LLMPort
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
 from eidolon_agent.core.types.tool import ToolSchema
 
-
 _PROPOSAL_TOOL = ToolSchema(
     name="propose_home_action",
     description="提出一次家居意图、目标和动作；此工具不会执行设备命令。",
