@@ -122,6 +122,17 @@ async def test_control_answer_becomes_a_proposal() -> None:
     }
 
 
+async def test_truncated_model_input_never_becomes_an_execution_proposal() -> None:
+    laya, _ = _laya(_json(_reply("控制", "客厅空调", truncated=["device"])))
+    try:
+        result = await laya.interpret(_request("打开空调"))
+        assert result.status == "abstained"
+        assert result.proposal is None
+        assert result.diagnostics["reason"] == "truncated_input"
+    finally:
+        await laya.aclose()
+
+
 async def test_numbers_come_from_the_shared_lexicon() -> None:
     laya, _ = _laya(_json(_reply("控制", "客厅空调", "设为指定的数值或模式")))
 

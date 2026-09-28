@@ -161,7 +161,10 @@ class LayaInterpreter:
             model_version = f"{model_version}@{revision.strip()}"
 
         proposal: Proposal | None
-        if _INTENTS[intent] == "unrelated":
+        if payload.get("truncated"):
+            proposal = None
+            diagnostics["reason"] = "truncated_input"
+        elif _INTENTS[intent] == "unrelated":
             proposal = Proposal(intent="unrelated", target_status="none")
         elif device == MULTIPLE:
             proposal = None  # several devices or a scene: laya cannot name which
