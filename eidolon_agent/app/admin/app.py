@@ -14,6 +14,8 @@ being a conversation read.
 
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -29,6 +31,12 @@ from eidolon_agent.app.admin.routers import (
 )
 from eidolon_agent.app.interaction.coordination.application import IpTeamApplication
 from eidolon_agent.config.settings import Settings
+from eidolon_agent.domain.interpretation import InterpretationConfig, InterpretationService
+from eidolon_agent.infra.interpretation import (
+    JsonlInterpretationRecorder,
+    LayaInterpreter,
+    RulesInterpreter,
+)
 from eidolon_agent.infra.participation import HttpParticipationDecision
 
 
@@ -90,6 +98,22 @@ def build_admin_app(
     # them, which is why every read of it is optional: the durable rows are the
     # answer either way, and a live turn is an addition to them.
     app.state.live_turns = live_turns
+    interpreter = os.environ.get("EIDOLON_SMARTHOME_INTERPRETER", "rules").strip().lower()
+    if interpreter == "laya":
+        laya = LayaInterpreter(
+            os.environ.get("EIDOLON_SMARTHOME_LAYA_URL", "http://127.0.0.1:8771")
+        )
+        record_path = os.environ.get("EIDOLON_SMARTHOME_INTERPRETATION_RECORD_PATH", "")
+        app.state.smarthome_laya = laya
+        app.state.smarthome_interpreter = InterpretationService(
+            {"laya": laya},
+            InterpretationConfig(primary="laya"),
+            recorder=JsonlInterpretationRecorder(record_path) if record_path else None,
+        )
+    elif interpreter == "rules":
+        app.state.smarthome_interpreter = RulesInterpreter()
+    else:
+        raise ValueError("EIDOLON_SMARTHOME_INTERPRETER must be rules or laya")
 
     app.include_router(
         owner_runtime.router,
