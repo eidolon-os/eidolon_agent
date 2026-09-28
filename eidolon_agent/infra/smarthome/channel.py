@@ -1,0 +1,51 @@
+"""Agent's narrow client for the Host smart-home Capability Runtime."""
+
+from __future__ import annotations
+
+import httpx
+from eidolon_sdk.biz.smarthome import ExecuteRequest, ExecuteResult, Registry
+
+from eidolon_agent.domain.smarthome import DeviceStatus, HomeSnapshot, SmartHomeUnavailable
+
+
+class ChannelSmartHomeClient:
+    def __init__(self, *, base_url: str, token: str) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._token = token
+
+    async def _post(self, action: str, body: dict) -> dict:
+        async with httpx.AsyncClient(trust_env=False, timeout=5) as client:
+            response = await client.post(
+                f"{self._base_url}/v1/smarthome/{action}",
+                headers={"Authorization": f"Bearer {self._token}"},
+                json=body,
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def snapshot(self, owner_id: str) -> HomeSnapshot:
+        try:
+            body = await self._post("snapshot", {"owner_id": owner_id})
+            return HomeSnapshot(
+                registry=Registry.model_validate(body["registry"]),
+                status={
+                    device_id: DeviceStatus(**status)
+                    for device_id, status in body["status"].items()
+                },
+            )
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            raise SmartHomeUnavailable("smart home snapshot unavailable") from exc
+
+    async def execute(self, owner_id: str, request: ExecuteRequest) -> ExecuteResult:
+        try:
+            body = await self._post(
+                "execute",
+                {"owner_id": owner_id, "request": request.model_dump(mode="json")},
+            )
+            return ExecuteResult.model_validate(body)
+        except httpx.ConnectError as exc:
+            raise SmartHomeUnavailable("smart home runtime is not connected") from exc
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            # A reply lost after submission may follow a real device change.
+            # The command use case reports that uncertainty; it never retries.
+            raise TimeoutError("smart home execution outcome unknown") from exc

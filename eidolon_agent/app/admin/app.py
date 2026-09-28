@@ -25,6 +25,7 @@ from eidolon_agent.app.admin.routers import (
     persona_preview,
     reports,
     role_groups,
+    smarthome,
 )
 from eidolon_agent.app.interaction.coordination.application import IpTeamApplication
 from eidolon_agent.config.settings import Settings
@@ -101,4 +102,5 @@ def build_admin_app(
     app.include_router(conversations.router, prefix="/api/admin", tags=["conversations"])
     app.include_router(long_tasks.router, prefix="/api/admin", tags=["long-tasks"])
     app.include_router(reports.router, prefix="/api/admin", tags=["reports"])
+    app.include_router(smarthome.router, prefix="/api/admin", tags=["smarthome"])
     return app
