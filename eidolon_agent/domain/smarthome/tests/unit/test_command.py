@@ -504,3 +504,49 @@ async def test_new_topic_clears_context_and_outside_candidate_never_executes(dir
     result = await command.handle(OWNER, "p", "t2", "打开灯", context=context)
     assert result.outcome == "unavailable"
     assert not executor.requests
+
+
+async def test_repeated_ambiguity_has_same_buttons_from_either_llm_tool(directory, executor):
+    action = Action(trait="on_off", command="off")
+    targets = ("living.main_light", "master.light")
+    fallback = _Fallback(Proposal(intent="control", target_status="ambiguous", targets=targets, action=action))
+    command = _command(directory, executor, interpreter=_Fixed(), fallback=fallback)
+    context = HomeContext()
+    first = await command.handle(OWNER, "unplaced", "a", "关闭主灯", context=context)
+    fallback.proposal = HomeClarification("客厅主灯、主卧灯，要关哪一个？", targets, action)
+    second = await command.handle(OWNER, "unplaced", "b", "关闭主灯", context=context)
+    assert first.outcome == second.outcome == "ambiguous"
+    assert first.candidates == second.candidates
+    assert first.command == second.command
+    assert context.snapshot()["proposal"]["targets"] == list(targets)
+    assert not executor.requests
+
+
+@pytest.mark.parametrize("targets", [("foreign.device", "living.main_light"),
+                                     ("living.main_light", "living.main_light")])
+async def test_clarification_rejects_foreign_or_duplicate_choices(directory, executor, targets):
+    fallback = _Fallback(HomeClarification("哪盏？", targets, Action(trait="on_off", command="off")))
+    result = await _say(_command(directory, executor, interpreter=_Fixed(), fallback=fallback), "关闭灯")
+    assert result.outcome == "unavailable"
+    assert not executor.requests
+
+
+async def test_missing_action_keeps_known_devices_without_executable_buttons(directory, executor):
+    targets = ("living.main_light", "master.light")
+    fallback = _Fallback(HomeClarification("想对灯做什么？", targets))
+    context = HomeContext()
+    result = await _command(directory, executor, interpreter=_Fixed(), fallback=fallback).handle(
+        OWNER, "unplaced", "a", "主灯", context=context)
+    assert result.outcome == "clarification"
+    assert not result.candidates and result.command is None
+    assert context.snapshot()["known_targets"] == list(targets)
+    assert not executor.requests
+
+
+async def test_question_never_executes_when_only_one_candidate_remains_capable(directory, executor):
+    fallback = _Fallback(HomeClarification("调暗哪一个？", ("living.main_light", "living.tv"),
+                         Action(trait="level", command="step", slots=(Slot(name="delta", value=-10),))))
+    result = await _say(_command(directory, executor, interpreter=_Fixed(), fallback=fallback), "暗一点")
+    assert result.outcome == "clarification"
+    assert not result.candidates
+    assert not executor.requests

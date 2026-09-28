@@ -173,13 +173,29 @@ class SmartHomeCommand:
             context.clear()
             return card("answered", "已取消，本次没有执行设备操作")
         if isinstance(proposal, HomeClarification):
+            # Both LLM tools carry semantic facts. Presentation is selected here,
+            # never by parsing device names from model-written question text.
+            if proposal.action is not None and len(proposal.targets) >= 2:
+                try:
+                    current = await self._directory.snapshot(owner_id)
+                except SmartHomeUnavailable:
+                    return card("unavailable", UNAVAILABLE)
+                if not context.active:
+                    return card("unavailable", "本次语音会话已结束")
+                selection = Proposal(intent="control", target_status="ambiguous",
+                                     targets=proposal.targets, action=proposal.action)
+                result = await self._ambiguous(card, owner_id, device_ref, current.registry,
+                                               selection, clarification=proposal.question)
+                if result.outcome == "ambiguous":
+                    context.remember(heard, selection, question=result.message)
+                    return result
             # Retain an unfinished request across a further clarification, but
             # never turn the conversation into an unbounded chat history.
             unfinished = (
                 f"{previous['previous_utterance']}；补充：{heard}"[:MAX_UTTERANCE]
                 if previous and previous['pending'] else heard
             )
-            context.remember(unfinished, None, question=proposal.question)
+            context.remember(unfinished, None, question=proposal.question, clarification=proposal)
             return card("clarification", proposal.question)
         context.clear()
         if proposal is None:
@@ -256,6 +272,21 @@ class SmartHomeCommand:
         except InterpretationError as exc:
             _log.info("smarthome fallback %s failed: %r", request.interpretation_id, exc)
             raise
+        if isinstance(suggested, HomeClarification):
+            known = {candidate.ref for candidate in request.candidates}
+            if len(set(suggested.targets)) != len(suggested.targets) or any(
+                ref not in known for ref in suggested.targets
+            ):
+                raise InterpretationError(ERROR_INVALID_PROPOSAL, "clarification_outside_request")
+            if suggested.action is not None and len(suggested.targets) >= 2:
+                selection = Proposal(intent="control", target_status="ambiguous",
+                                     targets=suggested.targets, action=suggested.action)
+                if _accepted(request, InterpretationResult(
+                    interpretation_id=request.interpretation_id, status="decided",
+                    proposal=selection, policy_version="fallback", model_version="fallback",
+                )) is None:
+                    raise InterpretationError(ERROR_INVALID_PROPOSAL, "clarification_invalid_action")
+            return suggested
         if not isinstance(suggested, Proposal):
             return suggested
         accepted = _accepted(
@@ -301,6 +332,7 @@ class SmartHomeCommand:
         device_ref: str | None,
         registry: Registry,
         proposal: Proposal,
+        *, clarification: str | None = None,
     ) -> VoiceResult:
         assert proposal.action is not None
         capable: list[tuple[Device, Command]] = []
@@ -312,6 +344,8 @@ class SmartHomeCommand:
                 capable.append((device, device_command(device, proposal.action)))
             except SmartHomeError as exc:
                 refused.append((device, exc.code))
+        if clarification is not None and len(capable) < 2:
+            return card("clarification", clarification)
         if not capable:
             if refused:
                 device, code = refused[0]

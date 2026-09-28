@@ -12,6 +12,7 @@ import logging
 from datetime import UTC, datetime
 
 from eidolon_sdk.biz.interpretation import (
+    Action,
     ERROR_INVALID_PROPOSAL,
     ERROR_UNAVAILABLE,
     InterpretationError,
@@ -51,6 +52,8 @@ class _ProposalArguments(BaseModel):
 class _ClarificationArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question: str = Field(min_length=1, max_length=100)
+    targets: tuple[str, ...] = Field(description="已确定或待选择的候选设备 ref；未知时 []，不能只在 question 中写设备名")
+    action: Action | None = Field(description="已明确且参数完整的待执行动作；缺少动作或必要参数时 null")
 
 
 class _CancelArguments(BaseModel):
@@ -108,6 +111,9 @@ class LlmHomeFallback:
                     "用户明确要求同时控制多台时，resolved 可包含多个 ref。"
                     "用户明确说出不存在的设备时 none；目标或动作缺失、无法确定时，"
                     "用 ask_home_clarification 提问，不调用 propose_home_action。"
+                    "追问也必须返回已知 targets 和 action，不得只在问句中列设备名称。"
+                    "只差从多个设备中选一个时，保留完整候选和动作；重复模糊请求不丢弃待确认候选。"
+                    "缺少动作或必要参数时 action=null，保留已知 targets。"
                     "不得把信息不足当成设备不存在。"
                     "闲聊用 unrelated、target_status=none、targets=[]、action=null。"
                     "mention 仅在 target_status=none 时用于不存在的设备名称，其余情况必须省略或为 null。"
@@ -154,7 +160,8 @@ class LlmHomeFallback:
                     if call.name == _PROPOSAL_TOOL.name:
                         proposals.append(_ProposalArguments.model_validate(call.arguments).proposal)
                     elif call.name == _CLARIFICATION_TOOL.name:
-                        proposals.append(HomeClarification(_ClarificationArguments.model_validate(call.arguments).question))
+                        clarification = _ClarificationArguments.model_validate(call.arguments)
+                        proposals.append(HomeClarification(clarification.question, clarification.targets, clarification.action))
                     elif call.name == _CANCEL_TOOL.name:
                         _CancelArguments.model_validate(call.arguments)
                         proposals.append(HomeCancellation())

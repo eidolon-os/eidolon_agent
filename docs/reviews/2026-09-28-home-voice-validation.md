@@ -41,3 +41,51 @@ esp_lvgl_port 的 lvgl9/esp_lvgl_port_touch.c:127 使用 ESP_ERROR_CHECK
 这是触控采样错误被依赖组件作为致命错误处理的直接证据，不能归因于
 Laya/LLM 或已修复的 RGB 位移，也尚未证明 CRC 本身的电气/时序触发原因。
 本次没有修改触控驱动或托管依赖以绕过它，保留该限制供单独修复。
+
+## 23:50–23:52 Korvo physical test: actual decision routes
+
+Audited Agent log `home interpretation` and `home turn` entries, correlated by
+turn ID (times below are final-result times, Asia/Shanghai). No primary/Laya
+proposal was directly executed in these 11 turns.
+
+| Time | Utterance | Decision route | Result |
+|---|---|---|---|
+| 23:50:11 | 打开客厅灯 | Laya timeout → LLM | executed |
+| 23:50:39 | 关闭客厅灯 | context → LLM | executed |
+| 23:51:33 | 关闭主灯 | Laya timeout → LLM | ambiguous, buttons |
+| 23:51:41 | 关闭主灯 | context → LLM | clarification, text only |
+| 23:51:48 | 关闭主卧灯 | context → LLM | executed |
+| 23:51:59 | 关闭主灯 | context → LLM | ambiguous, buttons |
+| 23:52:03 | 客厅主灯 | context → LLM | executed |
+| 23:52:20 | 打开它 | context → LLM | executed |
+| 23:52:28 | 打开主灯 | context → LLM | executed |
+| 23:52:34 | 打开主卧灯 | context → LLM | executed |
+| 23:52:40 | 主卧灯调亮20% | context → LLM | executed, 60% |
+
+The current routing sends **every** turn with unexpired context to the LLM,
+including self-contained new commands. This is a conservative single-turn Laya
+boundary, not evidence of low Laya confidence on those nine contextual turns.
+These tests demonstrate LLM fallback and contextual execution, not Laya direct
+execution. They do not establish why Laya exceeded its 800 ms deadline.
+
+### Structured clarification presentation
+
+`ask_home_clarification` now requires known target refs and a complete action
+(or explicit null when the action/required parameters are missing). Agent
+validates refs and normalizes complete, capable multi-device choices through
+the existing ambiguity builder. The selected LLM tool no longer by itself
+chooses text-only versus actionable presentation. Partial facts are retained
+in session context. Questions never execute a device merely because filtering
+leaves one capable candidate. Firmware and Channel contracts are unchanged.
+
+Verification: 77 related Agent tests passed. Real-model replay with test device
+ports produced five ambiguous results for repeated “关闭主灯”, each with the
+same two candidates and off command, with zero executions before selection.
+“客厅那个” executed once; “主灯” retained candidates but asked for action;
+“算了” cleared the request. This replay is not physical microphone/UI testing.
+
+Deployed by restarting only the Mac Agent. Readiness returned HTTP 200. Three
+consecutive “关闭主灯” requests through the deployed authenticated command API
+all returned the same two choices and off template; cancellation succeeded and
+the isolated verification session was closed. Physical Korvo UI confirmation
+of this optimization remains for the user.

@@ -76,7 +76,7 @@ async def test_invalid_or_incomplete_model_output_is_not_silent_abstention(scrip
 
 
 @pytest.mark.parametrize(("name", "arguments", "kind"), [
-    ("ask_home_clarification", {"question": "想调节哪个设备？"}, "HomeClarification"),
+    ("ask_home_clarification", {"question": "想调节哪个设备？", "targets": [], "action": None}, "HomeClarification"),
     ("cancel_home_command", {}, "HomeCancellation"),
 ])
 async def test_question_and_cancel_are_distinct_non_executable_tools(name, arguments, kind):
@@ -91,5 +91,22 @@ async def test_original_mention_contract_violation_is_reported_not_swallowed():
         "action": {"trait": "on_off", "command": "on", "slots": []},
         "mention": "打开客厅灯",
     })], per_token_delay_s=0)
+    with pytest.raises(InterpretationError, match="invalid_tool_arguments"):
+        await LlmHomeFallback(llm).propose(_request())
+
+
+async def test_clarification_carries_structured_candidates_and_action():
+    llm = FakeLLM(script=[{"kind": "tool_call", "name": "ask_home_clarification", "arguments": {
+        "question": "客厅灯还是卧室灯？", "targets": ["a", "b"],
+        "action": {"trait": "on_off", "command": "off"},
+    }}], per_token_delay_s=0)
+    result = await LlmHomeFallback(llm).propose(_request())
+    assert result.targets == ("a", "b")
+    assert result.action.command == "off"
+
+
+async def test_question_alone_is_no_longer_a_complete_model_contract():
+    llm = FakeLLM(script=[{"kind": "tool_call", "name": "ask_home_clarification",
+                          "arguments": {"question": "客厅灯还是卧室灯？"}}], per_token_delay_s=0)
     with pytest.raises(InterpretationError, match="invalid_tool_arguments"):
         await LlmHomeFallback(llm).propose(_request())
