@@ -118,12 +118,9 @@ async def _run(args) -> int:  # type: ignore[no-untyped-def]
         await system_data_http.aclose()
     if container.runtime_store is not None and hasattr(container.runtime_store, "close"):
         await container.runtime_store.close()
-    smart_home_interpreter = getattr(container.admin_app.state, "smarthome_interpreter", None)
-    if hasattr(smart_home_interpreter, "drain"):
-        await smart_home_interpreter.drain()
-    smart_home_laya = getattr(container.admin_app.state, "smarthome_laya", None)
-    if smart_home_laya is not None:
-        await smart_home_laya.aclose()
+    smart_home_application = getattr(container.admin_app.state, "smart_home_application", None)
+    if smart_home_application is not None:
+        await smart_home_application.close()
     return 0
 
 

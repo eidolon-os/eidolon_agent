@@ -38,9 +38,13 @@ async def _say(command: SmartHomeCommand, text: str, device: str | None = "panel
 class _Fixed:
     """An interpreter that always answers with the given proposal (or raises)."""
 
-    def __init__(self, proposal: Proposal | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self, proposal: Proposal | None = None, error: Exception | None = None,
+        diagnostics: dict | None = None,
+    ) -> None:
         self.proposal = proposal
         self.error = error
+        self.diagnostics = diagnostics or {}
         self.requests: list[InterpretationRequest] = []
 
     async def interpret(self, request: InterpretationRequest) -> InterpretationResult:
@@ -53,6 +57,7 @@ class _Fixed:
             proposal=self.proposal,
             policy_version="test",
             model_version="test",
+            diagnostics=self.diagnostics,
         )
 
 
@@ -328,6 +333,30 @@ async def test_abstained_goes_to_the_fallback(directory, executor) -> None:
 
     assert fallback.calls == 1
     assert (result.outcome, result.message) == ("executed", "客厅空调 已调到 24°C")
+
+
+async def test_low_confidence_home_proposal_uses_fallback_before_execution(directory, executor) -> None:
+    proposed = Proposal(
+        intent="control", target_status="resolved", targets=("living.tv",),
+        action=Action(trait="on_off", command="on"),
+    )
+    fallback = _Fallback(proposed)
+    interpreter = _Fixed(
+        Proposal(
+            intent="control", target_status="resolved", targets=("living.ac",),
+            action=Action(trait="on_off", command="on"),
+        ),
+        diagnostics={"intent_p": 0.96, "device_p": 0.51, "action_p": 0.94},
+    )
+
+    result = await _say(
+        _command(directory, executor, interpreter=interpreter, fallback=fallback, min_confidence=0.8),
+        "打开电视",
+    )
+
+    assert result.outcome == "executed"
+    assert fallback.calls == 1
+    assert executor.commands == [("living.tv", "on_off", "on", {})]
 
 
 async def test_interpreter_failure_is_not_read_as_unrelated(directory, executor) -> None:

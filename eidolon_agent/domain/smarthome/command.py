@@ -119,12 +119,16 @@ class SmartHomeCommand:
         interpretation_timeout_ms: int = 800,
         execute_deadline_ms: int = 3000,
         fallback_timeout_s: float = 8.0,
+        min_confidence: float = 0.0,
     ) -> None:
         self._directory = directory
         self._interpreter = interpreter
         self._fallback = fallback
         self._interpretation_timeout_ms = interpretation_timeout_ms
         self._fallback_timeout_s = fallback_timeout_s
+        if not 0.0 <= min_confidence <= 1.0:
+            raise ValueError("min_confidence must be between 0 and 1")
+        self._min_confidence = min_confidence
         self._actuator = HomeActuator(executor, deadline_ms=execute_deadline_ms)
 
     async def handle(
@@ -179,7 +183,8 @@ class SmartHomeCommand:
             # A failed interpreter is "not understood yet", never "unrelated".
             _log.info("smarthome interpretation %s failed: %s", request.interpretation_id, exc)
         else:
-            proposal = _accepted(request, result)
+            if self._confident(result):
+                proposal = _accepted(request, result)
         if proposal is not None or self._fallback is None:
             return proposal
         try:
@@ -199,6 +204,21 @@ class SmartHomeCommand:
                 policy_version="fallback",
                 model_version="fallback",
             ),
+        )
+
+    def _confident(self, result: InterpretationResult) -> bool:
+        if self._min_confidence == 0 or result.proposal is None:
+            return True
+        keys = ["intent_p"]
+        if result.proposal.intent != "unrelated":
+            keys.append("device_p")
+            if result.proposal.intent == "control":
+                keys.append("action_p")
+        return all(
+            isinstance(result.diagnostics.get(key), int | float)
+            and not isinstance(result.diagnostics[key], bool)
+            and result.diagnostics[key] >= self._min_confidence
+            for key in keys
         )
 
     def _answer(self, card: _Card, home: HomeSnapshot, proposal: Proposal) -> VoiceResult:

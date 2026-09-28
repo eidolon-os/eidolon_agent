@@ -30,6 +30,7 @@ from eidolon_sdk.integrations.audit import require_audit_transport
 
 from eidolon_agent.app.admin import build_admin_app
 from eidolon_agent.app.runtime.container import Container
+from eidolon_agent.app.smarthome import build_smart_home_application
 from eidolon_agent.app.transport.grpc import GrpcServer
 from eidolon_agent.app.transport.grpc.chat_servicer import EidolonAgentServicer
 from eidolon_agent.app.transport.http import build_http_app
@@ -382,6 +383,7 @@ async def build_application(
     container.grpc_server = grpc_server
 
     http_app = build_http_app(readiness=lambda: True)
+    smart_home_application = build_smart_home_application(container.llm_router)
     admin_app = build_admin_app(
         llm_router=container.llm_router,
         settings=settings,
@@ -396,6 +398,7 @@ async def build_application(
         runtime_store=runtime_store,
         long_task_submitter=long_task_worker,
         live_turns=live_turns,
+        smart_home_application=smart_home_application,
     )
     container.http_app = http_app
     container.admin_app = admin_app
