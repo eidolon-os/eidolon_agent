@@ -14,6 +14,8 @@ being a conversation read.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -48,7 +50,21 @@ def build_admin_app(
     participation_decision=None,
     smart_home_application=None,
 ) -> FastAPI:
+    owned_decision = (
+        HttpParticipationDecision(settings.participation.url, token=settings.participation.token)
+        if participation_decision is None and settings.participation.url else None
+    )
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        try:
+            yield
+        finally:
+            if owned_decision is not None:
+                await owned_decision.aclose()
+
     app = FastAPI(
+        lifespan=lifespan,
         title="eidolon-agent admin",
         version="0.1.0",
         docs_url="/api/docs",
@@ -65,10 +81,7 @@ def build_admin_app(
     app.state.role_group_connections = role_groups.SceneConnections()
     app.state.ip_team_application = IpTeamApplication(
         llm=llm_router, runtime_authority=runtime_authority,
-        decide=participation_decision if participation_decision is not None else (
-            HttpParticipationDecision(settings.participation.url, token=settings.participation.token)
-            if settings.participation.url else None
-        ),
+        decide=participation_decision if participation_decision is not None else owned_decision,
     )
     app.state.settings = settings
     app.state.agent_registry = agent_registry

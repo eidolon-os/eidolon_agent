@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-import httpx
+from eidolon_sdk.core.http import create_async_client
 
 from eidolon_agent.core.ports.tool import ToolInvocationContext
 from eidolon_agent.core.types.tool import Permission, ToolCall, ToolResult, ToolSchema
@@ -68,7 +68,7 @@ class GetWeatherTool:
 
 
 async def _fetch_open_meteo(location: str, lang: str) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=1.5, follow_redirects=True) as client:
+    async with create_async_client(timeout=1.5, follow_redirects=True) as client:
         geo_resp = await client.get(
             "https://geocoding-api.open-meteo.com/v1/search",
             params={

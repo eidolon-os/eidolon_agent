@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
 import httpx
+from eidolon_sdk.core.http import create_async_client
 
 from eidolon_agent.core.ports.events import EventBus
 from eidolon_agent.core.ports.long_tasks import LongTaskQueueFullError
@@ -64,7 +65,7 @@ class MementosHttpClient:
         max_retries: int = 2,
     ) -> None:
         self._base_url = base_url.rstrip("/")
-        self._client = httpx.AsyncClient(timeout=timeout_s, trust_env=False)
+        self._client = create_async_client(timeout=timeout_s, trust_env=False)
         self._max_retries = max(0, max_retries)
 
     async def close(self) -> None:

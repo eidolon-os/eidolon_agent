@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
+from eidolon_sdk.core.http import create_async_client
 
 from eidolon_agent.core.errors import MemoryUnavailableError
 from eidolon_agent.infra.memory.discovery import MemoryRoutingTable
@@ -66,7 +67,7 @@ class McpUserSession:
                 if "headers" in inspect.signature(streamable_http_client).parameters:
                     self._client_cm = streamable_http_client(self._url, headers=headers)
                 else:
-                    self._http_client = httpx.AsyncClient(
+                    self._http_client = create_async_client(timeout=5.0,
                         headers=headers,
                         follow_redirects=True,
                         trust_env=False,

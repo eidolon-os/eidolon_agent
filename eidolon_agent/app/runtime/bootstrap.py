@@ -23,6 +23,7 @@ import secrets
 from pathlib import Path
 
 import httpx
+from eidolon_sdk.core.http import create_async_client
 from eidolon_sdk.biz.runtime import RuntimeTokenVerifier
 from eidolon_sdk.biz.system_data import SystemDataRuntimeClient
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
@@ -136,7 +137,7 @@ async def build_application(
                 f"{settings.system_data.service_token_env} is required for "
                 "the System Data Companion Runtime Authority"
             )
-        system_data_http = httpx.AsyncClient(
+        system_data_http = create_async_client(
             timeout=httpx.Timeout(
                 settings.system_data.timeout_s,
                 connect=settings.system_data.connect_timeout_s,

@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+from eidolon_sdk.core.http import create_async_client
 from eidolon_sdk.biz.interpretation import (
     ERROR_CONTEXT_TOO_LARGE,
     ERROR_INVALID_PROPOSAL,
@@ -99,7 +100,7 @@ class LayaInterpreter:
         self._url = base_url.rstrip("/") + "/v1/systemone"
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         # A host-local model service: never through the operator's HTTP proxy.
-        self._client = httpx.AsyncClient(transport=transport, headers=headers, trust_env=False)
+        self._client = create_async_client(timeout=5.0, transport=transport, headers=headers, trust_env=False)
         self._policy_version = policy_version
         self._model_version = model_version
 

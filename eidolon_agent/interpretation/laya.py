@@ -7,6 +7,7 @@ import math
 from urllib.parse import urlsplit
 
 import httpx
+from eidolon_sdk.core.http import create_async_client
 
 from .contracts import (
     ACTIONS,
@@ -37,7 +38,12 @@ class LayaInterpretationAdapter:
         self.endpoint = endpoint.rstrip("/")
         self.revision = revision
         self.timeout_s = timeout_s
-        self._client = client
+        self._owns_client = client is None
+        self._client = client if client is not None else create_async_client(trust_env=False, timeout=timeout_s)
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
 
     async def interpret(self, request: InterpretationRequest) -> Suggestion | None:
         if not request.devices:
@@ -78,18 +84,9 @@ class LayaInterpretationAdapter:
         try:
 
             async def post() -> httpx.Response:
-                if self._client is not None:
-                    return await self._client.post(
-                        self.endpoint + "/v1/systemone",
-                        json=body,
-                        timeout=self.timeout_s,
-                    )
-                async with httpx.AsyncClient(trust_env=False) as client:
-                    return await client.post(
-                        self.endpoint + "/v1/systemone",
-                        json=body,
-                        timeout=self.timeout_s,
-                    )
+                return await self._client.post(
+                    self.endpoint + "/v1/systemone", json=body, timeout=self.timeout_s,
+                )
 
             response = await asyncio.wait_for(post(), timeout=self.timeout_s)
             response.raise_for_status()

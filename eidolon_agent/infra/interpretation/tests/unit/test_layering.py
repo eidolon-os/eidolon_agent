@@ -1,7 +1,7 @@
 """Interpretation adapters stay extractable into their own service.
 
 An adapter may import only the stdlib, pydantic/httpx, the SDK's interpretation
-and smart-home contracts, and its own package (the shared lexicon) — never the
+and smart-home contracts, shared SDK HTTP transport, and its own package (the shared lexicon) — never the
 Agent's directory, tools, sessions or anything else in ``eidolon_agent``.
 """
 
@@ -20,6 +20,7 @@ OWN_PACKAGE = "eidolon_agent.infra.interpretation.adapters"
 ALLOWED = (
     "pydantic",
     "httpx",
+    "eidolon_sdk.core.http",
     "eidolon_sdk.biz.interpretation",
     "eidolon_sdk.biz.smarthome",
     OWN_PACKAGE,

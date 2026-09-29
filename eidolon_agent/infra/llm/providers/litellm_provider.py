@@ -15,6 +15,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
 import httpx
+from eidolon_sdk.core.http import HTTPClientSettings, create_async_client
 import litellm
 from eidolon_sdk.integrations.llm import render_openai_tool_calls, validate_openai_tool_transcript
 
@@ -429,15 +430,10 @@ def _ensure_shared_client() -> httpx.AsyncClient:
     """
     global _shared_http_client
     if _shared_http_client is None or _shared_http_client.is_closed:
-        _shared_http_client = httpx.AsyncClient(
-            # Negotiate HTTP/2 when supported: completed SSE streams can then
-            # reuse the connection even when the SDK closes after [DONE].
-            # HTTPX retains HTTP/1.1 negotiation for other endpoints.
-            http2=True,
-            limits=httpx.Limits(
-                max_connections=100,
-                max_keepalive_connections=20,
-                keepalive_expiry=60.0,
+        _shared_http_client = create_async_client(
+            HTTPClientSettings(
+                timeout_seconds=5, connect_timeout_seconds=5,
+                http2=True, keepalive_expiry_seconds=60,
             ),
             follow_redirects=True,
         )

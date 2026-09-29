@@ -43,7 +43,7 @@ async def test_discovery_client_ignores_shell_proxy_env(monkeypatch):
             )
 
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:7890")
-    monkeypatch.setattr("eidolon_agent.infra.memory.discovery.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("eidolon_agent.infra.memory.discovery.create_async_client", FakeAsyncClient)
 
     discovery = await MemoryDiscoveryClient(
         discovery_url="http://127.0.0.1:8020/api/discovery/agent-routing",

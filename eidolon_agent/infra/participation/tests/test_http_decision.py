@@ -57,3 +57,44 @@ async def test_fixture_resolves_dynamic_ids_and_abstains_on_ambiguous_names():
     assert response.status == 'abstained'
     response = await InputMatchedDecisions([fixture.cases[0], fixture.cases[0]])(req)
     assert response.status == 'abstained'
+
+
+async def test_decision_reuses_pool_and_leaves_borrowed_pool_open():
+    req = request()
+    calls = []
+
+    async def handler(wire):
+        calls.append(wire)
+        assert wire.extensions['timeout']['read'] == req.timeout_ms / 1000
+        return httpx.Response(200, json=decided(req, speaker='a').model_dump(mode='json'))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as pool:
+        port = HttpParticipationDecision('http://fixture/decide', client=pool)
+        await port(req)
+        await port(req)
+        await port.aclose()
+        assert len(calls) == 2
+        assert not pool.is_closed
+
+
+@pytest.mark.parametrize('injected', [False, True])
+async def test_admin_lifespan_closes_only_owned_decision(monkeypatch, injected):
+    from eidolon_agent.app.admin.app import build_admin_app
+    from eidolon_agent.config.settings import Settings
+
+    class Decision:
+        closed = 0
+
+        async def aclose(self):
+            self.closed += 1
+
+    decision = Decision()
+    monkeypatch.setattr('eidolon_agent.app.admin.app.HttpParticipationDecision',
+                        lambda *args, **kwargs: decision)
+    settings = Settings()
+    settings.participation.url = 'http://fixture/decide'
+    app = build_admin_app(settings=settings, agent_registry=None,
+                          participation_decision=decision if injected else None)
+    async with app.router.lifespan_context(app):
+        assert decision.closed == 0
+    assert decision.closed == (0 if injected else 1)

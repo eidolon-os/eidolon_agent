@@ -56,7 +56,7 @@ async def _run(args) -> int:  # type: ignore[no-untyped-def]
             host=settings.http.host,
             port=settings.http.admin_port,
             log_config=None,
-            lifespan="off",
+            lifespan="on",
         )
     )
 

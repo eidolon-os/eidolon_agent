@@ -31,10 +31,12 @@ class SmartHomeApplication:
         *,
         interpreter: InterpretationService | RulesInterpreter,
         laya: LayaInterpreter | None = None,
+        hub_client: HubSmartHomeClient | None = None,
     ) -> None:
         self._command = command
         self._interpreter = interpreter
         self._laya = laya
+        self._hub_client = hub_client
         self._sessions = HomeSessions()
 
     async def handle(
@@ -67,8 +69,12 @@ class SmartHomeApplication:
         self._sessions.clear()
         if isinstance(self._interpreter, InterpretationService):
             await self._interpreter.drain()
-        if self._laya is not None:
-            await self._laya.aclose()
+        try:
+            if self._laya is not None:
+                await self._laya.aclose()
+        finally:
+            if self._hub_client is not None:
+                await self._hub_client.aclose()
 
 
 def build_smart_home_application(llm: LLMPort | None = None) -> SmartHomeApplication | None:
@@ -109,4 +115,5 @@ def build_smart_home_application(llm: LLMPort | None = None) -> SmartHomeApplica
         ),
         interpreter=interpreter,
         laya=laya,
+        hub_client=client,
     )

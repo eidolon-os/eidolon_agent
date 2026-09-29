@@ -12,7 +12,7 @@ import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-import httpx
+from eidolon_sdk.core.http import create_async_client
 from eidolon_memory_contracts import memory_space_subject_token
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -206,25 +206,19 @@ class MemoryDiscoveryClient:
     ) -> None:
         self._url = discovery_url
         self._token_env = token_env
-        self._timeout = timeout_s
+        self._http = create_async_client(timeout=timeout_s, follow_redirects=True, trust_env=False)
+
+    async def aclose(self) -> None:
+        await self._http.aclose()
 
     async def fetch(self) -> DiscoveryResponse:
         headers: dict[str, str] = {}
         token = os.environ.get(self._token_env, "").strip()
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        async with httpx.AsyncClient(
-            timeout=self._timeout,
-            follow_redirects=True,
-            # Discovery is an internal control-plane call, usually loopback.
-            # In dev, shell HTTP_PROXY often points at a local proxy such as
-            # :7890; letting httpx inherit that turns healthy localhost
-            # discovery into proxy-sourced 502s.
-            trust_env=False,
-        ) as client:
-            resp = await client.get(self._url, headers=headers or None)
-            resp.raise_for_status()
-            return DiscoveryResponse.model_validate(resp.json())
+        resp = await self._http.get(self._url, headers=headers or None)
+        resp.raise_for_status()
+        return DiscoveryResponse.model_validate(resp.json())
 
 
 class MemoryDiscoveryRefresher:
@@ -251,14 +245,16 @@ class MemoryDiscoveryRefresher:
 
     async def stop(self) -> None:
         self._stop.set()
-        if self._task is None:
-            return
-        self._task.cancel()
         try:
-            await self._task
-        except asyncio.CancelledError:
-            pass
-        self._task = None
+            if self._task is not None:
+                self._task.cancel()
+                try:
+                    await self._task
+                except asyncio.CancelledError:
+                    pass
+                self._task = None
+        finally:
+            await self._client.aclose()
 
     async def refresh_once(self) -> bool:
         """Fetch discovery immediately and replace the routing snapshot.
@@ -313,6 +309,9 @@ async def build_initial_memory_routes(
         discovery = await client.fetch()
         await routes.replace_from_discovery(discovery)
         effective_nats_url = discovery.nats.url
+    except asyncio.CancelledError:
+        await client.aclose()
+        raise
     except Exception:
         if log_initial_fetch_exception:
             _log.exception("memory discovery initial fetch failed; using static endpoints")
