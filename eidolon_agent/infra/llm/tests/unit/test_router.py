@@ -115,3 +115,24 @@ async def test_router_does_not_fallback_after_stream_started() -> None:
 async def test_count_tokens_uses_default_provider() -> None:
     router = LLMRouter(providers={"x": _StubProvider()}, default="x")
     assert await router.count_tokens([]) == 1
+
+
+async def test_router_close_releases_provider_and_reports_actual_model():
+    from eidolon_agent.core.types.llm import LLMDelta
+    from eidolon_agent.infra.llm.router import LLMRouter
+    class Provider:
+        model_id = 'actual/model'
+        closed = False
+        async def stream(self, *args, **kwargs):
+            try:
+                yield LLMDelta(text_delta='one')
+                yield LLMDelta(text_delta='two')
+            finally:
+                self.closed = True
+    provider = Provider()
+    router = LLMRouter(providers={'alias': provider}, default='alias')
+    stream = router.stream([], request_id='close-test')
+    delta = await anext(stream)
+    assert delta.raw['model_id'] == 'actual/model'
+    await stream.aclose()
+    assert provider.closed

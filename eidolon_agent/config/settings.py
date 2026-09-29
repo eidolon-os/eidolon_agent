@@ -366,6 +366,9 @@ class ParticipationSettings(BaseModel):
     # Full endpoint implementing the SDK v2 contract. Empty disables teams.
     url: str = ""
     token: str = ""
+    llm_fallback_enabled: bool = False
+    primary_timeout_ms: int = Field(default=1500, ge=1, le=60000)
+    fallback_timeout_ms: int = Field(default=3000, ge=1, le=60000)
 
     @field_validator("url")
     @classmethod

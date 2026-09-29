@@ -420,3 +420,32 @@ async def test_obsolete_stop_failure_cannot_poison_current_epoch():
         assert not h.session.failures
     finally:
         await h.session.close()
+
+
+async def test_late_llm_fallback_cannot_speak_after_new_user_press():
+    from eidolon_agent.app.interaction.coordination.decision import FallbackParticipationDecision
+    from eidolon_sdk.biz.participation import DecisionResult, Snapshot
+    h=Harness()
+    entered=asyncio.Event();release=asyncio.Event()
+    async def primary(req):
+        return DecisionResult(**{k:getattr(req,k) for k in Snapshot.model_fields},
+                              status='abstained',policy_version='test',model_version='small')
+    async def fallback(req):
+        entered.set()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            await release.wait()  # Simulate a provider returning after cancellation.
+        return decided(req,speaker='a')
+    h.policy=FallbackParticipationDecision(primary,fallback,primary_timeout_ms=100)
+    try:
+        h.press('old')
+        task=h.release('old')
+        await entered.wait()
+        h.press('new')
+        release.set()
+        await asyncio.gather(task,return_exceptions=True)
+        assert not h.permits and not [r for r in h.log if r[0]=='reply']
+    finally:
+        release.set()
+        await h.session.close()

@@ -1,0 +1,13 @@
+{
+  "models_head": "7ee49930cbed0825965ffef5c8c0d878166c1721",
+  "sources": {
+    "laya/train/scenarios/participation/service_check.py": "c924fc33d5c4ec87730b11420e223c0cec06b7fa9bb1ed0e2484f7e59e279653",
+    "laya/train/scenarios/participation/episodes.py": "3dd50da88f10c2149d95952d32145447ce817f9dc139b9195d0a3fe1f116d825",
+    "evals/participation-laya/dev/dev-companion.jsonl": "9b5a32ab6e017775fcc9b0f692101d45e8aacde32e4d9d844dff60d2423beebd",
+    "evals/participation-laya/dev/dev-team.jsonl": "2990a14fa2db755f61cf3c78d491816b3587445dbd37e85ddfa1bf2b7a23a0cd",
+    "evals/participation-laya/deploy-p4/board-scratch-20260929/responses.jsonl": "d592a5138655ae19c3fd6cafce5a75024ce22a2de8bc6a9311cda8e4f0d302f1"
+  },
+  "export": "service_check.requests_for(seed=7); primary responses joined by decision_id; gold from the same episode event only",
+  "abstained_count": 65,
+  "controls": "first 10 decided wait + first 10 decided finish, ordered by canonical dev files"
+}

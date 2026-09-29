@@ -20,3 +20,12 @@ def test_participation_endpoint_is_explicit_and_versioned():
 def test_other_model_routes_cannot_enable_ip_team(url):
     with pytest.raises(ValidationError, match="participation v2 endpoint"):
         ParticipationSettings(url=url)
+
+
+def test_fallback_is_opt_in_and_budgets_are_bounded():
+    settings = ParticipationSettings()
+    assert settings.llm_fallback_enabled is False
+    for field in ('primary_timeout_ms', 'fallback_timeout_ms'):
+        for value in (0, 60001):
+            with pytest.raises(ValidationError):
+                ParticipationSettings(**{field:value})

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
+from contextlib import aclosing
+from dataclasses import replace
 
 from eidolon_agent.core.errors import LLMUnavailableError
 from eidolon_agent.core.types.llm import LLMDelta
@@ -54,12 +56,13 @@ class LLMRouter:
             provider = self._providers[candidate]
             emitted = False
             try:
-                async for delta in provider.stream(
+                async with aclosing(provider.stream(
                     messages, tools=tools, temperature=temperature,
                     max_tokens=max_tokens, request_id=request_id,
-                ):
-                    emitted = True
-                    yield delta
+                )) as stream:
+                    async for delta in stream:
+                        emitted = True
+                        yield replace(delta, raw={**delta.raw, "model_id": getattr(provider, "model_id", candidate)})
                 return
             except LLMUnavailableError as exc:
                 if emitted:

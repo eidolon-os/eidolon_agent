@@ -1,0 +1,5 @@
+{
+  "source": "NPU board scratch; not confirmed formal deployment",
+  "responses_sha256": "d592a5138655ae19c3fd6cafce5a75024ce22a2de8bc6a9311cda8e4f0d302f1",
+  "exporter": "Models service_check.requests_for seed=7"
+}

@@ -1,0 +1,13 @@
+{
+  "input_sha256": "10229f3142dacec1334382626980f239563f66a096a699aa623afa3d391dbd71",
+  "configured_model": "openai/deepseek-v4-flash",
+  "timeout_ms": 3000,
+  "n": 20,
+  "action_correct": 19,
+  "e2e_correct": 19,
+  "unwanted_speech": 1,
+  "errors": 0,
+  "p50_ms": 786.75,
+  "p95_ms": 1204.2,
+  "max_ms": 1263.3
+}

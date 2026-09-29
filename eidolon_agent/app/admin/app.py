@@ -32,6 +32,8 @@ from eidolon_agent.app.admin.routers import (
 from eidolon_agent.app.interaction.coordination.application import IpTeamApplication
 from eidolon_agent.config.settings import Settings
 from eidolon_agent.infra.participation import HttpParticipationDecision
+from eidolon_agent.infra.participation.llm import LlmParticipationDecision
+from eidolon_agent.app.interaction.coordination.decision import FallbackParticipationDecision
 
 
 def build_admin_app(
@@ -50,10 +52,21 @@ def build_admin_app(
     participation_decision=None,
     smart_home_application=None,
 ) -> FastAPI:
+    if settings.participation.llm_fallback_enabled and participation_decision is None:
+        if not settings.participation.url or llm_router is None or llm_router.model_id == "fake":
+            raise ValueError("participation fallback requires a configured primary and real LLM")
     owned_decision = (
         HttpParticipationDecision(settings.participation.url, token=settings.participation.token)
         if participation_decision is None and settings.participation.url else None
     )
+
+    decision = participation_decision if participation_decision is not None else owned_decision
+    if settings.participation.llm_fallback_enabled and participation_decision is None:
+        decision = FallbackParticipationDecision(
+            owned_decision,
+            LlmParticipationDecision(llm_router, timeout_ms=settings.participation.fallback_timeout_ms),
+            primary_timeout_ms=settings.participation.primary_timeout_ms,
+        )
 
     @asynccontextmanager
     async def lifespan(_app):
@@ -81,7 +94,7 @@ def build_admin_app(
     app.state.role_group_connections = role_groups.SceneConnections()
     app.state.ip_team_application = IpTeamApplication(
         llm=llm_router, runtime_authority=runtime_authority,
-        decide=participation_decision if participation_decision is not None else owned_decision,
+        decide=decision,
     )
     app.state.settings = settings
     app.state.agent_registry = agent_registry

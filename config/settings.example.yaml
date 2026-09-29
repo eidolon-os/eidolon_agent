@@ -12,6 +12,11 @@ env: dev
 participation:
   url: ""
   token: ""
+  # Keep disabled until actual-model evaluation and the shared-Host gate pass.
+  llm_fallback_enabled: false
+  # Stage caps; both stages remain inside the caller's original deadline.
+  primary_timeout_ms: 1500
+  fallback_timeout_ms: 3000
 
 grpc:
   tcp_host: 127.0.0.1

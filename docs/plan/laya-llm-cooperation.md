@@ -27,10 +27,10 @@ Codex 负责 eidolon_agent：
 - [x] 组合现有 ParticipationDecisionPort：合法 wait/finish 不兜底；abstained 可兜底。
 - [x] 仅显式可恢复故障（忙碌/连接/模型超时等）触发；取消、非法/过期结果、鉴权错误停止。
 - [x] 总时限覆盖两阶段；第一阶段有独立上限，LLM仅消费剩余预算。禁用任何固定轮换。
-- [ ] LLM适配器复用 LLMPort、结构化输出和 SDK validate_proposal；不创建HTTP客户端或新模型路由。
-- [ ] 规范采用 LABELING.md 的任务语义，明确来源和版本；不在运行时依赖Models源码路径。
-- [ ] 澄清使用已定义的有界任务，不接受模型生成无限指令；结果保留原快照身份。
-- [ ] 以产品实际LLM单决策点评测部署NPU拒答集，禁止未来事件/同episode后续快照泄露。
+- [x] LLM适配器复用 LLMPort、结构化输出和 SDK validate_proposal；不创建HTTP客户端或新模型路由。
+- [x] 规范采用 LABELING.md 的任务语义，明确来源和版本；不在运行时依赖Models源码路径。
+- [x] 澄清使用已定义的有界任务，不接受模型生成无限指令；结果保留原快照身份。
+- [x] 以产品实际LLM单决策点评测部署NPU拒答集，禁止未来事件/同episode后续快照泄露。
 - [ ] 评测动作、人选、澄清原因、应停却发言、拒答、延迟、token；加入正常wait/finish反例。
 - [ ] 保持默认不启用，评测和现有状态/取消集成测试通过后再接入正式组合入口。
 
@@ -62,3 +62,11 @@ GLM 95.8%仅为已记录的p-dev动作一致率，原批量实验有同episode�
 
 验证：参与决策、CoordinationSession、IP团队应用、Admin语义流共67项通过；静态检查通过。
 未修改Models/Ops/SDK，未部署或重启共享服务。后续继续LLM适配器和离线评测入口，再验收实际NPU拒答集。
+
+## 第二阶段结果
+
+LLM适配器、默认关闭配置、评测入口完成；133项回归通过。
+产品DeepSeek对交付NPU临时实例65条拒答首轮53/65正确；修正finish表述后56/65，
+仍6次应停却发言，20条等待/结束控制组仍1次多说。因此不开放生产兜底。
+数据与边界见 `docs/reviews/2026-09-29-participation-fallback/README.md`。
+现有Models报告确认家居续接仍无可部署候选；接入与训练评测保持独立，不擅自开放路由。
