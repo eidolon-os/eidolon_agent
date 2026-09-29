@@ -11,6 +11,8 @@ import asyncio
 import hashlib
 import json
 import time
+from contextlib import aclosing
+from dataclasses import asdict
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -76,6 +78,34 @@ SCENARIOS = [
 ]
 
 
+class RecordedLLM:
+    """Record synthetic fixture exchanges only; never install in the product stack."""
+
+    def __init__(self, llm):
+        self.llm, self.exchanges = llm, []
+
+    async def stream(self, messages, **kwargs):
+        exchange = {
+            "request_id": kwargs["request_id"],
+            "messages": [{"role": m.role.value, "content": m.content} for m in messages],
+            "tool_calls": [],
+            "text": "",
+            "finish": None,
+        }
+        self.exchanges.append(exchange)
+        async with aclosing(self.llm.stream(messages, **kwargs)) as stream:
+            async for delta in stream:
+                if delta.tool_call is not None:
+                    exchange["tool_calls"].append(asdict(delta.tool_call))
+                if delta.text_delta:
+                    exchange["text"] += delta.text_delta
+                if delta.finish is not None:
+                    exchange["finish"] = delta.finish.value
+                if delta.usage is not None:
+                    exchange["usage"] = asdict(delta.usage)
+                yield delta
+
+
 class MeasuredFallback:
     def __init__(self, llm):
         self.port, self.calls = LlmHomeFallback(llm), 0
@@ -92,20 +122,23 @@ async def run(args):
     if llm.model_id == "fake":
         raise ValueError("requires configured product LLM")
     laya = LayaInterpreter(args.endpoint)
+    recorded = RecordedLLM(llm)
     report = []
     if args.cases:
         supplied = json.loads(args.cases.read_text())
+        expected_outcomes = {c["id"]: c["expected_outcomes"] for c in supplied if "expected_outcomes" in c}
         scenarios = [
             (c["id"], c["utterances"], [tuple(cmd) for cmd in c["expected_commands"]])
             for c in supplied
         ]
     else:
         scenarios = SCENARIOS
+        expected_outcomes = {"change_target": [["executed"], ["ambiguous", "clarification"]]}
     try:
         for name, words, expected in scenarios:
             directory = FakeDirectory(home_registry())
             executor = FakeExecutor(directory)
-            fallback, context = MeasuredFallback(llm), HomeContext()
+            fallback, context = MeasuredFallback(recorded), HomeContext()
             command = SmartHomeCommand(
                 directory=directory,
                 executor=executor,
@@ -139,6 +172,12 @@ async def run(args):
             outcomes_ok = all(
                 t["result"]["outcome"] not in {"failed", "unavailable", "not_found"} for t in turns
             )
+            allowed_outcomes = expected_outcomes.get(name)
+            if allowed_outcomes is not None:
+                outcomes_ok = outcomes_ok and len(allowed_outcomes) == len(turns) and all(
+                    turn["result"]["outcome"] in allowed
+                    for turn, allowed in zip(turns, allowed_outcomes, strict=True)
+                )
             report.append(
                 {
                     "id": name,
@@ -147,6 +186,7 @@ async def run(args):
                     "expected_commands": expected_full,
                     "commands_match": executor.commands == expected_full,
                     "outcomes_ok": outcomes_ok,
+                    "expected_outcomes": allowed_outcomes,
                 }
             )
     finally:
@@ -161,6 +201,7 @@ async def run(args):
             Path("eidolon_agent/infra/smarthome/llm_fallback.py").read_bytes()
         ).hexdigest(),
         "scenarios": report,
+        "llm_exchanges": recorded.exchanges,
         "passed": sum(r["commands_match"] and r["outcomes_ok"] for r in report),
         "total": len(report),
     }

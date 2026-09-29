@@ -194,7 +194,7 @@ class LlmHomeFallback:
         if len(proposals) > 1:
             raise InterpretationError(ERROR_INVALID_PROPOSAL, "multiple_proposals")
         if not proposals:
-            _log.info("home fallback turn=%s outcome=abstained", request.interpretation_id)
+            _log.info("home fallback turn=%s outcome=abstained reason=no_tool_call", request.interpretation_id)
             return None
         result = proposals[0]
         if isinstance(result, HomeCancellation):
@@ -205,7 +205,7 @@ class LlmHomeFallback:
             return result
         proposal = result
         if proposal is None:
-            _log.info("home fallback turn=%s outcome=abstained", request.interpretation_id)
+            _log.info("home fallback turn=%s outcome=abstained reason=null_proposal", request.interpretation_id)
             return None
         _log.info(
             "home fallback turn=%s outcome=proposed intent=%s target_status=%s targets=%s action=%s",

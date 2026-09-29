@@ -61,6 +61,18 @@ async def test_abstention_and_unrelated_are_distinct_valid_results(proposal):
     assert result is None if proposal is None else result.intent == "unrelated"
 
 
+@pytest.mark.parametrize(("script", "reason"), [
+    ([{"kind": "text", "text": "请说明设备"}], "no_tool_call"),
+    ([_call(None)], "null_proposal"),
+])
+async def test_abstention_diagnostic_distinguishes_wire_results(script, reason, caplog):
+    llm = FakeLLM(script=script, per_token_delay_s=0)
+    with caplog.at_level("INFO", logger="eidolon_agent.infra.smarthome.llm_fallback"):
+        assert await LlmHomeFallback(llm).propose(_request()) is None
+    assert f"reason={reason}" in caplog.text
+    assert "请说明设备" not in caplog.text
+
+
 @pytest.mark.parametrize("script", [
     [_call({"intent": "control", "target_status": "resolved", "targets": ["a"]})],
     [_call({"intent": "unrelated", "target_status": "none", "targets": ["a"]})],
@@ -110,3 +122,46 @@ async def test_question_alone_is_no_longer_a_complete_model_contract():
                           "arguments": {"question": "客厅灯还是卧室灯？"}}], per_token_delay_s=0)
     with pytest.raises(InterpretationError, match="invalid_tool_arguments"):
         await LlmHomeFallback(llm).propose(_request())
+
+
+async def test_change_room_clarification_then_selection_executes_new_action_once():
+    """Replay a real clarification shape through the Agent and virtual Provider."""
+    from eidolon_agent.domain.smarthome import SmartHomeCommand
+    from eidolon_agent.domain.smarthome.context import HomeContext
+    from eidolon_agent.domain.smarthome.tests.conftest import (
+        OWNER,
+        FakeDirectory,
+        FakeExecutor,
+        home_registry,
+    )
+    from eidolon_agent.infra.interpretation import RulesInterpreter
+
+    llm = FakeLLM(script=[[
+        {"kind": "tool_call", "name": "ask_home_clarification", "arguments": {
+            "question": "卧室里想关掉哪一盏灯？主卧灯还是床头灯？",
+            "targets": ["master.light", "master.bedside"],
+            "action": {"trait": "on_off", "command": "off", "slots": []},
+        }},
+    ], [_call({
+        "intent": "control", "target_status": "resolved", "targets": ["master.bedside"],
+        "action": {"trait": "on_off", "command": "off", "slots": []},
+    })]], per_token_delay_s=0)
+    directory = FakeDirectory(home_registry())
+    executor = FakeExecutor(directory)
+    command = SmartHomeCommand(directory=directory, executor=executor,
+                               interpreter=RulesInterpreter(), fallback=LlmHomeFallback(llm))
+    context = HomeContext()
+    first = await command.handle(OWNER, None, "focus", "打开客厅主灯", context=context)
+    assert first.outcome == "executed"
+    second = await command.handle(OWNER, None, "change", "卧室的也关掉", context=context)
+    assert second.outcome == "ambiguous"
+    assert [c.device_id for c in second.candidates] == ["master.light", "master.bedside"]
+    assert len(executor.commands) == 1
+    pending = context.snapshot()
+    assert pending["proposal"]["action"]["command"] == "off"
+    third = await command.handle(OWNER, None, "select", "床头灯", context=context)
+    assert third.outcome == "executed"
+    assert executor.commands == [("living.main_light", "on_off", "on", {}),
+                                 ("master.bedside", "on_off", "off", {})]
+    assert llm.calls == 2
+    assert context.snapshot()["pending"] is False
