@@ -66,7 +66,6 @@ from eidolon_agent.domain.smarthome.planning import (
     device_command,
     find_target,
     plan_action,
-    plan_devices,
     request_id,
 )
 from eidolon_agent.domain.smarthome.ports import (
@@ -200,9 +199,9 @@ class SmartHomeCommand:
                     return card("unavailable", "本轮已被新的输入替代或会话已结束")
                 selection = Proposal(intent="control", target_status="ambiguous",
                                      targets=proposal.targets, action=proposal.action)
-                result = await self._ambiguous(card, owner_id, device_ref, current.registry,
-                                               selection, clarification=proposal.question)
-                if result.outcome == "ambiguous":
+                result = self._resolve_ambiguity(card, current.registry,
+                                                selection, clarification=proposal.question)
+                if isinstance(result, VoiceResult) and result.outcome == "ambiguous":
                     context.remember(heard, selection, question=result.message)
                     return result
             # Retain an unfinished request across a further clarification, but
@@ -237,12 +236,14 @@ class SmartHomeCommand:
             return result
         assert proposal.action is not None  # a control proposal always carries one
         if proposal.target_status == "ambiguous":
-            result = await self._ambiguous(card, owner_id, device_ref, home.registry, proposal)
-            if result.outcome == "ambiguous":
-                context.remember(heard, proposal, question=result.message)
-            # _ambiguous may execute the sole capable device. Do not remember
-            # the original ambiguous proposal as a confirmed target.
-            return result
+            resolution = self._resolve_ambiguity(card, home.registry, proposal)
+            if isinstance(resolution, VoiceResult):
+                if resolution.outcome == "ambiguous":
+                    context.remember(heard, proposal, question=resolution.message)
+                return resolution
+            # A unique capable target is a resolved proposal, not an execution
+            # side path. Use the same version check, receipt and focus update.
+            proposal = resolution
         try:
             plan = plan_action(home.registry, proposal.targets, proposal.action)
         except SmartHomeError:
@@ -355,15 +356,13 @@ class SmartHomeCommand:
         lines = [describe(d, home.status.get(d.device_id)) for d in devices]
         return card("answered", clip("；".join(lines)))
 
-    async def _ambiguous(
+    def _resolve_ambiguity(
         self,
         card: _Card,
-        owner_id: str,
-        device_ref: str | None,
         registry: Registry,
         proposal: Proposal,
         *, clarification: str | None = None,
-    ) -> VoiceResult:
+    ) -> VoiceResult | Proposal:
         assert proposal.action is not None
         capable: list[tuple[Device, Command]] = []
         refused: list[tuple[Device, str]] = []
@@ -382,9 +381,9 @@ class SmartHomeCommand:
                 return card("failed", failure(device.name, code, device.type))
             return card("failed", NOT_UNDERSTOOD)
         if len(capable) == 1:  # the only one that can do it
-            action = proposal.action
-            plan = plan_devices([capable[0][0]], lambda _d: action)
-            return await self._run(card, owner_id, device_ref, plan)
+            return proposal.model_copy(update={
+                "target_status": "resolved", "targets": (capable[0][0].device_id,),
+            })
         if len(capable) > MAX_CANDIDATES:
             return card("failed", "符合的设备太多，请说出具体名称")
         # One action for every candidate, so the command is the same whichever is tapped.

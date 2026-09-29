@@ -661,3 +661,28 @@ async def test_missing_context_does_not_grant_a_guessed_target(directory, execut
     assert result.outcome == 'clarification'
     assert not primary.requests and not executor.requests
     assert fallback.contexts == [None]
+
+
+@pytest.mark.parametrize('completion', ['success', 'offline', 'unknown'])
+async def test_unique_capable_target_remembers_only_confirmed_execution(directory, executor, completion):
+    action = Action(trait='level', command='step', slots=(Slot(name='delta', value=-10),))
+    ambiguous = Proposal(intent='control', target_status='ambiguous',
+                        targets=('living.main_light', 'living.tv'), action=action)
+    primary = _Fixed(ambiguous)
+    fallback = _Fallback(Proposal(intent='control', target_status='resolved',
+                                 targets=('living.main_light',), action=action))
+    context = HomeContext()
+    if completion == 'offline': executor.offline.add('living.main_light')
+    if completion == 'unknown': executor.unknown.add('living.main_light')
+    command = _command(directory, executor, interpreter=primary, fallback=fallback)
+    first = await command.handle(OWNER, 'p', 'unique', '调暗一点', context=context)
+    if completion != 'success':
+        assert first.outcome != 'executed' and context.snapshot() is None
+        return
+    assert first.outcome == 'executed'
+    assert context.proposal.target_status == 'resolved'
+    assert context.proposal.targets == ('living.main_light',)
+    assert not context.pending
+    await command.handle(OWNER, 'p', 'followup', '再暗一点', context=context)
+    assert fallback.contexts[-1]['proposal']['targets'] == ['living.main_light']
+    assert executor.commands == [('living.main_light', 'level', 'step', {'delta': -10})] * 2

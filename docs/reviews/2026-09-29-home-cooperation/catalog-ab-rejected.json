@@ -1,0 +1,908 @@
+[
+  {
+    "variant": "before",
+    "repeat": 0,
+    "case": 0,
+    "utterance": "客厅那个",
+    "elapsed_ms": 1057.5,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5902,
+    "usage": null,
+    "first_effective_ms": 1053.9
+  },
+  {
+    "variant": "after",
+    "repeat": 0,
+    "case": 0,
+    "utterance": "客厅那个",
+    "elapsed_ms": 1161.3,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 4381,
+    "usage": null,
+    "first_effective_ms": 1158.1
+  },
+  {
+    "variant": "after",
+    "repeat": 0,
+    "case": 1,
+    "utterance": "主卧那个",
+    "elapsed_ms": 1240.5,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 4381,
+    "usage": null,
+    "first_effective_ms": 1238.7
+  },
+  {
+    "variant": "before",
+    "repeat": 0,
+    "case": 1,
+    "utterance": "主卧那个",
+    "elapsed_ms": 1854.4,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5902,
+    "usage": null,
+    "first_effective_ms": 1852.1
+  },
+  {
+    "variant": "before",
+    "repeat": 0,
+    "case": 2,
+    "utterance": "算了",
+    "elapsed_ms": 1071.3,
+    "correct": true,
+    "result": {
+      "type": "cancel"
+    },
+    "error": null,
+    "input_chars": 5900,
+    "usage": null,
+    "first_effective_ms": 1069.5
+  },
+  {
+    "variant": "after",
+    "repeat": 0,
+    "case": 2,
+    "utterance": "算了",
+    "elapsed_ms": 1133.9,
+    "correct": true,
+    "result": {
+      "type": "cancel"
+    },
+    "error": null,
+    "input_chars": 4379,
+    "usage": null,
+    "first_effective_ms": 1132.5
+  },
+  {
+    "variant": "after",
+    "repeat": 0,
+    "case": 3,
+    "utterance": "打开主卧灯",
+    "elapsed_ms": 1126.1,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 4382,
+    "usage": null,
+    "first_effective_ms": 1123.6
+  },
+  {
+    "variant": "before",
+    "repeat": 0,
+    "case": 3,
+    "utterance": "打开主卧灯",
+    "elapsed_ms": 1006.8,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5903,
+    "usage": null,
+    "first_effective_ms": 1005.4
+  },
+  {
+    "variant": "before",
+    "repeat": 0,
+    "case": 4,
+    "utterance": "不要关闭主卧灯",
+    "elapsed_ms": 744.9,
+    "correct": true,
+    "result": {
+      "type": "cancel"
+    },
+    "error": null,
+    "input_chars": 5878,
+    "usage": null,
+    "first_effective_ms": 744.4
+  },
+  {
+    "variant": "after",
+    "repeat": 0,
+    "case": 4,
+    "utterance": "不要关闭主卧灯",
+    "elapsed_ms": 5866.0,
+    "correct": true,
+    "result": {
+      "type": "cancel"
+    },
+    "error": null,
+    "input_chars": 4358,
+    "usage": null,
+    "first_effective_ms": 5864.5
+  },
+  {
+    "variant": "after",
+    "repeat": 0,
+    "case": 5,
+    "utterance": "打开它",
+    "elapsed_ms": 1303.2,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 4360,
+    "usage": null,
+    "first_effective_ms": 1301.6
+  },
+  {
+    "variant": "before",
+    "repeat": 0,
+    "case": 5,
+    "utterance": "打开它",
+    "elapsed_ms": 1198.4,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5880,
+    "usage": null,
+    "first_effective_ms": 1195.0
+  },
+  {
+    "variant": "before",
+    "repeat": 0,
+    "case": 6,
+    "utterance": "打开它",
+    "elapsed_ms": 1477.7,
+    "correct": true,
+    "result": {
+      "question": "你想打开哪台设备？",
+      "targets": [
+        "living.main_light",
+        "master.light",
+        "master.bedside",
+        "living.ac",
+        "master.ac",
+        "living.curtain",
+        "living.purifier",
+        "master.humidifier",
+        "living.tv",
+        "living.speaker",
+        "balcony.rack",
+        "bath.water_heater",
+        "entry.camera"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      }
+    },
+    "error": null,
+    "input_chars": 5598,
+    "usage": null,
+    "first_effective_ms": 1471.4
+  },
+  {
+    "variant": "after",
+    "repeat": 0,
+    "case": 6,
+    "utterance": "打开它",
+    "elapsed_ms": 1201.1,
+    "correct": true,
+    "result": {
+      "question": "你想打开哪台设备？",
+      "targets": [],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      }
+    },
+    "error": null,
+    "input_chars": 4103,
+    "usage": null,
+    "first_effective_ms": 1198.0
+  },
+  {
+    "variant": "after",
+    "repeat": 0,
+    "case": 7,
+    "utterance": "关闭主灯",
+    "elapsed_ms": 903.0,
+    "correct": false,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 4104,
+    "usage": null,
+    "first_effective_ms": 901.3
+  },
+  {
+    "variant": "before",
+    "repeat": 0,
+    "case": 7,
+    "utterance": "关闭主灯",
+    "elapsed_ms": 1085.6,
+    "correct": true,
+    "result": {
+      "question": "你说的“主灯”是指客厅主灯还是主卧灯？",
+      "targets": [
+        "living.main_light",
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      }
+    },
+    "error": null,
+    "input_chars": 5599,
+    "usage": null,
+    "first_effective_ms": 1083.9
+  },
+  {
+    "variant": "before",
+    "repeat": 0,
+    "case": 8,
+    "utterance": "今天天气怎么样",
+    "elapsed_ms": 5964.0,
+    "correct": true,
+    "result": {
+      "intent": "unrelated",
+      "target_status": "none",
+      "targets": [],
+      "action": null,
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5905,
+    "usage": null,
+    "first_effective_ms": 5960.8
+  },
+  {
+    "variant": "after",
+    "repeat": 0,
+    "case": 8,
+    "utterance": "今天天气怎么样",
+    "elapsed_ms": 1227.9,
+    "correct": true,
+    "result": {
+      "intent": "unrelated",
+      "target_status": "none",
+      "targets": [],
+      "action": null,
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 4384,
+    "usage": null,
+    "first_effective_ms": 1226.8
+  },
+  {
+    "variant": "after",
+    "repeat": 0,
+    "case": 9,
+    "utterance": "打开客厅灯，不，关掉",
+    "elapsed_ms": 1037.4,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 4110,
+    "usage": null,
+    "first_effective_ms": 539.6
+  },
+  {
+    "variant": "before",
+    "repeat": 0,
+    "case": 9,
+    "utterance": "打开客厅灯，不，关掉",
+    "elapsed_ms": 1028.7,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5605,
+    "usage": null,
+    "first_effective_ms": 1025.7
+  },
+  {
+    "variant": "after",
+    "repeat": 1,
+    "case": 0,
+    "utterance": "客厅那个",
+    "elapsed_ms": 952.0,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 4381,
+    "usage": null,
+    "first_effective_ms": 949.9
+  },
+  {
+    "variant": "before",
+    "repeat": 1,
+    "case": 0,
+    "utterance": "客厅那个",
+    "elapsed_ms": 1638.6,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5902,
+    "usage": null,
+    "first_effective_ms": 1635.3
+  },
+  {
+    "variant": "before",
+    "repeat": 1,
+    "case": 1,
+    "utterance": "主卧那个",
+    "elapsed_ms": 1194.8,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5902,
+    "usage": null,
+    "first_effective_ms": 1193.1
+  },
+  {
+    "variant": "after",
+    "repeat": 1,
+    "case": 1,
+    "utterance": "主卧那个",
+    "elapsed_ms": 1034.7,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 4381,
+    "usage": null,
+    "first_effective_ms": 1033.3
+  },
+  {
+    "variant": "after",
+    "repeat": 1,
+    "case": 2,
+    "utterance": "算了",
+    "elapsed_ms": 1346.1,
+    "correct": true,
+    "result": {
+      "type": "cancel"
+    },
+    "error": null,
+    "input_chars": 4379,
+    "usage": null,
+    "first_effective_ms": 1344.9
+  },
+  {
+    "variant": "before",
+    "repeat": 1,
+    "case": 2,
+    "utterance": "算了",
+    "elapsed_ms": 1055.7,
+    "correct": true,
+    "result": {
+      "type": "cancel"
+    },
+    "error": null,
+    "input_chars": 5900,
+    "usage": null,
+    "first_effective_ms": 1054.9
+  },
+  {
+    "variant": "before",
+    "repeat": 1,
+    "case": 3,
+    "utterance": "打开主卧灯",
+    "elapsed_ms": 1020.7,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5903,
+    "usage": null,
+    "first_effective_ms": 1017.6
+  },
+  {
+    "variant": "after",
+    "repeat": 1,
+    "case": 3,
+    "utterance": "打开主卧灯",
+    "elapsed_ms": 1245.0,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 4382,
+    "usage": null,
+    "first_effective_ms": 1242.4
+  },
+  {
+    "variant": "after",
+    "repeat": 1,
+    "case": 4,
+    "utterance": "不要关闭主卧灯",
+    "elapsed_ms": 945.4,
+    "correct": true,
+    "result": {
+      "type": "cancel"
+    },
+    "error": null,
+    "input_chars": 4358,
+    "usage": null,
+    "first_effective_ms": 944.6
+  },
+  {
+    "variant": "before",
+    "repeat": 1,
+    "case": 4,
+    "utterance": "不要关闭主卧灯",
+    "elapsed_ms": 982.2,
+    "correct": true,
+    "result": {
+      "type": "cancel"
+    },
+    "error": null,
+    "input_chars": 5878,
+    "usage": null,
+    "first_effective_ms": 981.6
+  },
+  {
+    "variant": "before",
+    "repeat": 1,
+    "case": 5,
+    "utterance": "打开它",
+    "elapsed_ms": 1197.7,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5880,
+    "usage": null,
+    "first_effective_ms": 1193.3
+  },
+  {
+    "variant": "after",
+    "repeat": 1,
+    "case": 5,
+    "utterance": "打开它",
+    "elapsed_ms": 1321.6,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 4360,
+    "usage": null,
+    "first_effective_ms": 1317.3
+  },
+  {
+    "variant": "after",
+    "repeat": 1,
+    "case": 6,
+    "utterance": "打开它",
+    "elapsed_ms": 963.6,
+    "correct": true,
+    "result": {
+      "question": "你想打开哪台设备？",
+      "targets": [],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      }
+    },
+    "error": null,
+    "input_chars": 4103,
+    "usage": null,
+    "first_effective_ms": 962.1
+  },
+  {
+    "variant": "before",
+    "repeat": 1,
+    "case": 6,
+    "utterance": "打开它",
+    "elapsed_ms": 1545.6,
+    "correct": true,
+    "result": {
+      "question": "你想打开哪台设备？",
+      "targets": [
+        "living.main_light",
+        "master.light",
+        "master.bedside",
+        "living.ac",
+        "master.ac",
+        "living.curtain",
+        "living.purifier",
+        "master.humidifier",
+        "living.tv",
+        "living.speaker",
+        "balcony.rack",
+        "bath.water_heater",
+        "entry.camera"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      }
+    },
+    "error": null,
+    "input_chars": 5598,
+    "usage": null,
+    "first_effective_ms": 1540.4
+  },
+  {
+    "variant": "before",
+    "repeat": 1,
+    "case": 7,
+    "utterance": "关闭主灯",
+    "elapsed_ms": 1227.1,
+    "correct": true,
+    "result": {
+      "question": "\"主灯\"指客厅主灯还是主卧灯？",
+      "targets": [
+        "living.main_light",
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      }
+    },
+    "error": null,
+    "input_chars": 5599,
+    "usage": null,
+    "first_effective_ms": 1225.4
+  },
+  {
+    "variant": "after",
+    "repeat": 1,
+    "case": 7,
+    "utterance": "关闭主灯",
+    "elapsed_ms": 996.3,
+    "correct": false,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 4104,
+    "usage": null,
+    "first_effective_ms": 994.8
+  },
+  {
+    "variant": "after",
+    "repeat": 1,
+    "case": 8,
+    "utterance": "今天天气怎么样",
+    "elapsed_ms": 1097.9,
+    "correct": true,
+    "result": {
+      "intent": "unrelated",
+      "target_status": "none",
+      "targets": [],
+      "action": null,
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 4384,
+    "usage": null,
+    "first_effective_ms": 1095.2
+  },
+  {
+    "variant": "before",
+    "repeat": 1,
+    "case": 8,
+    "utterance": "今天天气怎么样",
+    "elapsed_ms": 6184.1,
+    "correct": true,
+    "result": {
+      "intent": "unrelated",
+      "target_status": "none",
+      "targets": [],
+      "action": null,
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5905,
+    "usage": null,
+    "first_effective_ms": 6181.1
+  },
+  {
+    "variant": "before",
+    "repeat": 1,
+    "case": 9,
+    "utterance": "打开客厅灯，不，关掉",
+    "elapsed_ms": 1450.8,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5605,
+    "usage": null,
+    "first_effective_ms": 1003.4
+  },
+  {
+    "variant": "after",
+    "repeat": 1,
+    "case": 9,
+    "utterance": "打开客厅灯，不，关掉",
+    "elapsed_ms": 1195.9,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 4110,
+    "usage": null,
+    "first_effective_ms": 685.1
+  }
+]
