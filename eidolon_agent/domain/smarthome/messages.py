@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Literal
 
+from eidolon_sdk.biz.interpretation import Action
 from eidolon_sdk.biz.smarthome import (
     DEVICE_TYPES,
     ERROR_DEADLINE_EXCEEDED,
@@ -274,3 +275,34 @@ def _num(value: object) -> str:
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     return str(value)
+
+
+def action_phrase(action: Action) -> str:
+    """Describe a pending structured action without claiming it has executed."""
+    key = (action.trait, action.command)
+    params = {s.name: s.value for s in action.slots}
+    simple = {
+        ("on_off", "on"): "打开", ("on_off", "off"): "关闭",
+        ("position", "open"): "打开", ("position", "close"): "关上",
+        ("operational", "start"): "启动", ("operational", "stop"): "停止",
+        ("operational", "pause"): "暂停",
+    }
+    if key in simple:
+        return simple[key]
+    if action.command == "step" and isinstance(params.get("delta"), int | float):
+        positive = params['delta'] > 0
+        return {
+            "level": "调亮" if positive else "调暗",
+            "thermostat": "调高温度" if positive else "调低温度",
+            "volume": "调大音量" if positive else "调小音量",
+        }.get(action.trait, "")
+    if key == ("thermostat", "set_target") and 'celsius' in params:
+        return f"设为{_num(params['celsius'])}°C"
+    if key == ("thermostat", "set_mode") and params.get('mode') in MODE_LABELS:
+        return f"切换到{MODE_LABELS[params['mode']]}模式"
+    if action.command == "set" and 'value' in params:
+        prefix = {"level": "亮度调到", "position": "开到", "fan_speed": "风速调到", "volume": "音量调到"}.get(action.trait)
+        if prefix:
+            suffix = "" if action.trait == "volume" else "%"
+            return f"{prefix}{_num(params['value'])}{suffix}"
+    return ""

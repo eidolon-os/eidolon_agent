@@ -134,3 +134,12 @@ async def test_shadow_builds_candidates_from_owner_scoped_directory(caplog) -> N
     assert [d.device_id for d in adapter.requests[0].devices] == ["lamp-1"]
     assert "home_interpretation_shadow" in caplog.text
     assert "打开灯" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_candidate_revision_is_explicit_without_changing_r14_default():
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, json=_reply(revision="7b695ba8")))
+    async with httpx.AsyncClient(transport=transport) as client:
+        candidate = LayaInterpretationAdapter(client=client, revision="7b695ba8")
+        assert (await candidate.interpret(_request())).model_revision == "7b695ba8"
+        assert await LayaInterpretationAdapter(client=client).interpret(_request()) is None

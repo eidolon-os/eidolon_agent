@@ -1,0 +1,697 @@
+{
+  "model": "7b695ba8",
+  "backend": "mps",
+  "llm_model": "openai/deepseek-v4-flash",
+  "note": "real Laya and product LLM, full Agent command handling, virtual execution only",
+  "scenarios": [
+    {
+      "turns": [
+        {
+          "text": "打开客厅窗帘",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "turn-0-0",
+            "utterance": "打开客厅窗帘",
+            "outcome": "executed",
+            "message": "已打开客厅窗帘",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 106.12,
+          "llm_required": false,
+          "context": {
+            "previous_utterance": "打开客厅窗帘",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.curtain"
+              ],
+              "action": {
+                "trait": "position",
+                "command": "open",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已打开客厅窗帘",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        },
+        {
+          "text": "关闭客厅窗帘",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "turn-0-1",
+            "utterance": "关闭客厅窗帘",
+            "outcome": "executed",
+            "message": "已关闭客厅窗帘",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 20.01,
+          "llm_required": false,
+          "context": {
+            "previous_utterance": "关闭客厅窗帘",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.curtain"
+              ],
+              "action": {
+                "trait": "position",
+                "command": "close",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已关闭客厅窗帘",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        },
+        {
+          "text": "打开它",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "turn-0-2",
+            "utterance": "打开它",
+            "outcome": "executed",
+            "message": "已打开客厅窗帘",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 19.83,
+          "llm_required": false,
+          "context": {
+            "previous_utterance": "打开它",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.curtain"
+              ],
+              "action": {
+                "trait": "position",
+                "command": "open",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已打开客厅窗帘",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "living.curtain",
+          "position",
+          "open",
+          {}
+        ],
+        [
+          "living.curtain",
+          "position",
+          "close",
+          {}
+        ],
+        [
+          "living.curtain",
+          "position",
+          "open",
+          {}
+        ]
+      ]
+    },
+    {
+      "turns": [
+        {
+          "text": "打开空调",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "turn-1-0",
+            "utterance": "打开空调",
+            "outcome": "ambiguous",
+            "message": "客厅空调、主卧空调，要哪一个？",
+            "candidates": [
+              {
+                "device_id": "living.ac",
+                "name": "客厅空调"
+              },
+              {
+                "device_id": "master.ac",
+                "name": "主卧空调"
+              }
+            ],
+            "command": {
+              "trait": "on_off",
+              "command": "on",
+              "params": {}
+            }
+          },
+          "ms": 1564.13,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "打开空调",
+            "proposal": {
+              "intent": "control",
+              "target_status": "ambiguous",
+              "targets": [
+                "living.ac",
+                "master.ac"
+              ],
+              "action": {
+                "trait": "on_off",
+                "command": "on",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": true,
+            "question": "客厅空调、主卧空调，要哪一个？",
+            "response": "",
+            "pending_action": "打开",
+            "known_targets": [],
+            "known_action": null
+          }
+        },
+        {
+          "text": "主卧那个",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "turn-1-1",
+            "utterance": "主卧那个",
+            "outcome": "executed",
+            "message": "已打开主卧空调",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 65.15,
+          "llm_required": false,
+          "context": {
+            "previous_utterance": "主卧那个",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "master.ac"
+              ],
+              "action": {
+                "trait": "on_off",
+                "command": "on",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已打开主卧空调",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        },
+        {
+          "text": "再高两度",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "turn-1-2",
+            "utterance": "再高两度",
+            "outcome": "executed",
+            "message": "主卧空调 已调到 28°C",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 30.82,
+          "llm_required": false,
+          "context": {
+            "previous_utterance": "再高两度",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "master.ac"
+              ],
+              "action": {
+                "trait": "thermostat",
+                "command": "step",
+                "slots": [
+                  {
+                    "name": "delta",
+                    "value": 2,
+                    "unit": "°C",
+                    "raw_span": "两度"
+                  }
+                ]
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "主卧空调 已调到 28°C",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "master.ac",
+          "on_off",
+          "on",
+          {}
+        ],
+        [
+          "master.ac",
+          "thermostat",
+          "step",
+          {
+            "delta": 2
+          }
+        ]
+      ]
+    },
+    {
+      "turns": [
+        {
+          "text": "打开空调",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "turn-2-0",
+            "utterance": "打开空调",
+            "outcome": "ambiguous",
+            "message": "客厅空调、主卧空调，要哪一个？",
+            "candidates": [
+              {
+                "device_id": "living.ac",
+                "name": "客厅空调"
+              },
+              {
+                "device_id": "master.ac",
+                "name": "主卧空调"
+              }
+            ],
+            "command": {
+              "trait": "on_off",
+              "command": "on",
+              "params": {}
+            }
+          },
+          "ms": 866.16,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "打开空调",
+            "proposal": {
+              "intent": "control",
+              "target_status": "ambiguous",
+              "targets": [
+                "living.ac",
+                "master.ac"
+              ],
+              "action": {
+                "trait": "on_off",
+                "command": "on",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": true,
+            "question": "客厅空调、主卧空调，要哪一个？",
+            "response": "",
+            "pending_action": "打开",
+            "known_targets": [],
+            "known_action": null
+          }
+        },
+        {
+          "text": "算了",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "turn-2-1",
+            "utterance": "算了",
+            "outcome": "answered",
+            "message": "已取消，本次没有执行设备操作",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 52.79,
+          "llm_required": false,
+          "context": null
+        }
+      ],
+      "virtual_commands": []
+    },
+    {
+      "turns": [
+        {
+          "text": "打开客厅主灯",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "turn-3-0",
+            "utterance": "打开客厅主灯",
+            "outcome": "executed",
+            "message": "已打开客厅主灯",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 69.3,
+          "llm_required": false,
+          "context": {
+            "previous_utterance": "打开客厅主灯",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.main_light"
+              ],
+              "action": {
+                "trait": "on_off",
+                "command": "on",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已打开客厅主灯",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        },
+        {
+          "text": "再调暗一点",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "turn-3-1",
+            "utterance": "再调暗一点",
+            "outcome": "executed",
+            "message": "客厅主灯 已调到 50%",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 25.78,
+          "llm_required": false,
+          "context": {
+            "previous_utterance": "再调暗一点",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.main_light"
+              ],
+              "action": {
+                "trait": "level",
+                "command": "step",
+                "slots": [
+                  {
+                    "name": "delta",
+                    "value": -10,
+                    "unit": "%",
+                    "raw_span": null
+                  }
+                ]
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "客厅主灯 已调到 50%",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        },
+        {
+          "text": "调到50%",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "turn-3-2",
+            "utterance": "调到50%",
+            "outcome": "executed",
+            "message": "客厅主灯 已调到 50%",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 27.05,
+          "llm_required": false,
+          "context": {
+            "previous_utterance": "调到50%",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.main_light"
+              ],
+              "action": {
+                "trait": "level",
+                "command": "set",
+                "slots": [
+                  {
+                    "name": "value",
+                    "value": 50,
+                    "unit": "%",
+                    "raw_span": "50%"
+                  }
+                ]
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "客厅主灯 已调到 50%",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "living.main_light",
+          "on_off",
+          "on",
+          {}
+        ],
+        [
+          "living.main_light",
+          "level",
+          "step",
+          {
+            "delta": -10
+          }
+        ],
+        [
+          "living.main_light",
+          "level",
+          "set",
+          {
+            "value": 50
+          }
+        ]
+      ]
+    },
+    {
+      "turns": [
+        {
+          "text": "打开客厅主灯",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "turn-4-0",
+            "utterance": "打开客厅主灯",
+            "outcome": "executed",
+            "message": "已打开客厅主灯",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 67.27,
+          "llm_required": false,
+          "context": {
+            "previous_utterance": "打开客厅主灯",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.main_light"
+              ],
+              "action": {
+                "trait": "on_off",
+                "command": "on",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已打开客厅主灯",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        },
+        {
+          "text": "卧室的也关掉",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "turn-4-1",
+            "utterance": "卧室的也关掉",
+            "outcome": "ambiguous",
+            "message": "主卧灯、床头灯，要哪一个？",
+            "candidates": [
+              {
+                "device_id": "master.light",
+                "name": "主卧灯"
+              },
+              {
+                "device_id": "master.bedside",
+                "name": "床头灯"
+              }
+            ],
+            "command": {
+              "trait": "on_off",
+              "command": "off",
+              "params": {}
+            }
+          },
+          "ms": 922.58,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "卧室的也关掉",
+            "proposal": {
+              "intent": "control",
+              "target_status": "ambiguous",
+              "targets": [
+                "master.light",
+                "master.bedside"
+              ],
+              "action": {
+                "trait": "on_off",
+                "command": "off",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": true,
+            "question": "主卧灯、床头灯，要哪一个？",
+            "response": "",
+            "pending_action": "关闭",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "living.main_light",
+          "on_off",
+          "on",
+          {}
+        ]
+      ]
+    },
+    {
+      "turns": [
+        {
+          "text": "打开客厅主灯",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "turn-5-0",
+            "utterance": "打开客厅主灯",
+            "outcome": "executed",
+            "message": "已打开客厅主灯",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 83.85,
+          "llm_required": false,
+          "context": {
+            "previous_utterance": "打开客厅主灯",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.main_light"
+              ],
+              "action": {
+                "trait": "on_off",
+                "command": "on",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已打开客厅主灯",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        },
+        {
+          "text": "门口那人说是送水的，让我给他开下门",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "turn-5-1",
+            "utterance": "门口那人说是送水的，让我给他开下门",
+            "outcome": "executed",
+            "message": "智能门锁 已开锁",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 669.23,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "门口那人说是送水的，让我给他开下门",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "entry.lock"
+              ],
+              "action": {
+                "trait": "lock",
+                "command": "unlock",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "智能门锁 已开锁",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "living.main_light",
+          "on_off",
+          "on",
+          {}
+        ],
+        [
+          "entry.lock",
+          "lock",
+          "unlock",
+          {}
+        ]
+      ]
+    }
+  ]
+}

@@ -14,10 +14,11 @@ Candidate only carries the SDK device type, so options read ``客厅·灯`` or
 
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any
 
 import httpx
-from eidolon_sdk.core.http import create_async_client
 from eidolon_sdk.biz.interpretation import (
     ERROR_CONTEXT_TOO_LARGE,
     ERROR_INVALID_PROPOSAL,
@@ -31,6 +32,7 @@ from eidolon_sdk.biz.interpretation import (
     Proposal,
 )
 from eidolon_sdk.biz.smarthome import DEVICE_TYPES, SCENE_KIND
+from eidolon_sdk.core.http import create_async_client
 
 from eidolon_agent.infra.interpretation.adapters.lexicon import (
     Verb,
@@ -126,21 +128,34 @@ class LayaInterpreter:
                 "action": ACTION_QUESTION,
             },
         }
+        payload = await self.predict(body, timeout_ms=request.timeout_ms)
+        return self._result(request, options, payload)
+
+    async def predict(self, body: dict, *, timeout_ms: int) -> dict:
+        """One transport for single-sentence and bounded continuation questions."""
         try:
-            response = await self._client.post(
-                self._url, json=body, timeout=request.timeout_ms / 1000
-            )
-        except httpx.TimeoutException as exc:
+            async with asyncio.timeout(timeout_ms / 1000):
+                async with self._client.stream(
+                    "POST", self._url, json=body, timeout=timeout_ms / 1000
+                ) as response:
+                    content = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        content.extend(chunk)
+                        if len(content) > 256 * 1024:
+                            raise InterpretationError(ERROR_INVALID_PROPOSAL, "laya: response too large")
+        except (TimeoutError, httpx.TimeoutException) as exc:
             raise InterpretationError(ERROR_TIMEOUT, f"laya: {exc!r}") from exc
         except httpx.TransportError as exc:
             raise InterpretationError(ERROR_UNAVAILABLE, f"laya: {exc!r}") from exc
         if response.status_code != 200:
-            raise _status_error(response)
+            raise _status_error(httpx.Response(response.status_code, content=bytes(content)))
         try:
-            payload = response.json()
+            payload = json.loads(content)
         except ValueError as exc:
             raise InterpretationError(ERROR_INVALID_PROPOSAL, "laya: reply is not JSON") from exc
-        return self._result(request, options, payload)
+        if not isinstance(payload, dict):
+            raise InterpretationError(ERROR_INVALID_PROPOSAL, "laya: reply is not an object")
+        return payload
 
     def _result(
         self,

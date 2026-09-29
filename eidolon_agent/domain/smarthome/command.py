@@ -53,6 +53,7 @@ from eidolon_agent.domain.smarthome.messages import (
     NOT_UNDERSTOOD,
     UNAVAILABLE,
     UNRELATED,
+    action_phrase,
     choose_one,
     clip,
     describe,
@@ -129,10 +130,12 @@ class SmartHomeCommand:
         fallback_timeout_s: float = 8.0,
         min_confidence: float = 0.0,
         independent_interpreter: InteractionInterpretationPort | None = None,
+        continuation: SmartHomeFallbackPort | None = None,
     ) -> None:
         self._directory = directory
         self._interpreter = interpreter
         self._fallback = fallback
+        self._continuation = continuation
         self._independent_interpreter = independent_interpreter
         self._interpretation_timeout_ms = interpretation_timeout_ms
         self._fallback_timeout_s = fallback_timeout_s
@@ -173,7 +176,9 @@ class SmartHomeCommand:
         )
         understanding_started = time.monotonic()
         try:
-            proposal = await self._understand(request, context=previous)
+            proposal = await self._understand(
+                request, context=previous, context_deadline=context.expires_at,
+            )
         except InterpretationError as exc:
             if is_current():
                 context.clear()
@@ -202,7 +207,7 @@ class SmartHomeCommand:
                 result = self._resolve_ambiguity(card, current.registry,
                                                 selection, clarification=proposal.question)
                 if isinstance(result, VoiceResult) and result.outcome == "ambiguous":
-                    context.remember(heard, selection, question=result.message)
+                    self._remember_selection(context, heard, selection, result)
                     return result
             # Retain an unfinished request across a further clarification, but
             # never turn the conversation into an unbounded chat history.
@@ -232,14 +237,14 @@ class SmartHomeCommand:
         if proposal.intent == "query":
             result = self._answer(card, home, proposal)
             if result.outcome == "answered":
-                context.remember(heard, proposal)
+                context.remember(heard, proposal, response=result.message)
             return result
         assert proposal.action is not None  # a control proposal always carries one
         if proposal.target_status == "ambiguous":
             resolution = self._resolve_ambiguity(card, home.registry, proposal)
             if isinstance(resolution, VoiceResult):
                 if resolution.outcome == "ambiguous":
-                    context.remember(heard, proposal, question=resolution.message)
+                    self._remember_selection(context, heard, proposal, resolution)
                 return resolution
             # A unique capable target is a resolved proposal, not an execution
             # side path. Use the same version check, receipt and focus update.
@@ -252,10 +257,44 @@ class SmartHomeCommand:
             return card("unavailable", "本轮已被新的输入替代或会话已结束")
         result = await self._run(card, owner_id, device_ref, plan)
         if is_current() and result.outcome == "executed":
-            context.remember(heard, proposal)
+            context.remember(heard, proposal, response=result.message)
         return result
 
-    async def _understand(self, request: InterpretationRequest, *, context: dict | None = None) -> HomeUnderstanding:
+    @staticmethod
+    def _remember_selection(context: HomeContext, heard: str, proposal: Proposal, result: VoiceResult) -> None:
+        # Store precisely the capable candidates actually shown, in that order.
+        selection = proposal.model_copy(update={"targets": tuple(c.device_id for c in result.candidates)})
+        context.remember(heard, selection, question=result.message,
+                         pending_action=action_phrase(selection.action))
+
+    async def _understand(self, request: InterpretationRequest, *, context: dict | None = None,
+                          context_deadline: float = float("inf")) -> HomeUnderstanding:
+        if context is not None and self._continuation is not None:
+            started = time.monotonic()
+            suggested = None
+            try:
+                async with asyncio.timeout(request.timeout_ms / 1000):
+                    if time.monotonic() < context_deadline:
+                        suggested = await self._continuation.propose(request, context=context)
+                if time.monotonic() >= context_deadline:
+                    context, suggested = None, None
+                if suggested is not None:
+                    accepted = self._validate_understanding(request, suggested)
+                    _log.info("home interpretation turn=%s route=laya_continuation", request.interpretation_id)
+                    return accepted
+            except (InterpretationError, TimeoutError) as exc:
+                _log.info("home continuation turn=%s abstained=%s", request.interpretation_id, type(exc).__name__)
+            finally:
+                _log.info("home stage turn=%s stage=continuation elapsed_ms=%.1f", request.interpretation_id,
+                          (time.monotonic() - started) * 1000)
+            if time.monotonic() >= context_deadline:
+                context = None
+            # Reinterpret the same utterance and context once; do not add another
+            # single-sentence model call after continuation has declined it.
+            if self._fallback is not None:
+                _log.info("home interpretation turn=%s route=llm reason=continuation_not_accepted", request.interpretation_id)
+                return await self._fallback_proposal(request, context=context)
+            return None
         independent: Proposal | None = None
         if self._fallback is not None and (context is not None or self._independent_interpreter is not None):
             if self._independent_interpreter is not None:
@@ -303,6 +342,10 @@ class SmartHomeCommand:
         except InterpretationError as exc:
             _log.info("smarthome fallback %s failed: %r", request.interpretation_id, exc)
             raise
+        return self._validate_understanding(request, suggested)
+
+    @staticmethod
+    def _validate_understanding(request: InterpretationRequest, suggested: HomeUnderstanding) -> HomeUnderstanding:
         if isinstance(suggested, HomeClarification):
             known = {candidate.ref for candidate in request.candidates}
             if len(set(suggested.targets)) != len(suggested.targets) or any(

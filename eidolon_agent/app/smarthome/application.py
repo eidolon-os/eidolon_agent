@@ -18,6 +18,7 @@ from eidolon_agent.infra.interpretation import (
     RulesInterpreter,
 )
 from eidolon_agent.infra.smarthome import HubSmartHomeClient, LlmHomeFallback
+from eidolon_agent.infra.smarthome.laya_continuation import MODEL_REVISION, LayaHomeContinuation
 
 _log = logging.getLogger(__name__)
 
@@ -83,6 +84,12 @@ def build_smart_home_application(llm: LLMPort | None = None) -> SmartHomeApplica
     if len(token) < 32:
         return None
     interpreter_name = os.environ.get("EIDOLON_SMARTHOME_INTERPRETER", "rules").strip().lower()
+    continuation_revision = os.environ.get("EIDOLON_SMARTHOME_LAYA_CONTINUATION_REVISION", "").strip()
+    if continuation_revision and (
+        continuation_revision != MODEL_REVISION or interpreter_name != "laya"
+        or llm is None or llm.model_id == "fake"
+    ):
+        raise ValueError("Laya continuation requires the supported revision, Laya mode and a real LLM")
     laya = None
     if interpreter_name == "laya":
         laya = LayaInterpreter(
@@ -107,10 +114,11 @@ def build_smart_home_application(llm: LLMPort | None = None) -> SmartHomeApplica
         float(os.environ.get("EIDOLON_SMARTHOME_MIN_CONFIDENCE", "0.8"))
         if fallback and interpreter_name == "laya" else 0.0
     )
+    continuation = LayaHomeContinuation(laya, revision=continuation_revision) if continuation_revision else None
     return SmartHomeApplication(
         SmartHomeCommand(
             directory=client, executor=client, interpreter=interpreter,
-            fallback=fallback, min_confidence=min_confidence,
+            fallback=fallback, min_confidence=min_confidence, continuation=continuation,
             independent_interpreter=RulesInterpreter(require_complete=True),
         ),
         interpreter=interpreter,

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import httpx
-from eidolon_sdk.core.http import create_async_client
 from eidolon_sdk.biz.smarthome import ExecuteRequest, ExecuteResult, Registry
+from eidolon_sdk.core.http import create_async_client
 
-from eidolon_agent.domain.smarthome import DeviceStatus, HomeSnapshot, SmartHomeUnavailable
+from eidolon_agent.domain.smarthome.errors import SmartHomeUnavailable
+from eidolon_agent.domain.smarthome.ports import DeviceStatus, HomeSnapshot
 
 
 class HubSmartHomeClient:

@@ -1,0 +1,10 @@
+{
+  "agent_base_commit": "f01bbcd",
+  "models_commit": "5d3cc2b",
+  "model_revision": "7b695ba8",
+  "continuation_contract_sha256": "7fd91ac6da6e37c8596a6783ef8c84758bf036900d91256bcef370eb7cf11f2a",
+  "runtime": "torch MPS, loopback 18771",
+  "product_services_changed": false,
+  "execution": "existing FakeExecutor and SDK apartment, no real devices",
+  "known_failure": "reported_unlock"
+}

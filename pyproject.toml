@@ -218,5 +218,10 @@ source_modules = ["eidolon_agent.infra"]
 forbidden_modules = ["eidolon_agent.domain"]
 ignore_imports = [
     "eidolon_agent.infra.persistence.eidolon_data_persona -> eidolon_agent.domain.personas.types",
+    # Home adapters implement domain ports using their data types only.
+    "eidolon_agent.infra.smarthome.hub -> eidolon_agent.domain.smarthome.ports",
+    "eidolon_agent.infra.smarthome.hub -> eidolon_agent.domain.smarthome.errors",
+    "eidolon_agent.infra.smarthome.llm_fallback -> eidolon_agent.domain.smarthome.context",
+    "eidolon_agent.infra.smarthome.laya_continuation -> eidolon_agent.domain.smarthome.context",
     "**.tests.** -> **",
 ]
