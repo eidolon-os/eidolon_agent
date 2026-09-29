@@ -38,4 +38,4 @@
 .venv/bin/python docs/reviews/2026-09-29-home-llm-latency/probe.py --output /tmp/home-http1-new-run --repeats 2 --http1
 ```
 
-输出目录必须不存在。原始四批结果、transport.log和summary.json在本目录。依赖版本：httpx0.28.1、httpcore1.0.9、openai2.37.0、litellm1.85.1；HTTP/2依赖h2 4.4.1、hpack4.2.0、hyperframe6.1.0。
+输出目录必须不存在。原始四批结果、提取的transport-events.jsonl和summary.json在本目录。依赖版本：httpx0.28.1、httpcore1.0.9、openai2.37.0、litellm1.85.1；HTTP/2依赖h2 4.4.1、hpack4.2.0、hyperframe6.1.0。
