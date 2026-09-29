@@ -1,0 +1,78 @@
+{
+  "release_id": "rk3588-http-pools-20260929-1",
+  "status": "activated",
+  "revisions": {
+    "eidolon_admin": "60760629fd9377964b593ee71192b10731845c17",
+    "eidolon_agent": "9eee07b4c469d2d7f1af05e0f75294abc79e0e47",
+    "eidolon_channel": "5551aa9bf58ca72090c150d649a5d7916b47ecfb",
+    "eidolon_data": "8a873297e60c8e34984ebd08254d0e4d371daacc",
+    "eidolon_hub": "c52693960729b5200a6e676a12fbf97ac26426ee",
+    "eidolon_kernel": "fa7c5e3ccf6f42cc7a6ec89d9034eb326ab31e5b",
+    "eidolon_memory": "5333cb0a3f6c2653bfb6f9de4cb25b59f163a667",
+    "eidolon_models": "7e71d6aff365156e06751d9b8a5d01936cc133ef",
+    "eidolon_sdk": "c747e2f67cda7333bbe09168fee21cc6869847a1"
+  },
+  "steps": [
+    {
+      "id": "bundle",
+      "outcome": "applied"
+    },
+    {
+      "id": "upload_guard",
+      "outcome": "applied"
+    },
+    {
+      "id": "upload_finalize",
+      "outcome": "applied"
+    },
+    {
+      "id": "prepare",
+      "outcome": "applied"
+    },
+    {
+      "id": "dry_run",
+      "outcome": "applied"
+    },
+    {
+      "id": "activate",
+      "outcome": "applied"
+    },
+    {
+      "id": "host_application",
+      "outcome": "applied"
+    },
+    {
+      "id": "doctor",
+      "outcome": "applied"
+    },
+    {
+      "id": "app_ready",
+      "outcome": "applied"
+    },
+    {
+      "id": "local_bundle_cleanup",
+      "outcome": "applied"
+    }
+  ],
+  "mac": {
+    "mode": "source-run",
+    "health": "12/12",
+    "app_ready": true,
+    "dirty_repositories": [
+      "eidolon_admin",
+      "eidolon_memory",
+      "eidolon_models"
+    ]
+  },
+  "opi": {
+    "services": "21/21 active",
+    "app_ready": true,
+    "release_doctor": "passed",
+    "foundation_doctor": "degraded",
+    "foundation_difference": {
+      "extra_install_record_artifact": "llama-server",
+      "missing_artifacts": [],
+      "mismatched_artifacts": []
+    }
+  }
+}

@@ -1,0 +1,613 @@
+{
+  "real_models": true,
+  "production_device_execution": false,
+  "results": [
+    {
+      "scenario": "curtain",
+      "utterance": "打开窗帘",
+      "expected": {
+        "outcome": "executed",
+        "target": "living.curtain",
+        "verb": "open"
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-curtain-0",
+        "utterance": "打开窗帘",
+        "outcome": "executed",
+        "message": "已打开客厅窗帘",
+        "candidates": [],
+        "command": null
+      },
+      "commands": [
+        [
+          "living.curtain",
+          "position",
+          "open",
+          {}
+        ]
+      ],
+      "correct": true,
+      "elapsed_ms": 565.7,
+      "laya": [
+        {
+          "ms": 560.3069559438154,
+          "status": "decided",
+          "diagnostics": {
+            "intent_p": 0.9902,
+            "device_p": 0.99,
+            "action_p": 0.997,
+            "backend": "rknn",
+            "server_ms": 522.1
+          }
+        }
+      ],
+      "llm": []
+    },
+    {
+      "scenario": "curtain",
+      "utterance": "关闭窗帘",
+      "expected": {
+        "outcome": "executed",
+        "target": "living.curtain",
+        "verb": "close"
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-curtain-1",
+        "utterance": "关闭窗帘",
+        "outcome": "executed",
+        "message": "已关闭客厅窗帘",
+        "candidates": [],
+        "command": null
+      },
+      "commands": [
+        [
+          "living.curtain",
+          "position",
+          "close",
+          {}
+        ]
+      ],
+      "correct": true,
+      "elapsed_ms": 499.6,
+      "laya": [
+        {
+          "ms": 498.41608200222254,
+          "status": "decided",
+          "diagnostics": {
+            "intent_p": 0.9922,
+            "device_p": 0.9914,
+            "action_p": 0.997,
+            "backend": "rknn",
+            "server_ms": 493.2
+          }
+        }
+      ],
+      "llm": []
+    },
+    {
+      "scenario": "curtain",
+      "utterance": "打开它",
+      "expected": {
+        "outcome": "executed",
+        "target": "living.curtain",
+        "verb": "open"
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-curtain-2",
+        "utterance": "打开它",
+        "outcome": "clarification",
+        "message": "要打开哪个设备？",
+        "candidates": [],
+        "command": null
+      },
+      "commands": [],
+      "correct": false,
+      "elapsed_ms": 1637.7,
+      "laya": [],
+      "llm": [
+        {
+          "ms": 1636.369647923857,
+          "context": true,
+          "result_type": "HomeClarification"
+        }
+      ]
+    },
+    {
+      "scenario": "selection",
+      "utterance": "关闭主灯",
+      "expected": {
+        "outcome": "ambiguous",
+        "target": null,
+        "verb": null
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-selection-0",
+        "utterance": "关闭主灯",
+        "outcome": "ambiguous",
+        "message": "客厅主灯、主卧灯，要哪一个？",
+        "candidates": [
+          {
+            "device_id": "living.main_light",
+            "name": "客厅主灯"
+          },
+          {
+            "device_id": "master.light",
+            "name": "主卧灯"
+          }
+        ],
+        "command": {
+          "trait": "on_off",
+          "command": "off",
+          "params": {}
+        }
+      },
+      "commands": [],
+      "correct": true,
+      "elapsed_ms": 1120.2,
+      "laya": [],
+      "llm": [
+        {
+          "ms": 1119.1360569791868,
+          "context": false,
+          "result_type": "HomeClarification"
+        }
+      ]
+    },
+    {
+      "scenario": "selection",
+      "utterance": "客厅那个",
+      "expected": {
+        "outcome": "executed",
+        "target": "living.main_light",
+        "verb": "off"
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-selection-1",
+        "utterance": "客厅那个",
+        "outcome": "executed",
+        "message": "已关闭客厅主灯",
+        "candidates": [],
+        "command": null
+      },
+      "commands": [
+        [
+          "living.main_light",
+          "on_off",
+          "off",
+          {}
+        ]
+      ],
+      "correct": true,
+      "elapsed_ms": 850.3,
+      "laya": [],
+      "llm": [
+        {
+          "ms": 849.1789690451697,
+          "context": true,
+          "result_type": "Proposal"
+        }
+      ]
+    },
+    {
+      "scenario": "selection",
+      "utterance": "再暗一点",
+      "expected": {
+        "outcome": "executed",
+        "target": "living.main_light",
+        "verb": "step"
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-selection-2",
+        "utterance": "再暗一点",
+        "outcome": "executed",
+        "message": "客厅主灯 已调到 50%",
+        "candidates": [],
+        "command": null
+      },
+      "commands": [
+        [
+          "living.main_light",
+          "level",
+          "step",
+          {
+            "delta": -10
+          }
+        ]
+      ],
+      "correct": true,
+      "elapsed_ms": 1102.8,
+      "laya": [],
+      "llm": [
+        {
+          "ms": 1101.2089949799702,
+          "context": true,
+          "result_type": "Proposal"
+        }
+      ]
+    },
+    {
+      "scenario": "cancel",
+      "utterance": "关闭主灯",
+      "expected": {
+        "outcome": "ambiguous",
+        "target": null,
+        "verb": null
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-cancel-0",
+        "utterance": "关闭主灯",
+        "outcome": "ambiguous",
+        "message": "客厅主灯、主卧灯，要哪一个？",
+        "candidates": [
+          {
+            "device_id": "living.main_light",
+            "name": "客厅主灯"
+          },
+          {
+            "device_id": "master.light",
+            "name": "主卧灯"
+          }
+        ],
+        "command": {
+          "trait": "on_off",
+          "command": "off",
+          "params": {}
+        }
+      },
+      "commands": [],
+      "correct": true,
+      "elapsed_ms": 673.9,
+      "laya": [],
+      "llm": [
+        {
+          "ms": 673.0110560311005,
+          "context": false,
+          "result_type": "HomeClarification"
+        }
+      ]
+    },
+    {
+      "scenario": "cancel",
+      "utterance": "算了",
+      "expected": {
+        "outcome": "answered",
+        "target": null,
+        "verb": null
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-cancel-1",
+        "utterance": "算了",
+        "outcome": "answered",
+        "message": "已取消，本次没有执行设备操作",
+        "candidates": [],
+        "command": null
+      },
+      "commands": [],
+      "correct": true,
+      "elapsed_ms": 767.5,
+      "laya": [],
+      "llm": [
+        {
+          "ms": 766.7477319482714,
+          "context": true,
+          "result_type": "HomeCancellation"
+        }
+      ]
+    },
+    {
+      "scenario": "cancel",
+      "utterance": "打开它",
+      "expected": {
+        "outcome": "clarification",
+        "target": null,
+        "verb": null
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-cancel-2",
+        "utterance": "打开它",
+        "outcome": "clarification",
+        "message": "你想打开哪台设备？",
+        "candidates": [],
+        "command": null
+      },
+      "commands": [],
+      "correct": true,
+      "elapsed_ms": 1237.9,
+      "laya": [],
+      "llm": [
+        {
+          "ms": 1236.8669679854065,
+          "context": false,
+          "result_type": "HomeClarification"
+        }
+      ]
+    },
+    {
+      "scenario": "replace",
+      "utterance": "关闭主灯",
+      "expected": {
+        "outcome": "ambiguous",
+        "target": null,
+        "verb": null
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-replace-0",
+        "utterance": "关闭主灯",
+        "outcome": "ambiguous",
+        "message": "客厅主灯、主卧灯，要哪一个？",
+        "candidates": [
+          {
+            "device_id": "living.main_light",
+            "name": "客厅主灯"
+          },
+          {
+            "device_id": "master.light",
+            "name": "主卧灯"
+          }
+        ],
+        "command": {
+          "trait": "on_off",
+          "command": "off",
+          "params": {}
+        }
+      },
+      "commands": [],
+      "correct": true,
+      "elapsed_ms": 822.7,
+      "laya": [],
+      "llm": [
+        {
+          "ms": 821.7151120770723,
+          "context": false,
+          "result_type": "HomeClarification"
+        }
+      ]
+    },
+    {
+      "scenario": "replace",
+      "utterance": "打开主卧灯",
+      "expected": {
+        "outcome": "executed",
+        "target": "master.light",
+        "verb": "on"
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-replace-1",
+        "utterance": "打开主卧灯",
+        "outcome": "executed",
+        "message": "已打开主卧灯",
+        "candidates": [],
+        "command": null
+      },
+      "commands": [
+        [
+          "master.light",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      "correct": true,
+      "elapsed_ms": 531.0,
+      "laya": [
+        {
+          "ms": 529.8179719829932,
+          "status": "decided",
+          "diagnostics": {
+            "intent_p": 0.9937,
+            "device_p": 0.9396,
+            "action_p": 0.9942,
+            "backend": "rknn",
+            "server_ms": 521.7
+          }
+        }
+      ],
+      "llm": []
+    },
+    {
+      "scenario": "replace",
+      "utterance": "不要关闭主卧灯",
+      "expected": {
+        "outcome": "answered",
+        "target": null,
+        "verb": null
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-replace-2",
+        "utterance": "不要关闭主卧灯",
+        "outcome": "answered",
+        "message": "已取消，本次没有执行设备操作",
+        "candidates": [],
+        "command": null
+      },
+      "commands": [],
+      "correct": true,
+      "elapsed_ms": 738.3,
+      "laya": [],
+      "llm": [
+        {
+          "ms": 737.5516890315339,
+          "context": true,
+          "result_type": "HomeCancellation"
+        }
+      ]
+    },
+    {
+      "scenario": "missing",
+      "utterance": "打开它",
+      "expected": {
+        "outcome": "clarification",
+        "target": null,
+        "verb": null
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-missing-0",
+        "utterance": "打开它",
+        "outcome": "clarification",
+        "message": "你想打开哪台设备？",
+        "candidates": [],
+        "command": null
+      },
+      "commands": [],
+      "correct": true,
+      "elapsed_ms": 1563.8,
+      "laya": [],
+      "llm": [
+        {
+          "ms": 1562.456717947498,
+          "context": false,
+          "result_type": "HomeClarification"
+        }
+      ]
+    },
+    {
+      "scenario": "correction",
+      "utterance": "打开客厅灯，不，关掉",
+      "expected": {
+        "outcome": "executed",
+        "target": "living.main_light",
+        "verb": "off"
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-correction-0",
+        "utterance": "打开客厅灯，不，关掉",
+        "outcome": "executed",
+        "message": "已关闭客厅主灯",
+        "candidates": [],
+        "command": null
+      },
+      "commands": [
+        [
+          "living.main_light",
+          "on_off",
+          "off",
+          {}
+        ]
+      ],
+      "correct": true,
+      "elapsed_ms": 1625.6,
+      "laya": [],
+      "llm": [
+        {
+          "ms": 1622.0335389953107,
+          "context": false,
+          "result_type": "Proposal"
+        }
+      ]
+    },
+    {
+      "scenario": "new_topic",
+      "utterance": "打开窗帘",
+      "expected": {
+        "outcome": "executed",
+        "target": "living.curtain",
+        "verb": "open"
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-new_topic-0",
+        "utterance": "打开窗帘",
+        "outcome": "executed",
+        "message": "已打开客厅窗帘",
+        "candidates": [],
+        "command": null
+      },
+      "commands": [
+        [
+          "living.curtain",
+          "position",
+          "open",
+          {}
+        ]
+      ],
+      "correct": true,
+      "elapsed_ms": 366.5,
+      "laya": [
+        {
+          "ms": 365.42186699807644,
+          "status": "decided",
+          "diagnostics": {
+            "intent_p": 0.9902,
+            "device_p": 0.99,
+            "action_p": 0.997,
+            "backend": "rknn",
+            "server_ms": 358.0
+          }
+        }
+      ],
+      "llm": []
+    },
+    {
+      "scenario": "new_topic",
+      "utterance": "今天天气怎么样",
+      "expected": {
+        "outcome": "unrelated",
+        "target": null,
+        "verb": null
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-new_topic-1",
+        "utterance": "今天天气怎么样",
+        "outcome": "unrelated",
+        "message": "这里只处理家里的设备",
+        "candidates": [],
+        "command": null
+      },
+      "commands": [],
+      "correct": true,
+      "elapsed_ms": 633.3,
+      "laya": [],
+      "llm": [
+        {
+          "ms": 632.5471990276128,
+          "context": true,
+          "result_type": "Proposal"
+        }
+      ]
+    },
+    {
+      "scenario": "new_topic",
+      "utterance": "打开它",
+      "expected": {
+        "outcome": "clarification",
+        "target": null,
+        "verb": null
+      },
+      "result": {
+        "schema_version": 1,
+        "turn_id": "coop-new_topic-2",
+        "utterance": "打开它",
+        "outcome": "clarification",
+        "message": "你想打开哪个设备？",
+        "candidates": [],
+        "command": null
+      },
+      "commands": [],
+      "correct": true,
+      "elapsed_ms": 1218.8,
+      "laya": [],
+      "llm": [
+        {
+          "ms": 1217.673212988302,
+          "context": false,
+          "result_type": "HomeClarification"
+        }
+      ]
+    }
+  ]
+}

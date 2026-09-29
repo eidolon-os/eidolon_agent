@@ -1,0 +1,1620 @@
+[
+  {
+    "variant": "production",
+    "repeat": 0,
+    "case": 0,
+    "utterance": "客厅那个",
+    "elapsed_ms": 1783.2,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5902,
+    "usage": {
+      "tokens_in": 3872,
+      "tokens_out": 88,
+      "cached_tokens_in": 3712,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 225.8,
+        "events": [
+          {
+            "event": "connection.connect_tcp.started",
+            "elapsed_ms": 229.3
+          },
+          {
+            "event": "connection.connect_tcp.complete",
+            "elapsed_ms": 230.3
+          },
+          {
+            "event": "http11.send_request_headers.started",
+            "elapsed_ms": 230.4
+          },
+          {
+            "event": "http11.send_request_headers.complete",
+            "elapsed_ms": 230.6
+          },
+          {
+            "event": "http11.send_request_body.started",
+            "elapsed_ms": 230.6
+          },
+          {
+            "event": "http11.send_request_body.complete",
+            "elapsed_ms": 230.7
+          },
+          {
+            "event": "http11.receive_response_headers.started",
+            "elapsed_ms": 230.7
+          },
+          {
+            "event": "http11.receive_response_headers.complete",
+            "elapsed_ms": 231.0
+          },
+          {
+            "event": "proxy.start_tls.started",
+            "elapsed_ms": 231.0
+          },
+          {
+            "event": "proxy.start_tls.complete",
+            "elapsed_ms": 467.4
+          },
+          {
+            "event": "http2.send_connection_init.started",
+            "elapsed_ms": 467.9
+          },
+          {
+            "event": "http2.send_connection_init.complete",
+            "elapsed_ms": 468.1
+          },
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 470.3
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 470.9
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 470.9
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 471.1
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 471.1
+          },
+          {
+            "event": "http2.receive_remote_settings.started",
+            "elapsed_ms": 552.3
+          },
+          {
+            "event": "http2.receive_remote_settings.complete",
+            "elapsed_ms": 552.4
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 856.5
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 875.7
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 1777.5
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 1777.6
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 1787.6
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 857.2
+      }
+    ],
+    "first_effective_ms": 1777.3
+  },
+  {
+    "variant": "production",
+    "repeat": 0,
+    "case": 1,
+    "utterance": "主卧那个",
+    "elapsed_ms": 963.4,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5902,
+    "usage": {
+      "tokens_in": 3873,
+      "tokens_out": 87,
+      "cached_tokens_in": 3712,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 2.8,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 3.1
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 3.5
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 3.5
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 3.7
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 3.7
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 217.9
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 218.6
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 960.1
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 960.1
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 967.3
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 218.0
+      }
+    ],
+    "first_effective_ms": 960.0
+  },
+  {
+    "variant": "production",
+    "repeat": 0,
+    "case": 2,
+    "utterance": "算了",
+    "elapsed_ms": 756.1,
+    "correct": true,
+    "result": {
+      "type": "cancel"
+    },
+    "error": null,
+    "input_chars": 5900,
+    "usage": {
+      "tokens_in": 3871,
+      "tokens_out": 23,
+      "cached_tokens_in": 3712,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 2.7,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 3.0
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 3.3
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 3.3
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 3.6
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 3.6
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 223.6
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 224.8
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 753.1
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 753.2
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 763.5
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 223.9
+      }
+    ],
+    "first_effective_ms": 752.9
+  },
+  {
+    "variant": "production",
+    "repeat": 0,
+    "case": 3,
+    "utterance": "打开主卧灯",
+    "elapsed_ms": 729.1,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5903,
+    "usage": {
+      "tokens_in": 3874,
+      "tokens_out": 87,
+      "cached_tokens_in": 3712,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 4.8,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 5.2
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 5.8
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 5.8
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 6.2
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 6.2
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 264.0
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 264.6
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 725.0
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 725.1
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 733.2
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 264.1
+      }
+    ],
+    "first_effective_ms": 724.9
+  },
+  {
+    "variant": "production",
+    "repeat": 0,
+    "case": 4,
+    "utterance": "不要关闭主卧灯",
+    "elapsed_ms": 753.1,
+    "correct": true,
+    "result": {
+      "type": "cancel"
+    },
+    "error": null,
+    "input_chars": 5878,
+    "usage": {
+      "tokens_in": 3864,
+      "tokens_out": 23,
+      "cached_tokens_in": 3712,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 2.2,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 2.6
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 3.0
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 3.0
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 3.2
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 3.2
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 220.8
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 221.6
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 752.0
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 752.0
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 756.1
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 220.9
+      }
+    ],
+    "first_effective_ms": 751.9
+  },
+  {
+    "variant": "production",
+    "repeat": 0,
+    "case": 5,
+    "utterance": "打开它",
+    "elapsed_ms": 953.2,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5880,
+    "usage": {
+      "tokens_in": 3862,
+      "tokens_out": 93,
+      "cached_tokens_in": 3712,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 1.8,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 2.0
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 2.2
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 2.2
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 2.4
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 2.4
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 290.7
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 291.5
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 949.7
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 949.8
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 956.8
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 290.9
+      }
+    ],
+    "first_effective_ms": 949.7
+  },
+  {
+    "variant": "production",
+    "repeat": 0,
+    "case": 6,
+    "utterance": "打开它",
+    "elapsed_ms": 1131.7,
+    "correct": true,
+    "result": {
+      "question": "你想打开哪台设备？",
+      "targets": [
+        "living.main_light",
+        "master.light",
+        "master.bedside",
+        "living.ac",
+        "master.ac",
+        "living.curtain",
+        "living.purifier",
+        "master.humidifier",
+        "living.tv",
+        "living.speaker",
+        "balcony.rack",
+        "bath.water_heater",
+        "entry.camera"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      }
+    },
+    "error": null,
+    "input_chars": 5598,
+    "usage": {
+      "tokens_in": 3774,
+      "tokens_out": 171,
+      "cached_tokens_in": 3584,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 2.4,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 2.6
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 2.8
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 2.8
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 3.0
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 3.0
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 202.6
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 203.3
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 1126.1
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 1126.1
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 1134.9
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 202.8
+      }
+    ],
+    "first_effective_ms": 1126.0
+  },
+  {
+    "variant": "production",
+    "repeat": 0,
+    "case": 7,
+    "utterance": "关闭主灯",
+    "elapsed_ms": 1063.0,
+    "correct": true,
+    "result": {
+      "question": "你说的“主灯”是指客厅主灯还是主卧灯？",
+      "targets": [
+        "living.main_light",
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      }
+    },
+    "error": null,
+    "input_chars": 5599,
+    "usage": {
+      "tokens_in": 3775,
+      "tokens_out": 116,
+      "cached_tokens_in": 3584,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 2.2,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 2.4
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 2.7
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 2.7
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 2.8
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 2.9
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 227.7
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 228.4
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 1059.6
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 1059.7
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 1065.9
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 227.9
+      }
+    ],
+    "first_effective_ms": 1059.6
+  },
+  {
+    "variant": "production",
+    "repeat": 0,
+    "case": 8,
+    "utterance": "今天天气怎么样",
+    "elapsed_ms": 1048.2,
+    "correct": true,
+    "result": {
+      "intent": "unrelated",
+      "target_status": "none",
+      "targets": [],
+      "action": null,
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5905,
+    "usage": {
+      "tokens_in": 3873,
+      "tokens_out": 64,
+      "cached_tokens_in": 3712,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 1.9,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 2.1
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 2.4
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 2.4
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 2.5
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 2.5
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 215.6
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 217.0
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 1044.7
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 1044.7
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 1051.0
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 216.0
+      }
+    ],
+    "first_effective_ms": 1044.5
+  },
+  {
+    "variant": "production",
+    "repeat": 0,
+    "case": 9,
+    "utterance": "打开客厅灯，不，关掉",
+    "elapsed_ms": 1319.9,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5605,
+    "usage": {
+      "tokens_in": 3780,
+      "tokens_out": 118,
+      "cached_tokens_in": 3584,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 1.9,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 2.0
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 2.3
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 2.3
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 2.4
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 2.4
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 279.9
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 281.6
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 1315.6
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 1315.7
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 1323.2
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 280.3
+      }
+    ],
+    "first_effective_ms": 831.8
+  },
+  {
+    "variant": "production",
+    "repeat": 1,
+    "case": 0,
+    "utterance": "客厅那个",
+    "elapsed_ms": 916.5,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5902,
+    "usage": {
+      "tokens_in": 3872,
+      "tokens_out": 88,
+      "cached_tokens_in": 3712,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 1.9,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 2.1
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 2.6
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 2.6
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 2.8
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 2.8
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 232.7
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 234.4
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 913.7
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 913.7
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 919.8
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 233.1
+      }
+    ],
+    "first_effective_ms": 913.6
+  },
+  {
+    "variant": "production",
+    "repeat": 1,
+    "case": 1,
+    "utterance": "主卧那个",
+    "elapsed_ms": 832.4,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5902,
+    "usage": {
+      "tokens_in": 3873,
+      "tokens_out": 87,
+      "cached_tokens_in": 3712,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 2.1,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 2.3
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 2.6
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 2.6
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 2.8
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 2.8
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 284.0
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 284.6
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 829.2
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 829.3
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 835.4
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 284.2
+      }
+    ],
+    "first_effective_ms": 829.2
+  },
+  {
+    "variant": "production",
+    "repeat": 1,
+    "case": 2,
+    "utterance": "算了",
+    "elapsed_ms": 985.0,
+    "correct": true,
+    "result": {
+      "type": "cancel"
+    },
+    "error": null,
+    "input_chars": 5900,
+    "usage": {
+      "tokens_in": 3871,
+      "tokens_out": 23,
+      "cached_tokens_in": 3712,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 2.0,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 2.1
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 2.4
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 2.4
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 2.6
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 2.6
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 220.4
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 221.1
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 983.6
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 983.7
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 988.9
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 220.6
+      }
+    ],
+    "first_effective_ms": 983.5
+  },
+  {
+    "variant": "production",
+    "repeat": 1,
+    "case": 3,
+    "utterance": "打开主卧灯",
+    "elapsed_ms": 906.6,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5903,
+    "usage": {
+      "tokens_in": 3874,
+      "tokens_out": 87,
+      "cached_tokens_in": 3712,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 2.2,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 2.4
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 2.7
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 2.7
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 2.9
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 2.9
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 230.7
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 231.3
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 903.5
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 903.5
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 909.7
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 230.8
+      }
+    ],
+    "first_effective_ms": 903.4
+  },
+  {
+    "variant": "production",
+    "repeat": 1,
+    "case": 4,
+    "utterance": "不要关闭主卧灯",
+    "elapsed_ms": 676.9,
+    "correct": true,
+    "result": {
+      "type": "cancel"
+    },
+    "error": null,
+    "input_chars": 5878,
+    "usage": {
+      "tokens_in": 3864,
+      "tokens_out": 23,
+      "cached_tokens_in": 3712,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 1.9,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 2.1
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 2.4
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 2.5
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 2.7
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 2.7
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 263.3
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 264.5
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 673.5
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 673.7
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 685.3
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 263.5
+      }
+    ],
+    "first_effective_ms": 673.3
+  },
+  {
+    "variant": "production",
+    "repeat": 1,
+    "case": 5,
+    "utterance": "打开它",
+    "elapsed_ms": 955.2,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5880,
+    "usage": {
+      "tokens_in": 3862,
+      "tokens_out": 93,
+      "cached_tokens_in": 3712,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 5.6,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 6.1
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 6.6
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 6.7
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 7.1
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 7.1
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 226.6
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 227.2
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 949.2
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 949.3
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 958.1
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 226.7
+      }
+    ],
+    "first_effective_ms": 949.1
+  },
+  {
+    "variant": "production",
+    "repeat": 1,
+    "case": 6,
+    "utterance": "打开它",
+    "elapsed_ms": 1140.4,
+    "correct": true,
+    "result": {
+      "question": "你想打开哪台设备？",
+      "targets": [
+        "living.main_light",
+        "master.light",
+        "master.bedside",
+        "living.ac",
+        "master.ac",
+        "living.curtain",
+        "living.purifier",
+        "master.humidifier",
+        "living.tv",
+        "living.speaker",
+        "balcony.rack",
+        "bath.water_heater",
+        "entry.camera"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      }
+    },
+    "error": null,
+    "input_chars": 5598,
+    "usage": {
+      "tokens_in": 3774,
+      "tokens_out": 171,
+      "cached_tokens_in": 3584,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 1.8,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 2.0
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 2.2
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 2.2
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 2.4
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 2.4
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 507.1
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 507.7
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 1134.4
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 1134.4
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 1143.5
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 507.3
+      }
+    ],
+    "first_effective_ms": 1134.3
+  },
+  {
+    "variant": "production",
+    "repeat": 1,
+    "case": 7,
+    "utterance": "关闭主灯",
+    "elapsed_ms": 948.5,
+    "correct": true,
+    "result": {
+      "question": "\"主灯\"是指客厅主灯还是主卧灯？",
+      "targets": [
+        "living.main_light",
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      }
+    },
+    "error": null,
+    "input_chars": 5599,
+    "usage": {
+      "tokens_in": 3775,
+      "tokens_out": 115,
+      "cached_tokens_in": 3584,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 1.9,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 2.1
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 2.4
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 2.4
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 2.5
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 2.5
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 307.9
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 308.5
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 944.7
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 944.7
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 951.8
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 308.1
+      }
+    ],
+    "first_effective_ms": 944.6
+  },
+  {
+    "variant": "production",
+    "repeat": 1,
+    "case": 8,
+    "utterance": "今天天气怎么样",
+    "elapsed_ms": 785.0,
+    "correct": true,
+    "result": {
+      "intent": "unrelated",
+      "target_status": "none",
+      "targets": [],
+      "action": null,
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5905,
+    "usage": {
+      "tokens_in": 3873,
+      "tokens_out": 64,
+      "cached_tokens_in": 3712,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 2.0,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 2.2
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 2.5
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 2.5
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 2.7
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 2.7
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 296.1
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 297.1
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 782.8
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 782.8
+          },
+          {
+            "event": "http2.receive_response_body.failed",
+            "elapsed_ms": 788.0
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 296.3
+      }
+    ],
+    "first_effective_ms": 782.7
+  },
+  {
+    "variant": "production",
+    "repeat": 1,
+    "case": 9,
+    "utterance": "打开客厅灯，不，关掉",
+    "elapsed_ms": 1193.7,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "error": null,
+    "input_chars": 5605,
+    "usage": {
+      "tokens_in": 3780,
+      "tokens_out": 118,
+      "cached_tokens_in": 3584,
+      "cost_usd_micro": 0
+    },
+    "http_attempts": [
+      {
+        "start_ms": 1.8,
+        "events": [
+          {
+            "event": "http2.send_request_headers.started",
+            "elapsed_ms": 2.0
+          },
+          {
+            "event": "http2.send_request_headers.complete",
+            "elapsed_ms": 2.3
+          },
+          {
+            "event": "http2.send_request_body.started",
+            "elapsed_ms": 2.3
+          },
+          {
+            "event": "http2.send_request_body.complete",
+            "elapsed_ms": 2.5
+          },
+          {
+            "event": "http2.receive_response_headers.started",
+            "elapsed_ms": 2.5
+          },
+          {
+            "event": "http2.receive_response_headers.complete",
+            "elapsed_ms": 454.3
+          },
+          {
+            "event": "http2.receive_response_body.started",
+            "elapsed_ms": 455.1
+          },
+          {
+            "event": "http2.response_closed.started",
+            "elapsed_ms": 1189.3
+          },
+          {
+            "event": "http2.response_closed.complete",
+            "elapsed_ms": 1189.3
+          }
+        ],
+        "status": 200,
+        "http_version": "HTTP/2",
+        "headers_ms": 454.5
+      }
+    ],
+    "first_effective_ms": 723.4
+  }
+]
