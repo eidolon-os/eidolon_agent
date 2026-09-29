@@ -1,0 +1,42 @@
+{
+  "phase": {
+    "n": 40,
+    "correct": 40,
+    "p50_ms": 1085.75,
+    "p95_ms": 1399.5,
+    "max_ms": 2348.5,
+    "http_attempts": null,
+    "tls_handshakes": null,
+    "cache_token_fraction": 0.9562
+  },
+  "traced": {
+    "n": 60,
+    "correct": 60,
+    "p50_ms": 1167.95,
+    "p95_ms": 2053.3,
+    "max_ms": 2839.9,
+    "http_attempts": 60,
+    "tls_handshakes": 60,
+    "cache_token_fraction": 0.9562
+  },
+  "http2": {
+    "n": 40,
+    "correct": 40,
+    "p50_ms": 819.95,
+    "p95_ms": 1300.2,
+    "max_ms": 1792.9,
+    "http_attempts": 40,
+    "tls_handshakes": 1,
+    "cache_token_fraction": 0.9562
+  },
+  "production": {
+    "n": 20,
+    "correct": 20,
+    "p50_ms": 794.7,
+    "p95_ms": 1230.4,
+    "max_ms": 1347.0,
+    "http_attempts": 20,
+    "tls_handshakes": 1,
+    "cache_token_fraction": 0.9562
+  }
+}

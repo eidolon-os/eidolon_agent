@@ -7,6 +7,7 @@ Model names follow LiteLLM convention: ``gpt-4o-mini``, ``claude-3-5-sonnet-late
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -117,11 +118,16 @@ class LiteLLMProvider:
         if tools:
             kwargs["tools"] = [t.to_openai_function() for t in tools]
 
+        kwargs["stream_options"] = {"include_usage": True}
         tool_buf: dict[int, dict] = {}
         idle_ms = _idle_ms_and_mark()
         t0 = time.monotonic()
         try:
             response = await litellm.acompletion(**kwargs)
+        except asyncio.CancelledError:
+            _log.info("litellm_request_cancelled req=%s model=%s phase=opening elapsed_ms=%d",
+                      request_id, kwargs["model"], int((time.monotonic() - t0) * 1000))
+            raise
         except Exception as exc:
             connect_ms = int((time.monotonic() - t0) * 1000)
             _log.warning(
@@ -142,6 +148,10 @@ class LiteLLMProvider:
         raw_chunk_count = 0
         last_finish_reason: str | None = None
         stream_outcome = "interrupted"
+        tool_ready_ms: int | None = None
+        finish_ms: int | None = None
+        observed_usage: LLMUsage | None = None
+        cached_tokens: int | None = None
 
         try:
             try:
@@ -159,12 +169,29 @@ class LiteLLMProvider:
                             idle_ms,
                             len(chunk.choices or []),
                         )
+                    # OpenAI-compatible streams can send usage in a final chunk
+                    # with choices=[]; it must be read before skipping choices.
+                    usage = getattr(chunk, "usage", None)
+                    if usage:
+                        details = getattr(usage, "prompt_tokens_details", None)
+                        cached_tokens = (details.get("cached_tokens") if isinstance(details, dict)
+                                         else getattr(details, "cached_tokens", None))
+                        if cached_tokens is None:
+                            cached_tokens = getattr(usage, "prompt_cache_hit_tokens", None)
+                        observed_usage = LLMUsage(
+                            tokens_in=getattr(usage, "prompt_tokens", 0) or 0,
+                            tokens_out=getattr(usage, "completion_tokens", 0) or 0,
+                            cached_tokens_in=cached_tokens or 0,
+                        )
+                        yield LLMDelta(usage=observed_usage)
                     if not chunk.choices:
                         continue
                     choice = chunk.choices[0]
                     delta = choice.delta
                     if choice.finish_reason:
                         last_finish_reason = str(choice.finish_reason)
+                        if finish_ms is None:
+                            finish_ms = int((time.monotonic() - t0) * 1000)
 
                     content = getattr(delta, "content", None) if delta else None
                     reasoning_content = _reasoning_content(delta)
@@ -251,6 +278,8 @@ class LiteLLMProvider:
                                 args = json.loads(buf["args"] or "{}")
                             except json.JSONDecodeError:
                                 args = {"_raw": buf["args"]}
+                            if tool_ready_ms is None:
+                                tool_ready_ms = int((time.monotonic() - t0) * 1000)
                             yield LLMDelta(
                                 tool_call=ToolCall(
                                     id=buf["id"] or "", name=buf["name"], arguments=args
@@ -258,14 +287,6 @@ class LiteLLMProvider:
                             )
                         yield LLMDelta(finish=_map_finish(choice.finish_reason))
 
-                    usage = getattr(chunk, "usage", None)
-                    if usage:
-                        yield LLMDelta(
-                            usage=LLMUsage(
-                                tokens_in=getattr(usage, "prompt_tokens", 0) or 0,
-                                tokens_out=getattr(usage, "completion_tokens", 0) or 0,
-                            )
-                        )
                 stream_outcome = "completed"
             except Exception as exc:
                 stream_outcome = "error"
@@ -274,6 +295,7 @@ class LiteLLMProvider:
                 # upstream HTTP stream, but we don't want to wrap it.
                 raise LLMUnavailableError(f"litellm stream error: {exc}") from exc
         finally:
+            stream_end_ms = int((time.monotonic() - t0) * 1000)
             if not first_effective_delta_logged:
                 _log.info(
                     "litellm_stream_no_effective_delta req=%s model=%s connect_ms=%d "
@@ -302,12 +324,24 @@ class LiteLLMProvider:
             # keep pulling tokens we'll never read — billing against a
             # disconnected client. Closing the response (when the provider
             # exposes aclose) tears the upstream socket down immediately.
+            close_started = time.monotonic()
             aclose = getattr(response, "aclose", None)
             if aclose is not None:
                 try:
                     await aclose()
                 except Exception:
                     pass
+            _log.info(
+                "litellm_stream_summary req=%s model=%s outcome=%s connect_ms=%d "
+                "raw_ttft_ms=%s tool_ready_ms=%s finish_ms=%s stream_end_ms=%d close_ms=%d "
+                "tokens_in=%s tokens_out=%s cached_tokens_in=%s configured_max_retries=%d",
+                request_id, kwargs["model"], stream_outcome, connect_ms,
+                first_raw_chunk_ms, tool_ready_ms, finish_ms, stream_end_ms,
+                int((time.monotonic() - close_started) * 1000),
+                observed_usage.tokens_in if observed_usage else None,
+                observed_usage.tokens_out if observed_usage else None,
+                cached_tokens, self._max_retries,
+            )
 
     async def warmup(self, *, timeout_s: float = 10.0) -> bool:
         """Prime DNS/TCP/TLS/client cache with a tiny non-streaming request."""
@@ -396,6 +430,10 @@ def _ensure_shared_client() -> httpx.AsyncClient:
     global _shared_http_client
     if _shared_http_client is None or _shared_http_client.is_closed:
         _shared_http_client = httpx.AsyncClient(
+            # Negotiate HTTP/2 when supported: completed SSE streams can then
+            # reuse the connection even when the SDK closes after [DONE].
+            # HTTPX retains HTTP/1.1 negotiation for other endpoints.
+            http2=True,
             limits=httpx.Limits(
                 max_connections=100,
                 max_keepalive_connections=20,

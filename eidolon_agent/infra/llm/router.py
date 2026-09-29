@@ -66,16 +66,16 @@ class LLMRouter:
                     raise
                 last_error = exc
                 _log.warning(
-                    "llm provider %s failed before first chunk; trying fallback",
-                    candidate,
+                    "llm provider %s failed before first chunk; trying fallback req=%s",
+                    candidate, request_id,
                 )
             except Exception as exc:
                 if emitted:
                     raise LLMUnavailableError(f"provider {candidate} failed: {exc}") from exc
                 last_error = LLMUnavailableError(f"provider {candidate} failed: {exc}")
                 _log.warning(
-                    "llm provider %s failed before first chunk; trying fallback",
-                    candidate,
+                    "llm provider %s failed before first chunk; trying fallback req=%s",
+                    candidate, request_id,
                 )
         if last_error is not None:
             raise last_error

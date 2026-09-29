@@ -618,3 +618,74 @@ async def test_count_tokens_falls_back_when_litellm_raises(
     # 30-char content → 30 // 3 == 10 tokens approx
     n = await provider.count_tokens([_msg("a" * 30)])
     assert n >= 1
+
+
+async def test_usage_only_tail_preserves_tokens_and_cache_without_tool_reemission(monkeypatch, provider, caplog):
+    from types import SimpleNamespace
+
+    calls = []
+    chunks = [
+        _Chunk(choices=[_Choice(delta=_Delta(tool_calls=[
+            _ToolCallChunk(index=0, id="call", function=_ToolCallFunc(name="select", arguments='{}')),
+        ]))]),
+        _Chunk(choices=[_Choice(delta=_Delta(), finish_reason="tool_calls")]),
+        _Chunk(choices=[], usage=SimpleNamespace(
+            prompt_tokens=100, completion_tokens=12,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=80),
+        )),
+    ]
+
+    async def fake(**kwargs):
+        calls.append(kwargs)
+        return _aiter(chunks)
+
+    monkeypatch.setattr(litellm, "acompletion", fake)
+    with caplog.at_level("INFO"):
+        out = [d async for d in provider.stream([_msg("hi")], request_id="usage-tail")]
+    assert calls[0]["stream_options"] == {"include_usage": True}
+    assert len([d for d in out if d.tool_call]) == 1
+    assert len([d for d in out if d.finish]) == 1
+    usage = [d.usage for d in out if d.usage]
+    assert len(usage) == 1
+    assert (usage[0].tokens_in, usage[0].tokens_out, usage[0].cached_tokens_in) == (100, 12, 80)
+    assert out[-1].usage is usage[0]
+    summary = next(r.message for r in caplog.records if "litellm_stream_summary" in r.message)
+    assert "req=usage-tail" in summary and "outcome=completed" in summary
+    assert "tool_ready_ms=None" not in summary
+    assert "tokens_in=100 tokens_out=12 cached_tokens_in=80" in summary
+
+
+@pytest.mark.parametrize("phase", ["opening", "streaming"])
+async def test_cancellation_is_observed_without_turning_it_into_provider_failure(monkeypatch, provider, caplog, phase):
+    import asyncio
+
+    class Response:
+        closed = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise asyncio.CancelledError
+
+        async def aclose(self):
+            self.closed = True
+
+    response = Response()
+
+    async def fake(**kwargs):
+        if phase == "opening":
+            raise asyncio.CancelledError
+        return response
+
+    monkeypatch.setattr(litellm, "acompletion", fake)
+    with caplog.at_level("INFO"), pytest.raises(asyncio.CancelledError):
+        _ = [d async for d in provider.stream([_msg("hi")], request_id="cancel-probe")]
+    messages = "\n".join(r.message for r in caplog.records)
+    assert "req=cancel-probe" in messages
+    if phase == "opening":
+        assert "phase=opening" in messages
+    else:
+        assert response.closed
+        assert "outcome=interrupted" in messages
+        assert "tokens_in=None" in messages
