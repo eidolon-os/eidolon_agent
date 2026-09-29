@@ -93,8 +93,16 @@ async def run(args):
         raise ValueError("requires configured product LLM")
     laya = LayaInterpreter(args.endpoint)
     report = []
+    if args.cases:
+        supplied = json.loads(args.cases.read_text())
+        scenarios = [
+            (c["id"], c["utterances"], [tuple(cmd) for cmd in c["expected_commands"]])
+            for c in supplied
+        ]
+    else:
+        scenarios = SCENARIOS
     try:
-        for name, words, expected in SCENARIOS:
+        for name, words, expected in scenarios:
             directory = FakeDirectory(home_registry())
             executor = FakeExecutor(directory)
             fallback, context = MeasuredFallback(llm), HomeContext()
@@ -122,10 +130,10 @@ async def run(args):
                         "context": context.snapshot(),
                     }
                 )
-            expected_full = [(*c, {}) for c in expected]
-            if name == "pick_follow":
+            expected_full = [(*c, {}) if len(c) == 3 else c for c in expected]
+            if not args.cases and name == "pick_follow":
                 expected_full[-1] = (*expected[-1], {"delta": 2})
-            if name == "relative_absolute":
+            if not args.cases and name == "relative_absolute":
                 expected_full[1] = (*expected[1], {"delta": -10})
                 expected_full[2] = (*expected[2], {"value": 50})
             outcomes_ok = all(
@@ -175,5 +183,8 @@ if __name__ == "__main__":
     parser.add_argument("--endpoint", default="http://127.0.0.1:18771")
     parser.add_argument("--settings", type=Path, required=True)
     parser.add_argument("--env-file", type=Path, action="append", default=[])
+    parser.add_argument(
+        "--cases", type=Path, help="Independent scenario JSON: id, utterances, expected_commands"
+    )
     parser.add_argument("--output", type=Path, required=True)
     asyncio.run(run(parser.parse_args()))

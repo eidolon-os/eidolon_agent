@@ -1,0 +1,56 @@
+[
+  {
+    "id": "reported",
+    "ms": 2247.8,
+    "result": {
+      "type": "HomeClarification",
+      "question": "您是转述对方的话，还是想让我现在打开智能门锁？"
+    },
+    "activity": true,
+    "usage": {
+      "tokens_in": 4130,
+      "tokens_out": 355,
+      "cached_tokens_in": 3968,
+      "cost_usd_micro": 0
+    }
+  },
+  {
+    "id": "complete",
+    "ms": 1329.4,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.ac"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      },
+      "mention": null
+    },
+    "activity": true,
+    "usage": {
+      "tokens_in": 4069,
+      "tokens_out": 174,
+      "cached_tokens_in": 3840,
+      "cost_usd_micro": 0
+    }
+  },
+  {
+    "id": "change",
+    "ms": 7791.3,
+    "result": {
+      "type": "HomeClarification",
+      "question": "您想关掉卧室里的哪台设备？主卧灯、床头灯、主卧空调还是加湿器？"
+    },
+    "activity": true,
+    "usage": {
+      "tokens_in": 4124,
+      "tokens_out": 1748,
+      "cached_tokens_in": 3968,
+      "cost_usd_micro": 0
+    }
+  }
+]

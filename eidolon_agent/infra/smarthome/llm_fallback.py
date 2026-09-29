@@ -62,12 +62,12 @@ class _CancelArguments(BaseModel):
 
 _PROPOSAL_TOOL = ToolSchema(
     name="propose_home_action",
-    description="提出一次家居意图、目标和动作；此工具不会执行设备命令。",
+    description="提交明确的当前设备操作请求；控制提案通过校验后会实际执行，不可猜测用户的执行意图。",
     json_schema=_ProposalArguments.model_json_schema(),
 )
 _CLARIFICATION_TOOL = ToolSchema(
     name="ask_home_clarification",
-    description="缺少明确目标或动作时，向用户问一个简短问题；不执行设备。",
+    description="执行意图、目标、动作或参数不明确时，向用户澄清；意图未确认时 action=null。",
     json_schema=_ClarificationArguments.model_json_schema(),
 )
 _CANCEL_TOOL = ToolSchema(
@@ -110,7 +110,7 @@ class LlmHomeFallback:
                     "只有用户另外明确要求助手现在执行，才能将其中的动作作为控制提案；"
                     "无法判断用户是在转述还是请求执行时，先用 ask_home_clarification 确认意图，"
                     "不要因为句子中出现设备名和动作就执行。这一规则适用于所有设备。"
-                    "只调用一个工具返回本次理解结果，工具本身不执行。"
+                    "只调用一个工具返回本次理解结果。控制提案一旦通过设备和参数校验，就会实际执行；不要把它当作无副作用的讨论或草稿。"
                     "能够形成完整提案时用 propose_home_action。"
                     "明确设备时 resolved；多个合理候选时 ambiguous 并列出候选 ref，不猜选一个。"
                     "用户明确要求同时控制多台时，resolved 可包含多个 ref。"
@@ -120,11 +120,15 @@ class LlmHomeFallback:
                     "只差从多个设备中选一个时，保留完整候选和动作；重复模糊请求不丢弃待确认候选。"
                     "缺少动作或必要参数时 action=null，保留已知 targets。"
                     "不得把信息不足当成设备不存在。"
-                    "闲聊用 unrelated、target_status=none、targets=[]、action=null。"
+                    "明确只是陈述、转述或闲聊，用 unrelated、target_status=none、targets=[]、action=null；"
+                    "不要用 proposal=null 表示已判断为非操作请求。"
                     "mention 仅在 target_status=none 时用于不存在的设备名称，其余情况必须省略或为 null。"
                     "origin_area 只帮助解释没有指明房间的请求，不覆盖用户明确说出的房间。"
-                    "context 是本次会话近期上下文，可能为空。pending=true 表示上次操作尚未执行，"
-                    "回答‘客厅那个’等应补全那次待确认操作；只有回答足够明确才能 resolved。"
+                    "context 是本次会话近期上下文，可能为空。pending=true 表示仍在补全请求，尚未执行。"
+                    "proposal、known_targets、known_action 是已确定的事实；proposal=null 不表示其他事实无效。"
+                    "question 是刚问用户的问题，当前 utterance 是对它的回答；用回答补齐缺失项，保留其余已知事实。"
+                    "已知目标但缺动作时，当前回答给出动作即可形成完整请求；已知动作但缺目标时同理。"
+                    "只有补齐后仍缺信息才继续追问，不重复询问用户已经回答的内容。"
                     "用户说‘算了/取消’时用 cancel_home_command，不执行。"
                     "禁止把对一个动作的否定转换成执行相反动作：‘不要关闭’不等于‘打开’，"
                     "‘别调高’不等于‘调低’。只禁止、取消或要求保持现状而没有新的肯定操作时，"

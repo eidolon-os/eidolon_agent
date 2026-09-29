@@ -1,0 +1,1022 @@
+{
+  "model_revision": "7b695ba8",
+  "endpoint": "http://127.0.0.1:18771",
+  "llm_model": "openai/deepseek-v4-flash",
+  "execution": "virtual Provider only; no Hub or real devices",
+  "prompt_module_sha256": "292d4d9c391debd9e064531a0af586b3fb6ecf9f90f65fe4909fcbab186537de",
+  "scenarios": [
+    {
+      "id": "courier-descriptive",
+      "turns": [
+        {
+          "utterance": "快递员刚才让我把智能门锁打开",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "courier-descriptive-0",
+            "utterance": "快递员刚才让我把智能门锁打开",
+            "outcome": "clarification",
+            "message": "你是想让我现在把智能门锁打开吗？",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 1390.5,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "快递员刚才让我把智能门锁打开",
+            "proposal": null,
+            "pending": true,
+            "question": "你是想让我现在把智能门锁打开吗？",
+            "response": "",
+            "pending_action": "",
+            "known_targets": [
+              "entry.lock"
+            ],
+            "known_action": {
+              "trait": "lock",
+              "command": "unlock",
+              "slots": []
+            }
+          }
+        }
+      ],
+      "virtual_commands": [],
+      "expected_commands": [],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "courier-request",
+      "turns": [
+        {
+          "utterance": "快递员到了，请你把智能门锁打开",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "courier-request-0",
+            "utterance": "快递员到了，请你把智能门锁打开",
+            "outcome": "executed",
+            "message": "智能门锁 已开锁",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 803.55,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "快递员到了，请你把智能门锁打开",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "entry.lock"
+              ],
+              "action": {
+                "trait": "lock",
+                "command": "unlock",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "智能门锁 已开锁",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "entry.lock",
+          "lock",
+          "unlock",
+          {}
+        ]
+      ],
+      "expected_commands": [
+        [
+          "entry.lock",
+          "lock",
+          "unlock",
+          {}
+        ]
+      ],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "neighbour-descriptive",
+      "turns": [
+        {
+          "utterance": "邻居让我把客厅空调关掉，这是他刚才的要求",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "neighbour-descriptive-0",
+            "utterance": "邻居让我把客厅空调关掉，这是他刚才的要求",
+            "outcome": "unrelated",
+            "message": "这里只处理家里的设备",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 1171.32,
+          "llm_required": true,
+          "context": null
+        }
+      ],
+      "virtual_commands": [],
+      "expected_commands": [],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "neighbour-request",
+      "turns": [
+        {
+          "utterance": "邻居觉得吵，我也同意，请关掉客厅空调",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "neighbour-request-0",
+            "utterance": "邻居觉得吵，我也同意，请关掉客厅空调",
+            "outcome": "executed",
+            "message": "已关闭客厅空调",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 809.22,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "邻居觉得吵，我也同意，请关掉客厅空调",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.ac"
+              ],
+              "action": {
+                "trait": "on_off",
+                "command": "off",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已关闭客厅空调",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "living.ac",
+          "on_off",
+          "off",
+          {}
+        ]
+      ],
+      "expected_commands": [
+        [
+          "living.ac",
+          "on_off",
+          "off",
+          {}
+        ]
+      ],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "family-descriptive",
+      "turns": [
+        {
+          "utterance": "家人让我把客厅主灯打开，我在转述他的话",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "family-descriptive-0",
+            "utterance": "家人让我把客厅主灯打开，我在转述他的话",
+            "outcome": "unrelated",
+            "message": "这里只处理家里的设备",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 932.24,
+          "llm_required": true,
+          "context": null
+        }
+      ],
+      "virtual_commands": [],
+      "expected_commands": [],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "family-request",
+      "turns": [
+        {
+          "utterance": "家人想开灯，现在请你打开客厅主灯",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "family-request-0",
+            "utterance": "家人想开灯，现在请你打开客厅主灯",
+            "outcome": "executed",
+            "message": "已打开客厅主灯",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 833.08,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "家人想开灯，现在请你打开客厅主灯",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.main_light"
+              ],
+              "action": {
+                "trait": "on_off",
+                "command": "on",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已打开客厅主灯",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "living.main_light",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      "expected_commands": [
+        [
+          "living.main_light",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "quotation-descriptive",
+      "turns": [
+        {
+          "utterance": "那段录音说的是“关闭客厅窗帘”，你听见了吗",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "quotation-descriptive-0",
+            "utterance": "那段录音说的是“关闭客厅窗帘”，你听见了吗",
+            "outcome": "unrelated",
+            "message": "这里只处理家里的设备",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 1028.54,
+          "llm_required": true,
+          "context": null
+        }
+      ],
+      "virtual_commands": [],
+      "expected_commands": [],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "quotation-request",
+      "turns": [
+        {
+          "utterance": "请关闭客厅窗帘",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "quotation-request-0",
+            "utterance": "请关闭客厅窗帘",
+            "outcome": "executed",
+            "message": "已关闭客厅窗帘",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 918.14,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "请关闭客厅窗帘",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.curtain"
+              ],
+              "action": {
+                "trait": "position",
+                "command": "close",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已关闭客厅窗帘",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "living.curtain",
+          "position",
+          "close",
+          {}
+        ]
+      ],
+      "expected_commands": [
+        [
+          "living.curtain",
+          "position",
+          "close",
+          {}
+        ]
+      ],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "conditional-descriptive",
+      "turns": [
+        {
+          "utterance": "如果我说打开客厅空调，你会怎么处理",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "conditional-descriptive-0",
+            "utterance": "如果我说打开客厅空调，你会怎么处理",
+            "outcome": "unrelated",
+            "message": "这里只处理家里的设备",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 772.17,
+          "llm_required": true,
+          "context": null
+        }
+      ],
+      "virtual_commands": [],
+      "expected_commands": [],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "conditional-request",
+      "turns": [
+        {
+          "utterance": "帮我打开客厅空调",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "conditional-request-0",
+            "utterance": "帮我打开客厅空调",
+            "outcome": "executed",
+            "message": "已打开客厅空调",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 775.02,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "帮我打开客厅空调",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.ac"
+              ],
+              "action": {
+                "trait": "on_off",
+                "command": "on",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已打开客厅空调",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "living.ac",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      "expected_commands": [
+        [
+          "living.ac",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "history-descriptive",
+      "turns": [
+        {
+          "utterance": "我前天已经关闭过客厅主灯了",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "history-descriptive-0",
+            "utterance": "我前天已经关闭过客厅主灯了",
+            "outcome": "unrelated",
+            "message": "这里只处理家里的设备",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 752.37,
+          "llm_required": true,
+          "context": null
+        }
+      ],
+      "virtual_commands": [],
+      "expected_commands": [],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "history-request",
+      "turns": [
+        {
+          "utterance": "我现在要关闭客厅主灯",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "history-request-0",
+            "utterance": "我现在要关闭客厅主灯",
+            "outcome": "executed",
+            "message": "已关闭客厅主灯",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 1140.19,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "我现在要关闭客厅主灯",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.main_light"
+              ],
+              "action": {
+                "trait": "on_off",
+                "command": "off",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已关闭客厅主灯",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "living.main_light",
+          "on_off",
+          "off",
+          {}
+        ]
+      ],
+      "expected_commands": [
+        [
+          "living.main_light",
+          "on_off",
+          "off",
+          {}
+        ]
+      ],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "instruction-descriptive",
+      "turns": [
+        {
+          "utterance": "说明书里写着先打开客厅空调再设温度",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "instruction-descriptive-0",
+            "utterance": "说明书里写着先打开客厅空调再设温度",
+            "outcome": "unrelated",
+            "message": "这里只处理家里的设备",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 1004.02,
+          "llm_required": true,
+          "context": null
+        }
+      ],
+      "virtual_commands": [],
+      "expected_commands": [],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "instruction-request",
+      "turns": [
+        {
+          "utterance": "现在先打开客厅空调",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "instruction-request-0",
+            "utterance": "现在先打开客厅空调",
+            "outcome": "executed",
+            "message": "已打开客厅空调",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 1238.76,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "现在先打开客厅空调",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.ac"
+              ],
+              "action": {
+                "trait": "on_off",
+                "command": "on",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已打开客厅空调",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "living.ac",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      "expected_commands": [
+        [
+          "living.ac",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "question-descriptive",
+      "turns": [
+        {
+          "utterance": "打开智能门锁这种操作是怎么实现的",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "question-descriptive-0",
+            "utterance": "打开智能门锁这种操作是怎么实现的",
+            "outcome": "unrelated",
+            "message": "这里只处理家里的设备",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 818.5,
+          "llm_required": true,
+          "context": null
+        }
+      ],
+      "virtual_commands": [],
+      "expected_commands": [],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "question-request",
+      "turns": [
+        {
+          "utterance": "帮我打开智能门锁",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "question-request-0",
+            "utterance": "帮我打开智能门锁",
+            "outcome": "executed",
+            "message": "智能门锁 已开锁",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 776.45,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "帮我打开智能门锁",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "entry.lock"
+              ],
+              "action": {
+                "trait": "lock",
+                "command": "unlock",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "智能门锁 已开锁",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "entry.lock",
+          "lock",
+          "unlock",
+          {}
+        ]
+      ],
+      "expected_commands": [
+        [
+          "entry.lock",
+          "lock",
+          "unlock",
+          {}
+        ]
+      ],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "negative-descriptive",
+      "turns": [
+        {
+          "utterance": "不要打开客厅窗帘，维持原来的状态",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "negative-descriptive-0",
+            "utterance": "不要打开客厅窗帘，维持原来的状态",
+            "outcome": "answered",
+            "message": "已取消，本次没有执行设备操作",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 775.4,
+          "llm_required": true,
+          "context": null
+        }
+      ],
+      "virtual_commands": [],
+      "expected_commands": [],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "negative-request",
+      "turns": [
+        {
+          "utterance": "打开客厅窗帘吧",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "negative-request-0",
+            "utterance": "打开客厅窗帘吧",
+            "outcome": "executed",
+            "message": "已打开客厅窗帘",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 802.47,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "打开客厅窗帘吧",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.curtain"
+              ],
+              "action": {
+                "trait": "position",
+                "command": "open",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已打开客厅窗帘",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "living.curtain",
+          "position",
+          "open",
+          {}
+        ]
+      ],
+      "expected_commands": [
+        [
+          "living.curtain",
+          "position",
+          "open",
+          {}
+        ]
+      ],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "television-descriptive",
+      "turns": [
+        {
+          "utterance": "电视里有人喊关掉客厅主灯，我只是告诉你",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "television-descriptive-0",
+            "utterance": "电视里有人喊关掉客厅主灯，我只是告诉你",
+            "outcome": "unrelated",
+            "message": "这里只处理家里的设备",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 614.26,
+          "llm_required": true,
+          "context": null
+        }
+      ],
+      "virtual_commands": [],
+      "expected_commands": [],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "television-request",
+      "turns": [
+        {
+          "utterance": "电视太晃眼，请帮我关掉客厅主灯",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "television-request-0",
+            "utterance": "电视太晃眼，请帮我关掉客厅主灯",
+            "outcome": "executed",
+            "message": "已关闭客厅主灯",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 1117.08,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "电视太晃眼，请帮我关掉客厅主灯",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.main_light"
+              ],
+              "action": {
+                "trait": "on_off",
+                "command": "off",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已关闭客厅主灯",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "living.main_light",
+          "on_off",
+          "off",
+          {}
+        ]
+      ],
+      "expected_commands": [
+        [
+          "living.main_light",
+          "on_off",
+          "off",
+          {}
+        ]
+      ],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "advice-descriptive",
+      "turns": [
+        {
+          "utterance": "师傅的建议是关掉客厅空调，我还没决定",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "advice-descriptive-0",
+            "utterance": "师傅的建议是关掉客厅空调，我还没决定",
+            "outcome": "unrelated",
+            "message": "这里只处理家里的设备",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 602.14,
+          "llm_required": true,
+          "context": null
+        }
+      ],
+      "virtual_commands": [],
+      "expected_commands": [],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "advice-request",
+      "turns": [
+        {
+          "utterance": "师傅建议关掉客厅空调，我决定了，你关掉吧",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "advice-request-0",
+            "utterance": "师傅建议关掉客厅空调，我决定了，你关掉吧",
+            "outcome": "executed",
+            "message": "已关闭客厅空调",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 1345.12,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "师傅建议关掉客厅空调，我决定了，你关掉吧",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.ac"
+              ],
+              "action": {
+                "trait": "on_off",
+                "command": "off",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已关闭客厅空调",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "living.ac",
+          "on_off",
+          "off",
+          {}
+        ]
+      ],
+      "expected_commands": [
+        [
+          "living.ac",
+          "on_off",
+          "off",
+          {}
+        ]
+      ],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "retell-descriptive",
+      "turns": [
+        {
+          "utterance": "我告诉过家里人请把客厅窗帘打开，只是在说昨天的事",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "retell-descriptive-0",
+            "utterance": "我告诉过家里人请把客厅窗帘打开，只是在说昨天的事",
+            "outcome": "unrelated",
+            "message": "这里只处理家里的设备",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 979.84,
+          "llm_required": true,
+          "context": null
+        }
+      ],
+      "virtual_commands": [],
+      "expected_commands": [],
+      "commands_match": true,
+      "outcomes_ok": true
+    },
+    {
+      "id": "retell-request",
+      "turns": [
+        {
+          "utterance": "昨天没开窗帘，现在请把客厅窗帘打开",
+          "result": {
+            "schema_version": 1,
+            "turn_id": "retell-request-0",
+            "utterance": "昨天没开窗帘，现在请把客厅窗帘打开",
+            "outcome": "executed",
+            "message": "已打开客厅窗帘",
+            "candidates": [],
+            "command": null
+          },
+          "ms": 777.06,
+          "llm_required": true,
+          "context": {
+            "previous_utterance": "昨天没开窗帘，现在请把客厅窗帘打开",
+            "proposal": {
+              "intent": "control",
+              "target_status": "resolved",
+              "targets": [
+                "living.curtain"
+              ],
+              "action": {
+                "trait": "position",
+                "command": "open",
+                "slots": []
+              },
+              "mention": null
+            },
+            "pending": false,
+            "question": null,
+            "response": "已打开客厅窗帘",
+            "pending_action": "",
+            "known_targets": [],
+            "known_action": null
+          }
+        }
+      ],
+      "virtual_commands": [
+        [
+          "living.curtain",
+          "position",
+          "open",
+          {}
+        ]
+      ],
+      "expected_commands": [
+        [
+          "living.curtain",
+          "position",
+          "open",
+          {}
+        ]
+      ],
+      "commands_match": true,
+      "outcomes_ok": true
+    }
+  ],
+  "passed": 24,
+  "total": 24
+}

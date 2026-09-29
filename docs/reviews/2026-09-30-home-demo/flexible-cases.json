@@ -1,0 +1,146 @@
+[
+  {
+    "id": "change_pending_action",
+    "utterances": [
+      "打开空调",
+      "主卧的，不过改成关闭"
+    ],
+    "expected_commands": [
+      [
+        "master.ac",
+        "on_off",
+        "off",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "cancel_and_new",
+    "utterances": [
+      "打开空调",
+      "算了，打开客厅窗帘"
+    ],
+    "expected_commands": [
+      [
+        "living.curtain",
+        "position",
+        "open",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "multi_follow",
+    "utterances": [
+      "打开客厅主灯和主卧灯",
+      "把它们关掉"
+    ],
+    "expected_commands": [
+      [
+        "living.main_light",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "master.light",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "living.main_light",
+        "on_off",
+        "off",
+        {}
+      ],
+      [
+        "master.light",
+        "on_off",
+        "off",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "missing_action",
+    "utterances": [
+      "客厅空调",
+      "打开"
+    ],
+    "expected_commands": [
+      [
+        "living.ac",
+        "on_off",
+        "on",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "intent_clarification",
+    "utterances": [
+      "家人让我把客厅主灯关闭",
+      "对，我现在就是要你关掉"
+    ],
+    "expected_commands": [
+      [
+        "living.main_light",
+        "on_off",
+        "off",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "past_after_focus",
+    "utterances": [
+      "打开客厅窗帘",
+      "昨天我让家里人关上窗帘，没让你现在关"
+    ],
+    "expected_commands": [
+      [
+        "living.curtain",
+        "position",
+        "open",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "switch_device",
+    "utterances": [
+      "打开客厅空调",
+      "不是空调，把客厅窗帘打开"
+    ],
+    "expected_commands": [
+      [
+        "living.ac",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "living.curtain",
+        "position",
+        "open",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "query_follow",
+    "utterances": [
+      "客厅窗帘现在开着吗",
+      "把它打开"
+    ],
+    "expected_commands": [
+      [
+        "living.curtain",
+        "position",
+        "open",
+        {}
+      ]
+    ]
+  }
+]

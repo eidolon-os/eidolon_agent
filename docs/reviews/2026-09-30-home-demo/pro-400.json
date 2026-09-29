@@ -1,0 +1,74 @@
+[
+  {
+    "id": "reported",
+    "ms": 2061.8,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "entry.lock"
+      ],
+      "action": {
+        "trait": "lock",
+        "command": "unlock",
+        "slots": []
+      },
+      "mention": null
+    },
+    "activity": true,
+    "usage": {
+      "tokens_in": 4114,
+      "tokens_out": 97,
+      "cached_tokens_in": 0,
+      "cost_usd_micro": 0
+    }
+  },
+  {
+    "id": "complete",
+    "ms": 2632.6,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.ac"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      },
+      "mention": null
+    },
+    "activity": true,
+    "usage": {
+      "tokens_in": 4053,
+      "tokens_out": 126,
+      "cached_tokens_in": 0,
+      "cost_usd_micro": 0
+    }
+  },
+  {
+    "id": "change",
+    "ms": 1764.5,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "master.light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "activity": true,
+    "usage": {
+      "tokens_in": 4108,
+      "tokens_out": 98,
+      "cached_tokens_in": 2304,
+      "cost_usd_micro": 0
+    }
+  }
+]

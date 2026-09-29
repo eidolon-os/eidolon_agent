@@ -1,0 +1,254 @@
+[
+  {
+    "id": "courier-descriptive",
+    "utterances": [
+      "快递员刚才让我把智能门锁打开"
+    ],
+    "expected_commands": []
+  },
+  {
+    "id": "courier-request",
+    "utterances": [
+      "快递员到了，请你把智能门锁打开"
+    ],
+    "expected_commands": [
+      [
+        "entry.lock",
+        "lock",
+        "unlock",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "neighbour-descriptive",
+    "utterances": [
+      "邻居让我把客厅空调关掉，这是他刚才的要求"
+    ],
+    "expected_commands": []
+  },
+  {
+    "id": "neighbour-request",
+    "utterances": [
+      "邻居觉得吵，我也同意，请关掉客厅空调"
+    ],
+    "expected_commands": [
+      [
+        "living.ac",
+        "on_off",
+        "off",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "family-descriptive",
+    "utterances": [
+      "家人让我把客厅主灯打开，我在转述他的话"
+    ],
+    "expected_commands": []
+  },
+  {
+    "id": "family-request",
+    "utterances": [
+      "家人想开灯，现在请你打开客厅主灯"
+    ],
+    "expected_commands": [
+      [
+        "living.main_light",
+        "on_off",
+        "on",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "quotation-descriptive",
+    "utterances": [
+      "那段录音说的是“关闭客厅窗帘”，你听见了吗"
+    ],
+    "expected_commands": []
+  },
+  {
+    "id": "quotation-request",
+    "utterances": [
+      "请关闭客厅窗帘"
+    ],
+    "expected_commands": [
+      [
+        "living.curtain",
+        "position",
+        "close",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "conditional-descriptive",
+    "utterances": [
+      "如果我说打开客厅空调，你会怎么处理"
+    ],
+    "expected_commands": []
+  },
+  {
+    "id": "conditional-request",
+    "utterances": [
+      "帮我打开客厅空调"
+    ],
+    "expected_commands": [
+      [
+        "living.ac",
+        "on_off",
+        "on",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "history-descriptive",
+    "utterances": [
+      "我前天已经关闭过客厅主灯了"
+    ],
+    "expected_commands": []
+  },
+  {
+    "id": "history-request",
+    "utterances": [
+      "我现在要关闭客厅主灯"
+    ],
+    "expected_commands": [
+      [
+        "living.main_light",
+        "on_off",
+        "off",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "instruction-descriptive",
+    "utterances": [
+      "说明书里写着先打开客厅空调再设温度"
+    ],
+    "expected_commands": []
+  },
+  {
+    "id": "instruction-request",
+    "utterances": [
+      "现在先打开客厅空调"
+    ],
+    "expected_commands": [
+      [
+        "living.ac",
+        "on_off",
+        "on",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "question-descriptive",
+    "utterances": [
+      "打开智能门锁这种操作是怎么实现的"
+    ],
+    "expected_commands": []
+  },
+  {
+    "id": "question-request",
+    "utterances": [
+      "帮我打开智能门锁"
+    ],
+    "expected_commands": [
+      [
+        "entry.lock",
+        "lock",
+        "unlock",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "negative-descriptive",
+    "utterances": [
+      "不要打开客厅窗帘，维持原来的状态"
+    ],
+    "expected_commands": []
+  },
+  {
+    "id": "negative-request",
+    "utterances": [
+      "打开客厅窗帘吧"
+    ],
+    "expected_commands": [
+      [
+        "living.curtain",
+        "position",
+        "open",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "television-descriptive",
+    "utterances": [
+      "电视里有人喊关掉客厅主灯，我只是告诉你"
+    ],
+    "expected_commands": []
+  },
+  {
+    "id": "television-request",
+    "utterances": [
+      "电视太晃眼，请帮我关掉客厅主灯"
+    ],
+    "expected_commands": [
+      [
+        "living.main_light",
+        "on_off",
+        "off",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "advice-descriptive",
+    "utterances": [
+      "师傅的建议是关掉客厅空调，我还没决定"
+    ],
+    "expected_commands": []
+  },
+  {
+    "id": "advice-request",
+    "utterances": [
+      "师傅建议关掉客厅空调，我决定了，你关掉吧"
+    ],
+    "expected_commands": [
+      [
+        "living.ac",
+        "on_off",
+        "off",
+        {}
+      ]
+    ]
+  },
+  {
+    "id": "retell-descriptive",
+    "utterances": [
+      "我告诉过家里人请把客厅窗帘打开，只是在说昨天的事"
+    ],
+    "expected_commands": []
+  },
+  {
+    "id": "retell-request",
+    "utterances": [
+      "昨天没开窗帘，现在请把客厅窗帘打开"
+    ],
+    "expected_commands": [
+      [
+        "living.curtain",
+        "position",
+        "open",
+        {}
+      ]
+    ]
+  }
+]

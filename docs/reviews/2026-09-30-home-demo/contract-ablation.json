@@ -1,0 +1,326 @@
+[
+  {
+    "variant": "baseline",
+    "id": "reported_unlock",
+    "utterance": "门口那人说是送水的，让我给他开下门",
+    "want_control": false,
+    "is_control": true,
+    "correct": false,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "entry.lock"
+      ],
+      "action": {
+        "trait": "lock",
+        "command": "unlock",
+        "slots": []
+      },
+      "mention": null
+    },
+    "ms": 993.21
+  },
+  {
+    "variant": "baseline",
+    "id": "reported_light",
+    "utterance": "家里人说灯太亮，让我把客厅主灯关掉",
+    "want_control": false,
+    "is_control": false,
+    "correct": true,
+    "result": {
+      "type": "HomeClarification",
+      "question": "家里人说灯太亮、让你关客厅主灯——这是转述，需要我现在帮你关掉客厅主灯吗？"
+    },
+    "ms": 1344.47
+  },
+  {
+    "variant": "baseline",
+    "id": "reported_ac",
+    "utterance": "维修师傅让我关掉客厅空调再检查",
+    "want_control": false,
+    "is_control": false,
+    "correct": true,
+    "result": {
+      "type": "HomeClarification",
+      "question": "你是要我现在关掉客厅空调吗？"
+    },
+    "ms": 713.57
+  },
+  {
+    "variant": "baseline",
+    "id": "direct_unlock",
+    "utterance": "帮我把智能门锁打开",
+    "want_control": true,
+    "is_control": true,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "entry.lock"
+      ],
+      "action": {
+        "trait": "lock",
+        "command": "unlock",
+        "slots": []
+      },
+      "mention": null
+    },
+    "ms": 948.2
+  },
+  {
+    "variant": "baseline",
+    "id": "direct_light",
+    "utterance": "请帮我关闭客厅主灯",
+    "want_control": true,
+    "is_control": true,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "ms": 799.35
+  },
+  {
+    "variant": "baseline",
+    "id": "endorsed",
+    "utterance": "维修师傅让我关掉客厅空调，你现在帮我关掉吧",
+    "want_control": true,
+    "is_control": true,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.ac"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "ms": 895.66
+  },
+  {
+    "variant": "contract",
+    "id": "reported_unlock",
+    "utterance": "门口那人说是送水的，让我给他开下门",
+    "want_control": false,
+    "is_control": false,
+    "correct": true,
+    "result": {
+      "type": "HomeClarification",
+      "question": "您是转述门口那人的话，还是要我现在打开智能门锁？"
+    },
+    "ms": 1023.75
+  },
+  {
+    "variant": "contract",
+    "id": "reported_light",
+    "utterance": "家里人说灯太亮，让我把客厅主灯关掉",
+    "want_control": false,
+    "is_control": false,
+    "correct": true,
+    "result": {
+      "type": "HomeClarification",
+      "question": "你是转述家人的要求，还是现在就要我把客厅主灯关掉？"
+    },
+    "ms": 1409.02
+  },
+  {
+    "variant": "contract",
+    "id": "reported_ac",
+    "utterance": "维修师傅让我关掉客厅空调再检查",
+    "want_control": false,
+    "is_control": false,
+    "correct": true,
+    "result": {
+      "type": "HomeClarification",
+      "question": "你是要我现在关掉客厅空调吗？"
+    },
+    "ms": 912.13
+  },
+  {
+    "variant": "contract",
+    "id": "direct_unlock",
+    "utterance": "帮我把智能门锁打开",
+    "want_control": true,
+    "is_control": true,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "entry.lock"
+      ],
+      "action": {
+        "trait": "lock",
+        "command": "unlock",
+        "slots": []
+      },
+      "mention": null
+    },
+    "ms": 921.25
+  },
+  {
+    "variant": "contract",
+    "id": "direct_light",
+    "utterance": "请帮我关闭客厅主灯",
+    "want_control": true,
+    "is_control": true,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "ms": 1123.94
+  },
+  {
+    "variant": "contract",
+    "id": "endorsed",
+    "utterance": "维修师傅让我关掉客厅空调，你现在帮我关掉吧",
+    "want_control": true,
+    "is_control": true,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.ac"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "ms": 977.14
+  },
+  {
+    "variant": "contract_and_scope",
+    "id": "reported_unlock",
+    "utterance": "门口那人说是送水的，让我给他开下门",
+    "want_control": false,
+    "is_control": false,
+    "correct": true,
+    "result": {
+      "type": "HomeClarification",
+      "question": "门口有人说是送水的，要帮他开一下门锁吗？"
+    },
+    "ms": 902.58
+  },
+  {
+    "variant": "contract_and_scope",
+    "id": "reported_light",
+    "utterance": "家里人说灯太亮，让我把客厅主灯关掉",
+    "want_control": false,
+    "is_control": false,
+    "correct": true,
+    "result": {
+      "type": "HomeClarification",
+      "question": "家里人说灯太亮，要我现在帮你把客厅主灯关掉吗？"
+    },
+    "ms": 935.89
+  },
+  {
+    "variant": "contract_and_scope",
+    "id": "reported_ac",
+    "utterance": "维修师傅让我关掉客厅空调再检查",
+    "want_control": false,
+    "is_control": false,
+    "correct": true,
+    "result": {
+      "type": "HomeClarification",
+      "question": "维修师傅让您关掉客厅空调，需要我现在帮您关闭客厅空调吗？"
+    },
+    "ms": 1096.53
+  },
+  {
+    "variant": "contract_and_scope",
+    "id": "direct_unlock",
+    "utterance": "帮我把智能门锁打开",
+    "want_control": true,
+    "is_control": true,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "entry.lock"
+      ],
+      "action": {
+        "trait": "lock",
+        "command": "unlock",
+        "slots": []
+      },
+      "mention": null
+    },
+    "ms": 870.59
+  },
+  {
+    "variant": "contract_and_scope",
+    "id": "direct_light",
+    "utterance": "请帮我关闭客厅主灯",
+    "want_control": true,
+    "is_control": true,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.main_light"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "ms": 711.49
+  },
+  {
+    "variant": "contract_and_scope",
+    "id": "endorsed",
+    "utterance": "维修师傅让我关掉客厅空调，你现在帮我关掉吧",
+    "want_control": true,
+    "is_control": true,
+    "correct": true,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.ac"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "off",
+        "slots": []
+      },
+      "mention": null
+    },
+    "ms": 866.11
+  }
+]

@@ -1,0 +1,54 @@
+[
+  {
+    "id": "reported",
+    "ms": 2615.2,
+    "result": {
+      "error": "INVALID_PROPOSAL: incomplete_stream:LLMFinishReason.LENGTH"
+    },
+    "activity": true,
+    "usage": {
+      "tokens_in": 4130,
+      "tokens_out": 400,
+      "cached_tokens_in": 0,
+      "cost_usd_micro": 0
+    }
+  },
+  {
+    "id": "complete",
+    "ms": 1642.8,
+    "result": {
+      "intent": "control",
+      "target_status": "resolved",
+      "targets": [
+        "living.ac"
+      ],
+      "action": {
+        "trait": "on_off",
+        "command": "on",
+        "slots": []
+      },
+      "mention": null
+    },
+    "activity": true,
+    "usage": {
+      "tokens_in": 4069,
+      "tokens_out": 218,
+      "cached_tokens_in": 2176,
+      "cost_usd_micro": 0
+    }
+  },
+  {
+    "id": "change",
+    "ms": 2239.5,
+    "result": {
+      "error": "INVALID_PROPOSAL: incomplete_stream:LLMFinishReason.LENGTH"
+    },
+    "activity": true,
+    "usage": {
+      "tokens_in": 4124,
+      "tokens_out": 400,
+      "cached_tokens_in": 2176,
+      "cost_usd_micro": 0
+    }
+  }
+]

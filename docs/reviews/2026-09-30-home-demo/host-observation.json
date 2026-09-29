@@ -1,0 +1,5 @@
+{
+  "active_release": "rk3588-p4-route-20260929-1",
+  "readiness": "app_ready",
+  "product_config_changed": false
+}
