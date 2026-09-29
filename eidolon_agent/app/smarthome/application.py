@@ -105,6 +105,7 @@ def build_smart_home_application(llm: LLMPort | None = None) -> SmartHomeApplica
         SmartHomeCommand(
             directory=client, executor=client, interpreter=interpreter,
             fallback=fallback, min_confidence=min_confidence,
+            independent_interpreter=RulesInterpreter(require_complete=True),
         ),
         interpreter=interpreter,
         laya=laya,

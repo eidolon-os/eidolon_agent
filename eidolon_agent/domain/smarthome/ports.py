@@ -1,8 +1,8 @@
 """Ports for the smart-home domain.
 
-Implemented later by a Capability Runtime client (Channel Provider process):
-the directory is its Owner-scoped projection of the System Data registry plus
-live Provider state, and execute is its idempotent, deadline-bound submit.
+Implemented by the Hub client: the directory is its Owner-scoped projection
+of the System Data registry plus live Provider state. Execution submits to
+the Hub's single device authority with an idempotency key and deadline.
 """
 
 from __future__ import annotations

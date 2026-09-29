@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from eidolon_sdk.biz.interpretation import (
     ERROR_INVALID_PROPOSAL,
@@ -128,10 +129,12 @@ class SmartHomeCommand:
         execute_deadline_ms: int = 3000,
         fallback_timeout_s: float = 8.0,
         min_confidence: float = 0.0,
+        independent_interpreter: InteractionInterpretationPort | None = None,
     ) -> None:
         self._directory = directory
         self._interpreter = interpreter
         self._fallback = fallback
+        self._independent_interpreter = independent_interpreter
         self._interpretation_timeout_ms = interpretation_timeout_ms
         self._fallback_timeout_s = fallback_timeout_s
         if not 0.0 <= min_confidence <= 1.0:
@@ -169,6 +172,7 @@ class SmartHomeCommand:
             device_ref=device_ref,
             timeout_ms=self._interpretation_timeout_ms,
         )
+        understanding_started = time.monotonic()
         try:
             proposal = await self._understand(request, context=previous)
         except InterpretationError as exc:
@@ -176,6 +180,9 @@ class SmartHomeCommand:
                 context.clear()
             _log.warning("smarthome understanding turn=%s unavailable code=%s", turn_id, exc.code)
             return card("unavailable", "家居指令理解服务暂不可用，请稍后重试")
+        finally:
+            _log.info("home stage turn=%s stage=understanding elapsed_ms=%.1f", turn_id,
+                      (time.monotonic() - understanding_started) * 1000)
         if not is_current():
             return card("unavailable", "本轮已被新的输入替代或会话已结束")
         if isinstance(proposal, HomeCancellation):
@@ -248,11 +255,22 @@ class SmartHomeCommand:
         return result
 
     async def _understand(self, request: InterpretationRequest, *, context: dict | None = None) -> HomeUnderstanding:
-        # Laya's trained contract is single-turn. Context-dependent replies must
-        # reach the contextual interpreter even if Laya would label them unrelated.
-        if context is not None and self._fallback is not None:
-            _log.info("home interpretation turn=%s route=llm reason=context", request.interpretation_id)
-            return await self._fallback_proposal(request, context=context)
+        independent: Proposal | None = None
+        if self._fallback is not None and (context is not None or self._independent_interpreter is not None):
+            if self._independent_interpreter is not None:
+                # Require explicit grounding without the speaker's room filling
+                # an omitted target. No history is deleted to manufacture this.
+                witness_request = request.model_copy(update={"origin": Origin()})
+                witness = await self._independent_interpreter.interpret(witness_request)
+                independent = _accepted(witness_request, witness)
+                if independent is not None and (
+                    independent.intent == "unrelated" or independent.target_status != "resolved"
+                ):
+                    independent = None
+            if independent is None:
+                _log.info("home interpretation turn=%s route=llm reason=%s", request.interpretation_id,
+                          "context_required" if context is not None else "semantic_required")
+                return await self._fallback_proposal(request, context=context)
         proposal: Proposal | None = None
         try:
             result = await self._interpreter.interpret(request)
@@ -264,12 +282,15 @@ class SmartHomeCommand:
         else:
             if self._confident(result):
                 proposal = _accepted(request, result)
+                if independent is not None and proposal != independent:
+                    _log.info("home interpretation turn=%s reason=independent_disagreement", request.interpretation_id)
+                    proposal = None
         if proposal is not None or self._fallback is None:
             _log.info("home interpretation turn=%s route=primary proposal=%s", request.interpretation_id,
                       proposal.model_dump_json() if proposal else None)
             return proposal
         _log.info("home interpretation turn=%s route=llm reason=primary_not_accepted", request.interpretation_id)
-        return await self._fallback_proposal(request)
+        return await self._fallback_proposal(request, context=context)
 
     async def _fallback_proposal(self, request: InterpretationRequest, *, context: dict | None = None) -> HomeUnderstanding:
         assert self._fallback is not None
@@ -384,6 +405,7 @@ class SmartHomeCommand:
     async def _run(
         self, card: _Card, owner_id: str, device_ref: str | None, plan: CommandPlan
     ) -> VoiceResult:
+        started = time.monotonic()
         try:
             execution = await self._actuator.execute(
                 owner_id,
@@ -393,6 +415,9 @@ class SmartHomeCommand:
             )
         except SmartHomeUnavailable:
             return card("unavailable", UNAVAILABLE)
+        finally:
+            _log.info("home stage turn=%s stage=execution elapsed_ms=%.1f", card.turn_id,
+                      (time.monotonic() - started) * 1000)
         completion, message = summarize(plan, execution)
         return card(_OUTCOMES[completion], message)
 

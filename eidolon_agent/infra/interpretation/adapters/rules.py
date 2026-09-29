@@ -81,14 +81,16 @@ class RulesInterpreter:
         *,
         policy_version: str = POLICY_VERSION,
         model_version: str = MODEL_VERSION,
+        require_complete: bool = False,
     ) -> None:
         self._policy_version = policy_version
         self._model_version = model_version
+        self._require_complete = require_complete
 
     async def interpret(self, request: InterpretationRequest) -> InterpretationResult:
         if request.domain != "smarthome":
             raise InterpretationError(ERROR_INVALID_REQUEST, f"domain {request.domain!r}")
-        reading = read(request)
+        reading = read(request, require_complete=self._require_complete)
         if isinstance(reading, Proposal) and reading.intent not in request.allowed_intents:
             reading = "intent_not_allowed"
         if isinstance(reading, str):
@@ -108,7 +110,7 @@ class RulesInterpreter:
         )
 
 
-def read(request: InterpretationRequest) -> Proposal | str:
+def read(request: InterpretationRequest, *, require_complete: bool = False) -> Proposal | str:
     """The proposal for this request, or the reason to abstain."""
     original = normalize(request.utterance)
     if not original:
@@ -132,6 +134,15 @@ def read(request: InterpretationRequest) -> Proposal | str:
     asked = bool(queries) or QUERY_TAIL.search(text) is not None
     text, verb_hits = take(text, VERBS)
 
+    # An independence witness must account for the entire utterance. The normal
+    # rules interpreter permits surrounding conversational text; that is NOT
+    # evidence that a turn can safely ignore its preceding conversation.
+    if require_complete and (
+        text.strip("#") or any(h.value[0] == "noise" for h in spans)
+        or len(verb_hits) > 1
+    ):
+        return "incomplete_reading"
+
     named = [Hit(h.start, h.end, h.text, h.value[1]) for h in spans if h.value[0] == "name"]
     words: list[DeviceWord] = []
     verbs = {hit.value for hit in verb_hits}
@@ -143,6 +154,8 @@ def read(request: InterpretationRequest) -> Proposal | str:
             verbs.add(value[0])
             words.append(value[1])
     commanded = bool(verbs) or values.quantity is not None or values.mode is not None
+    if require_complete and not (named or words or scene_hits):
+        return "no_explicit_target"
     if not (named or words or scene_hits) and commanded and not asked:
         # 调亮一点 / 升温: the verb names the device kind; the room decides which.
         implied = IMPLIED_BY_DIMENSION.get(next(iter(verbs), Verb("set")).dimension or "")

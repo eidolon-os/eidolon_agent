@@ -587,3 +587,77 @@ async def test_new_input_during_submitted_command_does_not_pretend_to_undo_it(di
     old,new = await asyncio.gather(first,second)
     assert old.outcome == new.outcome == 'executed'
     assert [r.request_id for r in executor.requests] == ['voice:submitted','voice:correction']
+
+
+async def test_complete_command_in_conversation_uses_primary_without_llm(directory, executor):
+    context = HomeContext()
+    context.remember('打开窗帘', Proposal(intent='control', target_status='resolved',
+                     targets=('living.curtain',), action=Action(trait='position', command='open')))
+    proposal = Proposal(intent='control', target_status='resolved', targets=('living.curtain',),
+                        action=Action(trait='position', command='close'))
+    primary, fallback = _Fixed(proposal), _Fallback()
+    command = _command(directory, executor, interpreter=primary, fallback=fallback,
+                       independent_interpreter=RulesInterpreter(require_complete=True))
+    result = await command.handle(OWNER, 'panel-living', 'next', '关闭窗帘。', context=context)
+    assert result.outcome == 'executed'
+    assert fallback.calls == 0 and len(primary.requests) == 1
+    assert executor.commands == [('living.curtain', 'position', 'close', {})]
+    assert context.proposal == proposal
+
+
+@pytest.mark.parametrize('text', [
+    '打开它', '客厅那个', '再暗一点', '算了', '等一下', '打开客厅灯，不，关掉',
+    '别关主卧灯，打开客厅灯', '如果天黑就打开客厅灯', '打开客厅灯以后再关闭窗帘',
+    '不要打开窗帘', '关闭窗帘也取消', '我刚才说关闭窗帘', '我没说关闭窗帘',
+    '开心打开窗帘', '调暗一点', '关闭灯',
+])
+async def test_context_required_inputs_skip_primary_without_losing_plan(directory, executor, text):
+    context = HomeContext()
+    context.remember('关闭主灯', None, question='客厅还是主卧？')
+    before = context.snapshot()
+    primary, fallback = _Fixed(), _Fallback(HomeCancellation())
+    command = _command(directory, executor, interpreter=primary, fallback=fallback,
+                       independent_interpreter=RulesInterpreter(require_complete=True))
+    await command.handle(OWNER, 'panel-living', 'next', text, context=context)
+    assert not primary.requests and not executor.requests
+    assert fallback.contexts == [before]
+
+
+@pytest.mark.parametrize('primary_kind', ['disagree', 'abstain', 'error', 'low_confidence'])
+async def test_primary_fallback_preserves_context_and_never_executes_wrong_suggestion(
+    directory, executor, primary_kind,
+):
+    context = HomeContext()
+    context.remember('关闭主灯', None, question='客厅还是主卧？')
+    before = context.snapshot()
+    correct = Proposal(intent='control', target_status='resolved', targets=('living.curtain',),
+                       action=Action(trait='position', command='close'))
+    primary = _Fixed(correct, diagnostics={'intent_p': .99, 'device_p': .99, 'action_p': .99})
+    if primary_kind == 'disagree':
+        primary.proposal = correct.model_copy(update={'action': Action(trait='position', command='open')})
+    elif primary_kind == 'abstain':
+        primary.proposal = None
+    elif primary_kind == 'error':
+        primary.error = InterpretationError(ERROR_UNAVAILABLE, 'busy')
+    else:
+        primary.diagnostics['action_p'] = .7
+    fallback = _Fallback(correct)
+    command = _command(directory, executor, interpreter=primary, fallback=fallback,
+                       independent_interpreter=RulesInterpreter(require_complete=True), min_confidence=.8)
+    result = await command.handle(OWNER, 'panel-living', 'next', '关闭窗帘', context=context)
+    assert result.outcome == 'executed'
+    assert fallback.contexts == [before]
+    assert executor.commands == [('living.curtain', 'position', 'close', {})]
+
+
+@pytest.mark.parametrize('text', ['打开它', '不要关闭窗帘', '算了', '如果天黑就打开客厅灯'])
+async def test_missing_context_does_not_grant_a_guessed_target(directory, executor, text):
+    primary = _Fixed(Proposal(intent='control', target_status='resolved', targets=('living.curtain',),
+                            action=Action(trait='position', command='open')))
+    fallback = _Fallback(HomeClarification('请说明要操作的设备或动作'))
+    command = _command(directory, executor, interpreter=primary, fallback=fallback,
+                       independent_interpreter=RulesInterpreter(require_complete=True))
+    result = await _say(command, text)
+    assert result.outcome == 'clarification'
+    assert not primary.requests and not executor.requests
+    assert fallback.contexts == [None]

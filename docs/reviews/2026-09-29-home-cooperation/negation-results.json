@@ -1,0 +1,182 @@
+[
+  {
+    "utterance": "不要关闭主卧灯",
+    "result": {
+      "schema_version": 1,
+      "turn_id": "negation-0",
+      "utterance": "不要关闭主卧灯",
+      "outcome": "answered",
+      "message": "已取消，本次没有执行设备操作",
+      "candidates": [],
+      "command": null
+    },
+    "commands": [],
+    "correct": true,
+    "elapsed_ms": 1580.3
+  },
+  {
+    "utterance": "别把主卧灯关了",
+    "result": {
+      "schema_version": 1,
+      "turn_id": "negation-1",
+      "utterance": "别把主卧灯关了",
+      "outcome": "answered",
+      "message": "已取消，本次没有执行设备操作",
+      "candidates": [],
+      "command": null
+    },
+    "commands": [],
+    "correct": true,
+    "elapsed_ms": 6074.2
+  },
+  {
+    "utterance": "不用关灯了",
+    "result": {
+      "schema_version": 1,
+      "turn_id": "negation-2",
+      "utterance": "不用关灯了",
+      "outcome": "answered",
+      "message": "已取消，本次没有执行设备操作",
+      "candidates": [],
+      "command": null
+    },
+    "commands": [],
+    "correct": true,
+    "elapsed_ms": 715.0
+  },
+  {
+    "utterance": "先别动窗帘",
+    "result": {
+      "schema_version": 1,
+      "turn_id": "negation-3",
+      "utterance": "先别动窗帘",
+      "outcome": "answered",
+      "message": "已取消，本次没有执行设备操作",
+      "candidates": [],
+      "command": null
+    },
+    "commands": [],
+    "correct": true,
+    "elapsed_ms": 1386.7
+  },
+  {
+    "utterance": "维持现在这样",
+    "result": {
+      "schema_version": 1,
+      "turn_id": "negation-4",
+      "utterance": "维持现在这样",
+      "outcome": "answered",
+      "message": "已取消，本次没有执行设备操作",
+      "candidates": [],
+      "command": null
+    },
+    "commands": [],
+    "correct": true,
+    "elapsed_ms": 978.0
+  },
+  {
+    "utterance": "算了不用操作了",
+    "result": {
+      "schema_version": 1,
+      "turn_id": "negation-5",
+      "utterance": "算了不用操作了",
+      "outcome": "answered",
+      "message": "已取消，本次没有执行设备操作",
+      "candidates": [],
+      "command": null
+    },
+    "commands": [],
+    "correct": true,
+    "elapsed_ms": 1090.8
+  },
+  {
+    "utterance": "别调高温度",
+    "result": {
+      "schema_version": 1,
+      "turn_id": "negation-6",
+      "utterance": "别调高温度",
+      "outcome": "answered",
+      "message": "已取消，本次没有执行设备操作",
+      "candidates": [],
+      "command": null
+    },
+    "commands": [],
+    "correct": true,
+    "elapsed_ms": 936.2
+  },
+  {
+    "utterance": "不要调暗灯",
+    "result": {
+      "schema_version": 1,
+      "turn_id": "negation-7",
+      "utterance": "不要调暗灯",
+      "outcome": "answered",
+      "message": "已取消，本次没有执行设备操作",
+      "candidates": [],
+      "command": null
+    },
+    "commands": [],
+    "correct": true,
+    "elapsed_ms": 6215.1
+  },
+  {
+    "utterance": "取消刚才的操作",
+    "result": {
+      "schema_version": 1,
+      "turn_id": "negation-8",
+      "utterance": "取消刚才的操作",
+      "outcome": "answered",
+      "message": "已取消，本次没有执行设备操作",
+      "candidates": [],
+      "command": null
+    },
+    "commands": [],
+    "correct": true,
+    "elapsed_ms": 6064.0
+  },
+  {
+    "utterance": "停一下，先不要执行",
+    "result": {
+      "schema_version": 1,
+      "turn_id": "negation-9",
+      "utterance": "停一下，先不要执行",
+      "outcome": "answered",
+      "message": "已取消，本次没有执行设备操作",
+      "candidates": [],
+      "command": null
+    },
+    "commands": [],
+    "correct": true,
+    "elapsed_ms": 1068.4
+  },
+  {
+    "utterance": "我只是问问，不要操作",
+    "result": {
+      "schema_version": 1,
+      "turn_id": "negation-10",
+      "utterance": "我只是问问，不要操作",
+      "outcome": "answered",
+      "message": "已取消，本次没有执行设备操作",
+      "candidates": [],
+      "command": null
+    },
+    "commands": [],
+    "correct": true,
+    "elapsed_ms": 986.6
+  },
+  {
+    "utterance": "不要打开窗帘",
+    "result": {
+      "schema_version": 1,
+      "turn_id": "negation-11",
+      "utterance": "不要打开窗帘",
+      "outcome": "answered",
+      "message": "已取消，本次没有执行设备操作",
+      "candidates": [],
+      "command": null
+    },
+    "commands": [],
+    "correct": true,
+    "elapsed_ms": 1032.5
+  }
+]
