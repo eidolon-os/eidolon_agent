@@ -141,7 +141,7 @@ async def run_live_local_contract(
                 expected_status=200,
                 expected_json_key="services",
                 unavailable_status=cfg.dependency_unavailable_status,
-                hint="Start eidolon_admin with deploy/dev/run_all.sh start.",
+                hint="Start the Mac stack with eidolon_ops: ./eidolon mac start.",
             )
         )
         checks.append(
