@@ -1,0 +1,19 @@
+{
+  "models_handoff": "b55b5a9",
+  "models_deployed": "8213b4e",
+  "agent_base": "c86836c",
+  "agent_change": "interpretation_timeout_ms=1000",
+  "model_revision": "7b695ba8",
+  "readyz": {
+    "status": "ready",
+    "backend": "rknn"
+  },
+  "hashes": {
+    "manifest.json": "6f39cdf9a5135555b013aee3bf75c5f12f4a615046a6db4d4fc521af4e4144c8",
+    "continuation.json": "7fd91ac6da6e37c8596a6783ef8c84758bf036900d91256bcef370eb7cf11f2a",
+    "torch/model.safetensors": "7b695ba8f2e8a37f388eb118bcf065689d5f9c4480c8ba6677d05d8a2e91cb26",
+    "torch/rl_agent_config.json": "15f04f0753ce226e90ff49762b1f29160e5cfd7af1ee5efe344a3ad57276f7a9"
+  },
+  "execution": "Mac Agent -> SSH tunnel -> opi5max c4 NPU; product LLM; virtual Provider; no Hub or real actuator",
+  "note": "required-tool experiment reverted; current code keeps original auto tool selection"
+}

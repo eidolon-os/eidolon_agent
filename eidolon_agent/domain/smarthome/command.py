@@ -125,7 +125,7 @@ class SmartHomeCommand:
         executor: SmartHomeExecutePort,
         interpreter: InteractionInterpretationPort,
         fallback: SmartHomeFallbackPort | None = None,
-        interpretation_timeout_ms: int = 800,
+        interpretation_timeout_ms: int = 1000,
         execute_deadline_ms: int = 3000,
         fallback_timeout_s: float = 8.0,
         min_confidence: float = 0.0,

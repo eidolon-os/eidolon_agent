@@ -68,10 +68,12 @@ class _Fallback:
         self.error = error
         self.calls = 0
         self.contexts = []
+        self.requests = []
 
     async def propose(self, request: InterpretationRequest, *, context=None) -> Proposal | None:
         self.calls += 1
         self.contexts.append(context)
+        self.requests.append(request)
         if self.error is not None:
             raise self.error
         return self.proposal
@@ -411,11 +413,13 @@ async def test_only_capable_candidate_of_an_ambiguity_is_executed(directory, exe
     assert executor.commands == [("living.main_light", "level", "step", {"delta": -10})]
 
 
-async def test_request_carries_candidates_areas_and_origin(directory, executor) -> None:
+@pytest.mark.parametrize("budget", [None, 300])
+async def test_request_carries_candidates_areas_and_origin(directory, executor, budget) -> None:
     interpreter = _Fixed(None)
 
     await _say(
-        _command(directory, executor, interpreter=interpreter, interpretation_timeout_ms=300),
+        _command(directory, executor, interpreter=interpreter,
+                 **({"interpretation_timeout_ms": budget} if budget is not None else {})),
         "打开空调",
     )
 
@@ -423,7 +427,7 @@ async def test_request_carries_candidates_areas_and_origin(directory, executor) 
     assert request.interpretation_id == "turn-1"
     assert request.origin.device_ref == "panel-living"
     assert request.origin.area_id == "living"
-    assert request.timeout_ms == 300
+    assert request.timeout_ms == (1000 if budget is None else budget)
     assert len(request.candidates) == 18 + 4
     assert {c.kind for c in request.candidates if c.ref.startswith("scene.")} == {"scene"}
     assert [a.name for a in request.areas][:2] == ["客厅", "主卧"]
@@ -716,6 +720,7 @@ async def test_continuation_executes_through_existing_authority_without_llm(dire
     result = await command.handle(OWNER, None, "next", "把它关掉", context=context)
     assert result.outcome == "executed" and executor.commands[-1][2] == "off"
     assert continuation.calls == 1 and fallback.calls == 0
+    assert continuation.requests[0].timeout_ms == 1000
     assert context.snapshot()["response"] == "已关闭客厅空调"
 
 
