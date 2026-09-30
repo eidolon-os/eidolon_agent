@@ -221,7 +221,11 @@ class SmartHomeCommand:
         if proposal is None:
             return card("failed", NOT_UNDERSTOOD)
         if proposal.intent == "unrelated":
-            return card("unrelated", UNRELATED)
+            result = card("unrelated", UNRELATED)
+            # Preserve discourse for a later explicit request, never an
+            # executable focus. Continuation requires a validated Proposal.
+            context.remember(heard, None, response=result.message)
+            return result
         if proposal.target_status == "none":
             return card("not_found", not_found(proposal.mention))
 

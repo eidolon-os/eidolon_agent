@@ -1,0 +1,194 @@
+[
+  {
+    "id": "future_request",
+    "utterances": [
+      "明天早上再把客厅主灯打开"
+    ],
+    "expected_commands": [],
+    "expected_outcomes": [
+      [
+        "unrelated",
+        "clarification"
+      ]
+    ]
+  },
+  {
+    "id": "immediate_request",
+    "utterances": [
+      "现在就把客厅主灯打开"
+    ],
+    "expected_commands": [
+      [
+        "living.main_light",
+        "on_off",
+        "on",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "remind_request",
+    "utterances": [
+      "十分钟后提醒我关闭客厅空调"
+    ],
+    "expected_commands": [],
+    "expected_outcomes": [
+      [
+        "unrelated",
+        "clarification"
+      ]
+    ]
+  },
+  {
+    "id": "direct_request",
+    "utterances": [
+      "请帮我关闭客厅空调"
+    ],
+    "expected_commands": [
+      [
+        "living.ac",
+        "on_off",
+        "off",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "named_other",
+    "utterances": [
+      "小明，帮妈妈把客厅主灯打开"
+    ],
+    "expected_commands": [],
+    "expected_outcomes": [
+      [
+        "unrelated",
+        "clarification"
+      ]
+    ]
+  },
+  {
+    "id": "address_assistant",
+    "utterances": [
+      "助手，请帮我把客厅主灯打开"
+    ],
+    "expected_commands": [
+      [
+        "living.main_light",
+        "on_off",
+        "on",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "quoted_past",
+    "utterances": [
+      "邻居昨天说：把客厅窗帘拉开。我只是转述一下"
+    ],
+    "expected_commands": [],
+    "expected_outcomes": [
+      [
+        "unrelated",
+        "clarification"
+      ]
+    ]
+  },
+  {
+    "id": "endorsed_quote",
+    "utterances": [
+      "邻居说把客厅窗帘拉开，我同意，请你现在打开"
+    ],
+    "expected_commands": [
+      [
+        "living.curtain",
+        "position",
+        "open",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "question_about_action",
+    "utterances": [
+      "把客厅空调关掉以后会怎样"
+    ],
+    "expected_commands": [],
+    "expected_outcomes": [
+      [
+        "unrelated",
+        "clarification"
+      ]
+    ]
+  },
+  {
+    "id": "direct_polite",
+    "utterances": [
+      "能帮我把客厅空调关掉吗"
+    ],
+    "expected_commands": [
+      [
+        "living.ac",
+        "on_off",
+        "off",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "reported_lock",
+    "utterances": [
+      "刚才有人敲门，说让我开锁，我还没有决定"
+    ],
+    "expected_commands": [],
+    "expected_outcomes": [
+      [
+        "unrelated",
+        "clarification"
+      ]
+    ]
+  },
+  {
+    "id": "direct_lock",
+    "utterances": [
+      "我确认现在把智能门锁打开"
+    ],
+    "expected_commands": [
+      [
+        "entry.lock",
+        "lock",
+        "unlock",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ]
+    ]
+  }
+]

@@ -496,18 +496,38 @@ async def test_expired_or_closed_context_cannot_trigger_pending_action(directory
     assert not executor.requests
 
 
-async def test_new_topic_clears_context_and_outside_candidate_never_executes(directory, executor):
+async def test_new_topic_clears_action_focus_and_outside_candidate_never_executes(directory, executor):
     context = HomeContext()
     context.remember("关闭灯", None, question="哪盏？")
     fallback = _Fallback(Proposal(intent="unrelated", target_status="none"))
     command = _command(directory, executor, interpreter=_Fixed(), fallback=fallback)
     assert (await command.handle(OWNER, "p", "t1", "讲个笑话", context=context)).outcome == "unrelated"
-    assert context.snapshot() is None
+    snapshot = context.snapshot()
+    assert snapshot["previous_utterance"] == "讲个笑话"
+    assert snapshot["proposal"] is None and snapshot["pending"] is False
+    assert snapshot["known_targets"] == [] and snapshot["known_action"] is None
     fallback.proposal = Proposal(intent="control", target_status="resolved", targets=("foreign.device",),
                                 action=Action(trait="on_off", command="on"))
     result = await command.handle(OWNER, "p", "t2", "打开灯", context=context)
     assert result.outcome == "unavailable"
     assert not executor.requests
+
+
+async def test_non_command_discourse_can_ground_a_later_explicit_request(directory, executor):
+    context = HomeContext()
+    fallback = _Fallback(Proposal(intent="unrelated", target_status="none"))
+    command = _command(directory, executor, interpreter=_Fixed(), fallback=fallback)
+    await command.handle(OWNER, None, "statement", "家人让我把客厅主灯关闭", context=context)
+    before = context.snapshot()
+    assert not executor.requests
+    assert before["proposal"] is None and before["pending"] is False
+    fallback.proposal = Proposal(intent="control", target_status="resolved",
+                                targets=("living.main_light",),
+                                action=Action(trait="on_off", command="off"))
+    result = await command.handle(OWNER, None, "request", "对，我现在就是要你关掉", context=context)
+    assert result.outcome == "executed"
+    assert fallback.contexts[-1] == before
+    assert executor.commands == [("living.main_light", "on_off", "off", {})]
 
 
 async def test_repeated_ambiguity_has_same_buttons_from_either_llm_tool(directory, executor):
