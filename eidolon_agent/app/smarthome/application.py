@@ -9,6 +9,7 @@ import time
 from eidolon_sdk.biz.smarthome import HomeSessionScope, VoiceResult
 
 from eidolon_agent.app.smarthome.sessions import HomeSessions, HomeSessionUnavailable
+from eidolon_agent.config.settings import SmartHomeSettings
 from eidolon_agent.core.ports.llm import LLMPort
 from eidolon_agent.core.ports.runtime_authority import CompanionRuntimeAuthority
 from eidolon_agent.domain.interpretation import InterpretationConfig, InterpretationService
@@ -90,44 +91,41 @@ class SmartHomeApplication:
 
 
 def build_smart_home_application(
-    llm: LLMPort | None = None, *, runtime_authority: CompanionRuntimeAuthority,
+    llm: LLMPort | None = None,
+    *,
+    runtime_authority: CompanionRuntimeAuthority,
+    settings: SmartHomeSettings | None = None,
 ) -> SmartHomeApplication | None:
-    """Build at Agent startup, separately from the Companion and Admin apps."""
+    """Build at Agent startup, separately from the Companion and Admin apps.
+
+    ``settings`` is agent.yaml's ``smarthome``; where the Laya model answers (``laya.url``) is the
+    one thing about it Ops writes per Host. The Hub token is a credential and stays in agent.env.
+    """
+    settings = settings or SmartHomeSettings()
     token = os.environ.get("EIDOLON_HUB_SMARTHOME_TOKEN", "")
     if len(token) < 32:
         return None
-    interpreter_name = os.environ.get("EIDOLON_SMARTHOME_INTERPRETER", "rules").strip().lower()
-    continuation_revision = os.environ.get("EIDOLON_SMARTHOME_LAYA_CONTINUATION_REVISION", "").strip()
-    if continuation_revision and (
-        continuation_revision != MODEL_REVISION or interpreter_name != "laya"
-        or llm is None or llm.model_id == "fake"
-    ):
-        raise ValueError("Laya continuation requires the supported revision, Laya mode and a real LLM")
+    real_llm = llm is not None and llm.model_id != "fake"
+    if settings.laya.continuation and not real_llm:
+        raise ValueError("Laya continuation requires a real LLM for what it hands back")
     laya = None
-    if interpreter_name == "laya":
-        laya = LayaInterpreter(
-            os.environ.get("EIDOLON_SMARTHOME_LAYA_URL", "http://127.0.0.1:8771")
-        )
-        record_path = os.environ.get("EIDOLON_SMARTHOME_INTERPRETATION_RECORD_PATH", "")
+    if settings.interpreter == "laya":
+        laya = LayaInterpreter(settings.laya.url, api_key=settings.laya.token or None)
+        record_path = settings.interpretation_record_path
         interpreter = InterpretationService(
             {"laya": laya},
             InterpretationConfig(primary="laya"),
             recorder=JsonlInterpretationRecorder(record_path) if record_path else None,
         )
-    elif interpreter_name == "rules":
-        interpreter = RulesInterpreter()
     else:
-        raise ValueError("EIDOLON_SMARTHOME_INTERPRETER must be rules or laya")
-    client = HubSmartHomeClient(
-        base_url=os.environ.get("EIDOLON_SMARTHOME_HUB_URL", "http://127.0.0.1:8082"),
-        token=token,
+        interpreter = RulesInterpreter()
+    client = HubSmartHomeClient(base_url=settings.hub_url, token=token)
+    fallback = LlmHomeFallback(llm) if real_llm else None
+    min_confidence = settings.laya.min_confidence if fallback and laya is not None else 0.0
+    continuation = (
+        LayaHomeContinuation(laya, revision=MODEL_REVISION)
+        if settings.laya.continuation and laya is not None else None
     )
-    fallback = LlmHomeFallback(llm) if llm is not None and llm.model_id != "fake" else None
-    min_confidence = (
-        float(os.environ.get("EIDOLON_SMARTHOME_MIN_CONFIDENCE", "0.8"))
-        if fallback and interpreter_name == "laya" else 0.0
-    )
-    continuation = LayaHomeContinuation(laya, revision=continuation_revision) if continuation_revision else None
     return SmartHomeApplication(
         SmartHomeCommand(
             directory=client, executor=client, interpreter=interpreter,

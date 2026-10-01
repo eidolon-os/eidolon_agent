@@ -385,7 +385,7 @@ async def build_application(
 
     http_app = build_http_app(readiness=lambda: True)
     smart_home_application = build_smart_home_application(
-        container.llm_router, runtime_authority=runtime_authority,
+        container.llm_router, runtime_authority=runtime_authority, settings=settings.smarthome,
     )
     admin_app = build_admin_app(
         llm_router=container.llm_router,

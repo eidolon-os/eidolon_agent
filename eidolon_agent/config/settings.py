@@ -387,6 +387,49 @@ class ParticipationSettings(BaseModel):
         return value
 
 
+class SmartHomeLayaSettings(BaseModel):
+    # Where this Host reaches the smart-home Laya service (System One v1). Ops writes it per Host:
+    # the local service where the Host runs it, otherwise a remote one; empty = no Laya here.
+    url: str = ""
+    token: str = ""
+    # Below this, on any of the questions the proposal needs, the LLM answers instead.
+    min_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+    # pick / follow on the last turn's context; the service must serve the revision this code
+    # supports (infra.smarthome.laya_continuation.MODEL_REVISION).
+    continuation: bool = False
+
+    @field_validator("url")
+    @classmethod
+    def require_base_url(cls, value: str) -> str:
+        if not value:
+            return value
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"} or not parsed.hostname
+            or parsed.path not in {"", "/"} or parsed.query or parsed.fragment
+            or parsed.username or parsed.password
+        ):
+            raise ValueError("smarthome.laya.url must be the service's base URL")
+        return value.rstrip("/")
+
+
+class SmartHomeSettings(BaseModel):
+    # rules: the local rules (and the LLM below their reach). laya: Laya first, then the LLM.
+    interpreter: Literal["rules", "laya"] = "rules"
+    hub_url: str = "http://127.0.0.1:8082"
+    laya: SmartHomeLayaSettings = Field(default_factory=SmartHomeLayaSettings)
+    # Every interpretation, with the user's words, appended here for offline evaluation; empty = off.
+    interpretation_record_path: str = ""
+
+    @model_validator(mode="after")
+    def _laya_needs_its_endpoint(self) -> SmartHomeSettings:
+        if self.interpreter == "laya" and not self.laya.url:
+            raise ValueError("smarthome.interpreter laya needs smarthome.laya.url")
+        if self.laya.continuation and self.interpreter != "laya":
+            raise ValueError("smarthome.laya.continuation needs smarthome.interpreter laya")
+        return self
+
+
 class Settings(BaseSettings):
     """Process-level settings. One instance per process (cached singleton)."""
 
@@ -403,6 +446,7 @@ class Settings(BaseSettings):
     memory: MemorySettings = Field(default_factory=MemorySettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
     participation: ParticipationSettings = Field(default_factory=ParticipationSettings)
+    smarthome: SmartHomeSettings = Field(default_factory=SmartHomeSettings)
     long_task: LongTaskSettings = Field(default_factory=LongTaskSettings)
     body_control: BodyControlSettings = Field(default_factory=BodyControlSettings)
     persona: PersonaSettings = Field(default_factory=PersonaSettings)

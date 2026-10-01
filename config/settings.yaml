@@ -57,5 +57,18 @@ participation:
   # Empty disables IP Team creation until a decision provider is configured.
   url: ""
   token: ""
+smarthome:
+  # rules: the local rules (and the LLM below their reach). laya: Laya first, then the LLM.
+  interpreter: rules
+  hub_url: http://127.0.0.1:8082
+  laya:
+    # Written by Ops per Host: the local service where the Host runs it, else a remote one.
+    url: ""
+    token: ""
+    min_confidence: 0.8
+    # pick / follow on the last turn's context (needs the model revision this code supports).
+    continuation: false
+  # Appends every interpretation, with the user's words, for offline evaluation; empty = off.
+  interpretation_record_path: ""
 turn:
   slow_tool_hint_delay_ms: 1500

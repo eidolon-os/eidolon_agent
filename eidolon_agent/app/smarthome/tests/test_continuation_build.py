@@ -1,39 +1,61 @@
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from eidolon_agent.app.smarthome.application import build_smart_home_application
+from eidolon_agent.config.settings import SmartHomeSettings
+
+_LAYA = {"interpreter": "laya", "laya": {"url": "http://127.0.0.1:8771"}}
 
 
 @pytest.mark.parametrize(
-    "mode,revision,model",
+    "smarthome",
     [
-        ("rules", "7b695ba8", "real"),
-        ("laya", "45f3dedb", "real"),
-        ("laya", "7b695ba8", "fake"),
+        {"interpreter": "laya"},  # Laya with nowhere to reach it
+        {"laya": {"url": "http://127.0.0.1:8771", "continuation": True}},  # continuation on rules
+        {"interpreter": "laya", "laya": {"url": "http://127.0.0.1:8771/v1/systemone"}},  # a route
     ],
 )
-def test_invalid_continuation_configuration_is_rejected_before_client_creation(
-    monkeypatch, mode, revision, model
-):
-    monkeypatch.setenv("EIDOLON_HUB_SMARTHOME_TOKEN", "t" * 32)
-    monkeypatch.setenv("EIDOLON_SMARTHOME_INTERPRETER", mode)
-    monkeypatch.setenv("EIDOLON_SMARTHOME_LAYA_CONTINUATION_REVISION", revision)
-    with pytest.raises(ValueError, match="continuation requires"):
-        build_smart_home_application(SimpleNamespace(model_id=model), runtime_authority=object())
+def test_an_inconsistent_smarthome_section_is_refused(smarthome):
+    with pytest.raises(ValidationError):
+        SmartHomeSettings.model_validate(smarthome)
 
 
-@pytest.mark.parametrize("revision", ["", "7b695ba8"])
-async def test_continuation_is_explicit_opt_in_and_shares_laya_transport(monkeypatch, revision):
+def test_continuation_needs_a_real_llm_before_any_client_is_created(monkeypatch):
     monkeypatch.setenv("EIDOLON_HUB_SMARTHOME_TOKEN", "t" * 32)
-    monkeypatch.setenv("EIDOLON_SMARTHOME_INTERPRETER", "laya")
-    monkeypatch.setenv("EIDOLON_SMARTHOME_LAYA_CONTINUATION_REVISION", revision)
-    app = build_smart_home_application(SimpleNamespace(model_id="real"), runtime_authority=object())
+    settings = SmartHomeSettings.model_validate(
+        {**_LAYA, "laya": {**_LAYA["laya"], "continuation": True}}
+    )
+    with pytest.raises(ValueError, match="real LLM"):
+        build_smart_home_application(
+            SimpleNamespace(model_id="fake"), runtime_authority=object(), settings=settings
+        )
+
+
+@pytest.mark.parametrize("continuation", [False, True])
+async def test_continuation_is_explicit_opt_in_and_shares_laya_transport(monkeypatch, continuation):
+    monkeypatch.setenv("EIDOLON_HUB_SMARTHOME_TOKEN", "t" * 32)
+    settings = SmartHomeSettings.model_validate(
+        {**_LAYA, "laya": {**_LAYA["laya"], "continuation": continuation}}
+    )
+    app = build_smart_home_application(
+        SimpleNamespace(model_id="real"), runtime_authority=object(), settings=settings
+    )
     try:
         port = app._command._continuation
-        assert (port is not None) == bool(revision)
+        assert (port is not None) == continuation
         if port is not None:
             assert port._laya is app._laya
     finally:
         await app.close()
     assert app._laya._client.is_closed
+
+
+async def test_rules_is_the_default_and_opens_no_laya_client(monkeypatch):
+    monkeypatch.setenv("EIDOLON_HUB_SMARTHOME_TOKEN", "t" * 32)
+    app = build_smart_home_application(SimpleNamespace(model_id="real"), runtime_authority=object())
+    try:
+        assert app._laya is None and app._command._continuation is None
+    finally:
+        await app.close()
