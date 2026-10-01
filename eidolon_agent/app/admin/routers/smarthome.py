@@ -2,47 +2,46 @@
 
 from __future__ import annotations
 
-from eidolon_sdk.biz.smarthome import VoiceResult
+from eidolon_sdk.biz.smarthome import HomeCommandRequest, HomeSessionScope, VoiceResult
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
 
 from eidolon_agent.app.admin.authority import AUTHORITY_DEPENDENCIES
 from eidolon_agent.app.smarthome.sessions import HomeSessionUnavailable
+from eidolon_agent.core.errors import (
+    DependencyError,
+    NotFoundError,
+    PermissionDeniedError,
+    ValidationError,
+)
 
 router = APIRouter(dependencies=AUTHORITY_DEPENDENCIES)
 
 
-class SpokenCommand(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    owner_id: str = Field(min_length=1, max_length=128)
-    device_ref: str = Field(min_length=1, max_length=128)
-    turn_id: str = Field(min_length=1, max_length=128)
-    utterance: str = Field(min_length=1, max_length=512)
-    session_id: str | None = Field(default=None, min_length=1, max_length=128)
-
-
 @router.post("/smarthome/command", response_model=VoiceResult)
-async def spoken_command(body: SpokenCommand, request: Request) -> VoiceResult:
+async def spoken_command(body: HomeCommandRequest, request: Request) -> VoiceResult:
     application = request.app.state.smart_home_application
     if application is None:
         raise HTTPException(status_code=503, detail="smart home application is unavailable")
     try:
         return await application.handle(
-            body.owner_id, body.device_ref, body.turn_id, body.utterance, session_id=body.session_id,
+            HomeSessionScope.model_validate(body.model_dump(exclude={"turn_id", "utterance"})),
+            body.turn_id, body.utterance,
         )
     except HomeSessionUnavailable as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-class EndHomeSession(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    owner_id: str = Field(min_length=1, max_length=128)
-    device_ref: str = Field(min_length=1, max_length=128)
-    session_id: str = Field(min_length=1, max_length=128)
+    except (NotFoundError, PermissionDeniedError) as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DependencyError as exc:
+        raise HTTPException(status_code=503, detail="runtime authority is unavailable") from exc
 
 
 @router.post("/smarthome/session/end", status_code=204)
-async def end_home_session(body: EndHomeSession, request: Request) -> None:
+async def end_home_session(body: HomeSessionScope, request: Request) -> None:
     application = request.app.state.smart_home_application
     if application is not None:
-        application.end_session(body.owner_id, body.device_ref, body.session_id)
+        try:
+            application.end_session(body)
+        except HomeSessionUnavailable as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc

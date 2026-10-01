@@ -12,7 +12,7 @@ from eidolon_sdk.biz.interpretation import (
     Proposal,
     Slot,
 )
-from eidolon_sdk.biz.smarthome import Command, Registry, Scene, VoiceResult
+from eidolon_sdk.biz.smarthome import Command, HomeSessionScope, Registry, Scene, VoiceResult
 
 from eidolon_agent.domain.smarthome import DeviceStatus, SmartHomeCommand
 from eidolon_agent.domain.smarthome.context import HomeCancellation, HomeClarification, HomeContext
@@ -579,6 +579,8 @@ async def test_new_input_invalidates_inflight_interpretation_before_execution(di
     import asyncio
 
     from eidolon_agent.app.smarthome.application import SmartHomeApplication
+    from eidolon_agent.app.smarthome.tests.test_application import authority
+    scope = HomeSessionScope(owner_id=OWNER, companion_id="companion", device_ref="panel-living", session_id="s")
     entered, release = asyncio.Event(), asyncio.Event()
     class SlowRules:
         calls = 0
@@ -589,10 +591,10 @@ async def test_new_input_invalidates_inflight_interpretation_before_execution(di
                 await release.wait()
             return await RulesInterpreter().interpret(request)
     interpreter = SlowRules()
-    app = SmartHomeApplication(_command(directory, executor, interpreter=interpreter), interpreter=interpreter)
-    first = asyncio.create_task(app.handle(OWNER, 'panel-living', 'old', '打开客厅灯', session_id='s'))
+    app = SmartHomeApplication(_command(directory, executor, interpreter=interpreter), interpreter=interpreter, runtime_authority=authority(OWNER, "companion"))
+    first = asyncio.create_task(app.handle(scope, 'old', '打开客厅灯'))
     await entered.wait()
-    second = asyncio.create_task(app.handle(OWNER, 'panel-living', 'new', '关闭客厅灯', session_id='s'))
+    second = asyncio.create_task(app.handle(scope, 'new', '关闭客厅灯'))
     await asyncio.sleep(0)
     release.set()
     old, new = await asyncio.gather(first, second)
@@ -600,16 +602,63 @@ async def test_new_input_invalidates_inflight_interpretation_before_execution(di
     assert new.outcome == 'executed'
     assert len(executor.requests) == 1 and executor.requests[0].request_id == 'voice:new'
 
+
+async def test_new_input_invalidates_old_proposal_while_authority_is_pending(directory, executor):
+    import asyncio
+
+    from eidolon_agent.app.smarthome.application import SmartHomeApplication
+    from eidolon_agent.app.smarthome.tests.test_application import authority
+
+    scope = HomeSessionScope(
+        owner_id=OWNER, companion_id="companion", device_ref="panel-living", session_id="s",
+    )
+    interpreting, release_model = asyncio.Event(), asyncio.Event()
+    authorizing, release_authority = asyncio.Event(), asyncio.Event()
+
+    class SlowRules:
+        async def interpret(self, request):
+            interpreting.set()
+            await release_model.wait()
+            return await RulesInterpreter().interpret(request)
+
+    port = authority(OWNER, "companion")
+    facts = port.resolve.return_value
+
+    async def resolve(**_kwargs):
+        if interpreting.is_set():
+            authorizing.set()
+            await release_authority.wait()
+        return facts
+
+    port.resolve.side_effect = resolve
+    interpreter = SlowRules()
+    app = SmartHomeApplication(
+        _command(directory, executor, interpreter=interpreter),
+        interpreter=interpreter, runtime_authority=port,
+    )
+    first = asyncio.create_task(app.handle(scope, "old", "打开客厅灯"))
+    await interpreting.wait()
+    second = asyncio.create_task(app.handle(scope, "new", "关闭客厅灯"))
+    await authorizing.wait()
+    release_model.set()
+    assert (await asyncio.wait_for(first, 1)).outcome == "unavailable"
+    assert not executor.requests
+    release_authority.set()
+    assert (await asyncio.wait_for(second, 1)).outcome == "executed"
+    assert len(executor.requests) == 1 and executor.requests[0].request_id == "voice:new"
+
 async def test_new_input_during_submitted_command_does_not_pretend_to_undo_it(directory, executor):
     import asyncio
 
     from eidolon_agent.app.smarthome.application import SmartHomeApplication
+    from eidolon_agent.app.smarthome.tests.test_application import authority
+    scope = HomeSessionScope(owner_id=OWNER, companion_id="companion", device_ref="panel-living", session_id="s")
     executor.delay_s = 0.05
-    app = SmartHomeApplication(_command(directory, executor), interpreter=RulesInterpreter())
-    first = asyncio.create_task(app.handle(OWNER, 'panel-living', 'submitted', '打开客厅灯', session_id='s'))
+    app = SmartHomeApplication(_command(directory, executor), interpreter=RulesInterpreter(), runtime_authority=authority(OWNER, "companion"))
+    first = asyncio.create_task(app.handle(scope, 'submitted', '打开客厅灯'))
     while not executor.requests:
         await asyncio.sleep(0)
-    second = asyncio.create_task(app.handle(OWNER, 'panel-living', 'correction', '关闭客厅灯', session_id='s'))
+    second = asyncio.create_task(app.handle(scope, 'correction', '关闭客厅灯'))
     old,new = await asyncio.gather(first,second)
     assert old.outcome == new.outcome == 'executed'
     assert [r.request_id for r in executor.requests] == ['voice:submitted','voice:correction']

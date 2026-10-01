@@ -6,6 +6,8 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 
+from eidolon_sdk.biz.smarthome import HomeSessionScope
+
 from eidolon_agent.domain.smarthome import HomeContext
 
 
@@ -15,6 +17,7 @@ class HomeSessionUnavailable(Exception):
 
 @dataclass
 class HomeSession:
+    scope: HomeSessionScope
     context: HomeContext = field(default_factory=HomeContext)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     touched: float = field(default_factory=time.monotonic)
@@ -26,26 +29,30 @@ class HomeSessions:
         self._capacity = capacity
         self._items: dict[tuple[str, str, str], HomeSession] = {}
 
-    def get(self, owner: str, device: str, session_id: str) -> HomeSession:
+    def get(self, scope: HomeSessionScope) -> HomeSession:
         now = time.monotonic()
         for key, value in list(self._items.items()):
             if not value.lock.locked() and now - value.touched >= self._ttl:
                 value.context.active = False
                 del self._items[key]
-        key = (owner, device, session_id)
+        key = (scope.owner_id, scope.device_ref, scope.session_id)
         if key not in self._items:
             if len(self._items) >= self._capacity:
                 raise HomeSessionUnavailable("home session capacity reached")
-            self._items[key] = HomeSession()
+            self._items[key] = HomeSession(scope=scope)
         item = self._items[key]
+        if item.scope != scope:
+            raise HomeSessionUnavailable("changing a Companion requires a new home session")
         item.touched = now
         if not item.context.active:
             raise HomeSessionUnavailable("home session is closed")
         return item
 
-    def close(self, owner: str, device: str, session_id: str) -> None:
-        item = self._items.get((owner, device, session_id))
+    def close(self, scope: HomeSessionScope) -> None:
+        item = self._items.get((scope.owner_id, scope.device_ref, scope.session_id))
         if item is not None:
+            if item.scope != scope:
+                raise HomeSessionUnavailable("home session Companion does not match")
             item.context.active = False
             item.context.clear()
             item.touched = time.monotonic()

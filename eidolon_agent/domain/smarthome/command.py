@@ -1,8 +1,9 @@
 """SmartHomeCommand — one spoken home command, from transcript to panel result.
 
-Used by the companion-less command session (korvo-1 panel: ASR, one call, a
-result card, no TTS) and, later, by a companion's ``TOOL_DIRECT`` triage. No
-persona or memory is involved; the Owner comes from the trusted runtime scope.
+Used by the independent smart-home Agent session (ASR, command, result card,
+no TTS). Ingress resolves the terminal's Companion through the shared runtime
+authority; this use case receives Owner/device scope and home context only.
+No persona prompt or Companion memory is involved.
 
     registry -> InterpretationRequest -> interpreter (-> LLM fallback if abstained)
       -> re-check against the current registry -> validated commands, or a scene id

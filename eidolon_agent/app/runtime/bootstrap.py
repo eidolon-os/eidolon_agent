@@ -23,9 +23,9 @@ import secrets
 from pathlib import Path
 
 import httpx
-from eidolon_sdk.core.http import create_async_client
 from eidolon_sdk.biz.runtime import RuntimeTokenVerifier
 from eidolon_sdk.biz.system_data import SystemDataRuntimeClient
+from eidolon_sdk.core.http import create_async_client
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
 from eidolon_sdk.integrations.audit import require_audit_transport
 
@@ -384,7 +384,9 @@ async def build_application(
     container.grpc_server = grpc_server
 
     http_app = build_http_app(readiness=lambda: True)
-    smart_home_application = build_smart_home_application(container.llm_router)
+    smart_home_application = build_smart_home_application(
+        container.llm_router, runtime_authority=runtime_authority,
+    )
     admin_app = build_admin_app(
         llm_router=container.llm_router,
         settings=settings,
