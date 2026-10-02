@@ -19,7 +19,7 @@ import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from eidolon_sdk.biz.interpretation import Action, Candidate, Slot
+from eidolon_sdk.biz.interpretation import Action, Candidate, InterpretationRequest, Slot
 from eidolon_sdk.biz.smarthome import (
     DEVICE_TYPES,
     SCENE_COMMAND,
@@ -35,6 +35,7 @@ _BLANK = "#"
 
 _PUNCT = re.compile(r"[\s，。！？、；：,!?;:~～…\"'“”‘’（）()【】\[\]<>《》·]+")
 _STRAY_DOT = re.compile(r"(?<!\d)\.|\.(?!\d)")
+SINGULAR_REFERENCE = re.compile(r"它(?!们|俩|两)|(?:这|那)(?:一)?(?:台|个|盏|扇)|其中(?:一|某)(?:台|个|盏|扇)")
 
 
 def normalize(text: str) -> str:
@@ -346,6 +347,13 @@ class Values:
     mode: str | None = None
     dimension: str | None = None
     problem: str | None = None
+
+
+def utterance_values(request: InterpretationRequest) -> Values:
+    """Read amounts without treating digits in Owner names/aliases as values."""
+    names = {normalize(n): None for c in request.candidates for n in (c.name, *c.aliases)}
+    text, _ = take(normalize(request.utterance), names)
+    return read_values(text)[1]
 
 
 def read_values(text: str) -> tuple[str, Values]:

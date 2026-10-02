@@ -1,0 +1,817 @@
+[
+  {
+    "id": "switch_alias_then_pronoun",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "打开客厅空调",
+      "请把台灯关掉",
+      "再打开它"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "living.ac",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      [
+        [
+          "master.bedside",
+          "on_off",
+          "off",
+          {}
+        ]
+      ],
+      [
+        [
+          "master.bedside",
+          "on_off",
+          "on",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "living.ac",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "master.bedside",
+        "on_off",
+        "off",
+        {}
+      ],
+      [
+        "master.bedside",
+        "on_off",
+        "on",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "executed"
+      ],
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "switch_same_kind",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "打开主卧灯",
+      "客厅主灯关掉",
+      "把它再打开"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "master.light",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      [
+        [
+          "living.main_light",
+          "on_off",
+          "off",
+          {}
+        ]
+      ],
+      [
+        [
+          "living.main_light",
+          "on_off",
+          "on",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "master.light",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "living.main_light",
+        "on_off",
+        "off",
+        {}
+      ],
+      [
+        "living.main_light",
+        "on_off",
+        "on",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "executed"
+      ],
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "switch_area_inherit",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "把主卧空调打开",
+      "客厅那台也打开",
+      "降两度"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "master.ac",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      [
+        [
+          "living.ac",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      [
+        [
+          "living.ac",
+          "thermostat",
+          "step",
+          {
+            "delta": -2
+          }
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "master.ac",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "living.ac",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "living.ac",
+        "thermostat",
+        "step",
+        {
+          "delta": -2
+        }
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "executed"
+      ],
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "switch_cover_from_media",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "打开音箱",
+      "请关上窗帘",
+      "拉开它"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "living.speaker",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      [
+        [
+          "living.curtain",
+          "position",
+          "close",
+          {}
+        ]
+      ],
+      [
+        [
+          "living.curtain",
+          "position",
+          "open",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "living.speaker",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "living.curtain",
+        "position",
+        "close",
+        {}
+      ],
+      [
+        "living.curtain",
+        "position",
+        "open",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "executed"
+      ],
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "negated_new_target",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "打开客厅主灯",
+      "电视先别关，保持原样"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "living.main_light",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      []
+    ],
+    "expected_commands": [
+      [
+        "living.main_light",
+        "on_off",
+        "on",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "answered",
+        "unrelated"
+      ]
+    ]
+  },
+  {
+    "id": "correction_with_new_target",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "打开主卧空调",
+      "不，是把电视打开"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "master.ac",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      [
+        [
+          "living.tv",
+          "on_off",
+          "on",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "master.ac",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "living.tv",
+        "on_off",
+        "on",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "exclude_reverse_then_confirm",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "打开空调",
+      "不要主卧那台",
+      "那就客厅的"
+    ],
+    "expected_turn_commands": [
+      [],
+      [],
+      [
+        [
+          "living.ac",
+          "on_off",
+          "on",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "living.ac",
+        "on_off",
+        "on",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "ambiguous",
+        "clarification"
+      ],
+      [
+        "ambiguous",
+        "clarification"
+      ],
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "exclude_both",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "打开空调",
+      "这两台都不要"
+    ],
+    "expected_turn_commands": [
+      [],
+      []
+    ],
+    "expected_commands": [],
+    "expected_outcomes": [
+      [
+        "ambiguous",
+        "clarification"
+      ],
+      [
+        "answered"
+      ]
+    ]
+  },
+  {
+    "id": "cancel_then_weather",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "打开空调",
+      "不用了，告诉我明天的天气"
+    ],
+    "expected_turn_commands": [
+      [],
+      []
+    ],
+    "expected_commands": [],
+    "expected_outcomes": [
+      [
+        "ambiguous",
+        "clarification"
+      ],
+      [
+        "unrelated"
+      ]
+    ]
+  },
+  {
+    "id": "cancel_then_home",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "打开空调",
+      "算了，先关电视"
+    ],
+    "expected_turn_commands": [
+      [],
+      [
+        [
+          "living.tv",
+          "on_off",
+          "off",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "living.tv",
+        "on_off",
+        "off",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "ambiguous",
+        "clarification"
+      ],
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "multi_singular_then_choose",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "把电视和音箱打开",
+      "关掉它",
+      "音箱"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "living.tv",
+          "on_off",
+          "on",
+          {}
+        ],
+        [
+          "living.speaker",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      [],
+      [
+        [
+          "living.speaker",
+          "on_off",
+          "off",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "living.tv",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "living.speaker",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "living.speaker",
+        "on_off",
+        "off",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "ambiguous",
+        "clarification"
+      ],
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "multi_plural",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "打开客厅主灯和床头灯",
+      "把它们都关掉"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "living.main_light",
+          "on_off",
+          "on",
+          {}
+        ],
+        [
+          "master.bedside",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      [
+        [
+          "living.main_light",
+          "on_off",
+          "off",
+          {}
+        ],
+        [
+          "master.bedside",
+          "on_off",
+          "off",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "living.main_light",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "master.bedside",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "living.main_light",
+        "on_off",
+        "off",
+        {}
+      ],
+      [
+        "master.bedside",
+        "on_off",
+        "off",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "different_actions_same_kind",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "把电视打开，同时把音箱关掉"
+    ],
+    "expected_turn_commands": [
+      []
+    ],
+    "expected_commands": [],
+    "expected_outcomes": [
+      [
+        "clarification"
+      ]
+    ]
+  },
+  {
+    "id": "different_actions_same_device",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "打开电视并把音量设为30"
+    ],
+    "expected_turn_commands": [
+      []
+    ],
+    "expected_commands": [],
+    "expected_outcomes": [
+      [
+        "clarification"
+      ]
+    ]
+  },
+  {
+    "id": "range_then_correct",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "音箱音量调到150%",
+      "那就设成40%"
+    ],
+    "expected_turn_commands": [
+      [],
+      [
+        [
+          "living.speaker",
+          "volume",
+          "set",
+          {
+            "value": 40
+          }
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "living.speaker",
+        "volume",
+        "set",
+        {
+          "value": 40
+        }
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "clarification"
+      ],
+      [
+        "executed"
+      ]
+    ],
+    "expected_states": [
+      {},
+      {
+        "living.speaker": {
+          "volume": 40
+        }
+      }
+    ]
+  },
+  {
+    "id": "query_switch_and_follow",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "打开客厅主灯",
+      "床头灯开着吗",
+      "关掉它"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "living.main_light",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      [],
+      [
+        [
+          "master.bedside",
+          "on_off",
+          "off",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "living.main_light",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "master.bedside",
+        "on_off",
+        "off",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "answered"
+      ],
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "quotation_after_focus",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "打开电视",
+      "他让我把音箱关掉，我只是告诉你"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "living.tv",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      []
+    ],
+    "expected_commands": [
+      [
+        "living.tv",
+        "on_off",
+        "on",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "unrelated",
+        "clarification"
+      ]
+    ]
+  },
+  {
+    "id": "missing_new_target",
+    "category": "candidate_natural_regression",
+    "utterances": [
+      "打开音箱",
+      "把投影仪关掉"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "living.speaker",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      []
+    ],
+    "expected_commands": [
+      [
+        "living.speaker",
+        "on_off",
+        "on",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "not_found"
+      ]
+    ]
+  }
+]

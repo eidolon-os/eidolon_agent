@@ -159,6 +159,25 @@ async def test_missing_set_value_abstains_but_relative_amount_is_preserved():
     assert got.action.command == "step" and got.action.slots[0].value == 2
 
 
+@pytest.mark.parametrize("choice,probability,text,reason,outcome", [
+    ("重新理解", 0.9651, "讲个故事", "reinterpret", "abstained"),
+    ("关闭或停止", 0.90, "关了它", "low_probability", "abstained"),
+    ("设为指定的数值或模式", 0.99, "调一下", "action_mapping_failed", "abstained"),
+    ("关闭或停止", 0.99, "关了它", "follow_action", "proposed"),
+])
+async def test_decision_log_distinguishes_exit_confidence_and_mapping(
+    caplog, choice, probability, text, reason, outcome,
+):
+    with caplog.at_level("INFO", logger="eidolon_agent.infra.smarthome.laya_continuation"):
+        await invoke(response(choice, probability), text=text)
+    assert len(caplog.records) == 1
+    message = caplog.records[0].getMessage()
+    for part in (f"choice={choice!r}", f"probability={probability:.4f}",
+                 f"reason={reason}", f"outcome={outcome}", "turn=turn", "question=follow"):
+        assert part in message
+    assert text not in message
+
+
 async def test_timeout_and_cancel_propagate_without_closing_borrowed_transport():
     async def slow(req):
         await asyncio.sleep(1)
@@ -177,3 +196,46 @@ async def test_timeout_and_cancel_propagate_without_closing_borrowed_transport()
         assert not laya._client.is_closed
     finally:
         await laya.aclose()
+
+
+@pytest.mark.parametrize('text', [
+    '再关闭电视', '关掉音箱', '关闭电视', '电视关掉', '关闭音箱', '音箱关掉',
+    '把音箱关掉', '别关电视', '不是电视，打开音箱', '主卧的也打开',
+    '只关主卧灯，客厅的别动', '打开地下室的除湿机', '开启观影模式',
+])
+async def test_explicit_references_never_inherit_old_follow_target(text, caplog):
+    with caplog.at_level('INFO', logger='eidolon_agent.infra.smarthome.laya_continuation'):
+        got, bodies = await invoke(response('关闭或停止', .9999), text=text)
+    assert got is None and not bodies
+    assert 'reason=explicit_reference' in caplog.text
+
+
+@pytest.mark.parametrize('text', ['把它关掉', '把它们关掉', '全关掉', '再暗一点'])
+async def test_multiple_focus_requires_full_scope_interpretation(text, caplog):
+    with caplog.at_level('INFO', logger='eidolon_agent.infra.smarthome.laya_continuation'):
+        got, bodies = await invoke(response('关闭或停止', .9999),
+                                   ctx=context(targets=('living.main_light', 'master.light')), text=text)
+    assert got is None and not bodies
+    assert 'reason=multiple_focus' in caplog.text
+
+
+async def test_exact_name_selects_existing_pending_action_without_model_guessing():
+    ctx = context(pending=True, targets=('living.tv', 'living.speaker'))
+    ctx['question'] = '电视、智能音箱，要哪一个？'
+    got, bodies = await invoke(response('重新理解', key='pick'), ctx=ctx, text='音箱')
+    assert got.targets == ('living.speaker',) and got.action.command == 'on'
+    assert not bodies
+
+
+@pytest.mark.parametrize('text', ['音箱先别动', '不是音箱', '音箱也取消', '音箱打开'])
+async def test_exact_pick_never_discards_other_words(text):
+    ctx = context(pending=True, targets=('living.tv', 'living.speaker'))
+    ctx['question'] = '电视、智能音箱，要哪一个？'
+    got, bodies = await invoke(response('重新理解', key='pick'), ctx=ctx, text=text)
+    assert got is None and len(bodies) == 1
+
+
+async def test_exact_name_outside_pending_candidates_is_reinterpreted():
+    ctx = context(pending=True, targets=('living.ac', 'master.ac'))
+    got, bodies = await invoke(response('客厅空调', key='pick'), ctx=ctx, text='音箱')
+    assert got is None and not bodies

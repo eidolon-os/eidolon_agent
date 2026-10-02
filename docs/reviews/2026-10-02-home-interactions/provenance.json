@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-02",
+  "agent_base_commit": "c22ddd1ef4ad2d32ff48a8a9e4583d0f6e2c86d4",
+  "models_commit": "646cbc2222f6d8e43b91625628480774aab5806c",
+  "model_revision": "7b695ba8",
+  "llm_model": "openai/deepseek-v4-flash",
+  "npu": "opi5max existing 8771 through temporary local SSH forwarding 18771",
+  "torch": "temporary localhost 18772; FP32 MPS; closed after comparison",
+  "execution": "SmartHomeCommand + SDK apartment + FakeExecutor; no Hub, ASR, real devices or Companion authority timing",
+  "source_sha256": {
+    "eidolon_agent/infra/smarthome/laya_continuation.py": "ba4c1b9d178b67e87a9ff68a16e96155f30920b8346a3e1f3a50a01801a42005",
+    "eidolon_agent/domain/smarthome/command.py": "47eb6f7adf7fe16495824f7ed81b475309a5f0b3e72aeedc39a066332710ea37",
+    "eidolon_agent/infra/smarthome/llm_fallback.py": "2cad4ed176f6b07d2e706904ddb338f3b5de46970e150178aa96454b756377c3",
+    "scripts/eval_home_cooperation.py": "f4a03b86ce0f1f84c92528a7e2d08c5d783788269842330b1b751a94a4212731",
+    "eidolon_agent/domain/smarthome/tests/conftest.py": "2fc15a4e50c358e4dd687dcc937f18fa285278e503f33898a378120f66296405"
+  },
+  "artifact_sha256": {
+    "summary.json": "141263164ca3867b4b115eb2b2416720e1c6471aed41dea604e68bf17b534fd6",
+    "independent-witness.json": "21106acd01efa99d19eabd13f6ca80821032c7c43dd60d190301e89d4972cd82",
+    "probe-cases.json": "a6a5e80245b76ea52d6eb15b14dc2962d61bdd83cb899c3e8a71d8aa7c11c646",
+    "probes.json": "a93de02c84e3c8981134c767c50adc24c3be6df2ca33391d114ddadae60c2699",
+    "repeat-cases.json": "0c1837d76f7cb08092132eca279b14c3ad3d747882c392d2a2175a58f66fc516",
+    "repeats.json": "ddc26949ae27bf50e19c25510c974b13d433d99d49ebf331ef8c5a6442eaffe0",
+    "baseline.json": "044b4b559c9cfca96432affd3e81bc8c929e8ab2bf19c2ec7d369e51bd4c7cd1",
+    "cases.json": "9d86d69169e66422cf17476a8100ef9e1effb90bd367697d1718c5eff606d8c1",
+    "backend-comparison.json": "009eaf3de8dcef0decc9ac58eb25c84c316e67d948c52af18109e25afb1dd72c"
+  },
+  "baseline_log_note": "proposal JSON was added to bounded decision log after baseline process start; no routing, thresholds, prompt or model behavior changed in any batch",
+  "verification": "112 relevant tests passed; later log-only change verified by 26 continuation tests; Ruff and diff check passed"
+}

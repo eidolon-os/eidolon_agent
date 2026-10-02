@@ -36,6 +36,15 @@ async def _say(command: SmartHomeCommand, text: str, device: str | None = "panel
     return await command.handle(OWNER, device, "turn-1", text)
 
 
+async def test_virtual_volume_receipt_matches_relative_state(directory, executor):
+    command = _command(directory, executor)
+    for i, utterance in enumerate(("把电视音量调到50%", "把电视音量调大20%")):
+        result = await command.handle(OWNER, None, f"volume-{i}", utterance)
+        assert result.outcome == "executed"
+    assert directory.status["living.tv"].state["volume"] == 70
+    assert "70" in result.message
+
+
 class _Fixed:
     """An interpreter that always answers with the given proposal (or raises)."""
 
@@ -236,7 +245,7 @@ async def test_missing_reply_by_the_deadline_is_unknown(directory, executor) -> 
 async def test_out_of_range_value_is_refused_before_executing(directory, executor) -> None:
     result = await _say(_command(directory, executor), "空调调到35度")
 
-    assert (result.outcome, result.message) == ("failed", "客厅空调 只能设在 16–30°C")
+    assert (result.outcome, result.message) == ("clarification", "客厅空调只能设在 16–30°C，要设为多少？")
     assert executor.requests == []
 
 
@@ -875,3 +884,46 @@ async def test_ambiguity_snapshot_keeps_the_shown_candidates_and_action(director
     snapshot = context.snapshot()
     assert snapshot["proposal"]["targets"] == [c.device_id for c in result.candidates]
     assert snapshot["question"] == result.message and snapshot["pending_action"] == "打开"
+
+
+@pytest.mark.parametrize('text', ['开音箱', '关掉音箱', '音箱关掉'])
+async def test_complete_new_target_bypasses_wrong_high_confidence_follow(directory, executor, text):
+    context = HomeContext()
+    await _command(directory, executor).handle(OWNER, None, 'old', '打开床头灯', context=context)
+    wrong = _Fallback(Proposal(intent='control', target_status='resolved',
+                              targets=('master.bedside',), action=Action(trait='on_off', command='off')))
+    fallback = _Fallback()
+    command = _command(directory, executor, continuation=wrong, fallback=fallback,
+                       independent_interpreter=RulesInterpreter(require_complete=True))
+    result = await command.handle(OWNER, None, 'new', text, context=context)
+    assert result.outcome == 'executed'
+    assert executor.commands[-1][:3] == ('living.speaker', 'on_off', 'on' if text == '开音箱' else 'off')
+    assert wrong.calls == fallback.calls == 0
+    assert context.proposal.targets == ('living.speaker',)
+
+
+async def test_incompatible_shared_action_is_rejected_before_any_execution(directory, executor):
+    proposal = Proposal(intent='control', target_status='resolved',
+                        targets=('living.tv', 'living.curtain'), action=Action(trait='on_off', command='on'))
+    result = await _say(_command(directory, executor, interpreter=_Fixed(proposal)),
+                        '打开电视，同时关上客厅窗帘')
+    assert result.outcome == 'clarification'
+    assert not executor.requests and not executor.commands
+    assert '分别' in result.message
+
+
+async def test_out_of_range_retains_target_for_a_valid_value(directory, executor):
+    context = HomeContext()
+    fallback = _Fallback(Proposal(intent='control', target_status='resolved', targets=('living.tv',),
+                                 action=Action(trait='volume', command='set', slots=(Slot(name='value', value=120),))))
+    command = _command(directory, executor, interpreter=_Fixed(), fallback=fallback)
+    result = await command.handle(OWNER, None, 'bad', '电视音量120%', context=context)
+    assert result.outcome == 'clarification' and '0–100' in result.message
+    assert not executor.requests
+    assert context.snapshot()['known_targets'] == ['living.tv']
+    assert context.snapshot()['known_action'] is None
+    fallback.proposal = Proposal(intent='control', target_status='resolved', targets=('living.tv',),
+                                action=Action(trait='volume', command='set', slots=(Slot(name='value', value=30),)))
+    result = await command.handle(OWNER, None, 'good', '那就30', context=context)
+    assert result.outcome == 'executed'
+    assert executor.commands == [('living.tv', 'volume', 'set', {'value': 30})]

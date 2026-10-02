@@ -1,0 +1,217 @@
+{
+  "candidate": "v7",
+  "execution": "virtual only",
+  "batches": {
+    "cases": {
+      "original_expectations_passed": 41,
+      "total": 42,
+      "original_expectations_failures": [
+        "different_actions_one_turn"
+      ],
+      "declared_scope_passed": 42,
+      "declared_scope_failures": [],
+      "turns": 99,
+      "laya_calls": 53,
+      "laya_error_calls": 7,
+      "llm_calls": 64,
+      "actual_model_revisions": [
+        "7b695ba8"
+      ],
+      "actual_backends": [
+        "rknn"
+      ],
+      "declared_scope_commands_match": true
+    },
+    "repeat-cases": {
+      "original_expectations_passed": 13,
+      "total": 16,
+      "original_expectations_failures": [
+        "multi_singular_ambiguous_run2",
+        "different_actions_one_turn_run2",
+        "different_actions_one_turn_run3"
+      ],
+      "declared_scope_passed": 15,
+      "declared_scope_failures": [
+        "multi_singular_ambiguous_run2"
+      ],
+      "turns": 38,
+      "laya_calls": 18,
+      "laya_error_calls": 0,
+      "llm_calls": 26,
+      "actual_model_revisions": [
+        "7b695ba8"
+      ],
+      "actual_backends": [
+        "rknn"
+      ],
+      "declared_scope_commands_match": true
+    },
+    "probe-cases": {
+      "original_expectations_passed": 8,
+      "total": 8,
+      "original_expectations_failures": [],
+      "declared_scope_passed": 8,
+      "declared_scope_failures": [],
+      "turns": 14,
+      "laya_calls": 11,
+      "laya_error_calls": 0,
+      "llm_calls": 3,
+      "actual_model_revisions": [
+        "7b695ba8"
+      ],
+      "actual_backends": [
+        "rknn"
+      ],
+      "declared_scope_commands_match": true
+    },
+    "candidate-natural-cases": {
+      "original_expectations_passed": 18,
+      "total": 18,
+      "original_expectations_failures": [],
+      "declared_scope_passed": 18,
+      "declared_scope_failures": [],
+      "turns": 41,
+      "laya_calls": 18,
+      "laya_error_calls": 0,
+      "llm_calls": 26,
+      "actual_model_revisions": [
+        "7b695ba8"
+      ],
+      "actual_backends": [
+        "rknn"
+      ],
+      "declared_scope_commands_match": true
+    },
+    "candidate-focus-cases": {
+      "original_expectations_passed": 1,
+      "total": 1,
+      "original_expectations_failures": [],
+      "declared_scope_passed": 1,
+      "declared_scope_failures": [],
+      "turns": 1,
+      "laya_calls": 0,
+      "laya_error_calls": 0,
+      "llm_calls": 1,
+      "actual_model_revisions": [],
+      "actual_backends": [],
+      "declared_scope_commands_match": true
+    }
+  },
+  "limitations": [
+    "Different actions in one utterance are clarified, not executed; not full support for the original multi-action expectation.",
+    "Development/regression cases, not an independent statistical test set.",
+    "LLM semantics still needed; lexical consistency checks do not prove all language correct.",
+    "Mac/SSH/FakeExecutor latency is not Korvo end-to-end latency."
+  ],
+  "total_scenarios": 85,
+  "total_turns": 193,
+  "declared_scope_passed": 84,
+  "original_expectations_passed": 81,
+  "latency_ms": {
+    "without_llm": {
+      "n": 73,
+      "median": 421.93,
+      "sample_p95_nearest_rank": 462.88,
+      "max": 477.75
+    },
+    "with_llm": {
+      "n": 120,
+      "median": 1529.215,
+      "sample_p95_nearest_rank": 2133.54,
+      "max": 2636.43
+    }
+  },
+  "korvo_five_simulation": {
+    "baseline": [
+      {
+        "utterance": "打开电视",
+        "ms": 453.58,
+        "llm_required": false,
+        "laya_calls": 1
+      },
+      {
+        "utterance": "调大音量20%",
+        "ms": 279.27,
+        "llm_required": false,
+        "laya_calls": 1
+      },
+      {
+        "utterance": "关了它",
+        "ms": 263.78,
+        "llm_required": false,
+        "laya_calls": 1
+      },
+      {
+        "utterance": "开音箱",
+        "ms": 2958.97,
+        "llm_required": true,
+        "laya_calls": 1
+      },
+      {
+        "utterance": "关了它",
+        "ms": 292.98,
+        "llm_required": false,
+        "laya_calls": 1
+      }
+    ],
+    "candidate": [
+      {
+        "utterance": "打开电视",
+        "ms": 2478.77,
+        "llm_required": true,
+        "laya_calls": 1
+      },
+      {
+        "utterance": "调大音量20%",
+        "ms": 1267.22,
+        "llm_required": true,
+        "laya_calls": 1
+      },
+      {
+        "utterance": "关了它",
+        "ms": 1330.94,
+        "llm_required": true,
+        "laya_calls": 1
+      },
+      {
+        "utterance": "开音箱",
+        "ms": 1062.14,
+        "llm_required": true,
+        "laya_calls": 1
+      },
+      {
+        "utterance": "关了它",
+        "ms": 1562.81,
+        "llm_required": true,
+        "laya_calls": 1
+      }
+    ]
+  },
+  "original_artifacts_unchanged": true,
+  "candidate_sources_unchanged_during_final_run": true,
+  "artifact_sha256": {
+    "candidate-v7-cases.json": "2ad52b7a3ac361d1b6f1f1947d02a16d24cab378bbea33ad03fb8603fdc32000",
+    "candidate-v7-candidate-natural-cases.json": "6d1438a46db94e7a096c021f96f02b6e245bb62448a19a1ec4d47838aa5b5c16",
+    "candidate-v7-probe-cases.json": "0dc2bdd333d6ebd0c4bd67f3b674a1546a94b289b639cfc833998677dda90288",
+    "candidate-v7-candidate-focus-cases.json": "e3eea021cefc859282372ac928eecc7357ffa9d0ed6e0289ee11250c35c0a2a0",
+    "candidate-v7-provenance.json": "6281ddd9cd1e2a14c7cfa59559b2861e0ff9562413b047143b7e90ac331dc279",
+    "candidate-v7-repeat-cases.json": "db927179321083654cd3b742c63f91842a5927d72e00af201eccc8567d0d208f",
+    "candidate-v7-availability-recheck.json": "286d46adb6a3b22e3526a002533b61af449155c9db197e045720e307399e3b49"
+  },
+  "availability_recheck": {
+    "passed": 1,
+    "total": 1,
+    "turns": 2,
+    "replaces_original_failure": false
+  },
+  "availability_events": {
+    "laya_request_errors": 7,
+    "laya_transport_evidence": "Seven SSH channel-open messages reported Connection refused; corresponding initial requests logged transport ReadError/InterpretationError. Root cause of remote unavailability not established.",
+    "laya_fallback_completed": 7,
+    "llm_unavailable_turns": 1,
+    "llm_unavailable_turn": "multi_singular_ambiguous_run2-1",
+    "llm_unavailable_execution": [],
+    "temporary_forward_closed": true
+  },
+  "all_declared_scope_commands_match": true
+}

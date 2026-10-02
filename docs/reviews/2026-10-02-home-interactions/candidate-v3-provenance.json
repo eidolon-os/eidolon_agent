@@ -1,0 +1,33 @@
+{
+  "base_commit": "c22ddd1ef4ad2d32ff48a8a9e4583d0f6e2c86d4",
+  "branch": "codex/home-interaction-correctness",
+  "model_revision": "7b695ba8",
+  "sdk_changed": false,
+  "execution": "FakeExecutor only, current opi5max 8771 via temporary 18771",
+  "source_sha256": {
+    "eidolon_agent/domain/smarthome/command.py": "0bac86ed0ef90287f61b3f2390a3555f74a88a9cce590d7429a75c20a45d3bc2",
+    "eidolon_agent/domain/smarthome/messages.py": "b9d792f60ff0f37e1cd65ae5b2bf4ad288b61304f7d2cbc0258ef9e5cbbc4ec8",
+    "eidolon_agent/domain/smarthome/tests/conftest.py": "2fc15a4e50c358e4dd687dcc937f18fa285278e503f33898a378120f66296405",
+    "eidolon_agent/domain/smarthome/tests/unit/test_command.py": "6d7fa2e90048f121b49bebad370ef8cde50f3f197b718e04d5abc7a52e319147",
+    "eidolon_agent/infra/interpretation/adapters/laya.py": "91426ae3c78a64b31b012195d4e79368a44fe79dfc6a00fcb7c9cdad3090fa5a",
+    "eidolon_agent/infra/interpretation/adapters/lexicon.py": "9850bf4eecbcfa148cf2ac40c8c8dfd4051d24f0973768a19d75441cbb4c2611",
+    "eidolon_agent/infra/interpretation/adapters/rules.py": "32721e7f9bec34f96d68c61e15745bdacef122645786eb36d9676db04557a5d4",
+    "eidolon_agent/infra/interpretation/tests/unit/test_rules.py": "c54c66e6a323bbc084c2ee6b146fef92027cdda38bd848e21956cdc37b66a563",
+    "eidolon_agent/infra/smarthome/laya_continuation.py": "5ca5fbb839cfe0a4626c294fd2d95777e1c93bf41d546c8207205da08526a1bf",
+    "eidolon_agent/infra/smarthome/llm_fallback.py": "9c482e9ae63ba96deaeabddcae34a3381d507815cc00ecc2c590fa64e1b54e2e",
+    "eidolon_agent/infra/smarthome/tests/test_laya_continuation.py": "7faec92bcdcff618f0ba9713a8d55798ac9ee08eec1abbcf0e8e23c59c3ffadf",
+    "eidolon_agent/infra/smarthome/tests/test_llm_fallback.py": "dea3e3398cbf686eb5fa0754f597e7ab814bd49db7931c6140365491a27a780a",
+    "scripts/eval_home_cooperation.py": "f4a03b86ce0f1f84c92528a7e2d08c5d783788269842330b1b751a94a4212731"
+  },
+  "original_artifacts_verified": [
+    "summary.json",
+    "independent-witness.json",
+    "probe-cases.json",
+    "probes.json",
+    "repeat-cases.json",
+    "repeats.json",
+    "baseline.json",
+    "cases.json",
+    "backend-comparison.json"
+  ]
+}

@@ -1,0 +1,1847 @@
+{
+  "scope": "identical synthetic requests; no execution; torch FP32 MPS versus RKNN FP16 NPU",
+  "cases": [
+    {
+      "case": "korvo_five",
+      "turn": 3,
+      "request": {
+        "state": {
+          "utterance": "开音箱",
+          "context": {
+            "上一句": "关了它",
+            "Agent": "已关闭电视",
+            "设备": [
+              "电视"
+            ]
+          }
+        },
+        "questions": {
+          "follow": {
+            "type": "choice",
+            "instructions": "`context.设备` 刚被操作或查询过。`utterance` 是否是对这些设备的一个明确操作？",
+            "criteria": {
+              "打开或启动": "开启、启动、开始运行",
+              "关闭或停止": "关掉、停止、断电、收起",
+              "调高或增大": "调亮、升温、调大音量或档位",
+              "调低或减小": "调暗、降温、调小、降下",
+              "设为指定的数值或模式": "设到具体的温度、档位、百分比或模式",
+              "重新理解": "换了或增加设备、只针对其中一部分、撤销刚才的操作、保持不动、提问、闲聊或其他新要求"
+            }
+          }
+        }
+      },
+      "historical_npu": {
+        "contract_version": "eidolon.models.laya.systemone.v1",
+        "revision": "7b695ba8",
+        "model": "laya-smart-home",
+        "answers": {
+          "follow": {
+            "type": "choice",
+            "choice": "重新理解",
+            "probabilities": {
+              "打开或启动": 0.0337,
+              "关闭或停止": 0.0009,
+              "调高或增大": 0.001,
+              "调低或减小": 0.0008,
+              "设为指定的数值或模式": 0.0009,
+              "重新理解": 0.9626
+            },
+            "confidence": 0.9014,
+            "answer_confidence": 0.9626,
+            "action": {
+              "act_probability": 1.0
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 186,
+          "output_tokens": 0
+        },
+        "truncated": [],
+        "backend": "rknn",
+        "timing_ms": {
+          "forward": 273.1,
+          "total": 274.7
+        }
+      },
+      "npu": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "重新理解",
+              "probabilities": {
+                "打开或启动": 0.0337,
+                "关闭或停止": 0.0009,
+                "调高或增大": 0.001,
+                "调低或减小": 0.0008,
+                "设为指定的数值或模式": 0.0009,
+                "重新理解": 0.9626
+              },
+              "confidence": 0.9014,
+              "answer_confidence": 0.9626,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 186,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "rknn",
+          "timing_ms": {
+            "forward": 295.2,
+            "total": 297.4
+          }
+        },
+        "ms": 304.61
+      },
+      "torch": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "重新理解",
+              "probabilities": {
+                "打开或启动": 0.0328,
+                "关闭或停止": 0.0009,
+                "调高或增大": 0.001,
+                "调低或减小": 0.0008,
+                "设为指定的数值或模式": 0.0009,
+                "重新理解": 0.9636
+              },
+              "confidence": 0.9034,
+              "answer_confidence": 0.9636,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 186,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "torch",
+          "timing_ms": {
+            "forward": 203.5,
+            "total": 204.5
+          }
+        },
+        "ms": 207.22
+      },
+      "choices_match": true
+    },
+    {
+      "case": "explicit_switch_back",
+      "turn": 2,
+      "request": {
+        "state": {
+          "utterance": "再关闭电视",
+          "context": {
+            "上一句": "把音箱打开",
+            "Agent": "已打开智能音箱",
+            "设备": [
+              "智能音箱"
+            ]
+          }
+        },
+        "questions": {
+          "follow": {
+            "type": "choice",
+            "instructions": "`context.设备` 刚被操作或查询过。`utterance` 是否是对这些设备的一个明确操作？",
+            "criteria": {
+              "打开或启动": "开启、启动、开始运行",
+              "关闭或停止": "关掉、停止、断电、收起",
+              "调高或增大": "调亮、升温、调大音量或档位",
+              "调低或减小": "调暗、降温、调小、降下",
+              "设为指定的数值或模式": "设到具体的温度、档位、百分比或模式",
+              "重新理解": "换了或增加设备、只针对其中一部分、撤销刚才的操作、保持不动、提问、闲聊或其他新要求"
+            }
+          }
+        }
+      },
+      "historical_npu": {
+        "contract_version": "eidolon.models.laya.systemone.v1",
+        "revision": "7b695ba8",
+        "model": "laya-smart-home",
+        "answers": {
+          "follow": {
+            "type": "choice",
+            "choice": "关闭或停止",
+            "probabilities": {
+              "打开或启动": 0.0009,
+              "关闭或停止": 0.9914,
+              "调高或增大": 0.001,
+              "调低或减小": 0.0012,
+              "设为指定的数值或模式": 0.001,
+              "重新理解": 0.0046
+            },
+            "confidence": 0.9661,
+            "answer_confidence": 0.9914,
+            "action": {
+              "act_probability": 1.0
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 191,
+          "output_tokens": 0
+        },
+        "truncated": [],
+        "backend": "rknn",
+        "timing_ms": {
+          "forward": 304.1,
+          "total": 306.7
+        }
+      },
+      "npu": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.0009,
+                "关闭或停止": 0.9914,
+                "调高或增大": 0.001,
+                "调低或减小": 0.0012,
+                "设为指定的数值或模式": 0.001,
+                "重新理解": 0.0046
+              },
+              "confidence": 0.9661,
+              "answer_confidence": 0.9914,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 191,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "rknn",
+          "timing_ms": {
+            "forward": 290.2,
+            "total": 291.3
+          }
+        },
+        "ms": 296.24
+      },
+      "torch": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.0009,
+                "关闭或停止": 0.9915,
+                "调高或增大": 0.001,
+                "调低或减小": 0.0011,
+                "设为指定的数值或模式": 0.001,
+                "重新理解": 0.0046
+              },
+              "confidence": 0.9663,
+              "answer_confidence": 0.9915,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 191,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "torch",
+          "timing_ms": {
+            "forward": 38.7,
+            "total": 39.8
+          }
+        },
+        "ms": 42.08
+      },
+      "choices_match": true
+    },
+    {
+      "case": "alias_switch",
+      "turn": 2,
+      "request": {
+        "state": {
+          "utterance": "关掉音箱",
+          "context": {
+            "上一句": "打开台灯",
+            "Agent": "已打开床头灯",
+            "设备": [
+              "床头灯"
+            ]
+          }
+        },
+        "questions": {
+          "follow": {
+            "type": "choice",
+            "instructions": "`context.设备` 刚被操作或查询过。`utterance` 是否是对这些设备的一个明确操作？",
+            "criteria": {
+              "打开或启动": "开启、启动、开始运行",
+              "关闭或停止": "关掉、停止、断电、收起",
+              "调高或增大": "调亮、升温、调大音量或档位",
+              "调低或减小": "调暗、降温、调小、降下",
+              "设为指定的数值或模式": "设到具体的温度、档位、百分比或模式",
+              "重新理解": "换了或增加设备、只针对其中一部分、撤销刚才的操作、保持不动、提问、闲聊或其他新要求"
+            }
+          }
+        }
+      },
+      "historical_npu": {
+        "contract_version": "eidolon.models.laya.systemone.v1",
+        "revision": "7b695ba8",
+        "model": "laya-smart-home",
+        "answers": {
+          "follow": {
+            "type": "choice",
+            "choice": "关闭或停止",
+            "probabilities": {
+              "打开或启动": 0.0009,
+              "关闭或停止": 0.9908,
+              "调高或增大": 0.0011,
+              "调低或减小": 0.0012,
+              "设为指定的数值或模式": 0.001,
+              "重新理解": 0.0051
+            },
+            "confidence": 0.9639,
+            "answer_confidence": 0.9908,
+            "action": {
+              "act_probability": 1.0
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 191,
+          "output_tokens": 0
+        },
+        "truncated": [],
+        "backend": "rknn",
+        "timing_ms": {
+          "forward": 280.4,
+          "total": 282.9
+        }
+      },
+      "npu": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.0009,
+                "关闭或停止": 0.9908,
+                "调高或增大": 0.0011,
+                "调低或减小": 0.0012,
+                "设为指定的数值或模式": 0.001,
+                "重新理解": 0.0051
+              },
+              "confidence": 0.9639,
+              "answer_confidence": 0.9908,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 191,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "rknn",
+          "timing_ms": {
+            "forward": 292.2,
+            "total": 293.0
+          }
+        },
+        "ms": 296.82
+      },
+      "torch": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.0009,
+                "关闭或停止": 0.9909,
+                "调高或增大": 0.001,
+                "调低或减小": 0.0011,
+                "设为指定的数值或模式": 0.001,
+                "重新理解": 0.0049
+              },
+              "confidence": 0.9645,
+              "answer_confidence": 0.9909,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 191,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "torch",
+          "timing_ms": {
+            "forward": 36.1,
+            "total": 36.5
+          }
+        },
+        "ms": 37.76
+      },
+      "choices_match": true
+    },
+    {
+      "case": "multi_singular_ambiguous",
+      "turn": 1,
+      "request": {
+        "state": {
+          "utterance": "把它关掉",
+          "context": {
+            "上一句": "打开客厅主灯和主卧灯",
+            "Agent": "已打开客厅主灯、主卧灯",
+            "设备": [
+              "客厅主灯",
+              "主卧灯"
+            ]
+          }
+        },
+        "questions": {
+          "follow": {
+            "type": "choice",
+            "instructions": "`context.设备` 刚被操作或查询过。`utterance` 是否是对这些设备的一个明确操作？",
+            "criteria": {
+              "打开或启动": "开启、启动、开始运行",
+              "关闭或停止": "关掉、停止、断电、收起",
+              "调高或增大": "调亮、升温、调大音量或档位",
+              "调低或减小": "调暗、降温、调小、降下",
+              "设为指定的数值或模式": "设到具体的温度、档位、百分比或模式",
+              "重新理解": "换了或增加设备、只针对其中一部分、撤销刚才的操作、保持不动、提问、闲聊或其他新要求"
+            }
+          }
+        }
+      },
+      "historical_npu": {
+        "contract_version": "eidolon.models.laya.systemone.v1",
+        "revision": "7b695ba8",
+        "model": "laya-smart-home",
+        "answers": {
+          "follow": {
+            "type": "choice",
+            "choice": "关闭或停止",
+            "probabilities": {
+              "打开或启动": 0.0007,
+              "关闭或停止": 0.9957,
+              "调高或增大": 0.0009,
+              "调低或减小": 0.0008,
+              "设为指定的数值或模式": 0.0007,
+              "重新理解": 0.0012
+            },
+            "confidence": 0.9808,
+            "answer_confidence": 0.9957,
+            "action": {
+              "act_probability": 1.0
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 204,
+          "output_tokens": 0
+        },
+        "truncated": [],
+        "backend": "rknn",
+        "timing_ms": {
+          "forward": 294.2,
+          "total": 295.3
+        }
+      },
+      "npu": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.0007,
+                "关闭或停止": 0.9957,
+                "调高或增大": 0.0009,
+                "调低或减小": 0.0008,
+                "设为指定的数值或模式": 0.0007,
+                "重新理解": 0.0012
+              },
+              "confidence": 0.9808,
+              "answer_confidence": 0.9957,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 204,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "rknn",
+          "timing_ms": {
+            "forward": 269.3,
+            "total": 270.2
+          }
+        },
+        "ms": 274.27
+      },
+      "torch": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.0007,
+                "关闭或停止": 0.9958,
+                "调高或增大": 0.0009,
+                "调低或减小": 0.0008,
+                "设为指定的数值或模式": 0.0007,
+                "重新理解": 0.0011
+              },
+              "confidence": 0.9811,
+              "answer_confidence": 0.9958,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 204,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "torch",
+          "timing_ms": {
+            "forward": 38.2,
+            "total": 38.7
+          }
+        },
+        "ms": 39.93
+      },
+      "choices_match": true
+    },
+    {
+      "case": "tv_plain",
+      "turn": 1,
+      "request": {
+        "state": {
+          "utterance": "关闭电视",
+          "context": {
+            "上一句": "打开音箱",
+            "Agent": "已打开智能音箱",
+            "设备": [
+              "智能音箱"
+            ]
+          }
+        },
+        "questions": {
+          "follow": {
+            "type": "choice",
+            "instructions": "`context.设备` 刚被操作或查询过。`utterance` 是否是对这些设备的一个明确操作？",
+            "criteria": {
+              "打开或启动": "开启、启动、开始运行",
+              "关闭或停止": "关掉、停止、断电、收起",
+              "调高或增大": "调亮、升温、调大音量或档位",
+              "调低或减小": "调暗、降温、调小、降下",
+              "设为指定的数值或模式": "设到具体的温度、档位、百分比或模式",
+              "重新理解": "换了或增加设备、只针对其中一部分、撤销刚才的操作、保持不动、提问、闲聊或其他新要求"
+            }
+          }
+        }
+      },
+      "historical_npu": {
+        "contract_version": "eidolon.models.laya.systemone.v1",
+        "revision": "7b695ba8",
+        "model": "laya-smart-home",
+        "answers": {
+          "follow": {
+            "type": "choice",
+            "choice": "关闭或停止",
+            "probabilities": {
+              "打开或启动": 0.0009,
+              "关闭或停止": 0.9742,
+              "调高或增大": 0.0009,
+              "调低或减小": 0.0013,
+              "设为指定的数值或模式": 0.0011,
+              "重新理解": 0.0217
+            },
+            "confidence": 0.9236,
+            "answer_confidence": 0.9742,
+            "action": {
+              "act_probability": 1.0
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 189,
+          "output_tokens": 0
+        },
+        "truncated": [],
+        "backend": "rknn",
+        "timing_ms": {
+          "forward": 257.9,
+          "total": 258.7
+        }
+      },
+      "npu": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.0009,
+                "关闭或停止": 0.9742,
+                "调高或增大": 0.0009,
+                "调低或减小": 0.0013,
+                "设为指定的数值或模式": 0.0011,
+                "重新理解": 0.0217
+              },
+              "confidence": 0.9236,
+              "answer_confidence": 0.9742,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 189,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "rknn",
+          "timing_ms": {
+            "forward": 262.7,
+            "total": 264.8
+          }
+        },
+        "ms": 269.35
+      },
+      "torch": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.0009,
+                "关闭或停止": 0.9747,
+                "调高或增大": 0.0009,
+                "调低或减小": 0.0013,
+                "设为指定的数值或模式": 0.0011,
+                "重新理解": 0.0212
+              },
+              "confidence": 0.9248,
+              "answer_confidence": 0.9747,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 189,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "torch",
+          "timing_ms": {
+            "forward": 50.5,
+            "total": 51.4
+          }
+        },
+        "ms": 53.59
+      },
+      "choices_match": true
+    },
+    {
+      "case": "tv_object_first",
+      "turn": 1,
+      "request": {
+        "state": {
+          "utterance": "电视关掉",
+          "context": {
+            "上一句": "打开音箱",
+            "Agent": "已打开智能音箱",
+            "设备": [
+              "智能音箱"
+            ]
+          }
+        },
+        "questions": {
+          "follow": {
+            "type": "choice",
+            "instructions": "`context.设备` 刚被操作或查询过。`utterance` 是否是对这些设备的一个明确操作？",
+            "criteria": {
+              "打开或启动": "开启、启动、开始运行",
+              "关闭或停止": "关掉、停止、断电、收起",
+              "调高或增大": "调亮、升温、调大音量或档位",
+              "调低或减小": "调暗、降温、调小、降下",
+              "设为指定的数值或模式": "设到具体的温度、档位、百分比或模式",
+              "重新理解": "换了或增加设备、只针对其中一部分、撤销刚才的操作、保持不动、提问、闲聊或其他新要求"
+            }
+          }
+        }
+      },
+      "historical_npu": {
+        "contract_version": "eidolon.models.laya.systemone.v1",
+        "revision": "7b695ba8",
+        "model": "laya-smart-home",
+        "answers": {
+          "follow": {
+            "type": "choice",
+            "choice": "关闭或停止",
+            "probabilities": {
+              "打开或启动": 0.001,
+              "关闭或停止": 0.9733,
+              "调高或增大": 0.001,
+              "调低或减小": 0.0012,
+              "设为指定的数值或模式": 0.0011,
+              "重新理解": 0.0223
+            },
+            "confidence": 0.9212,
+            "answer_confidence": 0.9733,
+            "action": {
+              "act_probability": 1.0
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 190,
+          "output_tokens": 0
+        },
+        "truncated": [],
+        "backend": "rknn",
+        "timing_ms": {
+          "forward": 267.4,
+          "total": 268.2
+        }
+      },
+      "npu": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.001,
+                "关闭或停止": 0.9733,
+                "调高或增大": 0.001,
+                "调低或减小": 0.0012,
+                "设为指定的数值或模式": 0.0011,
+                "重新理解": 0.0223
+              },
+              "confidence": 0.9212,
+              "answer_confidence": 0.9733,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 190,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "rknn",
+          "timing_ms": {
+            "forward": 259.3,
+            "total": 261.3
+          }
+        },
+        "ms": 265.32
+      },
+      "torch": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.001,
+                "关闭或停止": 0.9747,
+                "调高或增大": 0.001,
+                "调低或减小": 0.0012,
+                "设为指定的数值或模式": 0.0011,
+                "重新理解": 0.021
+              },
+              "confidence": 0.9242,
+              "answer_confidence": 0.9747,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 190,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "torch",
+          "timing_ms": {
+            "forward": 31.4,
+            "total": 31.9
+          }
+        },
+        "ms": 33.48
+      },
+      "choices_match": true
+    },
+    {
+      "case": "tv_ba",
+      "turn": 1,
+      "request": {
+        "state": {
+          "utterance": "把电视关掉",
+          "context": {
+            "上一句": "打开音箱",
+            "Agent": "已打开智能音箱",
+            "设备": [
+              "智能音箱"
+            ]
+          }
+        },
+        "questions": {
+          "follow": {
+            "type": "choice",
+            "instructions": "`context.设备` 刚被操作或查询过。`utterance` 是否是对这些设备的一个明确操作？",
+            "criteria": {
+              "打开或启动": "开启、启动、开始运行",
+              "关闭或停止": "关掉、停止、断电、收起",
+              "调高或增大": "调亮、升温、调大音量或档位",
+              "调低或减小": "调暗、降温、调小、降下",
+              "设为指定的数值或模式": "设到具体的温度、档位、百分比或模式",
+              "重新理解": "换了或增加设备、只针对其中一部分、撤销刚才的操作、保持不动、提问、闲聊或其他新要求"
+            }
+          }
+        }
+      },
+      "historical_npu": {
+        "contract_version": "eidolon.models.laya.systemone.v1",
+        "revision": "7b695ba8",
+        "model": "laya-smart-home",
+        "answers": {
+          "follow": {
+            "type": "choice",
+            "choice": "重新理解",
+            "probabilities": {
+              "打开或启动": 0.0005,
+              "关闭或停止": 0.0682,
+              "调高或增大": 0.0004,
+              "调低或减小": 0.0007,
+              "设为指定的数值或模式": 0.0005,
+              "重新理解": 0.9297
+            },
+            "confidence": 0.8513,
+            "answer_confidence": 0.9297,
+            "action": {
+              "act_probability": 1.0
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 191,
+          "output_tokens": 0
+        },
+        "truncated": [],
+        "backend": "rknn",
+        "timing_ms": {
+          "forward": 276.5,
+          "total": 277.4
+        }
+      },
+      "npu": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "重新理解",
+              "probabilities": {
+                "打开或启动": 0.0005,
+                "关闭或停止": 0.0682,
+                "调高或增大": 0.0004,
+                "调低或减小": 0.0007,
+                "设为指定的数值或模式": 0.0005,
+                "重新理解": 0.9297
+              },
+              "confidence": 0.8513,
+              "answer_confidence": 0.9297,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 191,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "rknn",
+          "timing_ms": {
+            "forward": 256.2,
+            "total": 258.2
+          }
+        },
+        "ms": 261.89
+      },
+      "torch": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "重新理解",
+              "probabilities": {
+                "打开或启动": 0.0004,
+                "关闭或停止": 0.066,
+                "调高或增大": 0.0004,
+                "调低或减小": 0.0007,
+                "设为指定的数值或模式": 0.0005,
+                "重新理解": 0.932
+              },
+              "confidence": 0.8548,
+              "answer_confidence": 0.932,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 191,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "torch",
+          "timing_ms": {
+            "forward": 33.0,
+            "total": 33.4
+          }
+        },
+        "ms": 34.62
+      },
+      "choices_match": true
+    },
+    {
+      "case": "speaker_plain",
+      "turn": 1,
+      "request": {
+        "state": {
+          "utterance": "关闭音箱",
+          "context": {
+            "上一句": "打开床头灯",
+            "Agent": "已打开床头灯",
+            "设备": [
+              "床头灯"
+            ]
+          }
+        },
+        "questions": {
+          "follow": {
+            "type": "choice",
+            "instructions": "`context.设备` 刚被操作或查询过。`utterance` 是否是对这些设备的一个明确操作？",
+            "criteria": {
+              "打开或启动": "开启、启动、开始运行",
+              "关闭或停止": "关掉、停止、断电、收起",
+              "调高或增大": "调亮、升温、调大音量或档位",
+              "调低或减小": "调暗、降温、调小、降下",
+              "设为指定的数值或模式": "设到具体的温度、档位、百分比或模式",
+              "重新理解": "换了或增加设备、只针对其中一部分、撤销刚才的操作、保持不动、提问、闲聊或其他新要求"
+            }
+          }
+        }
+      },
+      "historical_npu": {
+        "contract_version": "eidolon.models.laya.systemone.v1",
+        "revision": "7b695ba8",
+        "model": "laya-smart-home",
+        "answers": {
+          "follow": {
+            "type": "choice",
+            "choice": "关闭或停止",
+            "probabilities": {
+              "打开或启动": 0.0008,
+              "关闭或停止": 0.9832,
+              "调高或增大": 0.001,
+              "调低或减小": 0.0011,
+              "设为指定的数值或模式": 0.001,
+              "重新理解": 0.0129
+            },
+            "confidence": 0.9444,
+            "answer_confidence": 0.9832,
+            "action": {
+              "act_probability": 1.0
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 191,
+          "output_tokens": 0
+        },
+        "truncated": [],
+        "backend": "rknn",
+        "timing_ms": {
+          "forward": 275.3,
+          "total": 277.4
+        }
+      },
+      "npu": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.0008,
+                "关闭或停止": 0.9832,
+                "调高或增大": 0.001,
+                "调低或减小": 0.0011,
+                "设为指定的数值或模式": 0.001,
+                "重新理解": 0.0129
+              },
+              "confidence": 0.9444,
+              "answer_confidence": 0.9832,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 191,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "rknn",
+          "timing_ms": {
+            "forward": 262.5,
+            "total": 264.2
+          }
+        },
+        "ms": 267.49
+      },
+      "torch": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.0008,
+                "关闭或停止": 0.9833,
+                "调高或增大": 0.0009,
+                "调低或减小": 0.0011,
+                "设为指定的数值或模式": 0.001,
+                "重新理解": 0.0128
+              },
+              "confidence": 0.9447,
+              "answer_confidence": 0.9833,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 191,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "torch",
+          "timing_ms": {
+            "forward": 22.8,
+            "total": 23.2
+          }
+        },
+        "ms": 24.39
+      },
+      "choices_match": true
+    },
+    {
+      "case": "speaker_object_first",
+      "turn": 1,
+      "request": {
+        "state": {
+          "utterance": "音箱关掉",
+          "context": {
+            "上一句": "打开床头灯",
+            "Agent": "已打开床头灯",
+            "设备": [
+              "床头灯"
+            ]
+          }
+        },
+        "questions": {
+          "follow": {
+            "type": "choice",
+            "instructions": "`context.设备` 刚被操作或查询过。`utterance` 是否是对这些设备的一个明确操作？",
+            "criteria": {
+              "打开或启动": "开启、启动、开始运行",
+              "关闭或停止": "关掉、停止、断电、收起",
+              "调高或增大": "调亮、升温、调大音量或档位",
+              "调低或减小": "调暗、降温、调小、降下",
+              "设为指定的数值或模式": "设到具体的温度、档位、百分比或模式",
+              "重新理解": "换了或增加设备、只针对其中一部分、撤销刚才的操作、保持不动、提问、闲聊或其他新要求"
+            }
+          }
+        }
+      },
+      "historical_npu": {
+        "contract_version": "eidolon.models.laya.systemone.v1",
+        "revision": "7b695ba8",
+        "model": "laya-smart-home",
+        "answers": {
+          "follow": {
+            "type": "choice",
+            "choice": "关闭或停止",
+            "probabilities": {
+              "打开或启动": 0.001,
+              "关闭或停止": 0.9688,
+              "调高或增大": 0.0011,
+              "调低或减小": 0.0012,
+              "设为指定的数值或模式": 0.0011,
+              "重新理解": 0.0267
+            },
+            "confidence": 0.9118,
+            "answer_confidence": 0.9688,
+            "action": {
+              "act_probability": 1.0
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 192,
+          "output_tokens": 0
+        },
+        "truncated": [],
+        "backend": "rknn",
+        "timing_ms": {
+          "forward": 276.2,
+          "total": 277.8
+        }
+      },
+      "npu": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.001,
+                "关闭或停止": 0.9688,
+                "调高或增大": 0.0011,
+                "调低或减小": 0.0012,
+                "设为指定的数值或模式": 0.0011,
+                "重新理解": 0.0267
+              },
+              "confidence": 0.9118,
+              "answer_confidence": 0.9688,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 192,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "rknn",
+          "timing_ms": {
+            "forward": 263.6,
+            "total": 264.4
+          }
+        },
+        "ms": 268.03
+      },
+      "torch": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.001,
+                "关闭或停止": 0.9694,
+                "调高或增大": 0.0011,
+                "调低或减小": 0.0012,
+                "设为指定的数值或模式": 0.0011,
+                "重新理解": 0.0261
+              },
+              "confidence": 0.9131,
+              "answer_confidence": 0.9694,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 192,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "torch",
+          "timing_ms": {
+            "forward": 51.9,
+            "total": 52.8
+          }
+        },
+        "ms": 55.18
+      },
+      "choices_match": true
+    },
+    {
+      "case": "speaker_ba",
+      "turn": 1,
+      "request": {
+        "state": {
+          "utterance": "把音箱关掉",
+          "context": {
+            "上一句": "打开床头灯",
+            "Agent": "已打开床头灯",
+            "设备": [
+              "床头灯"
+            ]
+          }
+        },
+        "questions": {
+          "follow": {
+            "type": "choice",
+            "instructions": "`context.设备` 刚被操作或查询过。`utterance` 是否是对这些设备的一个明确操作？",
+            "criteria": {
+              "打开或启动": "开启、启动、开始运行",
+              "关闭或停止": "关掉、停止、断电、收起",
+              "调高或增大": "调亮、升温、调大音量或档位",
+              "调低或减小": "调暗、降温、调小、降下",
+              "设为指定的数值或模式": "设到具体的温度、档位、百分比或模式",
+              "重新理解": "换了或增加设备、只针对其中一部分、撤销刚才的操作、保持不动、提问、闲聊或其他新要求"
+            }
+          }
+        }
+      },
+      "historical_npu": {
+        "contract_version": "eidolon.models.laya.systemone.v1",
+        "revision": "7b695ba8",
+        "model": "laya-smart-home",
+        "answers": {
+          "follow": {
+            "type": "choice",
+            "choice": "重新理解",
+            "probabilities": {
+              "打开或启动": 0.0004,
+              "关闭或停止": 0.0497,
+              "调高或增大": 0.0004,
+              "调低或减小": 0.0005,
+              "设为指定的数值或模式": 0.0005,
+              "重新理解": 0.9485
+            },
+            "confidence": 0.8811,
+            "answer_confidence": 0.9485,
+            "action": {
+              "act_probability": 1.0
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 193,
+          "output_tokens": 0
+        },
+        "truncated": [],
+        "backend": "rknn",
+        "timing_ms": {
+          "forward": 275.4,
+          "total": 276.3
+        }
+      },
+      "npu": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "重新理解",
+              "probabilities": {
+                "打开或启动": 0.0004,
+                "关闭或停止": 0.0497,
+                "调高或增大": 0.0004,
+                "调低或减小": 0.0005,
+                "设为指定的数值或模式": 0.0005,
+                "重新理解": 0.9485
+              },
+              "confidence": 0.8811,
+              "answer_confidence": 0.9485,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 193,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "rknn",
+          "timing_ms": {
+            "forward": 315.5,
+            "total": 316.7
+          }
+        },
+        "ms": 320.89
+      },
+      "torch": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "follow": {
+              "type": "choice",
+              "choice": "重新理解",
+              "probabilities": {
+                "打开或启动": 0.0004,
+                "关闭或停止": 0.0487,
+                "调高或增大": 0.0004,
+                "调低或减小": 0.0005,
+                "设为指定的数值或模式": 0.0005,
+                "重新理解": 0.9495
+              },
+              "confidence": 0.8827,
+              "answer_confidence": 0.9495,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 193,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "torch",
+          "timing_ms": {
+            "forward": 56.4,
+            "total": 57.5
+          }
+        },
+        "ms": 60.1
+      },
+      "choices_match": true
+    },
+    {
+      "case": "direct_single_再关闭电视",
+      "request": {
+        "state": {
+          "utterance": "再关闭电视"
+        },
+        "questions": {
+          "intent": {
+            "type": "choice",
+            "instructions": "`utterance` 是在让智能家居做什么？",
+            "criteria": {
+              "控制": "要求改变家里设备的状态：打开、关闭、调节、设定、启动、暂停、上锁",
+              "查询": "询问家里设备的状态或读数，不改变任何设备",
+              "无关": "与控制或查询家里的设备无关：闲聊、常识、陈述、购物"
+            }
+          },
+          "device": {
+            "type": "choice",
+            "instructions": "`utterance` 说的是家里的哪台设备？",
+            "criteria": {
+              "客厅主灯": "客厅·灯",
+              "主卧灯": "主卧·灯",
+              "床头灯": "主卧·灯",
+              "客厅空调": "客厅·空调",
+              "主卧空调": "主卧·空调",
+              "客厅窗帘": "客厅·窗帘",
+              "空气净化器": "客厅·风扇/净化/加湿",
+              "加湿器": "主卧·风扇/净化/加湿",
+              "电视": "客厅·影音",
+              "智能音箱": "客厅·影音",
+              "扫地机器人": "全屋·家电",
+              "洗衣机": "阳台·家电",
+              "电动晾衣架": "阳台·窗帘",
+              "电饭煲": "厨房·家电",
+              "热水器": "卫生间·热水器",
+              "智能门锁": "玄关·门锁",
+              "摄像头": "玄关·摄像头",
+              "温湿度计": "客厅·传感器",
+              "多个设备或整屋": "同时涉及多台设备，或整屋的场景模式",
+              "没有对应的设备": "家里没有能满足这个要求的设备"
+            }
+          },
+          "action": {
+            "type": "choice",
+            "instructions": "`utterance` 要对设备做什么操作？",
+            "criteria": {
+              "打开或启动": "开启、启动、开始运行",
+              "关闭或停止": "关掉、停止、断电、收起",
+              "调高或增大": "调亮、升温、调大音量或档位",
+              "调低或减小": "调暗、降温、调小、降下",
+              "设为指定的数值或模式": "设到具体的温度、档位、百分比或模式",
+              "暂停": "暂时停下，之后再继续",
+              "上锁": "锁门、上锁"
+            }
+          }
+        }
+      },
+      "npu": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "intent": {
+              "type": "choice",
+              "choice": "控制",
+              "probabilities": {
+                "控制": 0.9923,
+                "查询": 0.0036,
+                "无关": 0.0041
+              },
+              "confidence": 0.954,
+              "answer_confidence": 0.9923,
+              "action": {
+                "act_probability": 1.0
+              }
+            },
+            "device": {
+              "type": "choice",
+              "choice": "电视",
+              "probabilities": {
+                "客厅主灯": 0.0013,
+                "主卧灯": 0.001,
+                "床头灯": 0.0007,
+                "客厅空调": 0.0006,
+                "主卧空调": 0.0005,
+                "客厅窗帘": 0.0006,
+                "空气净化器": 0.0006,
+                "加湿器": 0.0006,
+                "电视": 0.9733,
+                "智能音箱": 0.0014,
+                "扫地机器人": 0.0008,
+                "洗衣机": 0.0006,
+                "电动晾衣架": 0.0006,
+                "电饭煲": 0.0006,
+                "热水器": 0.0005,
+                "智能门锁": 0.0005,
+                "摄像头": 0.0005,
+                "温湿度计": 0.0006,
+                "多个设备或整屋": 0.0026,
+                "没有对应的设备": 0.0122
+              },
+              "confidence": 0.9395,
+              "answer_confidence": 0.9733,
+              "action": {
+                "act_probability": 1.0
+              }
+            },
+            "action": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.0014,
+                "关闭或停止": 0.9911,
+                "调高或增大": 0.0016,
+                "调低或减小": 0.002,
+                "设为指定的数值或模式": 0.0017,
+                "暂停": 0.0012,
+                "上锁": 0.001
+              },
+              "confidence": 0.9656,
+              "answer_confidence": 0.9911,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 460,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "rknn",
+          "timing_ms": {
+            "forward": 438.6,
+            "total": 440.2
+          }
+        },
+        "ms": 443.76
+      },
+      "torch": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "intent": {
+              "type": "choice",
+              "choice": "控制",
+              "probabilities": {
+                "控制": 0.9923,
+                "查询": 0.0036,
+                "无关": 0.0041
+              },
+              "confidence": 0.9541,
+              "answer_confidence": 0.9923,
+              "action": {
+                "act_probability": 1.0
+              }
+            },
+            "device": {
+              "type": "choice",
+              "choice": "电视",
+              "probabilities": {
+                "客厅主灯": 0.0014,
+                "主卧灯": 0.001,
+                "床头灯": 0.0007,
+                "客厅空调": 0.0006,
+                "主卧空调": 0.0005,
+                "客厅窗帘": 0.0006,
+                "空气净化器": 0.0006,
+                "加湿器": 0.0006,
+                "电视": 0.9737,
+                "智能音箱": 0.0015,
+                "扫地机器人": 0.0008,
+                "洗衣机": 0.0006,
+                "电动晾衣架": 0.0006,
+                "电饭煲": 0.0006,
+                "热水器": 0.0005,
+                "智能门锁": 0.0005,
+                "摄像头": 0.0005,
+                "温湿度计": 0.0006,
+                "多个设备或整屋": 0.0027,
+                "没有对应的设备": 0.0117
+              },
+              "confidence": 0.94,
+              "answer_confidence": 0.9737,
+              "action": {
+                "act_probability": 1.0
+              }
+            },
+            "action": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.0014,
+                "关闭或停止": 0.9911,
+                "调高或增大": 0.0017,
+                "调低或减小": 0.0019,
+                "设为指定的数值或模式": 0.0017,
+                "暂停": 0.0012,
+                "上锁": 0.001
+              },
+              "confidence": 0.9659,
+              "answer_confidence": 0.9911,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 460,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "torch",
+          "timing_ms": {
+            "forward": 104.6,
+            "total": 105.8
+          }
+        },
+        "ms": 107.26
+      },
+      "choices_match": true
+    },
+    {
+      "case": "direct_single_关掉音箱",
+      "request": {
+        "state": {
+          "utterance": "关掉音箱"
+        },
+        "questions": {
+          "intent": {
+            "type": "choice",
+            "instructions": "`utterance` 是在让智能家居做什么？",
+            "criteria": {
+              "控制": "要求改变家里设备的状态：打开、关闭、调节、设定、启动、暂停、上锁",
+              "查询": "询问家里设备的状态或读数，不改变任何设备",
+              "无关": "与控制或查询家里的设备无关：闲聊、常识、陈述、购物"
+            }
+          },
+          "device": {
+            "type": "choice",
+            "instructions": "`utterance` 说的是家里的哪台设备？",
+            "criteria": {
+              "客厅主灯": "客厅·灯",
+              "主卧灯": "主卧·灯",
+              "床头灯": "主卧·灯",
+              "客厅空调": "客厅·空调",
+              "主卧空调": "主卧·空调",
+              "客厅窗帘": "客厅·窗帘",
+              "空气净化器": "客厅·风扇/净化/加湿",
+              "加湿器": "主卧·风扇/净化/加湿",
+              "电视": "客厅·影音",
+              "智能音箱": "客厅·影音",
+              "扫地机器人": "全屋·家电",
+              "洗衣机": "阳台·家电",
+              "电动晾衣架": "阳台·窗帘",
+              "电饭煲": "厨房·家电",
+              "热水器": "卫生间·热水器",
+              "智能门锁": "玄关·门锁",
+              "摄像头": "玄关·摄像头",
+              "温湿度计": "客厅·传感器",
+              "多个设备或整屋": "同时涉及多台设备，或整屋的场景模式",
+              "没有对应的设备": "家里没有能满足这个要求的设备"
+            }
+          },
+          "action": {
+            "type": "choice",
+            "instructions": "`utterance` 要对设备做什么操作？",
+            "criteria": {
+              "打开或启动": "开启、启动、开始运行",
+              "关闭或停止": "关掉、停止、断电、收起",
+              "调高或增大": "调亮、升温、调大音量或档位",
+              "调低或减小": "调暗、降温、调小、降下",
+              "设为指定的数值或模式": "设到具体的温度、档位、百分比或模式",
+              "暂停": "暂时停下，之后再继续",
+              "上锁": "锁门、上锁"
+            }
+          }
+        }
+      },
+      "npu": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "intent": {
+              "type": "choice",
+              "choice": "控制",
+              "probabilities": {
+                "控制": 0.9918,
+                "查询": 0.0037,
+                "无关": 0.0045
+              },
+              "confidence": 0.9517,
+              "answer_confidence": 0.9918,
+              "action": {
+                "act_probability": 1.0
+              }
+            },
+            "device": {
+              "type": "choice",
+              "choice": "智能音箱",
+              "probabilities": {
+                "客厅主灯": 0.0012,
+                "主卧灯": 0.001,
+                "床头灯": 0.001,
+                "客厅空调": 0.0006,
+                "主卧空调": 0.0005,
+                "客厅窗帘": 0.0005,
+                "空气净化器": 0.0007,
+                "加湿器": 0.0007,
+                "电视": 0.025,
+                "智能音箱": 0.9601,
+                "扫地机器人": 0.0012,
+                "洗衣机": 0.0006,
+                "电动晾衣架": 0.0006,
+                "电饭煲": 0.0006,
+                "热水器": 0.0006,
+                "智能门锁": 0.0006,
+                "摄像头": 0.0006,
+                "温湿度计": 0.0006,
+                "多个设备或整屋": 0.0007,
+                "没有对应的设备": 0.0025
+              },
+              "confidence": 0.9215,
+              "answer_confidence": 0.9601,
+              "action": {
+                "act_probability": 1.0
+              }
+            },
+            "action": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.0012,
+                "关闭或停止": 0.9922,
+                "调高或增大": 0.0014,
+                "调低或减小": 0.0017,
+                "设为指定的数值或模式": 0.0015,
+                "暂停": 0.001,
+                "上锁": 0.001
+              },
+              "confidence": 0.9695,
+              "answer_confidence": 0.9922,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 463,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "rknn",
+          "timing_ms": {
+            "forward": 477.9,
+            "total": 479.9
+          }
+        },
+        "ms": 484.35
+      },
+      "torch": {
+        "response": {
+          "contract_version": "eidolon.models.laya.systemone.v1",
+          "revision": "7b695ba8",
+          "model": "laya-smart-home",
+          "answers": {
+            "intent": {
+              "type": "choice",
+              "choice": "控制",
+              "probabilities": {
+                "控制": 0.9918,
+                "查询": 0.0037,
+                "无关": 0.0044
+              },
+              "confidence": 0.9518,
+              "answer_confidence": 0.9918,
+              "action": {
+                "act_probability": 1.0
+              }
+            },
+            "device": {
+              "type": "choice",
+              "choice": "智能音箱",
+              "probabilities": {
+                "客厅主灯": 0.0012,
+                "主卧灯": 0.001,
+                "床头灯": 0.001,
+                "客厅空调": 0.0006,
+                "主卧空调": 0.0005,
+                "客厅窗帘": 0.0005,
+                "空气净化器": 0.0007,
+                "加湿器": 0.0006,
+                "电视": 0.0249,
+                "智能音箱": 0.9604,
+                "扫地机器人": 0.0012,
+                "洗衣机": 0.0006,
+                "电动晾衣架": 0.0006,
+                "电饭煲": 0.0006,
+                "热水器": 0.0006,
+                "智能门锁": 0.0006,
+                "摄像头": 0.0006,
+                "温湿度计": 0.0006,
+                "多个设备或整屋": 0.0007,
+                "没有对应的设备": 0.0024
+              },
+              "confidence": 0.9219,
+              "answer_confidence": 0.9604,
+              "action": {
+                "act_probability": 1.0
+              }
+            },
+            "action": {
+              "type": "choice",
+              "choice": "关闭或停止",
+              "probabilities": {
+                "打开或启动": 0.0012,
+                "关闭或停止": 0.9923,
+                "调高或增大": 0.0014,
+                "调低或减小": 0.0016,
+                "设为指定的数值或模式": 0.0014,
+                "暂停": 0.001,
+                "上锁": 0.001
+              },
+              "confidence": 0.9699,
+              "answer_confidence": 0.9923,
+              "action": {
+                "act_probability": 1.0
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 463,
+            "output_tokens": 0
+          },
+          "truncated": [],
+          "backend": "torch",
+          "timing_ms": {
+            "forward": 85.4,
+            "total": 86.1
+          }
+        },
+        "ms": 87.37
+      },
+      "choices_match": true
+    }
+  ],
+  "note": "Original live utterance outputs are not reconstructed; these are synthetic repeated requests."
+}

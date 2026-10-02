@@ -19,6 +19,7 @@ from eidolon_sdk.biz.smarthome import (
     ERROR_UNKNOWN_DEVICE,
     ERROR_UNKNOWN_SCENE,
     ERROR_UNSUPPORTED_COMMAND,
+    TRAIT_COMMANDS,
     Command,
     Device,
     StateValue,
@@ -62,6 +63,25 @@ def not_found(mention: str | None) -> str:
 
 def choose_one(candidate_names: Sequence[str]) -> str:
     return clip(f"{names(candidate_names)}，要哪一个？")
+
+
+def value_question(name: str, kind: str, action: Action) -> str:
+    """Explain the rejected numeric parameter using the same SDK limits."""
+    params = TRAIT_COMMANDS.get(action.trait, {}).get(action.command, {})
+    for slot in action.slots:
+        spec = params.get(slot.name)
+        if spec is None or not isinstance(slot.value, int | float):
+            continue
+        _, low, high = spec
+        unit = ""
+        if (action.trait, action.command, slot.name) == ("thermostat", "set_target", "celsius"):
+            limits = DEVICE_TYPES[kind].target_c
+            if limits is not None:
+                low, high = limits
+                unit = "°C"
+        if low is not None and high is not None and not low <= slot.value <= high:
+            return clip(f"{name}只能设在 {_num(low)}–{_num(high)}{unit}，要设为多少？")
+    return clip(f"{name}不支持这个数值，请换一个数值")
 
 
 # --- state ------------------------------------------------------------------------

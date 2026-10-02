@@ -129,6 +129,9 @@ def read(request: InterpretationRequest, *, require_complete: bool = False) -> P
     text, quantified = take(text, dict.fromkeys(QUANTIFIERS))
     text, area_hits = take(text, {normalize(a.name): a for a in request.areas})
     text, rooms = take(text, dict.fromkeys(ROOM_WORDS))
+    # Quantity spans can include the setting verb (音量设为30). Remember it
+    # before blanking values so a preceding 打开 is not mistaken for one action.
+    explicit_verbs = {hit.value for hit in take(text, VERBS)[1]}
     text, values = read_values(text)
     text, queries = take_pattern(text, QUERY)
     asked = bool(queries) or QUERY_TAIL.search(text) is not None
@@ -166,7 +169,7 @@ def read(request: InterpretationRequest, *, require_complete: bool = False) -> P
 
     if negated:
         return "negation" if mentioned or commanded else _UNRELATED
-    if len(verbs) > 1:
+    if len(verbs | explicit_verbs) > 1:
         return "multiple_commands"
     if rooms:
         return "unknown_area"
@@ -227,6 +230,35 @@ def _spans_table(devices: tuple[Candidate, ...]) -> dict[str, tuple[str, object]
     for phrase, word in DEVICE_WORDS.items():
         table.setdefault(phrase, ("word", word))
     return table
+
+
+def has_explicit_reference(request: InterpretationRequest, *, include_areas: bool = True) -> bool:
+    """Whether the utterance names a device, scene or area, even if not a command.
+
+    This is only evidence against blindly inheriting a focus, never permission
+    to act. Reuse the rules reader's longest-match vocabulary, including Owner
+    aliases and noise such as 电视剧; do not interpret negation or corrections here.
+    """
+    devices = tuple(c for c in request.candidates if c.kind != SCENE_KIND)
+    scenes = tuple(c for c in request.candidates if c.kind == SCENE_KIND)
+    text, scene_hits = _take_scenes(normalize(request.utterance), scenes)
+    text, spans = take(text, _spans_table(devices))
+    if scene_hits or any(h.value[0] != "noise" for h in spans):
+        return True
+    if not include_areas:
+        return False
+    text, areas = take(text, {normalize(a.name): a for a in request.areas})
+    _, rooms = take(text, dict.fromkeys(ROOM_WORDS))
+    return bool(areas or rooms)
+
+
+def exact_named_target(request: InterpretationRequest) -> Candidate | None:
+    """One complete, unique Owner name/alias, without any other words or verbs."""
+    devices = tuple(c for c in request.candidates if c.kind != SCENE_KIND)
+    found = _spans_table(devices).get(normalize(request.utterance))
+    if found is not None and found[0] == "name" and len(found[1]) == 1:
+        return found[1][0]
+    return None
 
 
 def _take_scenes(text: str, scenes: tuple[Candidate, ...]) -> tuple[str, list[Hit[Candidate]]]:

@@ -1,0 +1,44 @@
+{
+  "home_tests": {
+    "command": "PYTHONPATH=/private/tmp/eidolon-home-sdk-c375645 .venv/bin/pytest -q eidolon_agent/domain/smarthome/tests eidolon_agent/infra/smarthome/tests eidolon_agent/infra/interpretation/tests/unit eidolon_agent/app/smarthome/tests",
+    "passed": 390,
+    "failed": 0,
+    "sdk_commit": "c3756456d198719987baee240f6a2753206a08da"
+  },
+  "ruff_changed_files": "passed",
+  "git_diff_check": "passed",
+  "import_linter": {
+    "kept": 4,
+    "broken": 0
+  },
+  "architecture_test": {
+    "command": ".venv/bin/pytest -q eidolon_agent/app/smarthome tests/test_architecture.py",
+    "passed": 21,
+    "failed": 1,
+    "failure": "test_no_cross_layer_deep_imports",
+    "preexisting_at_base": "c22ddd1",
+    "preexisting_imports": [
+      [
+        "app.smarthome.application",
+        "infra.smarthome.laya_continuation"
+      ],
+      [
+        "app.admin.app",
+        "infra.participation.llm"
+      ],
+      [
+        "infra.smarthome.laya_continuation",
+        "domain.smarthome.context"
+      ],
+      [
+        "infra.smarthome.llm_fallback",
+        "domain.smarthome.context"
+      ],
+      [
+        "infra.smarthome.hub",
+        "domain.smarthome.errors"
+      ]
+    ]
+  },
+  "candidate": "v7"
+}

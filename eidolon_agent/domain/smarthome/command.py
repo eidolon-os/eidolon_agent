@@ -29,6 +29,7 @@ from eidolon_sdk.biz.interpretation import (
     validate_proposal,
 )
 from eidolon_sdk.biz.smarthome import (
+    ERROR_OUT_OF_RANGE,
     SCENE_KIND,
     Command,
     CommandTemplate,
@@ -61,6 +62,7 @@ from eidolon_agent.domain.smarthome.messages import (
     failure,
     not_found,
     summarize,
+    value_question,
 )
 from eidolon_agent.domain.smarthome.planning import (
     CommandPlan,
@@ -258,6 +260,18 @@ class SmartHomeCommand:
             plan = plan_action(home.registry, proposal.targets, proposal.action)
         except SmartHomeError:
             return card("failed", NOT_UNDERSTOOD)
+        rejected = next((target for target in plan.targets if target.rejected), None)
+        if rejected is not None and (len(plan.targets) > 1 or rejected.rejected == ERROR_OUT_OF_RANGE):
+            # A malformed shared action must not become a partially executed
+            # request. Provider failures after a valid plan remain partial receipts.
+            question = (
+                value_question(rejected.name, rejected.kind, proposal.action)
+                if rejected.rejected == ERROR_OUT_OF_RANGE
+                else "这些设备不能执行同一个操作，请分别说明每台设备要做什么"
+            )
+            clarification = HomeClarification(question, proposal.targets)
+            context.remember(heard, None, question=question, clarification=clarification)
+            return card("clarification", question)
         if not is_current():
             return card("unavailable", "本轮已被新的输入替代或会话已结束")
         result = await self._run(card, owner_id, device_ref, plan)
@@ -274,7 +288,18 @@ class SmartHomeCommand:
 
     async def _understand(self, request: InterpretationRequest, *, context: dict | None = None,
                           context_deadline: float = float("inf")) -> HomeUnderstanding:
-        if context is not None and self._continuation is not None:
+        independent: Proposal | None = None
+        if self._independent_interpreter is not None:
+            # A complete command is independent even while another request is
+            # pending. Preserve that context for fallback if the primary disagrees.
+            witness_request = request.model_copy(update={"origin": Origin()})
+            witness = await self._independent_interpreter.interpret(witness_request)
+            independent = _accepted(witness_request, witness)
+            if independent is not None and (
+                independent.intent == "unrelated" or independent.target_status != "resolved"
+            ):
+                independent = None
+        if independent is None and context is not None and self._continuation is not None:
             started = time.monotonic()
             suggested = None
             try:
@@ -300,22 +325,11 @@ class SmartHomeCommand:
                 _log.info("home interpretation turn=%s route=llm reason=continuation_not_accepted", request.interpretation_id)
                 return await self._fallback_proposal(request, context=context)
             return None
-        independent: Proposal | None = None
-        if self._fallback is not None and (context is not None or self._independent_interpreter is not None):
-            if self._independent_interpreter is not None:
-                # Require explicit grounding without the speaker's room filling
-                # an omitted target. No history is deleted to manufacture this.
-                witness_request = request.model_copy(update={"origin": Origin()})
-                witness = await self._independent_interpreter.interpret(witness_request)
-                independent = _accepted(witness_request, witness)
-                if independent is not None and (
-                    independent.intent == "unrelated" or independent.target_status != "resolved"
-                ):
-                    independent = None
-            if independent is None:
-                _log.info("home interpretation turn=%s route=llm reason=%s", request.interpretation_id,
-                          "context_required" if context is not None else "semantic_required")
-                return await self._fallback_proposal(request, context=context)
+        if (self._fallback is not None and independent is None
+                and (context is not None or self._independent_interpreter is not None)):
+            _log.info("home interpretation turn=%s route=llm reason=%s", request.interpretation_id,
+                      "context_required" if context is not None else "semantic_required")
+            return await self._fallback_proposal(request, context=context)
         proposal: Proposal | None = None
         try:
             result = await self._interpreter.interpret(request)

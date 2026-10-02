@@ -1,0 +1,238 @@
+{
+  "batches": {
+    "baseline": {
+      "passed": 34,
+      "total": 42,
+      "turns": 99,
+      "laya_requests": 70,
+      "llm_requests": 57
+    },
+    "repeats": {
+      "passed": 2,
+      "total": 16,
+      "turns": 38,
+      "laya_requests": 28,
+      "llm_requests": 22
+    },
+    "probes": {
+      "passed": 4,
+      "total": 8,
+      "turns": 14,
+      "laya_requests": 13,
+      "llm_requests": 3
+    }
+  },
+  "baseline_latency_ms": {
+    "without_llm": {
+      "n": 42,
+      "median": 319.36,
+      "sample_p95_nearest_rank": 468.0,
+      "max": 487.03
+    },
+    "with_llm": {
+      "n": 57,
+      "median": 1520.72,
+      "sample_p95_nearest_rank": 2107.38,
+      "max": 2958.97
+    }
+  },
+  "confirmed_switch_errors": [
+    {
+      "case": "explicit_switch_back",
+      "utterance": "再关闭电视",
+      "focus": [
+        "智能音箱"
+      ],
+      "npu_choice": "关闭或停止",
+      "npu_probability": 0.9914,
+      "torch_choice": "关闭或停止",
+      "torch_probability": 0.9915,
+      "expected_choice": "重新理解",
+      "reason": "明确换到焦点之外的设备，按 continuation-laya-v1 follow 金标应为重新理解"
+    },
+    {
+      "case": "alias_switch",
+      "utterance": "关掉音箱",
+      "focus": [
+        "床头灯"
+      ],
+      "npu_choice": "关闭或停止",
+      "npu_probability": 0.9908,
+      "torch_choice": "关闭或停止",
+      "torch_probability": 0.9909,
+      "expected_choice": "重新理解",
+      "reason": "明确换到焦点之外的设备，按 continuation-laya-v1 follow 金标应为重新理解"
+    },
+    {
+      "case": "tv_plain",
+      "utterance": "关闭电视",
+      "focus": [
+        "智能音箱"
+      ],
+      "npu_choice": "关闭或停止",
+      "npu_probability": 0.9742,
+      "torch_choice": "关闭或停止",
+      "torch_probability": 0.9747,
+      "expected_choice": "重新理解",
+      "reason": "明确换到焦点之外的设备，按 continuation-laya-v1 follow 金标应为重新理解"
+    },
+    {
+      "case": "tv_object_first",
+      "utterance": "电视关掉",
+      "focus": [
+        "智能音箱"
+      ],
+      "npu_choice": "关闭或停止",
+      "npu_probability": 0.9733,
+      "torch_choice": "关闭或停止",
+      "torch_probability": 0.9747,
+      "expected_choice": "重新理解",
+      "reason": "明确换到焦点之外的设备，按 continuation-laya-v1 follow 金标应为重新理解"
+    },
+    {
+      "case": "speaker_plain",
+      "utterance": "关闭音箱",
+      "focus": [
+        "床头灯"
+      ],
+      "npu_choice": "关闭或停止",
+      "npu_probability": 0.9832,
+      "torch_choice": "关闭或停止",
+      "torch_probability": 0.9833,
+      "expected_choice": "重新理解",
+      "reason": "明确换到焦点之外的设备，按 continuation-laya-v1 follow 金标应为重新理解"
+    },
+    {
+      "case": "speaker_object_first",
+      "utterance": "音箱关掉",
+      "focus": [
+        "床头灯"
+      ],
+      "npu_choice": "关闭或停止",
+      "npu_probability": 0.9688,
+      "torch_choice": "关闭或停止",
+      "torch_probability": 0.9694,
+      "expected_choice": "重新理解",
+      "reason": "明确换到焦点之外的设备，按 continuation-laya-v1 follow 金标应为重新理解"
+    }
+  ],
+  "backend_comparison": {
+    "requests": 12,
+    "choices_match": 12,
+    "note": "12 identical requests, including six definite target-switch negatives; no physical execution"
+  },
+  "repeated_cases": {
+    "explicit_switch_back": [
+      {
+        "batch": "baseline",
+        "passed": false
+      },
+      {
+        "batch": "run2",
+        "passed": false
+      },
+      {
+        "batch": "run3",
+        "passed": false
+      }
+    ],
+    "alias_switch": [
+      {
+        "batch": "baseline",
+        "passed": false
+      },
+      {
+        "batch": "run2",
+        "passed": false
+      },
+      {
+        "batch": "run3",
+        "passed": false
+      }
+    ],
+    "room_action_inheritance": [
+      {
+        "batch": "baseline",
+        "passed": false
+      },
+      {
+        "batch": "run2",
+        "passed": true
+      },
+      {
+        "batch": "run3",
+        "passed": true
+      }
+    ],
+    "exclude_then_choose": [
+      {
+        "batch": "baseline",
+        "passed": false
+      },
+      {
+        "batch": "run2",
+        "passed": false
+      },
+      {
+        "batch": "run3",
+        "passed": false
+      }
+    ],
+    "cancel_new_nonhome": [
+      {
+        "batch": "baseline",
+        "passed": false
+      },
+      {
+        "batch": "run2",
+        "passed": false
+      },
+      {
+        "batch": "run3",
+        "passed": false
+      }
+    ],
+    "multi_singular_ambiguous": [
+      {
+        "batch": "baseline",
+        "passed": false
+      },
+      {
+        "batch": "run2",
+        "passed": false
+      },
+      {
+        "batch": "run3",
+        "passed": false
+      }
+    ],
+    "different_actions_one_turn": [
+      {
+        "batch": "baseline",
+        "passed": false
+      },
+      {
+        "batch": "run2",
+        "passed": false
+      },
+      {
+        "batch": "run3",
+        "passed": false
+      }
+    ],
+    "out_of_range": [
+      {
+        "batch": "baseline",
+        "passed": false
+      },
+      {
+        "batch": "run2",
+        "passed": false
+      },
+      {
+        "batch": "run3",
+        "passed": false
+      }
+    ]
+  }
+}

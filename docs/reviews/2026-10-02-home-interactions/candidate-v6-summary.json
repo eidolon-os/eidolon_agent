@@ -1,0 +1,178 @@
+{
+  "candidate": "v6",
+  "execution": "virtual only",
+  "batches": {
+    "cases": {
+      "original_expectations_passed": 41,
+      "total": 42,
+      "original_expectations_failures": [
+        "different_actions_one_turn"
+      ],
+      "declared_scope_passed": 42,
+      "declared_scope_failures": [],
+      "turns": 99,
+      "laya_calls": 53,
+      "llm_calls": 57,
+      "actual_model_revisions": [
+        "7b695ba8"
+      ],
+      "actual_backends": [
+        "rknn"
+      ]
+    },
+    "repeat-cases": {
+      "original_expectations_passed": 14,
+      "total": 16,
+      "original_expectations_failures": [
+        "different_actions_one_turn_run2",
+        "different_actions_one_turn_run3"
+      ],
+      "declared_scope_passed": 16,
+      "declared_scope_failures": [],
+      "turns": 38,
+      "laya_calls": 18,
+      "llm_calls": 26,
+      "actual_model_revisions": [
+        "7b695ba8"
+      ],
+      "actual_backends": [
+        "rknn"
+      ]
+    },
+    "probe-cases": {
+      "original_expectations_passed": 8,
+      "total": 8,
+      "original_expectations_failures": [],
+      "declared_scope_passed": 8,
+      "declared_scope_failures": [],
+      "turns": 14,
+      "laya_calls": 11,
+      "llm_calls": 3,
+      "actual_model_revisions": [
+        "7b695ba8"
+      ],
+      "actual_backends": [
+        "rknn"
+      ]
+    },
+    "candidate-natural-cases": {
+      "original_expectations_passed": 17,
+      "total": 18,
+      "original_expectations_failures": [
+        "switch_area_inherit"
+      ],
+      "declared_scope_passed": 17,
+      "declared_scope_failures": [
+        "switch_area_inherit"
+      ],
+      "turns": 41,
+      "laya_calls": 18,
+      "llm_calls": 27,
+      "actual_model_revisions": [
+        "7b695ba8"
+      ],
+      "actual_backends": [
+        "rknn"
+      ]
+    }
+  },
+  "limitations": [
+    "Different actions in one utterance are clarified, not executed; not full support for the original multi-action expectation.",
+    "Development/regression cases, not an independent statistical test set.",
+    "LLM semantics still needed; lexical consistency checks do not prove all language correct.",
+    "Mac/SSH/FakeExecutor latency is not Korvo end-to-end latency."
+  ],
+  "total_scenarios": 84,
+  "total_turns": 192,
+  "declared_scope_passed": 83,
+  "original_expectations_passed": 80,
+  "latency_ms": {
+    "without_llm": {
+      "n": 79,
+      "median": 411.97,
+      "sample_p95_nearest_rank": 468.49,
+      "max": 477.52
+    },
+    "with_llm": {
+      "n": 113,
+      "median": 1381.37,
+      "sample_p95_nearest_rank": 2095.95,
+      "max": 3274.12
+    }
+  },
+  "korvo_five_simulation": {
+    "baseline": [
+      {
+        "utterance": "打开电视",
+        "ms": 453.58,
+        "llm_required": false,
+        "laya_calls": 1
+      },
+      {
+        "utterance": "调大音量20%",
+        "ms": 279.27,
+        "llm_required": false,
+        "laya_calls": 1
+      },
+      {
+        "utterance": "关了它",
+        "ms": 263.78,
+        "llm_required": false,
+        "laya_calls": 1
+      },
+      {
+        "utterance": "开音箱",
+        "ms": 2958.97,
+        "llm_required": true,
+        "laya_calls": 1
+      },
+      {
+        "utterance": "关了它",
+        "ms": 292.98,
+        "llm_required": false,
+        "laya_calls": 1
+      }
+    ],
+    "candidate": [
+      {
+        "utterance": "打开电视",
+        "ms": 436.75,
+        "llm_required": false,
+        "laya_calls": 1
+      },
+      {
+        "utterance": "调大音量20%",
+        "ms": 263.98,
+        "llm_required": false,
+        "laya_calls": 1
+      },
+      {
+        "utterance": "关了它",
+        "ms": 281.91,
+        "llm_required": false,
+        "laya_calls": 1
+      },
+      {
+        "utterance": "开音箱",
+        "ms": 399.39,
+        "llm_required": false,
+        "laya_calls": 1
+      },
+      {
+        "utterance": "关了它",
+        "ms": 263.04,
+        "llm_required": false,
+        "laya_calls": 1
+      }
+    ]
+  },
+  "original_artifacts_unchanged": true,
+  "candidate_sources_unchanged_during_final_run": true,
+  "artifact_sha256": {
+    "candidate-v6-probe-cases.json": "1c62c02c2f708a6a7a4cc4652a0caa452f51f24ce9cdc553241f6dde86b1b3cc",
+    "candidate-v6-cases.json": "c9b2ff77e87b8440932e92b0c3c4f124a4dd1c508c8bce92769250381de93324",
+    "candidate-v6-provenance.json": "15c8aea716b40c1e3b6d6989da8285ae23a877908984eddfa69ad2cec208ac1b",
+    "candidate-v6-candidate-natural-cases.json": "8dd075861120d09d3c5f6a037429f7ecfc406d06eaf22b86131cbe605ef0b4e6",
+    "candidate-v6-repeat-cases.json": "fc4037af7615baee252230849803a78cb7b5dd8622203eb5302a690e68dcdd56"
+  }
+}

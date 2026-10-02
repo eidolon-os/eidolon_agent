@@ -1,0 +1,2113 @@
+[
+  {
+    "case": "korvo_five",
+    "turn": 0,
+    "utterance": "打开电视",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-korvo_five-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.tv"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "korvo_five",
+    "turn": 1,
+    "utterance": "调大音量20%",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-korvo_five-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "korvo_five",
+    "turn": 2,
+    "utterance": "关了它",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-korvo_five-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "korvo_five",
+    "turn": 3,
+    "utterance": "开音箱",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-korvo_five-3",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.speaker"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "korvo_five",
+    "turn": 4,
+    "utterance": "关了它",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-korvo_five-4",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "speaker_without_context",
+    "turn": 0,
+    "utterance": "开音箱",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-speaker_without_context-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.speaker"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "explicit_switch_back",
+    "turn": 0,
+    "utterance": "打开电视",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-explicit_switch_back-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.tv"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "explicit_switch_back",
+    "turn": 1,
+    "utterance": "把音箱打开",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-explicit_switch_back-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "explicit_switch_back",
+    "turn": 2,
+    "utterance": "再关闭电视",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-explicit_switch_back-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "explicit_switch_back",
+    "turn": 3,
+    "utterance": "把它打开",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-explicit_switch_back-3",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "switch_type",
+    "turn": 0,
+    "utterance": "打开客厅空调",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-switch_type-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.ac"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "switch_type",
+    "turn": 1,
+    "utterance": "把客厅窗帘拉开",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-switch_type-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "switch_type",
+    "turn": 2,
+    "utterance": "再关上它",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-switch_type-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "alias_switch",
+    "turn": 0,
+    "utterance": "打开电视",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-alias_switch-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.tv"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "alias_switch",
+    "turn": 1,
+    "utterance": "打开台灯",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-alias_switch-1",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "master.bedside"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "alias_switch",
+    "turn": 2,
+    "utterance": "关掉音箱",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-alias_switch-2",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.speaker"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "off",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "room_action_inheritance",
+    "turn": 0,
+    "utterance": "打开客厅空调",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-room_action_inheritance-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.ac"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "room_action_inheritance",
+    "turn": 1,
+    "utterance": "主卧的也打开",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-room_action_inheritance-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "room_action_inheritance",
+    "turn": 2,
+    "utterance": "再高两度",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-room_action_inheritance-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "room_ambiguous_then_pick",
+    "turn": 0,
+    "utterance": "打开客厅主灯",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-room_ambiguous_then_pick-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.main_light"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "room_ambiguous_then_pick",
+    "turn": 1,
+    "utterance": "卧室的也关掉",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-room_ambiguous_then_pick-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "room_ambiguous_then_pick",
+    "turn": 2,
+    "utterance": "床头灯",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-room_ambiguous_then_pick-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "no_command"
+      }
+    }
+  },
+  {
+    "case": "correct_object",
+    "turn": 0,
+    "utterance": "打开电视",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-correct_object-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.tv"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "correct_object",
+    "turn": 1,
+    "utterance": "不是电视，打开音箱",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-correct_object-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "correct_object",
+    "turn": 2,
+    "utterance": "关了它",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-correct_object-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "pending_new_device",
+    "turn": 0,
+    "utterance": "打开空调",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-pending_new_device-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "ambiguous",
+        "targets": [
+          "living.ac",
+          "master.ac"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "pending_new_device",
+    "turn": 1,
+    "utterance": "不选空调了，打开音箱",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-pending_new_device-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "pending_new_device",
+    "turn": 2,
+    "utterance": "调到30%",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-pending_new_device-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "no_explicit_target"
+      }
+    }
+  },
+  {
+    "case": "pick_ordinal",
+    "turn": 0,
+    "utterance": "打开空调",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-pick_ordinal-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "ambiguous",
+        "targets": [
+          "living.ac",
+          "master.ac"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "pick_ordinal",
+    "turn": 1,
+    "utterance": "第二个",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-pick_ordinal-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "pick_ordinal",
+    "turn": 2,
+    "utterance": "关了它",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-pick_ordinal-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "repeat_pending",
+    "turn": 0,
+    "utterance": "打开空调",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-repeat_pending-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "ambiguous",
+        "targets": [
+          "living.ac",
+          "master.ac"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "repeat_pending",
+    "turn": 1,
+    "utterance": "空调打开",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-repeat_pending-1",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "ambiguous",
+        "targets": [
+          "living.ac",
+          "master.ac"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "repeat_pending",
+    "turn": 2,
+    "utterance": "主卧那个",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-repeat_pending-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "exclude_then_choose",
+    "turn": 0,
+    "utterance": "打开空调",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-exclude_then_choose-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "ambiguous",
+        "targets": [
+          "living.ac",
+          "master.ac"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "exclude_then_choose",
+    "turn": 1,
+    "utterance": "不是客厅的",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-exclude_then_choose-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "exclude_then_choose",
+    "turn": 2,
+    "utterance": "我要主卧的",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-exclude_then_choose-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "pick_change_action",
+    "turn": 0,
+    "utterance": "打开空调",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-pick_change_action-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "ambiguous",
+        "targets": [
+          "living.ac",
+          "master.ac"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "pick_change_action",
+    "turn": 1,
+    "utterance": "主卧的，不过改成关闭",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-pick_change_action-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "pick_change_value",
+    "turn": 0,
+    "utterance": "把空调设成26度",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-pick_change_value-0",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "pick_change_value",
+    "turn": 1,
+    "utterance": "主卧那台，改成24度",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-pick_change_value-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "cancel_new_request",
+    "turn": 0,
+    "utterance": "打开空调",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-cancel_new_request-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "ambiguous",
+        "targets": [
+          "living.ac",
+          "master.ac"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "cancel_new_request",
+    "turn": 1,
+    "utterance": "算了，帮我打开客厅窗帘",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-cancel_new_request-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "cancel_then_pronoun",
+    "turn": 0,
+    "utterance": "打开空调",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-cancel_then_pronoun-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "ambiguous",
+        "targets": [
+          "living.ac",
+          "master.ac"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "cancel_then_pronoun",
+    "turn": 1,
+    "utterance": "算了",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-cancel_then_pronoun-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "cancel_then_pronoun",
+    "turn": 2,
+    "utterance": "把它关了",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-cancel_then_pronoun-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "cancel_new_nonhome",
+    "turn": 0,
+    "utterance": "打开空调",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-cancel_new_nonhome-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "ambiguous",
+        "targets": [
+          "living.ac",
+          "master.ac"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "cancel_new_nonhome",
+    "turn": 1,
+    "utterance": "算了，给我讲个故事",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-cancel_new_nonhome-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "negated_follow",
+    "turn": 0,
+    "utterance": "打开电视",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-negated_follow-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.tv"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "negated_follow",
+    "turn": 1,
+    "utterance": "别把它关掉",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-negated_follow-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "negated_follow",
+    "turn": 2,
+    "utterance": "电视现在开着吗",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-negated_follow-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "negate_and_new",
+    "turn": 0,
+    "utterance": "打开电视",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-negate_and_new-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.tv"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "negate_and_new",
+    "turn": 1,
+    "utterance": "电视别动，把音箱打开",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-negate_and_new-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "reported_after_focus",
+    "turn": 0,
+    "utterance": "打开客厅主灯",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-reported_after_focus-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.main_light"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "reported_after_focus",
+    "turn": 1,
+    "utterance": "妈妈刚才说把客厅主灯关了，我只是转述一下",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-reported_after_focus-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "quote_then_authorize",
+    "turn": 0,
+    "utterance": "妈妈刚才说把客厅主灯关了，我只是转述一下",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-quote_then_authorize-0",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "quote_then_authorize",
+    "turn": 1,
+    "utterance": "现在请你把客厅主灯关掉",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-quote_then_authorize-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "hypothetical_after_focus",
+    "turn": 0,
+    "utterance": "打开电视",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-hypothetical_after_focus-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.tv"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "hypothetical_after_focus",
+    "turn": 1,
+    "utterance": "如果把电视关了，是不是就听不到声音了",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-hypothetical_after_focus-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "past_after_focus",
+    "turn": 0,
+    "utterance": "打开客厅窗帘",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-past_after_focus-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.curtain"
+        ],
+        "action": {
+          "trait": "position",
+          "command": "open",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "past_after_focus",
+    "turn": 1,
+    "utterance": "昨晚我把窗帘关上了，现在只是告诉你",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-past_after_focus-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "future_operation",
+    "turn": 0,
+    "utterance": "打开电视",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-future_operation-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.tv"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "future_operation",
+    "turn": 1,
+    "utterance": "十分钟后把电视关了",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-future_operation-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "missing_device",
+    "turn": 0,
+    "utterance": "打开电视",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-missing_device-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.tv"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "missing_device",
+    "turn": 1,
+    "utterance": "打开地下室的除湿机",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-missing_device-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "missing_action",
+    "turn": 0,
+    "utterance": "客厅空调",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-missing_action-0",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "no_command"
+      }
+    }
+  },
+  {
+    "case": "missing_action",
+    "turn": 1,
+    "utterance": "打开",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-missing_action-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "no_explicit_target"
+      }
+    }
+  },
+  {
+    "case": "missing_value",
+    "turn": 0,
+    "utterance": "把客厅空调温度设成",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-missing_value-0",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "missing_value",
+    "turn": 1,
+    "utterance": "24度",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-missing_value-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "no_explicit_target"
+      }
+    }
+  },
+  {
+    "case": "query_then_follow",
+    "turn": 0,
+    "utterance": "电视现在开着吗",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-query_then_follow-0",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "query_then_follow",
+    "turn": 1,
+    "utterance": "把它打开",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-query_then_follow-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "query_changes_focus",
+    "turn": 0,
+    "utterance": "打开电视",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-query_changes_focus-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.tv"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "query_changes_focus",
+    "turn": 1,
+    "utterance": "音箱现在开着吗",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-query_changes_focus-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "query_changes_focus",
+    "turn": 2,
+    "utterance": "把它打开",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-query_changes_focus-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "media_volume",
+    "turn": 0,
+    "utterance": "把电视音量调到50%",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-media_volume-0",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "media_volume",
+    "turn": 1,
+    "utterance": "调大音量20%",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-media_volume-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "media_volume",
+    "turn": 2,
+    "utterance": "再小10%",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-media_volume-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "media_mute",
+    "turn": 0,
+    "utterance": "打开电视",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-media_mute-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.tv"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "media_mute",
+    "turn": 1,
+    "utterance": "把它静音",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-media_mute-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "media_mute",
+    "turn": 2,
+    "utterance": "取消静音",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-media_mute-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "temperature_relative",
+    "turn": 0,
+    "utterance": "把主卧空调设成24度",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-temperature_relative-0",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "temperature_relative",
+    "turn": 1,
+    "utterance": "再高两度",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-temperature_relative-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "temperature_relative",
+    "turn": 2,
+    "utterance": "降一度",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-temperature_relative-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "same_action_multi",
+    "turn": 0,
+    "utterance": "打开客厅主灯和主卧灯",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-same_action_multi-0",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "same_action_multi",
+    "turn": 1,
+    "utterance": "把它们关掉",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-same_action_multi-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "multi_subset",
+    "turn": 0,
+    "utterance": "打开客厅主灯和主卧灯",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-multi_subset-0",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "multi_subset",
+    "turn": 1,
+    "utterance": "只关主卧灯，客厅的别动",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-multi_subset-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "multi_singular_ambiguous",
+    "turn": 0,
+    "utterance": "打开客厅主灯和主卧灯",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-multi_singular_ambiguous-0",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "multi_singular_ambiguous",
+    "turn": 1,
+    "utterance": "把它关掉",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-multi_singular_ambiguous-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "different_actions_one_turn",
+    "turn": 0,
+    "utterance": "打开电视，同时关上客厅窗帘",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-different_actions_one_turn-0",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "correction_same_utterance",
+    "turn": 0,
+    "utterance": "打开电视，不对，是打开音箱",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-correction_same_utterance-0",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "light_absolute_relative",
+    "turn": 0,
+    "utterance": "打开客厅主灯",
+    "has_context": false,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-light_absolute_relative-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.main_light"
+        ],
+        "action": {
+          "trait": "on_off",
+          "command": "on",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "light_absolute_relative",
+    "turn": 1,
+    "utterance": "调到50%",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-light_absolute_relative-1",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "no_explicit_target"
+      }
+    }
+  },
+  {
+    "case": "light_absolute_relative",
+    "turn": 2,
+    "utterance": "再暗10%",
+    "has_context": true,
+    "actual_llm_required": false,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-light_absolute_relative-2",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "scene_then_explicit",
+    "turn": 0,
+    "utterance": "开启观影模式",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-scene_then_explicit-0",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "scene.movie"
+        ],
+        "action": {
+          "trait": "scene",
+          "command": "activate",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "scene_then_explicit",
+    "turn": 1,
+    "utterance": "打开客厅窗帘",
+    "has_context": true,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-scene_then_explicit-1",
+      "status": "decided",
+      "proposal": {
+        "intent": "control",
+        "target_status": "resolved",
+        "targets": [
+          "living.curtain"
+        ],
+        "action": {
+          "trait": "position",
+          "command": "open",
+          "slots": []
+        },
+        "mention": null
+      },
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {}
+    }
+  },
+  {
+    "case": "quoted_unlock",
+    "turn": 0,
+    "utterance": "门口的人说让我打开智能门锁，我只是在转述他的要求",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-quoted_unlock-0",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "out_of_range",
+    "turn": 0,
+    "utterance": "把电视音量设为120%",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-out_of_range-0",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  },
+  {
+    "case": "no_focus_pronoun",
+    "turn": 0,
+    "utterance": "把它打开",
+    "has_context": false,
+    "actual_llm_required": true,
+    "witness": {
+      "schema_version": 1,
+      "interpretation_id": "witness-no_focus_pronoun-0",
+      "status": "abstained",
+      "proposal": null,
+      "policy_version": "rules-zh-v1",
+      "model_version": "rules-zh-v1",
+      "diagnostics": {
+        "reason": "incomplete_reading"
+      }
+    }
+  }
+]

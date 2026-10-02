@@ -249,3 +249,24 @@ async def test_owner_names_beat_generic_words() -> None:
     assert fridge.proposal.targets == ("study.fridge",)
     strip = await RulesInterpreter().interpret(request("打开书房的灯"))
     assert (strip.proposal.targets, strip.proposal.action.trait) == (("study.strip",), "on_off")
+
+
+@pytest.mark.parametrize('text,expected', [
+    ('把它关掉', False), ('调大音量20%', False), ('电视剧真好看', False),
+    ('再关闭电视', True), ('台灯先别动', True), ('主卧的也打开', True),
+    ('不是客厅的', True), ('关闭地下室的除湿机', True), ('观影模式', True),
+])
+def test_reference_evidence_is_not_execution_authorization(text, expected):
+    from eidolon_agent.infra.interpretation.adapters.rules import has_explicit_reference
+    assert has_explicit_reference(_request(text)) is expected
+
+
+def test_reference_evidence_uses_owner_names_and_aliases_without_device_keywords():
+    from eidolon_sdk.biz.interpretation import Candidate
+
+    from eidolon_agent.infra.interpretation.adapters.rules import has_explicit_reference
+    request = _request('请关掉月亮', candidates=(Candidate(ref='custom', name='小白',
+                                                       aliases=('月亮',), kind='switch'),))
+    assert has_explicit_reference(request)
+    assert has_explicit_reference(request.model_copy(update={'utterance': '小白先别动'}))
+    assert not has_explicit_reference(request.model_copy(update={'utterance': '把它关掉'}))

@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import logging
 import time
 from contextlib import aclosing
 from dataclasses import asdict
@@ -106,6 +107,37 @@ class RecordedLLM:
                 yield delta
 
 
+class RecordedLaya(LayaInterpreter):
+    """Keep synthetic requests/replies; production only logs bounded decisions."""
+
+    def __init__(self, endpoint):
+        super().__init__(endpoint)
+        self.exchanges = []
+
+    async def predict(self, body, *, timeout_ms):
+        exchange = {"request": body, "timeout_ms": timeout_ms}
+        self.exchanges.append(exchange)
+        started = time.perf_counter()
+        try:
+            response = await super().predict(body, timeout_ms=timeout_ms)
+            exchange["response"] = response
+            return response
+        except Exception as exc:
+            exchange["error"] = type(exc).__name__
+            raise
+        finally:
+            exchange["ms"] = round((time.perf_counter() - started) * 1000, 2)
+
+
+class DecisionLog(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.events = []
+
+    def emit(self, record):
+        self.events.append(record.getMessage())
+
+
 class MeasuredFallback:
     def __init__(self, llm):
         self.port, self.calls = LlmHomeFallback(llm), 0
@@ -121,11 +153,21 @@ async def run(args):
     llm = _build_llm_router(load_settings(yaml_path=args.settings))
     if llm.model_id == "fake":
         raise ValueError("requires configured product LLM")
-    laya = LayaInterpreter(args.endpoint)
+    laya = RecordedLaya(args.endpoint)
+    decisions = DecisionLog()
+    loggers = [logging.getLogger("eidolon_agent." + name) for name in (
+        "domain.smarthome.command", "infra.smarthome.laya_continuation", "infra.smarthome.llm_fallback",
+    )]
+    levels = [logger.level for logger in loggers]
+    for logger in loggers:
+        logger.setLevel(logging.INFO)
+        logger.addHandler(decisions)
+    case_by_id = {}
     recorded = RecordedLLM(llm)
     report = []
     if args.cases:
         supplied = json.loads(args.cases.read_text())
+        case_by_id = {c["id"]: c for c in supplied}
         expected_outcomes = {c["id"]: c["expected_outcomes"] for c in supplied if "expected_outcomes" in c}
         scenarios = [
             (c["id"], c["utterances"], [tuple(cmd) for cmd in c["expected_commands"]])
@@ -151,6 +193,10 @@ async def run(args):
             turns = []
             for i, utterance in enumerate(words):
                 start, calls = time.perf_counter(), fallback.calls
+                command_count, request_count = len(executor.commands), len(executor.requests)
+                laya_count, llm_count = len(laya.exchanges), len(recorded.exchanges)
+                event_count = len(decisions.events)
+                before = context.snapshot()
                 result = await command.handle(
                     OWNER, None, f"{name}-{i}", utterance, context=context
                 )
@@ -160,7 +206,14 @@ async def run(args):
                         "result": result.model_dump(mode="json"),
                         "ms": round((time.perf_counter() - start) * 1000, 2),
                         "llm_required": fallback.calls > calls,
+                        "context_before": before,
                         "context": context.snapshot(),
+                        "commands": executor.commands[command_count:],
+                        "scenes": [r.scene_id for r in executor.requests[request_count:] if r.scene_id],
+                        "states": {ref: dict(status.state) for ref, status in directory.status.items()},
+                        "laya_exchanges": laya.exchanges[laya_count:],
+                        "llm_exchange_ids": [e["request_id"] for e in recorded.exchanges[llm_count:]],
+                        "decisions": decisions.events[event_count:],
                     }
                 )
             expected_full = [(*c, {}) if len(c) == 3 else c for c in expected]
@@ -174,29 +227,55 @@ async def run(args):
             )
             allowed_outcomes = expected_outcomes.get(name)
             if allowed_outcomes is not None:
-                outcomes_ok = outcomes_ok and len(allowed_outcomes) == len(turns) and all(
+                outcomes_ok = len(allowed_outcomes) == len(turns) and all(
                     turn["result"]["outcome"] in allowed
                     for turn, allowed in zip(turns, allowed_outcomes, strict=True)
                 )
+            case = case_by_id.get(name, {})
+            per_turn = case.get("expected_turn_commands")
+            commands_match = executor.commands == expected_full
+            if per_turn is not None:
+                if len(per_turn) != len(turns):
+                    raise ValueError(f"{name}: one command expectation required per turn")
+                for turn, expected_commands in zip(turns, per_turn, strict=True):
+                    turn["commands_match"] = canonical_commands(turn["commands"]) == canonical_commands(expected_commands)
+                commands_match = all(t["commands_match"] for t in turns)
+            expected_scenes = case.get("expected_scenes", [[] for _ in turns])
+            expected_states = case.get("expected_states", [{} for _ in turns])
+            if len(expected_scenes) != len(turns) or len(expected_states) != len(turns):
+                raise ValueError(f"{name}: one state/scene expectation required per turn")
+            for turn, scenes, states in zip(turns, expected_scenes, expected_states, strict=True):
+                turn["scenes_match"] = turn["scenes"] == scenes
+                turn["states_match"] = all(
+                    turn["states"].get(ref, {}).get(key) == value
+                    for ref, values in states.items() for key, value in values.items()
+                )
+            commands_match = commands_match and all(t["scenes_match"] and t["states_match"] for t in turns)
             report.append(
                 {
                     "id": name,
                     "turns": turns,
                     "virtual_commands": executor.commands,
                     "expected_commands": expected_full,
-                    "commands_match": executor.commands == expected_full,
+                    "commands_match": commands_match,
                     "outcomes_ok": outcomes_ok,
                     "expected_outcomes": allowed_outcomes,
                 }
             )
+            print(json.dumps({"case": name, "commands_match": commands_match,
+                              "outcomes_ok": outcomes_ok}), flush=True)
     finally:
+        for logger, level in zip(loggers, levels, strict=True):
+            logger.removeHandler(decisions)
+            logger.setLevel(level)
         await laya.aclose()
         await llm.close()
     result = {
         "model_revision": MODEL_REVISION,
         "endpoint": args.endpoint,
         "llm_model": llm.model_id,
-        "execution": "virtual Provider only; no Hub or real devices",
+        "execution": "FakeExecutor with SDK apartment; no Hub or real devices",
+        "cases_sha256": hashlib.sha256(args.cases.read_bytes()).hexdigest() if args.cases else None,
         "prompt_module_sha256": hashlib.sha256(
             Path("eidolon_agent/infra/smarthome/llm_fallback.py").read_bytes()
         ).hexdigest(),
@@ -217,6 +296,11 @@ async def run(args):
             }
         )
     )
+
+
+def canonical_commands(commands):
+    """Devices in the same turn may be returned in either order; duplicates still count."""
+    return sorted(json.dumps(c, sort_keys=True) for c in commands)
 
 
 if __name__ == "__main__":

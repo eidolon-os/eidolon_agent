@@ -1,0 +1,14 @@
+{
+  "temporary_forward": "127.0.0.1:18771 -> eidolon-opi5max 127.0.0.1:8771",
+  "observed_stderr": [
+    "channel 1: open failed: connect failed: Connection refused",
+    "channel 1: open failed: connect failed: Connection refused",
+    "channel 1: open failed: connect failed: Connection refused",
+    "channel 1: open failed: connect failed: Connection refused",
+    "channel 1: open failed: connect failed: Connection refused",
+    "channel 1: open failed: connect failed: Connection refused",
+    "channel 1: open failed: connect failed: Connection refused"
+  ],
+  "note": "Collected from this task SSH process after v7 completed; no individual timestamps. Compatible with seven initial transport errors, not a per-request distributed trace. Remote root cause not established.",
+  "cleanup": "The owned SSH PID 12637 was terminated; session completed with exit 0. No remote service was stopped."
+}

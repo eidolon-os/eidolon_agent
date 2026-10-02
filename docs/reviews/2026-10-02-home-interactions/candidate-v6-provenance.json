@@ -1,0 +1,38 @@
+{
+  "base_commit": "c22ddd1ef4ad2d32ff48a8a9e4583d0f6e2c86d4",
+  "branch": "codex/home-interaction-correctness",
+  "model_revision": "7b695ba8",
+  "llm_model": "openai/deepseek-v4-flash",
+  "sdk_changed": false,
+  "execution": "FakeExecutor only, current opi5max 8771 via temporary 18771",
+  "source_sha256": {
+    "eidolon_agent/domain/smarthome/command.py": "0bac86ed0ef90287f61b3f2390a3555f74a88a9cce590d7429a75c20a45d3bc2",
+    "eidolon_agent/domain/smarthome/messages.py": "b9d792f60ff0f37e1cd65ae5b2bf4ad288b61304f7d2cbc0258ef9e5cbbc4ec8",
+    "eidolon_agent/domain/smarthome/tests/conftest.py": "2fc15a4e50c358e4dd687dcc937f18fa285278e503f33898a378120f66296405",
+    "eidolon_agent/domain/smarthome/tests/unit/test_command.py": "6d7fa2e90048f121b49bebad370ef8cde50f3f197b718e04d5abc7a52e319147",
+    "eidolon_agent/infra/interpretation/adapters/laya.py": "91426ae3c78a64b31b012195d4e79368a44fe79dfc6a00fcb7c9cdad3090fa5a",
+    "eidolon_agent/infra/interpretation/adapters/lexicon.py": "9850bf4eecbcfa148cf2ac40c8c8dfd4051d24f0973768a19d75441cbb4c2611",
+    "eidolon_agent/infra/interpretation/adapters/rules.py": "5b35fd175a24be2201fd56723b3c419f78c43593b85ceda8225990f8344b901d",
+    "eidolon_agent/infra/interpretation/tests/unit/test_rules.py": "c54c66e6a323bbc084c2ee6b146fef92027cdda38bd848e21956cdc37b66a563",
+    "eidolon_agent/infra/smarthome/laya_continuation.py": "003bc2f7260278bca7d62e6d3e2b52c73ebed90a827d64f2495a8ca1ddf86f7d",
+    "eidolon_agent/infra/smarthome/llm_fallback.py": "e48dbbd27c8fecbcf0190258c92dbb1a5fc7f45c2502e380c44e66cda93443e6",
+    "eidolon_agent/infra/smarthome/tests/test_laya_continuation.py": "597897db519fc1af073e12bc2826015651f053c6283afc28809cf6b146388f2b",
+    "eidolon_agent/infra/smarthome/tests/test_llm_fallback.py": "56b8025ae2fe597e21f416d83d1cfe8408ae95e8871180d9dfd3d3e02e2e0900",
+    "scripts/eval_home_cooperation.py": "f4a03b86ce0f1f84c92528a7e2d08c5d783788269842330b1b751a94a4212731"
+  },
+  "original_artifacts_verified": [
+    "summary.json",
+    "independent-witness.json",
+    "probe-cases.json",
+    "probes.json",
+    "repeat-cases.json",
+    "repeats.json",
+    "baseline.json",
+    "cases.json",
+    "backend-comparison.json"
+  ],
+  "sdk_commit": "c3756456d198719987baee240f6a2753206a08da",
+  "sdk_source": "read-only git archive through PYTHONPATH=/private/tmp/eidolon-home-sdk-c375645",
+  "sdk_smarthome_sha256": "679998f9a58e56674e13a8c3d531d532786611663b86bb5ab9b05ef39b3040e4",
+  "sdk_worktree_note": "A concurrent uncommitted v2 SDK change was found; v6 uses the fixed archive. SDK worktree was not altered."
+}

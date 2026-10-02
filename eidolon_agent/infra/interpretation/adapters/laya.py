@@ -38,9 +38,7 @@ from eidolon_agent.infra.interpretation.adapters.lexicon import (
     Verb,
     command_for,
     generic_command,
-    normalize,
-    read_values,
-    take,
+    utterance_values,
 )
 
 POLICY_VERSION = "laya-smarthome-v1"
@@ -231,10 +229,7 @@ def _control(
     device: str,
     verb: Verb,
 ) -> Proposal | None:
-    # Numbers come from the lexicon with device names blanked, so 3号灯 is no value.
-    names = {normalize(n): None for c in request.candidates for n in (c.name, *c.aliases)}
-    text, _names = take(normalize(request.utterance), names)
-    _text, values = read_values(text)
+    values = utterance_values(request)
     if device == NO_DEVICE:
         action = generic_command(verb, values)
         if action is None:

@@ -1,0 +1,53 @@
+[
+  {
+    "id": "availability_recheck_multi_singular",
+    "category": "multiple",
+    "utterances": [
+      "打开客厅主灯和主卧灯",
+      "把它关掉"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "living.main_light",
+          "on_off",
+          "on",
+          {}
+        ],
+        [
+          "master.light",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      []
+    ],
+    "expected_commands": [
+      [
+        "living.main_light",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "master.light",
+        "on_off",
+        "on",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "clarification",
+        "ambiguous"
+      ]
+    ],
+    "source_case": "multi_singular_ambiguous",
+    "repetition": 2,
+    "diagnostic_note": "Recheck one unavailable turn; does not replace v7 failure."
+  }
+]

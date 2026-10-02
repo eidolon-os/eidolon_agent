@@ -1,0 +1,350 @@
+[
+  {
+    "id": "tv_plain",
+    "category": "diagnostic_after_baseline",
+    "utterances": [
+      "打开音箱",
+      "关闭电视"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "living.speaker",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      [
+        [
+          "living.tv",
+          "on_off",
+          "off",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "living.speaker",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "living.tv",
+        "on_off",
+        "off",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "tv_object_first",
+    "category": "diagnostic_after_baseline",
+    "utterances": [
+      "打开音箱",
+      "电视关掉"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "living.speaker",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      [
+        [
+          "living.tv",
+          "on_off",
+          "off",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "living.speaker",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "living.tv",
+        "on_off",
+        "off",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "tv_ba",
+    "category": "diagnostic_after_baseline",
+    "utterances": [
+      "打开音箱",
+      "把电视关掉"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "living.speaker",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      [
+        [
+          "living.tv",
+          "on_off",
+          "off",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "living.speaker",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "living.tv",
+        "on_off",
+        "off",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "speaker_plain",
+    "category": "diagnostic_after_baseline",
+    "utterances": [
+      "打开床头灯",
+      "关闭音箱"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "master.bedside",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      [
+        [
+          "living.speaker",
+          "on_off",
+          "off",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "master.bedside",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "living.speaker",
+        "on_off",
+        "off",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "speaker_object_first",
+    "category": "diagnostic_after_baseline",
+    "utterances": [
+      "打开床头灯",
+      "音箱关掉"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "master.bedside",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      [
+        [
+          "living.speaker",
+          "on_off",
+          "off",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "master.bedside",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "living.speaker",
+        "on_off",
+        "off",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "speaker_ba",
+    "category": "diagnostic_after_baseline",
+    "utterances": [
+      "打开床头灯",
+      "把音箱关掉"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "master.bedside",
+          "on_off",
+          "on",
+          {}
+        ]
+      ],
+      [
+        [
+          "living.speaker",
+          "on_off",
+          "off",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "master.bedside",
+        "on_off",
+        "on",
+        {}
+      ],
+      [
+        "living.speaker",
+        "on_off",
+        "off",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ],
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "standalone_tv_close",
+    "category": "diagnostic_after_baseline",
+    "utterances": [
+      "再关闭电视"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "living.tv",
+          "on_off",
+          "off",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "living.tv",
+        "on_off",
+        "off",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ]
+    ]
+  },
+  {
+    "id": "standalone_speaker_close",
+    "category": "diagnostic_after_baseline",
+    "utterances": [
+      "关掉音箱"
+    ],
+    "expected_turn_commands": [
+      [
+        [
+          "living.speaker",
+          "on_off",
+          "off",
+          {}
+        ]
+      ]
+    ],
+    "expected_commands": [
+      [
+        "living.speaker",
+        "on_off",
+        "off",
+        {}
+      ]
+    ],
+    "expected_outcomes": [
+      [
+        "executed"
+      ]
+    ]
+  }
+]

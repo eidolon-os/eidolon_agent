@@ -1,0 +1,18 @@
+[
+  {
+    "id": "missing_focus_room_reference",
+    "category": "failure_recovery_regression",
+    "utterances": [
+      "客厅那台也打开"
+    ],
+    "expected_turn_commands": [
+      []
+    ],
+    "expected_commands": [],
+    "expected_outcomes": [
+      [
+        "clarification"
+      ]
+    ]
+  }
+]
