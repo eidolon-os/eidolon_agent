@@ -60,6 +60,8 @@ class FakeExecutor:
         self.requests: list[ExecuteRequest] = []
         self.offline: set[str] = set()
         self.unknown: set[str] = set()
+        # Devices behind a platform that only answers in words.
+        self.delegated: dict[str, str] = {}
         self.delay_s = 0.0
         self.unavailable = False
         self.scenes = {s.scene_id: s for s in directory.registries[-1].scenes}
@@ -89,6 +91,14 @@ class FakeExecutor:
                 continue
             if device_id in self.unknown:
                 results.append(CommandResult(device_id=device_id, status="unknown"))
+                continue
+            if device_id in self.delegated:
+                results.append(
+                    CommandResult(
+                        device_id=device_id, status="delegated",
+                        platform_answer=self.delegated[device_id],
+                    )
+                )
                 continue
             current = self._directory.status[device_id]
             state = _apply(dict(current.state), command.trait, command.command, command.params)

@@ -78,9 +78,14 @@ class CommandPlan:
 
 @dataclass(frozen=True, slots=True)
 class DeviceOutcome:
-    status: Literal["succeeded", "failed", "unknown"]
+    """``delegated``: a platform took the instruction in its own words and
+    reported no device state; ``answer`` is what it said. It is neither
+    success nor failure and is never read as the device having changed."""
+
+    status: Literal["succeeded", "failed", "unknown", "delegated"]
     code: str | None = None
     state: Mapping[str, StateValue] | None = None
+    answer: str | None = None
 
 
 UNKNOWN = DeviceOutcome("unknown")
@@ -244,10 +249,14 @@ class HomeActuator:
 
 
 def _outcome(results: list[CommandResult]) -> DeviceOutcome:
-    """Failed if any step failed; succeeded only if every reported step did."""
+    """Failed if any step failed; unknown if any was; delegated if any was;
+    succeeded only if every reported step did."""
     failed = next((r for r in results if r.status == "failed"), None)
     if failed is not None:
         return DeviceOutcome("failed", failed.code, results[-1].state)
     if not results or any(r.status == "unknown" for r in results):
         return UNKNOWN
+    delegated = [r for r in results if r.status == "delegated"]
+    if delegated:
+        return DeviceOutcome("delegated", None, None, delegated[-1].platform_answer)
     return DeviceOutcome("succeeded", None, results[-1].state)

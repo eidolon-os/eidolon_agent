@@ -232,6 +232,28 @@ async def test_unconfirmed_command_never_claims_success(directory, executor) -> 
     assert result.message == "没收到确认，客厅空调可能没有执行"
 
 
+async def test_delegated_outcome_quotes_the_platform_and_claims_no_state(directory, executor) -> None:
+    executor.delegated["living.ac"] = "好的，为您打开客厅空调"
+
+    result = await _say(_command(directory, executor), "打开空调")
+
+    assert result.outcome == "executed"
+    assert result.message == "客厅空调 已交给平台，平台回复：好的，为您打开客厅空调"
+    # The directory's state was never touched: nothing was observed.
+    assert directory.status["living.ac"].state["on"] is False
+
+
+async def test_delegated_beside_a_confirmed_device_is_partial_wording_not_partial_outcome(
+    directory, executor
+) -> None:
+    executor.delegated["master.bedside"] = "好的"
+
+    result = await _say(_command(directory, executor), "关掉所有灯")
+
+    assert result.outcome == "executed"
+    assert result.message == "已关闭客厅主灯、主卧灯；床头灯 已交给平台，平台回复：好的"
+
+
 async def test_missing_reply_by_the_deadline_is_unknown(directory, executor) -> None:
     executor.delay_s = 1.0
     command = _command(directory, executor, execute_deadline_ms=10)

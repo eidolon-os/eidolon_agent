@@ -1,7 +1,8 @@
 """Short Chinese result text for the panel card (and for the companion to speak).
 
 A message only claims what a Provider confirmed: ``succeeded`` reads as done,
-``unknown`` says no confirmation arrived, ``failed`` says why.
+``unknown`` says no confirmation arrived, ``failed`` says why, and
+``delegated`` says the platform took it, in the platform's own words.
 """
 
 from __future__ import annotations
@@ -153,6 +154,7 @@ def summarize(plan: CommandPlan, execution: Execution) -> tuple[Completion, str]
     else:
         targets = plan.targets
     done: list[PlannedTarget] = []
+    delegated: list[PlannedTarget] = []
     unknown: list[PlannedTarget] = []
     problems: list[str] = []
     for target in targets:
@@ -162,20 +164,34 @@ def summarize(plan: CommandPlan, execution: Execution) -> tuple[Completion, str]
         outcome = outcomes.get(target.device_id, UNKNOWN)
         if outcome.status == "succeeded":
             done.append(target)
+        elif outcome.status == "delegated":
+            delegated.append(target)
         elif outcome.status == "failed":
             problems.append(failure(target.name, outcome.code, target.kind))
         else:
             unknown.append(target)
+    handled = done or delegated
     completion: Completion = (
-        "none" if not done else "complete" if not unknown and not problems else "partial"
+        "none" if not handled else "complete" if not unknown and not problems else "partial"
     )
     if plan.scene is not None:
-        return completion, clip(_scene_message(plan, done, unknown, problems))
+        return completion, clip(_scene_message(plan, done + delegated, unknown, problems))
     parts = [_done_message(done, outcomes)] if done else []
+    if delegated:
+        parts.append(_delegated_message(delegated, outcomes))
     parts.extend(dict.fromkeys(problems))
     if unknown:
         parts.append(f"没收到确认，{names([t.name for t in unknown])}可能没有执行")
     return completion, clip("；".join(parts) or NOT_UNDERSTOOD)
+
+
+def _delegated_message(delegated: list[PlannedTarget], outcomes: Mapping[str, DeviceOutcome]) -> str:
+    """The platform's words, marked as the platform's: no device state is claimed."""
+    answers = [outcomes[t.device_id].answer for t in delegated if outcomes[t.device_id].answer]
+    subject = names([t.name for t in delegated])
+    if len(set(answers)) == 1:
+        return f"{subject} 已交给平台，平台回复：{answers[0]}"
+    return f"{subject} 已交给平台处理"
 
 
 def _refused(plan: CommandPlan, code: str) -> str:
