@@ -230,6 +230,14 @@ class ContextCompiler:
                 memory_backend_trace,
             ) = memory_payload
 
+        # An empty successful read is not an outage or proof that no memory exists.
+        # None means recall was skipped; it must not acquire a no-match notice.
+        memory_empty = (
+            memory_payload is not None
+            and not memory_degraded
+            and not (memory_text or memory_hit_ids or memory_kg_triple_ids)
+        )
+
         active_commitments: list[ActiveCommitment] = []
         active_commitment_total = 0
         active_commitments_truncated = False
@@ -381,6 +389,9 @@ class ContextCompiler:
             degraded_sources.append("memory")
         if memory_degraded and not memory_text:
             memory_text = self._MEMORY_DEGRADED_NOTICE
+        if memory_empty:
+            memory_text = self._MEMORY_EMPTY_NOTICE
+        memory_status = "failed" if memory_degraded else "empty" if memory_empty else "completed"
         memory_segment: ContextSegment | None = None
         if memory_text:
             memory_segment = ContextSegment(
@@ -389,12 +400,12 @@ class ContextCompiler:
                 source="memory",
                 token_estimate=_estimate_tokens(memory_text),
                 priority=80,
-                droppable=not memory_degraded,
+                droppable=not (memory_degraded or memory_empty),
                 metadata={
                     "degraded": memory_degraded,
                     **_context_tag_metadata(
                         authority="retrieved_memory",
-                        status="failed" if memory_degraded else "completed",
+                        status=memory_status,
                         scope="long_term_preference",
                         actionability="may_use_as_reference",
                     ),
@@ -404,7 +415,7 @@ class ContextCompiler:
             system_parts_by_segment[id(memory_segment)] = (
                 "[RETRIEVED MEMORY]\n"
                 f"authority=retrieved_memory; "
-                f"status={'failed' if memory_degraded else 'completed'}; "
+                f"status={memory_status}; "
                 "scope=long_term_preference; actionability=may_use_as_reference\n"
                 "Use this only as reference evidence for the CURRENT REQUEST. "
                 "When it directly answers the request, answer naturally and "
@@ -615,6 +626,7 @@ class ContextCompiler:
             ),
             "degraded": memory_degraded,
             "degraded_reason": memory_degraded_reason,
+            "empty": memory_empty,
             "elapsed_ms": memory_ms,
             "timeout_ms": int(memory_timeout_s * 1000),
             "hit_ids": memory_hit_ids,
@@ -797,6 +809,13 @@ class ContextCompiler:
         "（系统提示：本轮长期记忆召回暂不可用,没有可引用的过往记忆上下文。"
         "不要假装记得用户之前说过的事;除非用户明确询问记忆状态,不要主动解释召回失败。"
         "这只描述召回链路,不要据此判断 memory 写入工具是否可用。）"
+    )
+
+    _MEMORY_EMPTY_NOTICE = (
+        "（系统提示：本轮长期记忆查询未找到匹配证据，不代表用户从未说过或系统没有保存。"
+        "可依据当前对话、摘要及其他已提供的证据回答；证据不足时坦诚说明不确定，"
+        "不要编造过往经历或断言用户没有说过。不要主动解释检索机制，"
+        "也不要据此判断记忆服务故障或写入工具是否可用。）"
     )
 
     async def _memory_recall(

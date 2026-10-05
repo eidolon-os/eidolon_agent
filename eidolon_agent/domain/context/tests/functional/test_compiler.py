@@ -663,6 +663,82 @@ async def test_memory_success_does_not_inject_degraded_notice() -> None:
     assert "[RETRIEVED MEMORY]" in system
     assert "暂不可达" not in system  # the notice keyword must not appear
     assert "长期记忆召回暂不可用" not in system  # the notice keyword must not appear
+    assert "本轮长期记忆查询未找到匹配证据" not in system
+
+
+@pytest.mark.parametrize("budget", [None, 5])
+async def test_empty_recall_reports_no_match_without_claiming_memory_failure(budget) -> None:
+    class EmptyMemory:
+        async def recall_context(self, **_):
+            return MemoryRecallResult(context="", hits=[], kg_triples=[], degraded=False)
+
+    history = HistoryManager()
+    await _seed_history(history, 4)
+    ti = make_turn_input("我以前喜欢什么？")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=history,
+        history_window=2,
+        degraded_history_window=8,
+        memory_port=EmptyMemory(),
+        summary_provider=_StubSummary("已有摘要：用户喜欢钢琴"),
+        context_budget_tokens=budget,
+    )
+    messages = await compiler.compile(ti)
+    system = messages[0].content
+    assert "本轮长期记忆查询未找到匹配证据" in system
+    assert "不代表用户从未说过或系统没有保存" in system
+    assert "可依据当前对话、摘要及其他已提供的证据回答" in system
+    assert "status=empty" in system
+    assert "长期记忆召回暂不可用" not in system
+    trace = ti.metadata["memory_trace"]
+    assert trace["attempted"] and trace["empty"] and trace["context_injected"]
+    assert not trace["degraded"] and trace["degraded_reason"] is None
+    assert trace["hit_count"] == trace["kg_triple_count"] == 0
+    assert "memory" not in ti.metadata["context_ledger"]["degraded_sources"]
+    assert not ti.metadata["history_window_applied"]["expanded_for_degraded_memory"]
+    assert ti.metadata["history_window_applied"]["effective"] == 2
+    if budget is None:
+        assert "已有摘要：用户喜欢钢琴" in system
+        assert "turn-3-u" in system and "turn-2-u" not in system
+
+
+async def test_context_only_recall_is_not_labelled_empty() -> None:
+    class ContextOnlyMemory:
+        async def recall_context(self, **_):
+            return MemoryRecallResult(context="主题：最近关注睡眠", hits=[], kg_triples=[])
+
+    ti = make_turn_input("我最近关注什么？")
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=ContextOnlyMemory(),
+    )
+    messages = await compiler.compile(ti)
+    assert "主题：最近关注睡眠" in messages[0].content
+    assert "本轮长期记忆查询未找到匹配证据" not in messages[0].content
+    assert not ti.metadata["memory_trace"]["empty"]
+
+
+@pytest.mark.parametrize("skip", ["no_port", "no_text", "temporary"])
+async def test_skipped_recall_does_not_claim_a_successful_empty_read(skip) -> None:
+    memory = _StubMemory()
+    ti = make_turn_input("" if skip == "no_text" else "你好")
+    if skip == "temporary":
+        ti.metadata["temporary"] = True
+    compiler = ContextCompiler(
+        personas_service=_StubPersonas(),
+        instance_locator=_locator,
+        history_manager=HistoryManager(),
+        memory_port=None if skip == "no_port" else memory,
+    )
+    messages = await compiler.compile(ti)
+    assert not memory.calls
+    assert "本轮长期记忆查询未找到匹配证据" not in messages[0].content
+    assert not ti.metadata["memory_trace"]["attempted"]
+    assert not ti.metadata["memory_trace"]["empty"]
 
 
 async def test_memory_soft_degraded_injects_degraded_notice() -> None:
@@ -678,6 +754,7 @@ async def test_memory_soft_degraded_injects_degraded_notice() -> None:
     msgs = await compiler.compile(ti)
 
     assert "长期记忆召回暂不可用" in msgs[0].content
+    assert not ti.metadata["memory_trace"]["empty"]
     assert "memory" in ti.metadata["context_ledger"]["degraded_sources"]
 
 
