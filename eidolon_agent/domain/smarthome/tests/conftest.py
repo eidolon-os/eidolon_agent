@@ -159,6 +159,8 @@ def _apply(state: dict, trait: str, command: str, params: dict) -> dict:
         state["volume"] = max(0, min(100, state["volume"] + params["delta"]))
     elif key == ("volume", "mute"):
         state["muted"] = params["muted"]
+    elif key == ("fan_speed", "step"):
+        state["speed"] = max(0, min(100, state["speed"] + params["delta"]))
     elif key == ("fan_speed", "set"):
         state["speed"] = params["value"]
     return state

@@ -394,8 +394,7 @@ class SmartHomeLayaSettings(BaseModel):
     token: str = ""
     # Below this, on any of the questions the proposal needs, the LLM answers instead.
     min_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
-    # pick / follow on the last turn's context; the service must serve the revision this code
-    # supports (infra.smarthome.laya_continuation.MODEL_REVISION).
+    # Deprecated compatibility key. Laya now always receives bounded context.
     continuation: bool = False
 
     @field_validator("url")
@@ -417,6 +416,7 @@ class SmartHomeSettings(BaseModel):
     # rules: the local rules (and the LLM below their reach). laya: Laya first, then the LLM.
     interpreter: Literal["rules", "laya"] = "rules"
     hub_url: str = "http://127.0.0.1:8082"
+    context_turns: int = Field(default=3, ge=1, le=5)
     laya: SmartHomeLayaSettings = Field(default_factory=SmartHomeLayaSettings)
     # Every interpretation, with the user's words, appended here for offline evaluation; empty = off.
     interpretation_record_path: str = ""

@@ -1,21 +1,16 @@
-"""Shadow adapter for the laya model service (``eidolon_models/laya``).
+"""Model-first smart-home interpretation over one batched Laya request.
 
-laya is a choice encoder: it picks among options and never extracts numbers.
-This adapter asks the smart-home scenario's three questions word for word
-(``train/scenarios/smart-home/scenario.yaml``: intent / device / action, the
-device options being ``{name: "room·type"}`` plus two fixed exits) over
-``POST /v1/systemone``, maps the answers onto a Proposal, and takes numbers and
-modes from the shared lexicon, as the rules adapter does.
-
-Known gap: laya was trained on product types (吸顶灯, 空气净化器) while a
-Candidate only carries the SDK device type, so options read ``客厅·灯`` or
-``客厅·风扇/净化/加湿``; the device name still carries most of the signal.
+Current-sentence questions retain their frozen input; context questions receive
+only the facts they need. No lexical rules decide whether the model may run.
+The model selects semantics; deterministic capability/quantity mapping creates
+a proposal, and the command boundary validates it before execution.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import math
 from typing import Any
 
 import httpx
@@ -25,6 +20,7 @@ from eidolon_sdk.biz.interpretation import (
     ERROR_INVALID_REQUEST,
     ERROR_TIMEOUT,
     ERROR_UNAVAILABLE,
+    Action,
     Candidate,
     InterpretationError,
     InterpretationRequest,
@@ -41,7 +37,7 @@ from eidolon_agent.infra.interpretation.adapters.lexicon import (
     utterance_values,
 )
 
-POLICY_VERSION = "laya-smarthome-v1"
+POLICY_VERSION = "laya-smarthome-context-v2"
 MODEL_VERSION = "laya"
 
 MULTIPLE = "多个设备或整屋"
@@ -100,7 +96,9 @@ class LayaInterpreter:
         self._url = base_url.rstrip("/") + "/v1/systemone"
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         # A host-local model service: never through the operator's HTTP proxy.
-        self._client = create_async_client(timeout=5.0, transport=transport, headers=headers, trust_env=False)
+        self._client = create_async_client(
+            timeout=5.0, transport=transport, headers=headers, trust_env=False
+        )
         self._policy_version = policy_version
         self._model_version = model_version
 
@@ -114,7 +112,7 @@ class LayaInterpreter:
         body = {
             "state": {"utterance": request.utterance},
             "questions": {
-                "intent": INTENT_QUESTION,
+                "intent": {**INTENT_QUESTION},
                 "device": {
                     "type": "choice",
                     "instructions": DEVICE_INSTRUCTIONS,
@@ -123,11 +121,30 @@ class LayaInterpreter:
                         **DEVICE_EXITS,
                     },
                 },
-                "action": ACTION_QUESTION,
+                "action": {**ACTION_QUESTION},
             },
         }
+        context_questions = _context_questions(request, options)
+        body["questions"].update(context_questions)
         payload = await self.predict(body, timeout_ms=request.timeout_ms)
-        return self._result(request, options, payload)
+        result = self._result(request, options, payload)
+        if context_questions:
+            if (
+                not isinstance(payload.get("features"), dict)
+                or payload["features"].get("question_state") is not True
+            ):
+                return result.model_copy(
+                    update={
+                        "status": "abstained",
+                        "proposal": None,
+                        "diagnostics": {
+                            **result.diagnostics,
+                            "reason": "question_state_unsupported",
+                        },
+                    }
+                )
+            return _context_result(request, options, payload, result)
+        return result
 
     async def predict(self, body: dict, *, timeout_ms: int) -> dict:
         """One transport for single-sentence and bounded continuation questions."""
@@ -140,7 +157,9 @@ class LayaInterpreter:
                     async for chunk in response.aiter_bytes():
                         content.extend(chunk)
                         if len(content) > 256 * 1024:
-                            raise InterpretationError(ERROR_INVALID_PROPOSAL, "laya: response too large")
+                            raise InterpretationError(
+                                ERROR_INVALID_PROPOSAL, "laya: response too large"
+                            )
         except (TimeoutError, httpx.TimeoutException) as exc:
             raise InterpretationError(ERROR_TIMEOUT, f"laya: {exc!r}") from exc
         except httpx.TransportError as exc:
@@ -164,10 +183,39 @@ class LayaInterpreter:
         answers = payload.get("answers") if isinstance(payload, dict) else None
         if not isinstance(answers, dict):
             raise InterpretationError(ERROR_INVALID_PROPOSAL, "laya: no answers")
+        for key in ("intent", "device", "action"):
+            answer = answers.get(key)
+            if not isinstance(answer, dict) or not isinstance(
+                answer.get("probabilities", {}), dict
+            ):
+                raise InterpretationError(ERROR_INVALID_PROPOSAL, f"laya: bad {key} probabilities")
         intent = _choice(answers, "intent", _INTENTS)
         device = _choice(answers, "device", {*options, *DEVICE_EXITS})
         action = _choice(answers, "action", _ACTIONS)
         diagnostics = _diagnostics(payload, answers)
+        diagnostics["answers_json"] = json.dumps(
+            {
+                key: {
+                    "choice": answer.get("choice"),
+                    "top": sorted(
+                        [
+                            (label, value)
+                            for label, value in (answer.get("probabilities") or {}).items()
+                            if type(value) in (int, float)
+                            and math.isfinite(value)
+                            and 0 <= value <= 1
+                        ],
+                        key=lambda item: item[1],
+                        reverse=True,
+                    )[:3],
+                }
+                for key, answer in answers.items()
+                if key in {"intent", "device", "action", "context_device", "pick", "follow"}
+                and isinstance(answer, dict)
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
         model = payload.get("model")
         model_version = model if isinstance(model, str) and model.strip() else self._model_version
         revision = payload.get("revision")
@@ -201,6 +249,212 @@ class LayaInterpreter:
             model_version=model_version[:128],
             diagnostics=diagnostics,
         )
+
+
+PICK_INSTRUCTIONS = "Agent 刚问用户要对哪台设备执行 `context.待执行`。`utterance` 是否明确选了其中一台，且没有改动作？"
+FOLLOW_INSTRUCTIONS = (
+    "`context.设备` 刚被操作或查询过。`utterance` 是否是对这些设备的一个明确操作？"
+)
+
+
+def _context_questions(request, options):
+    context = request.context
+    if not context:
+        return {}
+    state = {"utterance": request.utterance, "context": _model_context(request)}
+    questions = {
+        "context_device": {
+            "type": "choice",
+            "instructions": DEVICE_INSTRUCTIONS,
+            "criteria": {**{k: v[0] for k, v in options.items()}, **DEVICE_EXITS},
+            "state": state,
+        }
+    }
+    previous = context.get("proposal") or {}
+    refs = previous.get("targets", [])
+    # Keep the frozen c4 continuation question's immediate facts. Older turns
+    # remain available to context_device and to the LLM; they are not repeated
+    # in every classifier where they contaminate the single-turn task.
+    immediate = dict(state["context"])
+    immediate.pop("最近对话", None)
+    continuation_state = {"utterance": request.utterance, "context": immediate}
+    # These are structural capabilities, never a parse of the user's words.
+    if (
+        context.get("pending")
+        and previous.get("target_status") == "ambiguous"
+        and previous.get("action")
+    ):
+        criteria = {label: value[0] for label, value in options.items() if value[1].ref in refs}
+        if 2 <= len(criteria) <= 8:
+            pick_state = {
+                "utterance": request.utterance,
+                "context": {k: v for k, v in immediate.items() if k != "设备"},
+            }
+            questions["pick"] = {
+                "type": "choice",
+                "instructions": PICK_INSTRUCTIONS,
+                "criteria": {
+                    **criteria,
+                    "取消": "用户明确不要执行这次待确认的操作，也没有提出别的要求",
+                    "重新理解": "改了动作或数值、要多台或候选之外的设备、没说清是哪台、提问、闲聊或提出新要求",
+                },
+                "state": pick_state,
+            }
+    elif previous.get("target_status") == "resolved" and len(refs) == 1:
+        continuation_state["context"].pop("待执行", None)
+        questions["follow"] = {
+            "type": "choice",
+            "instructions": FOLLOW_INSTRUCTIONS,
+            "criteria": {
+                **ACTION_QUESTION["criteria"],
+                "重新理解": "换了或增加设备、只针对其中一部分、撤销刚才的操作、保持不动、提问、闲聊或其他新要求",
+            },
+            "state": continuation_state,
+        }
+    return questions
+
+
+def _prob(answers, key):
+    a = answers.get(key, {})
+    if not isinstance(a, dict) or not isinstance(a.get("probabilities"), dict):
+        return 0.0
+    value = a["probabilities"].get(a.get("choice"))
+    return (
+        float(value)
+        if type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1
+        else 0.0
+    )
+
+
+def _context_result(request, options, payload, result):
+    """Combine model evidence without a lexical gate or a second model request."""
+    answers = payload.get("answers", {})
+    diagnostics = dict(result.diagnostics)
+    if payload.get("truncated"):
+        return result
+
+    def abstain(reason):
+        return result.model_copy(
+            update={
+                "status": "abstained",
+                "proposal": None,
+                "diagnostics": {**diagnostics, "reason": reason},
+            }
+        )
+
+    primary = result.proposal
+    direct = (
+        primary is not None
+        and primary.intent != "unrelated"
+        and all(_prob(answers, q) >= 0.99 for q in ("intent", "device", "action"))
+    )
+    # A model disagreement is evidence for escalation, not an instruction to keep old focus.
+    pick = answers.get("pick", {}).get("choice")
+    if _prob(answers, "pick") >= 0.95 and pick == "取消":
+        if direct:
+            return abstain("model_disagreement")
+        return result.model_copy(
+            update={
+                "status": "decided",
+                "proposal": Proposal(intent="unrelated", target_status="none"),
+                "diagnostics": {
+                    **diagnostics,
+                    "home_decision": "cancelled",
+                    "resolution": "pick",
+                    "intent_p": _prob(answers, "pick"),
+                },
+            }
+        )
+    context = request.context or {}
+    previous = context.get("proposal") or {}
+    if (
+        _prob(answers, "pick") >= 0.95
+        and pick in options
+        and pick not in {"取消", "重新理解"}
+        and options[pick][1].ref in previous.get("targets", [])
+    ):
+        proposal = Proposal(
+            intent="control",
+            target_status="resolved",
+            targets=(options[pick][1].ref,),
+            action=Action.model_validate(previous["action"]),
+        )
+        if direct and primary != proposal:
+            return abstain("model_disagreement")
+        return result.model_copy(
+            update={
+                "status": "decided",
+                "proposal": proposal,
+                "diagnostics": {
+                    **diagnostics,
+                    "intent_p": _prob(answers, "pick"),
+                    "device_p": _prob(answers, "pick"),
+                    "action_p": _prob(answers, "pick"),
+                    "resolution": "pick",
+                },
+            }
+        )
+    if context.get("pending"):
+        return abstain("pending_not_resolved")
+    if direct:
+        return result
+    follow = answers.get("follow", {}).get("choice")
+    device = answers.get("context_device", {}).get("choice")
+    if answers.get("device", {}).get("choice") == MULTIPLE:
+        return abstain("multiple_devices")
+    if (
+        answers.get("intent", {}).get("choice") == "控制"
+        and _prob(answers, "intent") >= 0.99
+        and follow in _ACTIONS
+        and _prob(answers, "follow") >= 0.95
+        and device in options
+        and _prob(answers, "context_device") >= 0.95
+        and list(previous.get("targets", [])) == [options[device][1].ref]
+    ):
+        proposal = _control(request, options, device, _ACTIONS[follow])
+        if proposal is not None:
+            if (
+                primary is not None
+                and primary.intent == "control"
+                and _prob(answers, "device") >= 0.8
+                and primary.targets != proposal.targets
+            ):
+                return abstain("model_disagreement")
+            return result.model_copy(
+                update={
+                    "status": "decided",
+                    "proposal": proposal,
+                    "diagnostics": {
+                        **diagnostics,
+                        "intent_p": _prob(answers, "follow"),
+                        "action_p": _prob(answers, "follow"),
+                        "device_p": _prob(answers, "context_device"),
+                        "resolution": "follow",
+                    },
+                }
+            )
+    if primary is not None and primary.intent == "unrelated":
+        # An unrelated answer on a fragment can conflict with the context model.
+        return abstain("context_not_resolved")
+    return result
+
+
+def _model_context(request: InterpretationRequest) -> dict:
+    context = request.context or {}
+    names = {c.ref: c.name for c in request.candidates}
+    proposal = context.get("proposal") or {}
+    refs = proposal.get("targets", context.get("known_targets", []))
+    return {
+        "最近对话": [
+            {"用户": h["utterance"], "助手": h["response"]} for h in context.get("history", [])[-5:]
+        ],
+        "上一句": context.get("previous_utterance", ""),
+        "Agent": context.get("question") or context.get("response", ""),
+        "设备": [names[r] for r in refs if r in names],
+        "待执行": context.get("pending_action", "")
+        if context.get("pending")
+        else "无，上一轮已结束",
+    }
 
 
 def device_options(request: InterpretationRequest) -> dict[str, tuple[str, Candidate]]:
@@ -257,7 +511,11 @@ def _diagnostics(payload: dict, answers: dict) -> dict[str, bool | int | float |
     for question in ("intent", "device", "action"):
         answer = answers[question]
         probability = (answer.get("probabilities") or {}).get(answer["choice"])
-        if isinstance(probability, int | float) and not isinstance(probability, bool):
+        if (
+            type(probability) in (int, float)
+            and math.isfinite(probability)
+            and 0 <= probability <= 1
+        ):
             out[f"{question}_p"] = float(probability)
     backend = payload.get("backend")
     if isinstance(backend, str):

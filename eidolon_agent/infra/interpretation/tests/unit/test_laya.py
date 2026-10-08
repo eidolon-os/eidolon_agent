@@ -105,7 +105,7 @@ async def test_control_answer_becomes_a_proposal() -> None:
 
     assert result.status == "decided"
     assert result.model_version == "laya-multilingual@test-revision"
-    assert result.policy_version == "laya-smarthome-v1"
+    assert result.policy_version == "laya-smarthome-context-v2"
     proposal = result.proposal
     assert (proposal.intent, proposal.target_status, proposal.targets) == (
         "control",
@@ -113,7 +113,7 @@ async def test_control_answer_becomes_a_proposal() -> None:
         ("living.ac",),
     )
     assert (proposal.action.trait, proposal.action.command) == ("on_off", "on")
-    assert result.diagnostics == {
+    assert {k: v for k, v in result.diagnostics.items() if k != "answers_json"} == {
         "intent_p": 0.9,
         "device_p": 0.7,
         "action_p": 0.9,

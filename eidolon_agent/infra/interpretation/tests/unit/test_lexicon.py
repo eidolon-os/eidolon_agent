@@ -103,7 +103,7 @@ def test_modes_are_read_and_bound_to_thermostats() -> None:
         ("media", "mute", ("volume", "mute")),
         ("light", "mute", None),
         ("climate", "up", ("thermostat", "step")),
-        ("fan", "up", None),
+        ("fan", "up", ("fan_speed", "step")),
         ("sensor", "off", None),
         ("scene", "on", ("scene", "activate")),
         ("scene", "off", None),

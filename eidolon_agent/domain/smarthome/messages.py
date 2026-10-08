@@ -281,6 +281,10 @@ def done_phrase(subject: str, command: Command, state: Mapping[str, StateValue] 
         return f"已调{'高' if _positive(params) else '低'}{subject}温度"
     if key == ("thermostat", "set_mode"):
         return f"{subject} 已切换到{MODE_LABELS.get(str(params['mode']), params['mode'])}"
+    if key == ("fan_speed", "step"):
+        if state.get("speed") is not None:
+            return f"{subject} 风速已调到 {state['speed']}%"
+        return f"已调{'大' if _positive(params) else '小'}{subject}风速"
     if key == ("fan_speed", "set"):
         return f"{subject} 风速已调到 {params['value']}%"
     if key == ("volume", "set"):

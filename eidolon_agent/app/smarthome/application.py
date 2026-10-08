@@ -21,7 +21,6 @@ from eidolon_agent.infra.interpretation import (
     RulesInterpreter,
 )
 from eidolon_agent.infra.smarthome import HubSmartHomeClient, LlmHomeFallback
-from eidolon_agent.infra.smarthome.laya_continuation import MODEL_REVISION, LayaHomeContinuation
 
 _log = logging.getLogger(__name__)
 
@@ -35,6 +34,7 @@ class SmartHomeApplication:
         *,
         interpreter: InterpretationService | RulesInterpreter,
         runtime_authority: CompanionRuntimeAuthority,
+        context_turns: int = 3,
         laya: LayaInterpreter | None = None,
         hub_client: HubSmartHomeClient | None = None,
     ) -> None:
@@ -42,7 +42,7 @@ class SmartHomeApplication:
         self._interpreter = interpreter
         self._laya = laya
         self._hub_client = hub_client
-        self._sessions = HomeSessions()
+        self._sessions = HomeSessions(context_turns=context_turns)
         self._runtime_sessions = RuntimeSessionAuthorizer(runtime_authority)
 
     async def handle(
@@ -50,21 +50,22 @@ class SmartHomeApplication:
     ) -> VoiceResult:
         start = time.monotonic()
         session = self._sessions.get(scope)
-        # Invalidate old interpretation as soon as a new input arrives, before
-        # either an authority read or serialized context updates can await.
-        session.context.revision += 1
-        revision = session.context.revision
-        # The same authority as Companion conversations, without entering their
-        # prompt compiler, memory or TurnEngine. Check active identity each turn.
-        authority_started = time.monotonic()
-        await self._runtime_sessions.authorize(
-            owner_id=scope.owner_id, companion_id=scope.companion_id,
-            device_id=scope.device_ref, session_id=scope.session_id,
-        )
-        authority_ms = int((time.monotonic() - authority_started) * 1000)
+        # FIFO per session: a second complete command does not cancel an earlier
+        # independent command just because ASR produced it before the first finished.
+        # Closing the session still invalidates all in-flight interpretation.
+        queued = time.monotonic()
         async with session.lock:
+            _log.info("home stage turn=%s stage=queue elapsed_ms=%.1f", turn_id, (time.monotonic() - queued) * 1000)
             if not session.context.active:
                 raise HomeSessionUnavailable("home session is closed")
+            session.context.revision += 1
+            revision = session.context.revision
+            authority_started = time.monotonic()
+            await self._runtime_sessions.authorize(
+                owner_id=scope.owner_id, companion_id=scope.companion_id,
+                device_id=scope.device_ref, session_id=scope.session_id,
+            )
+            authority_ms = int((time.monotonic() - authority_started) * 1000)
             result = await self._command.handle(
                 scope.owner_id, scope.device_ref, turn_id, utterance,
                 context=session.context, revision=revision,
@@ -106,8 +107,6 @@ def build_smart_home_application(
     if len(token) < 32:
         return None
     real_llm = llm is not None and llm.model_id != "fake"
-    if settings.laya.continuation and not real_llm:
-        raise ValueError("Laya continuation requires a real LLM for what it hands back")
     laya = None
     if settings.interpreter == "laya":
         laya = LayaInterpreter(settings.laya.url, api_key=settings.laya.token or None)
@@ -122,18 +121,14 @@ def build_smart_home_application(
     client = HubSmartHomeClient(base_url=settings.hub_url, token=token)
     fallback = LlmHomeFallback(llm) if real_llm else None
     min_confidence = settings.laya.min_confidence if fallback and laya is not None else 0.0
-    continuation = (
-        LayaHomeContinuation(laya, revision=MODEL_REVISION)
-        if settings.laya.continuation and laya is not None else None
-    )
     return SmartHomeApplication(
         SmartHomeCommand(
             directory=client, executor=client, interpreter=interpreter,
-            fallback=fallback, min_confidence=min_confidence, continuation=continuation,
-            independent_interpreter=RulesInterpreter(require_complete=True),
+            fallback=fallback, min_confidence=min_confidence,
         ),
         interpreter=interpreter,
         runtime_authority=runtime_authority,
         laya=laya,
         hub_client=client,
+        context_turns=settings.context_turns,
     )

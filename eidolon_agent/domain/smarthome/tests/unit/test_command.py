@@ -482,11 +482,12 @@ async def test_clarification_reply_resumes_pending_action_then_relative_followup
     first = await command.handle(OWNER, "unplaced", "t1", "关闭空调", context=context)
     assert first.outcome == "ambiguous"
     assert not executor.requests
+    interpreter.proposal = None
     second = await command.handle(OWNER, "unplaced", "t2", "客厅那个", context=context)
     assert second.outcome == "executed"
     assert fallback.contexts[0]["pending"] is True
     assert fallback.contexts[0]["proposal"]["action"]["command"] == "off"
-    assert len(interpreter.requests) == 1  # a short reply must not go to single-turn Laya
+    assert len(interpreter.requests) == 2  # the same primary sees the short reply and context
     assert executor.commands == [("living.ac", "on_off", "off", {})]
     fallback.proposal = Proposal(intent="control", target_status="resolved", targets=("living.ac",),
                                 action=Action(trait="thermostat", command="step", slots=(Slot(name="delta", value=-2),)))
@@ -507,7 +508,7 @@ async def test_missing_action_asks_question_and_cancellation_clears_pending(dire
     fallback.proposal = HomeCancellation()
     result = await command.handle(OWNER, "p", "t2", "算了", context=context)
     assert result.outcome == "answered"
-    assert context.snapshot() is None
+    assert context.snapshot()["pending"] is False and context.proposal is None
     assert not executor.requests
 
 
@@ -518,7 +519,7 @@ async def test_expired_or_closed_context_cannot_trigger_pending_action(directory
     fallback = _Fallback()
     command = _command(directory, executor, interpreter=_Fixed(), fallback=fallback)
     await command.handle(OWNER, "p", "t1", "那个", context=context)
-    assert fallback.contexts == [None]
+    assert set(fallback.contexts[0]) == {"laya_handoff"}
     context.active = False
     fallback.proposal = Proposal(intent="control", target_status="resolved", targets=("living.ac",),
                                 action=Action(trait="on_off", command="off"))
@@ -557,7 +558,7 @@ async def test_non_command_discourse_can_ground_a_later_explicit_request(directo
                                 action=Action(trait="on_off", command="off"))
     result = await command.handle(OWNER, None, "request", "对，我现在就是要你关掉", context=context)
     assert result.outcome == "executed"
-    assert fallback.contexts[-1] == before
+    assert {k: v for k, v in fallback.contexts[-1].items() if k != "laya_handoff"} == before
     assert executor.commands == [("living.main_light", "on_off", "off", {})]
 
 
@@ -606,7 +607,7 @@ async def test_question_never_executes_when_only_one_candidate_remains_capable(d
     assert not result.candidates
     assert not executor.requests
 
-async def test_new_input_invalidates_inflight_interpretation_before_execution(directory, executor):
+async def test_new_input_is_queued_without_dropping_previous_command(directory, executor):
     import asyncio
 
     from eidolon_agent.app.smarthome.application import SmartHomeApplication
@@ -629,54 +630,38 @@ async def test_new_input_invalidates_inflight_interpretation_before_execution(di
     await asyncio.sleep(0)
     release.set()
     old, new = await asyncio.gather(first, second)
-    assert old.outcome == 'unavailable'
-    assert new.outcome == 'executed'
-    assert len(executor.requests) == 1 and executor.requests[0].request_id == 'voice:new'
+    assert old.outcome == new.outcome == 'executed'
+    assert [r.request_id for r in executor.requests] == ['voice:old', 'voice:new']
 
 
-async def test_new_input_invalidates_old_proposal_while_authority_is_pending(directory, executor):
+async def test_queued_turn_authorizes_after_previous_completion(directory, executor):
     import asyncio
-
     from eidolon_agent.app.smarthome.application import SmartHomeApplication
     from eidolon_agent.app.smarthome.tests.test_application import authority
-
-    scope = HomeSessionScope(
-        owner_id=OWNER, companion_id="companion", device_ref="panel-living", session_id="s",
-    )
-    interpreting, release_model = asyncio.Event(), asyncio.Event()
-    authorizing, release_authority = asyncio.Event(), asyncio.Event()
-
+    scope = HomeSessionScope(owner_id=OWNER,companion_id="companion",device_ref="panel-living",session_id="fifo")
+    entered, release = asyncio.Event(), asyncio.Event()
     class SlowRules:
+        calls = 0
         async def interpret(self, request):
-            interpreting.set()
-            await release_model.wait()
+            self.calls += 1
+            if self.calls == 1:
+                entered.set()
+                await release.wait()
             return await RulesInterpreter().interpret(request)
+    port=authority(OWNER,"companion")
+    interpreter=SlowRules()
+    app=SmartHomeApplication(_command(directory,executor,interpreter=interpreter),interpreter=interpreter,runtime_authority=port)
+    first=asyncio.create_task(app.handle(scope,"old","打开客厅灯"))
+    await entered.wait()
+    count=port.resolve.call_count
+    second=asyncio.create_task(app.handle(scope,"new","关闭客厅灯"))
+    await asyncio.sleep(0)
+    assert port.resolve.call_count == count
+    release.set()
+    a,b=await asyncio.gather(first,second)
+    assert a.outcome == b.outcome == "executed"
+    assert [r.request_id for r in executor.requests] == ["voice:old","voice:new"]
 
-    port = authority(OWNER, "companion")
-    facts = port.resolve.return_value
-
-    async def resolve(**_kwargs):
-        if interpreting.is_set():
-            authorizing.set()
-            await release_authority.wait()
-        return facts
-
-    port.resolve.side_effect = resolve
-    interpreter = SlowRules()
-    app = SmartHomeApplication(
-        _command(directory, executor, interpreter=interpreter),
-        interpreter=interpreter, runtime_authority=port,
-    )
-    first = asyncio.create_task(app.handle(scope, "old", "打开客厅灯"))
-    await interpreting.wait()
-    second = asyncio.create_task(app.handle(scope, "new", "关闭客厅灯"))
-    await authorizing.wait()
-    release_model.set()
-    assert (await asyncio.wait_for(first, 1)).outcome == "unavailable"
-    assert not executor.requests
-    release_authority.set()
-    assert (await asyncio.wait_for(second, 1)).outcome == "executed"
-    assert len(executor.requests) == 1 and executor.requests[0].request_id == "voice:new"
 
 async def test_new_input_during_submitted_command_does_not_pretend_to_undo_it(directory, executor):
     import asyncio
@@ -703,7 +688,7 @@ async def test_complete_command_in_conversation_uses_primary_without_llm(directo
                         action=Action(trait='position', command='close'))
     primary, fallback = _Fixed(proposal), _Fallback()
     command = _command(directory, executor, interpreter=primary, fallback=fallback,
-                       independent_interpreter=RulesInterpreter(require_complete=True))
+                       )
     result = await command.handle(OWNER, 'panel-living', 'next', '关闭窗帘。', context=context)
     assert result.outcome == 'executed'
     assert fallback.calls == 0 and len(primary.requests) == 1
@@ -717,19 +702,20 @@ async def test_complete_command_in_conversation_uses_primary_without_llm(directo
     '不要打开窗帘', '关闭窗帘也取消', '我刚才说关闭窗帘', '我没说关闭窗帘',
     '开心打开窗帘', '调暗一点', '关闭灯',
 ])
-async def test_context_required_inputs_skip_primary_without_losing_plan(directory, executor, text):
+async def test_context_inputs_always_reach_primary_before_fallback(directory, executor, text):
     context = HomeContext()
     context.remember('关闭主灯', None, question='客厅还是主卧？')
     before = context.snapshot()
     primary, fallback = _Fixed(), _Fallback(HomeCancellation())
     command = _command(directory, executor, interpreter=primary, fallback=fallback,
-                       independent_interpreter=RulesInterpreter(require_complete=True))
+                       )
     await command.handle(OWNER, 'panel-living', 'next', text, context=context)
-    assert not primary.requests and not executor.requests
-    assert fallback.contexts == [before]
+    assert len(primary.requests) == 1 and not executor.requests
+    assert primary.requests[0].context == before
+    assert [{k: v for k, v in c.items() if k != "laya_handoff"} for c in fallback.contexts] == [before]
 
 
-@pytest.mark.parametrize('primary_kind', ['disagree', 'abstain', 'error', 'low_confidence'])
+@pytest.mark.parametrize('primary_kind', ['invalid_target', 'abstain', 'error', 'low_confidence'])
 async def test_primary_fallback_preserves_context_and_never_executes_wrong_suggestion(
     directory, executor, primary_kind,
 ):
@@ -739,8 +725,8 @@ async def test_primary_fallback_preserves_context_and_never_executes_wrong_sugge
     correct = Proposal(intent='control', target_status='resolved', targets=('living.curtain',),
                        action=Action(trait='position', command='close'))
     primary = _Fixed(correct, diagnostics={'intent_p': .99, 'device_p': .99, 'action_p': .99})
-    if primary_kind == 'disagree':
-        primary.proposal = correct.model_copy(update={'action': Action(trait='position', command='open')})
+    if primary_kind == 'invalid_target':
+        primary.proposal = correct.model_copy(update={'targets': ('foreign.device',)})
     elif primary_kind == 'abstain':
         primary.proposal = None
     elif primary_kind == 'error':
@@ -749,24 +735,25 @@ async def test_primary_fallback_preserves_context_and_never_executes_wrong_sugge
         primary.diagnostics['action_p'] = .7
     fallback = _Fallback(correct)
     command = _command(directory, executor, interpreter=primary, fallback=fallback,
-                       independent_interpreter=RulesInterpreter(require_complete=True), min_confidence=.8)
+                       min_confidence=.8)
     result = await command.handle(OWNER, 'panel-living', 'next', '关闭窗帘', context=context)
     assert result.outcome == 'executed'
-    assert fallback.contexts == [before]
+    assert [{k: v for k, v in c.items() if k != "laya_handoff"} for c in fallback.contexts] == [before]
     assert executor.commands == [('living.curtain', 'position', 'close', {})]
 
 
 @pytest.mark.parametrize('text', ['打开它', '不要关闭窗帘', '算了', '如果天黑就打开客厅灯'])
-async def test_missing_context_does_not_grant_a_guessed_target(directory, executor, text):
+async def test_low_confidence_without_context_escalates_without_execution(directory, executor, text):
     primary = _Fixed(Proposal(intent='control', target_status='resolved', targets=('living.curtain',),
                             action=Action(trait='position', command='open')))
     fallback = _Fallback(HomeClarification('请说明要操作的设备或动作'))
     command = _command(directory, executor, interpreter=primary, fallback=fallback,
-                       independent_interpreter=RulesInterpreter(require_complete=True))
+                       min_confidence=.8)
     result = await _say(command, text)
     assert result.outcome == 'clarification'
-    assert not primary.requests and not executor.requests
-    assert fallback.contexts == [None]
+    assert len(primary.requests) == 1 and not executor.requests
+    assert primary.requests[0].context is None
+    assert set(fallback.contexts[0]) == {"laya_handoff"}
 
 
 @pytest.mark.parametrize('completion', ['success', 'offline', 'unknown'])
@@ -791,110 +778,59 @@ async def test_unique_capable_target_remembers_only_confirmed_execution(director
     assert context.proposal.target_status == 'resolved'
     assert context.proposal.targets == ('living.main_light',)
     assert not context.pending
+    primary.proposal = None
     await command.handle(OWNER, 'p', 'followup', '再暗一点', context=context)
     assert fallback.contexts[-1]['proposal']['targets'] == ['living.main_light']
     assert executor.commands == [('living.main_light', 'level', 'step', {'delta': -10})] * 2
 
 
-async def test_continuation_executes_through_existing_authority_without_llm(directory, executor):
+async def test_context_primary_executes_without_llm(directory, executor):
     context = HomeContext()
-    base = _command(directory, executor)
-    await base.handle(OWNER, None, "first", "打开客厅空调", context=context)
-    assert context.snapshot()["response"] == "已打开客厅空调"
-    continuation = _Fallback(
-        Proposal(
-            intent="control",
-            target_status="resolved",
-            targets=("living.ac",),
-            action=Action(trait="on_off", command="off"),
-        )
-    )
+    await _command(directory, executor).handle(OWNER, None, "first", "打开客厅空调", context=context)
+    primary = _Fixed(Proposal(intent="control", target_status="resolved", targets=("living.ac",),
+                             action=Action(trait="on_off", command="off")))
     fallback = _Fallback()
-    command = _command(
-        directory,
-        executor,
-        continuation=continuation,
-        fallback=fallback,
-        independent_interpreter=RulesInterpreter(require_complete=True),
-    )
-    result = await command.handle(OWNER, None, "next", "把它关掉", context=context)
+    result = await _command(directory, executor, interpreter=primary, fallback=fallback).handle(
+        OWNER, None, "next", "把它关掉", context=context)
     assert result.outcome == "executed" and executor.commands[-1][2] == "off"
-    assert continuation.calls == 1 and fallback.calls == 0
-    assert continuation.requests[0].timeout_ms == 1000
-    assert context.snapshot()["response"] == "已关闭客厅空调"
+    assert len(primary.requests) == 1 and fallback.calls == 0
+    assert primary.requests[0].context["history"][-1]["outcome"] == "executed"
 
 
-async def test_continuation_abstention_falls_back_once_with_same_context(directory, executor):
-    context = HomeContext()
-    await _command(directory, executor).handle(
-        OWNER, None, "first", "打开客厅空调", context=context
-    )
-    before = context.snapshot()
-    continuation, fallback = _Fallback(), _Fallback()
-    primary = _Fixed()
-    await _command(
-        directory, executor, interpreter=primary, continuation=continuation, fallback=fallback
-    ).handle(OWNER, None, "second", "那卧室的呢", context=context)
-    assert continuation.calls == fallback.calls == 1 and not primary.requests
-    assert fallback.contexts == [before]
-
-
-async def test_late_continuation_cannot_execute_after_new_turn(directory, executor):
+@pytest.mark.parametrize("invalidate", ["new_turn", "expiry"])
+async def test_late_context_primary_cannot_execute(directory, executor, invalidate):
     import asyncio
-
     context = HomeContext()
-    await _command(directory, executor).handle(
-        OWNER, None, "first", "打开客厅空调", context=context
-    )
+    await _command(directory, executor).handle(OWNER, None, "first", "打开客厅空调", context=context)
     started, release = asyncio.Event(), asyncio.Event()
-
-    class Slow:
-        async def propose(self, request, *, context=None):
+    class Slow(_Fixed):
+        async def interpret(self, request):
             started.set()
             await release.wait()
-            return Proposal(
-                intent="control",
-                target_status="resolved",
-                targets=("living.ac",),
-                action=Action(trait="on_off", command="off"),
-            )
-
-    task = asyncio.create_task(
-        _command(directory, executor, continuation=Slow(), fallback=_Fallback()).handle(
-            OWNER, None, "next", "关闭它", context=context
-        )
-    )
+            return await super().interpret(request)
+    primary = Slow(Proposal(intent="control", target_status="resolved", targets=("living.ac",),
+                            action=Action(trait="on_off", command="off")))
+    fallback = _Fallback()
+    task = asyncio.create_task(_command(directory, executor, interpreter=primary, fallback=fallback).handle(
+        OWNER, None, "next", "关闭它", context=context))
     await started.wait()
-    context.revision += 1
+    if invalidate == "new_turn":
+        context.revision += 1
+    else:
+        # The deadline is captured before inference; let it elapse without sleeping 30 seconds.
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError): await task
+        context.expires_at = time.monotonic() + .001
+        started.clear(); release.clear()
+        task = asyncio.create_task(_command(directory, executor, interpreter=primary, fallback=fallback).handle(
+            OWNER, None, "next", "关闭它", context=context))
+        await started.wait()
+        await asyncio.sleep(.005)
     release.set()
     result = await task
-    assert result.outcome == "unavailable" and len(executor.requests) == 1
-
-
-async def test_continuation_expiring_during_inference_is_not_executed(directory, executor):
-    import asyncio
-
-    context = HomeContext()
-    await _command(directory, executor).handle(
-        OWNER, None, "first", "打开客厅空调", context=context
-    )
-    context.expires_at = time.monotonic() + 0.005
-
-    class Slow:
-        async def propose(self, request, *, context=None):
-            await asyncio.sleep(0.02)
-            return Proposal(
-                intent="control",
-                target_status="resolved",
-                targets=("living.ac",),
-                action=Action(trait="on_off", command="off"),
-            )
-
-    fallback = _Fallback()
-    await _command(directory, executor, continuation=Slow(), fallback=fallback).handle(
-        OWNER, None, "next", "关闭它", context=context
-    )
-    assert len(executor.requests) == 1 and fallback.contexts == [None]
+    assert len(executor.requests) == 1
+    if invalidate == "new_turn": assert result.outcome == "unavailable"
+    else: assert fallback.contexts == [{"laya_handoff": {"reason": "context_expired"}}]
 
 
 async def test_ambiguity_snapshot_keeps_the_shown_candidates_and_action(directory, executor):
@@ -909,18 +845,17 @@ async def test_ambiguity_snapshot_keeps_the_shown_candidates_and_action(director
 
 
 @pytest.mark.parametrize('text', ['开音箱', '关掉音箱', '音箱关掉'])
-async def test_complete_new_target_bypasses_wrong_high_confidence_follow(directory, executor, text):
+async def test_complete_new_target_reaches_primary_with_full_directory(directory, executor, text):
     context = HomeContext()
     await _command(directory, executor).handle(OWNER, None, 'old', '打开床头灯', context=context)
-    wrong = _Fallback(Proposal(intent='control', target_status='resolved',
-                              targets=('master.bedside',), action=Action(trait='on_off', command='off')))
+    primary = _Fixed(Proposal(intent='control', target_status='resolved', targets=('living.speaker',),
+                     action=Action(trait='on_off', command='on' if text == '开音箱' else 'off')))
     fallback = _Fallback()
-    command = _command(directory, executor, continuation=wrong, fallback=fallback,
-                       independent_interpreter=RulesInterpreter(require_complete=True))
-    result = await command.handle(OWNER, None, 'new', text, context=context)
-    assert result.outcome == 'executed'
-    assert executor.commands[-1][:3] == ('living.speaker', 'on_off', 'on' if text == '开音箱' else 'off')
-    assert wrong.calls == fallback.calls == 0
+    result = await _command(directory, executor, interpreter=primary, fallback=fallback).handle(
+        OWNER, None, 'new', text, context=context)
+    assert result.outcome == 'executed' and fallback.calls == 0
+    assert len(primary.requests[0].candidates) == len(directory.registries[0].devices) + len(directory.registries[0].scenes)
+    assert primary.requests[0].context['proposal']['targets'] == ['master.bedside']
     assert context.proposal.targets == ('living.speaker',)
 
 

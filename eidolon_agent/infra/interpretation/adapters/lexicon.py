@@ -405,6 +405,7 @@ _STEPS: tuple[tuple[str, tuple[str, ...], int, tuple[str | None, ...]], ...] = (
     ("level", ("brightness",), 10, ("percent", None)),
     ("thermostat", ("temperature",), 1, ("celsius", None)),
     ("volume", ("volume",), 10, ("percent", None)),
+    ("fan_speed", ("speed",), 10, ("percent", None)),
 )
 _SET_BY_DIMENSION = {
     "brightness": "level",

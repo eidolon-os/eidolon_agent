@@ -132,14 +132,10 @@ class SmartHomeCommand:
         execute_deadline_ms: int = 3000,
         fallback_timeout_s: float = 8.0,
         min_confidence: float = 0.0,
-        independent_interpreter: InteractionInterpretationPort | None = None,
-        continuation: SmartHomeFallbackPort | None = None,
     ) -> None:
         self._directory = directory
         self._interpreter = interpreter
         self._fallback = fallback
-        self._continuation = continuation
-        self._independent_interpreter = independent_interpreter
         self._interpretation_timeout_ms = interpretation_timeout_ms
         self._fallback_timeout_s = fallback_timeout_s
         if not 0.0 <= min_confidence <= 1.0:
@@ -193,8 +189,13 @@ class SmartHomeCommand:
         if not is_current():
             return card("unavailable", "本轮已被新的输入替代或会话已结束")
         if isinstance(proposal, HomeCancellation):
-            context.clear()
-            return card("answered", "已取消，本次没有执行设备操作")
+            message = "已取消待确认的请求，本次没有执行设备操作" if previous and previous.get("pending") else (
+                f"上次结果：{previous['response']}。本次没有新操作，未撤销上次操作"
+                if previous and previous.get("outcome") == "executed" else "本次没有执行设备操作"
+            )
+            context.clear(preserve_history=True)
+            context.remember(heard, None, response=message, outcome="cancelled")
+            return card("answered", message)
         if isinstance(proposal, HomeClarification):
             # Both LLM tools carry semantic facts. Presentation is selected here,
             # never by parsing device names from model-written question text.
@@ -214,20 +215,16 @@ class SmartHomeCommand:
                     return result
             # Retain an unfinished request across a further clarification, but
             # never turn the conversation into an unbounded chat history.
-            unfinished = (
-                f"{previous['previous_utterance']}；补充：{heard}"[:MAX_UTTERANCE]
-                if previous and previous['pending'] else heard
-            )
-            context.remember(unfinished, None, question=proposal.question, clarification=proposal)
+            context.remember(heard, None, question=proposal.question, clarification=proposal)
             return card("clarification", proposal.question)
-        context.clear()
+        context.clear(preserve_history=True)
         if proposal is None:
             return card("failed", NOT_UNDERSTOOD)
         if proposal.intent == "unrelated":
             result = card("unrelated", UNRELATED)
             # Preserve discourse for a later explicit request, never an
             # executable focus. Continuation requires a validated Proposal.
-            context.remember(heard, None, response=result.message)
+            context.remember(heard, None, response=result.message, outcome=result.outcome)
             return result
         if proposal.target_status == "none":
             return card("not_found", not_found(proposal.mention))
@@ -244,7 +241,7 @@ class SmartHomeCommand:
         if proposal.intent == "query":
             result = self._answer(card, home, proposal)
             if result.outcome == "answered":
-                context.remember(heard, proposal, response=result.message)
+                context.remember(heard, proposal, response=result.message, outcome=result.outcome)
             return result
         assert proposal.action is not None  # a control proposal always carries one
         if proposal.target_status == "ambiguous":
@@ -276,7 +273,7 @@ class SmartHomeCommand:
             return card("unavailable", "本轮已被新的输入替代或会话已结束")
         result = await self._run(card, owner_id, device_ref, plan)
         if is_current() and result.outcome == "executed":
-            context.remember(heard, proposal, response=result.message)
+            context.remember(heard, proposal, response=result.message, outcome=result.outcome)
         return result
 
     @staticmethod
@@ -288,68 +285,55 @@ class SmartHomeCommand:
 
     async def _understand(self, request: InterpretationRequest, *, context: dict | None = None,
                           context_deadline: float = float("inf")) -> HomeUnderstanding:
-        independent: Proposal | None = None
-        if self._independent_interpreter is not None:
-            # A complete command is independent even while another request is
-            # pending. Preserve that context for fallback if the primary disagrees.
-            witness_request = request.model_copy(update={"origin": Origin()})
-            witness = await self._independent_interpreter.interpret(witness_request)
-            independent = _accepted(witness_request, witness)
-            if independent is not None and (
-                independent.intent == "unrelated" or independent.target_status != "resolved"
-            ):
-                independent = None
-        if independent is None and context is not None and self._continuation is not None:
-            started = time.monotonic()
-            suggested = None
-            try:
-                async with asyncio.timeout(request.timeout_ms / 1000):
-                    if time.monotonic() < context_deadline:
-                        suggested = await self._continuation.propose(request, context=context)
-                if time.monotonic() >= context_deadline:
-                    context, suggested = None, None
-                if suggested is not None:
-                    accepted = self._validate_understanding(request, suggested)
-                    _log.info("home interpretation turn=%s route=laya_continuation", request.interpretation_id)
-                    return accepted
-            except (InterpretationError, TimeoutError) as exc:
-                _log.info("home continuation turn=%s abstained=%s", request.interpretation_id, type(exc).__name__)
-            finally:
-                _log.info("home stage turn=%s stage=continuation elapsed_ms=%.1f", request.interpretation_id,
-                          (time.monotonic() - started) * 1000)
-            if time.monotonic() >= context_deadline:
-                context = None
-            # Reinterpret the same utterance and context once; do not add another
-            # single-sentence model call after continuation has declined it.
-            if self._fallback is not None:
-                _log.info("home interpretation turn=%s route=llm reason=continuation_not_accepted", request.interpretation_id)
-                return await self._fallback_proposal(request, context=context)
-            return None
-        if (self._fallback is not None and independent is None
-                and (context is not None or self._independent_interpreter is not None)):
-            _log.info("home interpretation turn=%s route=llm reason=%s", request.interpretation_id,
-                      "context_required" if context is not None else "semantic_required")
-            return await self._fallback_proposal(request, context=context)
-        proposal: Proposal | None = None
+        # One interpretation request, with the full directory and the same bounded
+        # context used by fallback. No semantic rules gate model admission.
+        if context is not None and time.monotonic() >= context_deadline:
+            context = None
+        request = request.model_copy(update={"context": context})
+        started = time.monotonic()
+        handoff: dict = {}
         try:
-            result = await self._interpreter.interpret(request)
-        except InterpretationError as exc:
-            # A failed interpreter is "not understood yet", never "unrelated".
-            _log.info("smarthome interpretation %s failed: %s", request.interpretation_id, exc)
+            async with asyncio.timeout(request.timeout_ms / 1000):
+                result = await self._interpreter.interpret(request)
+            handoff = {
+                "model": result.model_version, "status": result.status,
+                "proposal": result.proposal.model_dump(mode="json") if result.proposal else None,
+                "diagnostics": dict(result.diagnostics),
+            }
+            expired = context is not None and time.monotonic() >= context_deadline
+            proposal = _accepted(request, result) if self._confident(result) and not expired else None
+            handoff["reason"] = "context_expired" if expired else (
+                "low_confidence" if not self._confident(result) else result.diagnostics.get("reason", "not_accepted")
+            )
+            if proposal is not None:
+                _log.info("home interpretation turn=%s route=primary model=%s", request.interpretation_id,
+                          result.model_version)
+                if result.diagnostics.get("home_decision") == "cancelled":
+                    return HomeCancellation()
+                return proposal
+        except (InterpretationError, TimeoutError) as exc:
             if self._fallback is None:
+                if isinstance(exc, TimeoutError):
+                    raise InterpretationError(ERROR_TIMEOUT, "home primary deadline") from exc
                 raise
-        else:
-            if self._confident(result):
-                proposal = _accepted(request, result)
-                if independent is not None and proposal != independent:
-                    _log.info("home interpretation turn=%s reason=independent_disagreement", request.interpretation_id)
-                    proposal = None
-        if proposal is not None or self._fallback is None:
-            _log.info("home interpretation turn=%s route=primary proposal=%s", request.interpretation_id,
-                      proposal.model_dump_json() if proposal else None)
-            return proposal
-        _log.info("home interpretation turn=%s route=llm reason=primary_not_accepted", request.interpretation_id)
-        return await self._fallback_proposal(request, context=context)
+            handoff = {"reason": exc.code if isinstance(exc, InterpretationError) else ERROR_TIMEOUT}
+        finally:
+            _log.info("home stage turn=%s stage=primary elapsed_ms=%.1f", request.interpretation_id,
+                      (time.monotonic() - started) * 1000)
+        if self._fallback is None:
+            return None
+        if context is not None and time.monotonic() >= context_deadline:
+            context = None
+            request = request.model_copy(update={"context": None})
+            # Expired proposals must not be reintroduced through the handoff.
+            handoff = {"reason": "context_expired"}
+        fallback_context = {**(context or {}), "laya_handoff": handoff}
+        _log.info("home interpretation turn=%s route=llm reason=%s", request.interpretation_id,
+                  handoff.get("reason"))
+        understood = await self._fallback_proposal(request, context=fallback_context)
+        if context is not None and time.monotonic() >= context_deadline:
+            return HomeClarification("上一轮上下文已过期，请重新说明设备和操作")
+        return understood
 
     async def _fallback_proposal(self, request: InterpretationRequest, *, context: dict | None = None) -> HomeUnderstanding:
         assert self._fallback is not None
@@ -397,7 +381,14 @@ class SmartHomeCommand:
         return accepted
 
     def _confident(self, result: InterpretationResult) -> bool:
-        if self._min_confidence == 0 or result.proposal is None:
+        if result.proposal is None:
+            return True
+        minimum = self._min_confidence
+        if result.policy_version == "laya-smarthome-context-v2":
+            # New input contract has no trained calibration. Conservative floors
+            # are explicit and covered by fixed-weight release gates.
+            minimum = max(minimum, .95 if result.diagnostics.get("resolution") in {"pick", "follow"} else .99)
+        if minimum == 0:
             return True
         keys = ["intent_p"]
         if result.proposal.intent != "unrelated":
@@ -407,7 +398,7 @@ class SmartHomeCommand:
         return all(
             isinstance(result.diagnostics.get(key), int | float)
             and not isinstance(result.diagnostics[key], bool)
-            and result.diagnostics[key] >= self._min_confidence
+            and minimum <= result.diagnostics[key] <= 1.0
             for key in keys
         )
 

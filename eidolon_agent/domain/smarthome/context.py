@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from copy import deepcopy
 
 from eidolon_sdk.biz.interpretation import Action, Proposal
 
@@ -25,6 +26,9 @@ HomeUnderstanding = Proposal | HomeClarification | HomeCancellation | None
 
 @dataclass
 class HomeContext:
+    history_limit: int = 3
+    history: list[dict] = field(default_factory=list)
+    outcome: str = ""
     utterance: str = ""
     proposal: Proposal | None = None
     question: str | None = None
@@ -36,7 +40,14 @@ class HomeContext:
     active: bool = True
     revision: int = 0
 
-    def clear(self) -> None:
+    def __post_init__(self) -> None:
+        if not 1 <= self.history_limit <= 5:
+            raise ValueError("history_limit must be 1..5")
+
+    def clear(self, *, preserve_history: bool = False) -> None:
+        if not preserve_history:
+            self.history.clear()
+        self.outcome = ""
         self.utterance = ""
         self.proposal = None
         self.question = None
@@ -48,7 +59,12 @@ class HomeContext:
 
     def remember(self, utterance: str, proposal: Proposal | None, *, question: str | None = None,
                  clarification: HomeClarification | None = None, response: str = "",
-                 pending_action: str = "") -> None:
+                 pending_action: str = "", outcome: str = "") -> None:
+        self.outcome = outcome or ("clarification" if question is not None else "answered")
+        self.history.append({"utterance": utterance[:512], "response": response[:512] or (question or "")[:512],
+                             "outcome": self.outcome,
+                             "proposal": proposal.model_dump(mode="json") if proposal else None})
+        del self.history[:-self.history_limit]
         self.utterance = utterance
         self.proposal = proposal
         self.question = question
@@ -63,6 +79,8 @@ class HomeContext:
             self.clear()
             return None
         return {
+            "history": deepcopy(self.history),
+            "outcome": self.outcome,
             "previous_utterance": self.utterance,
             "proposal": self.proposal.model_dump(mode="json") if self.proposal else None,
             "pending": self.pending,

@@ -85,6 +85,7 @@ _STEPS: dict[str, tuple[str, int]] = {
     "brightness": ("level", 10),
     "temperature": ("thermostat", 1),
     "volume": ("volume", 10),
+    "fan_speed": ("fan_speed", 10),
 }
 _MODES = sorted({mode for spec in DEVICE_TYPES.values() for mode in spec.modes})
 

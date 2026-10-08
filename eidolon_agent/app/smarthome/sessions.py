@@ -24,7 +24,8 @@ class HomeSession:
 
 
 class HomeSessions:
-    def __init__(self, *, ttl_s: float = 120, capacity: int = 256):
+    def __init__(self, *, ttl_s: float = 120, capacity: int = 256, context_turns: int = 3):
+        self._context_turns = context_turns
         self._ttl = ttl_s
         self._capacity = capacity
         self._items: dict[tuple[str, str, str], HomeSession] = {}
@@ -39,7 +40,7 @@ class HomeSessions:
         if key not in self._items:
             if len(self._items) >= self._capacity:
                 raise HomeSessionUnavailable("home session capacity reached")
-            self._items[key] = HomeSession(scope=scope)
+            self._items[key] = HomeSession(scope=scope, context=HomeContext(history_limit=self._context_turns))
         item = self._items[key]
         if item.scope != scope:
             raise HomeSessionUnavailable("changing a Companion requires a new home session")

@@ -1,5 +1,7 @@
 # eidolon-agent
 
+
+2026-10-08: [Smart-home model-first architecture](docs/smart-home-model-first.md).
 > 桌面陪伴中控大脑。被 LiveKit 语音 pipeline 通过 gRPC 当作 LLM 调用；对接外部
 > `eidolon-memory` 服务（MCP+NATS）；通过本地 long-task worker 调用 mementos coworker。
 

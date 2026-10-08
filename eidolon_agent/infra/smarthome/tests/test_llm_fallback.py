@@ -276,3 +276,21 @@ async def test_pending_known_target_is_valid_focus_without_a_complete_proposal()
         context={'pending': True, 'proposal': None, 'known_targets': ['a']},
     )
     assert result.targets == ('a',) and result.action.command == 'on'
+
+
+async def test_model_handoff_and_relative_semantics_reach_llm_transport():
+    import json
+    captured=[]
+    class Capture(FakeLLM):
+        async def stream(self,messages,**kwargs):
+            captured.extend(messages)
+            async for delta in super().stream(messages,**kwargs):
+                yield delta
+    llm=Capture(script=[_call({'intent':'unrelated','target_status':'none','targets':[]})],per_token_delay_s=0)
+    context={'history':[{'utterance':'开灯','response':'已打开','outcome':'executed'}],
+             'laya_handoff':{'reason':'low_confidence','proposal':None,'diagnostics':{'device_p':.6}}}
+    await LlmHomeFallback(llm).propose(_request(),context=context)
+    body=json.loads(captured[-1].content)
+    assert body['context'] == context
+    assert '可补全也可推翻' in captured[0].content
+    assert '禁止根据历史回复猜测绝对值set' in captured[0].content
