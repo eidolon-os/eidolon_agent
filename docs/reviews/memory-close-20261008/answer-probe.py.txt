@@ -1,0 +1,22 @@
+import asyncio,json,sys,hashlib
+from pathlib import Path
+sys.path.insert(0,str(Path.cwd()))
+from eidolon.memory.config.memory_settings import get_memory_settings
+from litellm import acompletion
+async def main():
+ cfg=get_memory_settings().llm
+ path=Path('../eidolon_agent/reports/memory-close-20261008/compiled.json')
+ cases=json.loads(path.read_text()); sem=asyncio.Semaphore(2)
+ async def one(row):
+  async with sem:
+   try:
+    r=await acompletion(model=cfg.model,api_base=cfg.base_url,api_key=cfg.resolve_api_key(),messages=row['messages'],temperature=0,timeout=90,num_retries=0,max_tokens=2048)
+    result={'id':row['id'],'query':row['query'],'answer':r.choices[0].message.content,'finish_reason':r.choices[0].finish_reason}
+   except Exception as e:
+    result={'id':row['id'],'error':type(e).__name__}
+   print(json.dumps(result,ensure_ascii=False),flush=True)
+   return result
+ results=await asyncio.gather(*(one(r) for r in cases))
+ report={'model':cfg.model,'temperature':0,'compiled_sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'scope':'authorized synthetic corpus; frozen MCP contexts; current ContextCompiler; not full Agent deployment','results':results}
+ path.with_name('answers.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
+asyncio.run(main())

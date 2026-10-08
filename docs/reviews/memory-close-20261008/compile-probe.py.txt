@@ -1,0 +1,23 @@
+import asyncio,gzip,json,sys
+from pathlib import Path
+sys.path.insert(0,str(Path.cwd()))
+from eidolon_agent.domain.context.tests.functional.test_compiler import _StubMemory,_StubPersonas,_locator
+from eidolon_agent.domain.context.compiler import ContextCompiler
+from tests.helpers import make_turn_input
+from eidolon_agent.domain.history.manager import HistoryManager
+root=Path('../eidolon_memory')
+raw=json.loads(gzip.decompress((root/'benchmarks/results/unified-claims-20261008/raw_results.json.gz').read_bytes()))
+responses={r['id']:r['response'] for r in raw['raw_responses']}
+qs=[json.loads(s) for s in (root/'tests/memory/e2e/fixtures/quality_queries.jsonl').read_text().splitlines()]
+async def main():
+ rows=[]
+ for q in qs:
+  if not q.get('expect_abstention') and q['id'] not in ('canonical-003','kinship-005','preference-002'):
+   continue
+  r=responses[q['id']]
+  compiler=ContextCompiler(personas_service=_StubPersonas('你是陪伴助手，用中文简短自然地回答用户。'),instance_locator=_locator,history_manager=HistoryManager(),memory_port=_StubMemory(formatted=r['context'],kg_triples=r.get('kg_triples')))
+  messages=await compiler.compile(make_turn_input(q['query']))
+  rows.append({'id':q['id'],'query':q['query'],'messages':[{'role':m.role.value,'content':m.content} for m in messages]})
+ Path('reports/memory-close-20261008/compiled.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2)+'\n')
+ print('Compiled',len(rows),'cases through ContextCompiler')
+asyncio.run(main())

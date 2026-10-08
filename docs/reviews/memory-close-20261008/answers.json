@@ -1,0 +1,80 @@
+{
+  "model": "openai/deepseek-v4-flash",
+  "temperature": 0,
+  "compiled_sha256": "e25e49339d8c9722ec457280514350a7b11276d51fda3f0867fc01b7c4adc4e7",
+  "scope": "authorized synthetic corpus; frozen MCP contexts; current ContextCompiler; not full Agent deployment",
+  "results": [
+    {
+      "id": "canonical-003",
+      "query": "铁锤是什么品种",
+      "answer": "铁锤是边境牧羊犬。",
+      "finish_reason": "stop"
+    },
+    {
+      "id": "canonical-006",
+      "query": "北京出差的事",
+      "answer": "北京出差这事我这边没具体印象，你是想让我帮忙安排什么，还是想聊哪一段？",
+      "finish_reason": "stop"
+    },
+    {
+      "id": "kinship-005",
+      "query": "我家狗多大",
+      "answer": "铁锤的年龄我这边没有记录，只记得小白是三岁。你直接告诉我，我就能记住啦。",
+      "finish_reason": "stop"
+    },
+    {
+      "id": "time-004",
+      "query": "我答应了什么事情",
+      "answer": "我这边没找到你明确答应过什么事的记录，只看到今天你们和好了、李总请了饭，还有今晚你和老婆聊了换房的事，孩子在你妈那儿。如果答应的事跟换房有关，我确实没记到具体内容。",
+      "finish_reason": "stop"
+    },
+    {
+      "id": "preference-002",
+      "query": "我听什么播客",
+      "answer": "你之前提到常听 Acquired，尤其喜欢里面讲半导体的几期。",
+      "finish_reason": "stop"
+    },
+    {
+      "id": "future-002",
+      "query": "我答应了妈妈什么",
+      "answer": "这个我现在不确定——我这边只记得你提过妈妈张丽失眠一周多，没记下你答应她的具体事情。你给个提示，比如大概哪天的、跟她失眠有关吗？",
+      "finish_reason": "stop"
+    },
+    {
+      "id": "negative-001",
+      "query": "我家鸟会说话吗",
+      "answer": "这我还真不清楚——我这边只有小白和铁锤的印象，鸟的事没听说过。是什么鸟呀？要是鹦鹉、八哥这类，学说话的机会比较大；其他的基本就只会叫自己的调子。",
+      "finish_reason": "stop"
+    },
+    {
+      "id": "negative-002",
+      "query": "我哥结婚的事",
+      "answer": "我这边没有你哥结婚的相关信息，你能说得具体点吗？比如是要问随礼、筹备安排，还是那天要不要你帮忙做什么？",
+      "finish_reason": "stop"
+    },
+    {
+      "id": "negative-003",
+      "query": "我爸去世的事",
+      "answer": "嗯，我在。你想从哪儿说起都行，我听着。",
+      "finish_reason": "stop"
+    },
+    {
+      "id": "negative-004",
+      "query": "前任的事",
+      "answer": "你想说前任的什么事？是想聊聊、问我怎么看，还是要我帮你做点什么？",
+      "finish_reason": "stop"
+    },
+    {
+      "id": "negative-005",
+      "query": "我儿子的学习",
+      "answer": "嗯，你说。是成绩上的事，还是最近报班那摊子事？",
+      "finish_reason": "stop"
+    },
+    {
+      "id": "event-003",
+      "query": "我跟客户吵架了",
+      "answer": "跟客户吵起来，肯定又气又累吧。先缓口气，想说说经过我听着。",
+      "finish_reason": "stop"
+    }
+  ]
+}

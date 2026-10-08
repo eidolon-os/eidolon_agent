@@ -1,0 +1,68 @@
+{
+  "model": "openai/deepseek-v4-flash",
+  "temperature": 0,
+  "compiled_sha256": "c11810d6f43df54270a9cf5da8e837a843e9d2c6a4a2e784efe1ba4e3adf2816",
+  "scope": "authorized synthetic corpus; frozen MCP contexts; current ContextCompiler; not full Agent deployment",
+  "results": [
+    {
+      "id": "canonical-003",
+      "query": "铁锤是什么品种",
+      "answer": "铁锤是边境牧羊犬。"
+    },
+    {
+      "id": "canonical-006",
+      "query": "北京出差的事",
+      "answer": "我这边没记着北京出差的具体安排——你是想问行程、还是让我帮忙做点准备？说一句我就接着办。"
+    },
+    {
+      "id": "kinship-005",
+      "query": "我家狗多大",
+      "answer": "这个我还真没记过——只记得铁锤是只边牧，年龄没提过。你养它多久了？"
+    },
+    {
+      "id": "time-004",
+      "query": "我答应了什么事情",
+      "answer": "我这边没记下你明确\"答应\"过什么具体的事。最近的记录只有：今晚和老婆聊了换房的事、今天和好了、李总请吃了饭、孩子在妈那儿。如果答应的是换房相关的事，具体内容我这儿没记到，你再提一句我就能接上。"
+    },
+    {
+      "id": "preference-002",
+      "query": "我听什么播客",
+      "answer": "你最近在听 Acquired，尤其喜欢半导体那几期。"
+    },
+    {
+      "id": "future-002",
+      "query": "我答应了妈妈什么",
+      "answer": "我这边没记下你具体答应过妈妈什么。跟妈妈相关的只有张丽最近失眠一周、孩子现在在她那儿——对不上某件\"答应的事\"。如果你想起大概是什么时候或哪方面的事，说一声我再帮你捋。"
+    },
+    {
+      "id": "negative-001",
+      "query": "我家鸟会说话吗",
+      "answer": ""
+    },
+    {
+      "id": "negative-002",
+      "query": "我哥结婚的事",
+      "answer": "你哥结婚的事，你想说的是哪方面？是日子定了要帮忙，还是有什么要商量？"
+    },
+    {
+      "id": "negative-003",
+      "query": "我爸去世的事",
+      "answer": "嗯，这事挺重的。我在，你想说什么就说，我听着。"
+    },
+    {
+      "id": "negative-004",
+      "query": "前任的事",
+      "answer": "你说的是哪个前任、哪件事？我这边没听到上下文，你多说两句我才能接得上。"
+    },
+    {
+      "id": "negative-005",
+      "query": "我儿子的学习",
+      "answer": "你是指哪块——成绩、作业，还是报班的事？说一下具体情况我好接着聊。"
+    },
+    {
+      "id": "event-003",
+      "query": "我跟客户吵架了",
+      "answer": "跟客户吵一架，心里肯定堵得慌。先喘口气，别急着复盘谁对谁错。"
+    }
+  ]
+}
