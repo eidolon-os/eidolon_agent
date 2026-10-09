@@ -12,11 +12,13 @@ import hashlib
 import logging
 import time
 import uuid
+from dataclasses import replace
 from datetime import UTC
 
 import grpc
 from eidolon_sdk.biz.chat_stream import TerminationCause
 from eidolon_sdk.biz.presentation import PresentationReceipt
+from eidolon_sdk.biz.presentation.motion import MotionReceipt
 
 from eidolon_agent.app.interaction import AcceptReply, ReplyRequest
 from eidolon_agent.app.transport.grpc.codec import struct_to_dict, turn_event_to_proto
@@ -37,6 +39,8 @@ from eidolon_agent.core.types.turn import (
 )
 from eidolon_agent.core.types.turn_context import InputModality
 from eidolon_agent.domain.signals import SignalFuser
+
+from .motion import MotionExchange
 
 _log = logging.getLogger(__name__)
 
@@ -146,6 +150,16 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                             )
                         )
                     continue
+                if payload == "motion_feedback":
+                    feedback = frame.motion_feedback
+                    target = input_by_turn.get(feedback.turn_id)
+                    if target is not None and isinstance(target.motion_executor, MotionExchange):
+                        try:
+                            target.motion_executor.accept(MotionReceipt.model_validate(
+                                struct_to_dict(feedback.receipt)))
+                        except ValueError:
+                            _log.warning("invalid motion receipt turn=%s", feedback.turn_id)
+                    continue
                 if payload == "presentation_feedback":
                     feedback = frame.presentation_feedback
                     target = input_by_turn.get(feedback.turn_id)
@@ -229,6 +243,18 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 except NotFoundError as exc:
                     await context.abort(grpc.StatusCode.FAILED_PRECONDITION, exc.message)
                 agent, ti = prepared.agent, prepared.turn
+                async def send_motion(request, _ti=ti, _generation=generation):
+                    if (request.turn_id != _ti.turn_id or
+                            generation_by_conversation.get(_ti.conversation_id) != _generation):
+                        raise asyncio.CancelledError()
+                    event = pb.TurnEvent(turn_id=_ti.turn_id, seq=0, kind=pb.TurnEvent.MOTION,
+                                         ts=time.time())
+                    event.motion.CopyFrom(pb.HeadMotionRequest(
+                        command_id=request.command_id, action=request.action.action,
+                        times=request.action.times))
+                    async with write_lock:
+                        await context.write(event)
+                ti = replace(ti, motion_executor=MotionExchange(send_motion))
                 if start.turn_id:
                     accepted_starts[start.turn_id] = start_digest
 

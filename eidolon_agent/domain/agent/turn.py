@@ -880,6 +880,15 @@ class TurnEngine:
                 cap_ports = {n: p for n, p in cap_ports.items() if n not in cfg.tool_deny}
             schemas = schemas + cap_schemas
             extra_tools.update(cap_ports)
+        if (ti.motion_executor is not None and cfg.allow_body_control
+                and not ti.metadata.get("speculative")
+                and ti.metadata.get("motion_profile") == "stackchan.head.v1"
+                and ti.metadata.get("selected_outputs", {}).get("motion") is True):
+            from eidolon_agent.domain.tools.stackchan_head import StackChanHeadTool
+            tool = StackChanHeadTool(ti.motion_executor)
+            if ToolVisibilityPolicy.filter([tool.schema], allow=cfg.tool_allow, deny=cfg.tool_deny):
+                schemas.append(tool.schema)
+                extra_tools[tool.schema.name] = tool
         visible = self._harness.visible_tool_schemas(schemas)
         visible_names = {schema.name for schema in visible}
         extra_tools = {name: port for name, port in extra_tools.items() if name in visible_names}

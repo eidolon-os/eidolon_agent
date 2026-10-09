@@ -467,3 +467,36 @@ async def test_retry_does_not_resurrect_cancelled_turn(monkeypatch):
     ]), context)
     assert registry._idx == 1
     assert all(event.kind == pb.TurnEvent.ACK for event in context.written)
+
+async def test_motion_tool_receipt_on_authenticated_turn_stream(monkeypatch):
+    from eidolon_sdk.biz.presentation.motion import MotionRequest
+    monkeypatch.setattr(chat_servicer, 'current_identity', _identity)
+    outgoing = asyncio.Queue()
+    received = []
+    class Agent:
+        async def run_turn(self, ti):
+            request = MotionRequest(turn_id=ti.turn_id,command_id='motion:1',action={'action':'shake','times':2})
+            receipt = await ti.motion_executor.execute(request)
+            received.append(receipt)
+            assert await ti.motion_executor.execute(request) == receipt
+            yield TurnEvent.done(ti.turn_id,1,TurnStatus.OK,0)
+    class Context(_Context):
+        async def write(self,event):
+            await super().write(event)
+            await outgoing.put(event)
+    async def requests():
+        yield pb.ChatRequest(start=pb.StartTurn(turn_id='t',conversation_id='c',text='摇头两次',input_modality='voice'))
+        event = await asyncio.wait_for(outgoing.get(),1)
+        assert event.kind == pb.TurnEvent.MOTION and event.motion.times == 2
+        assert event.motion.action == 'shake' and event.turn_id == 't'
+        feedback = pb.MotionFeedback(turn_id='t')
+        feedback.receipt.update({'command_id':'motion:1','status':'completed','completion_basis':'software_sequence'})
+        yield pb.ChatRequest(motion_feedback=feedback)
+        done = await asyncio.wait_for(outgoing.get(),1)
+        assert done.kind == pb.TurnEvent.DONE
+    context = Context()
+    servicer = EidolonAgentServicer(agent_registry=_Registry([Agent()]),signals_bus=_Signals(),
+        proactive_bus=None,runtime_sessions=_runtime_sessions())
+    await servicer.Chat(requests(),context)
+    assert received[0].status == 'completed'
+    assert sum(e.kind == pb.TurnEvent.MOTION for e in context.written) == 1

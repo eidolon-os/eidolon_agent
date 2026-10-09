@@ -10,13 +10,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from eidolon_agent.core.types.companion_runtime import CompanionRuntimeConfig
 from eidolon_agent.core.types.coordination import CoordinatedInput
 from eidolon_agent.core.types.presentation import PresentationFeedback
 from eidolon_agent.core.types.signal import SignalDigest
 from eidolon_agent.core.types.turn_context import InputModality, TurnContext
+
+if TYPE_CHECKING:
+    from eidolon_agent.core.ports.motion import MotionExecutor
 
 
 class TurnTrigger(str, Enum):
@@ -96,6 +99,7 @@ class TurnInput:
     metadata: dict = field(default_factory=dict)
     presentation_feedback: PresentationFeedback | None = None
     coordination: CoordinatedInput | None = None
+    motion_executor: MotionExecutor | None = None
 
     def __post_init__(self) -> None:
         if self.coordination is not None and (self.text or "") != self.coordination.user_text:
