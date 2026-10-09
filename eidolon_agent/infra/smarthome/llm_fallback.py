@@ -115,6 +115,9 @@ class LlmHomeFallback:
                     "context.history 是最近几轮真实对话，outcome区分澄清、已执行与取消。"
                     "context.laya_handoff 是前级模型的非权威提案、分数及升级原因；结合原话独立检查，"
                     "可补全也可推翻，不能把前级推测当成事实或授权。"
+                    "先区分数值是最终目标还是变化量：‘调到/调大到音量30%’表示最终值30，使用volume.set(value=30)；"
+                    "‘音量增加30/降低10’才是相对变化，使用volume.step(delta=30/-10)。"
+                    "方向词与目标值同时出现时，目标值决定set，不能把30%的最终音量当作增加30。"
                     "相对增减必须使用支持的step和delta，由执行层读取最新状态；"
                     "禁止根据历史回复猜测绝对值set。没有相对能力时澄清。"
                     "这里只支持即时家居操作；提醒或未来操作不能转成现在执行。"
@@ -162,7 +165,13 @@ class LlmHomeFallback:
                     "pending=false 且 proposal=null 时，previous_utterance 只是上一句对话，"
                     "没有已执行或待执行的动作；可用于理解当前明确请求的指代，但不能把历史内容当作执行授权。"
                     "其中唯一的 targets 设备就是当前焦点；当前话语使用代词或省略目标时沿用它，"
-                    "无需再次询问设备。改说另一房间的同类设备时，继承旧目标的设备类别，"
+                    "无需再次询问设备。目录里还有其他支持同一动作的设备，不构成再次澄清的理由。"
+                    "pending=false 且已有唯一设备焦点时，‘关了吧/关闭它/停下来’通常是在要求关闭或停止当前设备，"
+                    "应解释为新的设备动作；只有明确取消、禁止操作或保持现状时才用cancel_home_command。"
+                    "例如刚打开电视后说‘声音小一点’，对当前焦点电视减小音量；不能又列出音箱让用户选。"
+                    "刚对主卧空调执行操作后重复‘关闭空调’，没有切换目标的表达则仍作用于主卧；"
+                    "不能因为已经关闭就自动改选其他空调，也不要无故丢弃当前焦点。"
+                    "改说另一房间的同类设备时，继承旧目标的设备类别，"
                     "在新房间查找同类设备；多个同类才澄清，不扩展为新房间全部设备。"
                     "焦点有多个目标时，明确复数或全体指代可沿用全体；单数指代必须澄清是哪一台，不能对全体执行。"
                     "当前话语的动作优先，不能照抄历史动作；闲聊或换话题不能触发旧操作。"
@@ -258,9 +267,8 @@ class LlmHomeFallback:
                 _log.info("home fallback turn=%s outcome=clarification reason=value_disagreement", request.interpretation_id)
                 return HomeClarification("请确认要设为多少？", proposal.targets)
         _log.info(
-            "home fallback turn=%s outcome=proposed intent=%s target_status=%s targets=%s action=%s",
-            request.interpretation_id, proposal.intent, proposal.target_status, proposal.targets,
-            (proposal.action.trait, proposal.action.command) if proposal.action else None,
+            "home fallback turn=%s outcome=proposed proposal=%s",
+            request.interpretation_id, proposal.model_dump_json(),
         )
         return proposal
 

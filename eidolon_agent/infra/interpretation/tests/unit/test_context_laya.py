@@ -114,3 +114,21 @@ async def test_uncertain_pick_does_not_execute_stateless_guessed_action():
         },
     )
     assert r.proposal is None and r.diagnostics["reason"] == "pending_not_resolved"
+
+
+async def test_confident_full_command_can_replace_pending_with_model_agreement():
+    result, _ = await run(pending(), {
+        'intent': answer('控制'), 'device': answer('床头灯'),
+        'action': answer('打开或启动'), 'pick': answer('重新理解', .98),
+    })
+    assert result.proposal.targets == ('master.bedside',)
+    assert result.proposal.action.command == 'on'
+
+
+@pytest.mark.parametrize('pick', [answer('重新理解', .94), answer('取消', .98)])
+async def test_pending_replacement_does_not_override_uncertainty_or_cancellation(pick):
+    result, _ = await run(pending(), {
+        'intent': answer('控制'), 'device': answer('床头灯'),
+        'action': answer('打开或启动'), 'pick': pick,
+    })
+    assert result.proposal is None

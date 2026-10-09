@@ -33,3 +33,13 @@ The new `laya-smarthome-context-v2` contract is not a newly trained/calibrated m
 Unit/contract tests cover model-first admission, full-directory target changes, three-turn snapshots, expired context, LLM evidence transport, contradiction/truncation/old-service fallback, FIFO ordering, cancellation feedback and relative device state. Mac FP32 inference replays are in sibling `eidolon_models/laya/evals/model-first-20261008` with fixed revisions c4 `7b695ba8` and c10 `e8254243`.
 
 The real-model replay uses a scripted fallback oracle and an in-memory test actuator. It measures Laya and application behavior, not real LLM accuracy, ASR quality, Korvo rendering or NPU latency. No weights were trained or deployed. Code changes require compatible SDK, Agent, Hub, Channel and model service updates; deploy only after the separately authorized board validation.
+
+## Production follow-up (2026-10-10)
+
+The pending branch accepts a complete current command only when intent/device/action clear the existing direct floors **and** pick independently returns `重新理解` at ≥0.95. Conflicting picks, cancellation and uncertain continuation still escalate; there is no new lexical admission gate or extra Laya request.
+
+LLM instructions distinguish final setpoints from deltas, device-off requests from cancellation, and a unique recent focus from the larger capability directory. This improves the observed conversation cases without lowering floors or retraining. Prompt examples are not a guarantee of unrestricted language accuracy; the live-LLM regression uses a synthetic registry and an in-memory executor.
+
+The shipped settings enable local interpretation replay at `$EIDOLON_STATE_ROOT/agent/interpretations/smarthome.jsonl`. A single recorder writes asynchronously under a lock, keeps an active file plus three backups of at most 8 MiB each, and creates files with mode 0600. Records include user text, exact bounded context, candidates, model/policy version, top-three question scores, adapter result and duration. They are local diagnostic data, not uploaded telemetry. Set `interpretation_record_path: ""` to disable; this is size retention rather than a guaranteed number of days. Oversized records fail closed for logging and are reported by the existing non-fatal recorder failure path.
+
+`home fallback` logs the complete validated proposal. `home execute` and `home receipt` correlate turn IDs with submitted parameters and provider-reported state. Provider acknowledgement still does not prove physical device behavior or Korvo playback; those require their own endpoint evidence.

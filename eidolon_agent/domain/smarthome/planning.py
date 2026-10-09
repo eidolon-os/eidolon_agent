@@ -221,12 +221,14 @@ class HomeActuator:
             # Absolute: past it the Runtime runs nothing, even if delivered late.
             deadline_ms=int(self._wall_clock() * 1000) + self._deadline_ms,
         )
+        _log.info("home execute turn=%s request=%s", origin.turn_id, request.model_dump_json())
         try:
             async with asyncio.timeout(self._deadline_ms / 1000 + self._grace_s):
                 result = await self._executor.execute(owner_id, request)
         except TimeoutError:
             _log.warning("smarthome execute %s: no reply by the deadline", request_id)
             return Execution(dict.fromkeys(expected, UNKNOWN))
+        _log.info("home receipt turn=%s result=%s", origin.turn_id, result.model_dump_json())
         if result.request_id != request_id:
             _log.warning("smarthome execute %s answered as %s", request_id, result.request_id)
             return Execution(dict.fromkeys(expected, UNKNOWN))

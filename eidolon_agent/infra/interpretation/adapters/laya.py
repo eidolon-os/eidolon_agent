@@ -395,6 +395,11 @@ def _context_result(request, options, payload, result):
             }
         )
     if context.get("pending"):
+        # A complete new command may replace pending work only when the
+        # continuation classifier independently calls for reinterpretation.
+        # Uncertain picks and conflicting selections/cancellations still escalate.
+        if direct and pick == "重新理解" and _prob(answers, "pick") >= 0.95:
+            return result
         return abstain("pending_not_resolved")
     if direct:
         return result
