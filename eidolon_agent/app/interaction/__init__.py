@@ -13,6 +13,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from eidolon_agent.core.errors import NotFoundError, PermissionDeniedError
+from eidolon_agent.core.ports.channel_tool import ChannelToolExecutor
 from eidolon_agent.core.types.conversation import validate_conversation_id
 from eidolon_agent.core.types.coordination import CoordinatedInput
 from eidolon_agent.core.types.presentation import PresentationFeedback
@@ -43,6 +44,8 @@ class ReplyRequest:
     realtime: SignalDigest | None = None
     metadata: dict = field(default_factory=dict)
     coordination: CoordinatedInput | None = None
+    channel_tool_executor: ChannelToolExecutor | None = None
+    channel_tool_capabilities: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,5 +111,7 @@ class AcceptReply:
             text=request.text,
             realtime=request.realtime,
             metadata=metadata,
+            channel_tool_executor=request.channel_tool_executor,
+            channel_tool_capabilities=request.channel_tool_capabilities,
         )
         return PreparedReply(agent=instance.agent, turn=turn)

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from eidolon_agent.core.types.companion_runtime import CompanionRuntimeConfig
@@ -19,10 +19,11 @@ from eidolon_agent.core.types.signal import SignalDigest
 from eidolon_agent.core.types.turn_context import InputModality, TurnContext
 
 if TYPE_CHECKING:
+    from eidolon_agent.core.ports.channel_tool import ChannelToolExecutor
     from eidolon_agent.core.ports.motion import MotionExecutor
 
 
-class TurnTrigger(str, Enum):
+class TurnTrigger(StrEnum):
     USER_UTTERANCE = "user_utterance"  # standard incoming chat
     CONTINUATION = "continuation"  # follow-up in same conversation
     PROACTIVE = "proactive"  # agent-initiated (timer / signal / promise)
@@ -31,7 +32,7 @@ class TurnTrigger(str, Enum):
     SYSTEM = "system"  # internal (warmup, health, etc.)
 
 
-class TriageKind(str, Enum):
+class TriageKind(StrEnum):
     """How the input was classified."""
 
     SIMPLE = "simple"  # short conversational reply
@@ -39,14 +40,14 @@ class TriageKind(str, Enum):
     TOOL_DIRECT = "tool_direct"  # bypass LLM, run tool directly
 
 
-class TurnStatus(str, Enum):
+class TurnStatus(StrEnum):
     OK = "ok"
     CANCELLED = "cancelled"
     ERRORED = "errored"
     HANDED_OFF = "handed_off"
 
 
-class TurnEventKind(str, Enum):
+class TurnEventKind(StrEnum):
     """Wire-protocol event kinds. Must stay in sync with eidolon.proto."""
 
     STATE = "state"
@@ -63,7 +64,7 @@ class TurnEventKind(str, Enum):
     HANDOFF = "handoff"  # delegated to a background worker
 
 
-class FSMState(str, Enum):
+class FSMState(StrEnum):
     IDLE = "idle"
     LISTENING = "listening"
     THINKING = "thinking"
@@ -100,6 +101,8 @@ class TurnInput:
     presentation_feedback: PresentationFeedback | None = None
     coordination: CoordinatedInput | None = None
     motion_executor: MotionExecutor | None = None
+    channel_tool_executor: ChannelToolExecutor | None = None
+    channel_tool_capabilities: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         if self.coordination is not None and (self.text or "") != self.coordination.user_text:

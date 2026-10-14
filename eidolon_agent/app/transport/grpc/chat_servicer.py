@@ -21,6 +21,7 @@ from eidolon_sdk.biz.presentation import PresentationReceipt
 from eidolon_sdk.biz.presentation.motion import MotionReceipt
 
 from eidolon_agent.app.interaction import AcceptReply, ReplyRequest
+from eidolon_agent.app.transport.grpc.channel_tools import ChannelToolExchange
 from eidolon_agent.app.transport.grpc.codec import struct_to_dict, turn_event_to_proto
 from eidolon_agent.app.transport.grpc.interceptors import current_identity
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
@@ -30,6 +31,7 @@ from eidolon_agent.core.errors import (
     NotFoundError,
     PermissionDeniedError,
 )
+from eidolon_agent.core.ports.channel_tool import ChannelToolResult
 from eidolon_agent.core.types.conversation import validate_conversation_id
 from eidolon_agent.core.types.signal import SignalDigest
 from eidolon_agent.core.types.turn import (
@@ -84,6 +86,38 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         accepted_starts: dict[str, bytes] = {}
         write_lock = asyncio.Lock()
         signal_fuser = SignalFuser()
+
+        async def send_channel_tool(request):
+            event = pb.TurnEvent(
+                turn_id=request.turn_id,
+                seq=0,
+                kind=pb.TurnEvent.CHANNEL_TOOL_CALL,
+                ts=time.time(),
+                channel_tool_call=pb.ChannelToolCall(
+                    call_id=request.call_id,
+                    name=request.name,
+                ),
+            )
+            event.channel_tool_call.arguments.update(dict(request.arguments))
+            async with write_lock:
+                await context.write(event)
+
+        async def cancel_channel_tool(turn_id: str, call_id: str):
+            async with write_lock:
+                await context.write(
+                    pb.TurnEvent(
+                        turn_id=turn_id,
+                        seq=0,
+                        kind=pb.TurnEvent.CHANNEL_TOOL_CANCEL,
+                        ts=time.time(),
+                        channel_tool_cancel=pb.ChannelToolCancel(
+                            turn_id=turn_id,
+                            call_id=call_id,
+                        ),
+                    )
+                )
+
+        channel_tool_exchange = ChannelToolExchange(send_channel_tool, cancel_channel_tool)
 
         # Watch the gRPC context for cancellation (raw TCP close, RPC cancel
         # without a CancelTurn frame, deadline exceeded, …). When fired, cancel
@@ -174,6 +208,20 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                         except ValueError:
                             _log.warning("invalid presentation receipt turn=%s", feedback.turn_id)
                     continue
+                if payload == "channel_tool_result":
+                    result = frame.channel_tool_result
+                    channel_tool_exchange.accept(
+                        ChannelToolResult(
+                            turn_id=result.turn_id,
+                            call_id=result.call_id,
+                            name=result.name,
+                            ok=result.ok,
+                            content=struct_to_dict(result.content),
+                            error_code=result.error_code,
+                            error_message=result.error_message,
+                        )
+                    )
+                    continue
                 if payload == "signal":
                     await self._signals.publish(
                         scope.session_id,
@@ -236,6 +284,15 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                             metadata=struct_to_dict(start.metadata),
                             trace_id=trace_id,
                             request_id=dict(context.invocation_metadata()).get("x-request-id", ""),
+                            channel_tool_executor=channel_tool_exchange,
+                            channel_tool_capabilities=frozenset(
+                                capability
+                                for capability in start.channel_tool_capabilities
+                                if capability in {"music.play", "music.stop", "music.status"}
+                                and scope.device_id is not None
+                                and input_modality == "voice"
+                                and not start.speculative
+                            ),
                         ),
                     )
                 except PermissionDeniedError as exc:
