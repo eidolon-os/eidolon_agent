@@ -12,6 +12,7 @@ class ChannelMusicTool:
         executor: ChannelToolExecutor,
         *,
         name: str,
+        llm_name: str,
         description: str,
         json_schema: dict[str, Any],
         side_effect: bool,
@@ -20,6 +21,7 @@ class ChannelMusicTool:
         self._executor = executor
         self.schema = ToolSchema(
             name=name,
+            llm_name=llm_name,
             description=description,
             json_schema=json_schema,
             permissions=frozenset({Permission.SYSTEM}),
@@ -44,6 +46,7 @@ def build_channel_music_tools(executor: ChannelToolExecutor) -> list[ChannelMusi
         ChannelMusicTool(
             executor,
             name="music.play",
+            llm_name="music_play",
             description="Play an authorized online music song by its provider song id.",
             json_schema={
                 "type": "object",
@@ -60,6 +63,7 @@ def build_channel_music_tools(executor: ChannelToolExecutor) -> list[ChannelMusi
         ChannelMusicTool(
             executor,
             name="music.stop",
+            llm_name="music_stop",
             description="Stop the current online music playback.",
             json_schema={
                 "type": "object",
@@ -72,6 +76,7 @@ def build_channel_music_tools(executor: ChannelToolExecutor) -> list[ChannelMusi
         ChannelMusicTool(
             executor,
             name="music.status",
+            llm_name="music_status",
             description="Read the current online music playback status.",
             json_schema={"type": "object", "properties": {}, "additionalProperties": False},
             side_effect=False,

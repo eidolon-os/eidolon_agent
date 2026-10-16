@@ -34,13 +34,14 @@ class ToolSchema:
     side_effect: bool = False  # True → dispatcher serializes
     supports_dry_run: bool = False
     idempotency_key_template: str | None = None  # e.g. "${user_id}:${date}:${vendor}"
+    llm_name: str | None = None
 
     def to_openai_function(self) -> dict:
         """Render to OpenAI / Anthropic-compatible function spec."""
         return {
             "type": "function",
             "function": {
-                "name": self.name,
+                "name": self.llm_name or self.name,
                 "description": self.description,
                 "parameters": self.json_schema,
             },
