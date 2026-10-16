@@ -15,8 +15,8 @@ from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
 import httpx
-from eidolon_sdk.core.http import HTTPClientSettings, create_async_client
 import litellm
+from eidolon_sdk.core.http import HTTPClientSettings, create_async_client
 from eidolon_sdk.integrations.llm import render_openai_tool_calls, validate_openai_tool_transcript
 
 from eidolon_agent.core.errors import LLMUnavailableError
@@ -116,6 +116,21 @@ class LiteLLMProvider:
         )
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
+        provider_to_internal_name = {
+            schema.llm_name: schema.name
+            for schema in tools or []
+            if schema.llm_name is not None
+        }
+        internal_to_provider_name = {
+            internal_name: provider_name
+            for provider_name, internal_name in provider_to_internal_name.items()
+        }
+        openai_messages = [
+            _to_msg(message, internal_to_provider_name=internal_to_provider_name)
+            for message in messages
+        ]
+        validate_openai_tool_transcript(openai_messages)
+        kwargs["messages"] = openai_messages
         if tools:
             kwargs["tools"] = [t.to_openai_function() for t in tools]
 
@@ -283,7 +298,9 @@ class LiteLLMProvider:
                                 tool_ready_ms = int((time.monotonic() - t0) * 1000)
                             yield LLMDelta(
                                 tool_call=ToolCall(
-                                    id=buf["id"] or "", name=buf["name"], arguments=args
+                                    id=buf["id"] or "",
+                                    name=provider_to_internal_name.get(buf["name"], buf["name"]),
+                                    arguments=args,
                                 )
                             )
                         yield LLMDelta(finish=_map_finish(choice.finish_reason))
@@ -382,7 +399,10 @@ class LiteLLMProvider:
 
     async def count_tokens(self, messages: list[ChatMessage]) -> int:
         try:
-            return litellm.token_counter(model=self._model, messages=[_to_msg(m) for m in messages])
+            return litellm.token_counter(
+                model=self._model,
+                messages=[_to_msg(m) for m in messages],
+            )
         except Exception:
             return sum(max(1, len(m.content) // 3) for m in messages)
 
@@ -450,7 +470,11 @@ async def close_shared_client() -> None:
     _shared_http_client = None
 
 
-def _to_msg(m: ChatMessage) -> dict:
+def _to_msg(
+    m: ChatMessage,
+    *,
+    internal_to_provider_name: dict[str, str] | None = None,
+) -> dict:
     role = {
         MessageRole.SYSTEM: "system",
         MessageRole.USER: "user",
@@ -460,10 +484,22 @@ def _to_msg(m: ChatMessage) -> dict:
     }.get(m.role, "user")
     out: dict = {"role": role, "content": m.content}
     if m.role is MessageRole.ASSISTANT and m.tool_calls:
-        out["tool_calls"] = render_openai_tool_calls(m.tool_calls)
+        calls = m.tool_calls
+        if internal_to_provider_name:
+            calls = [
+                ToolCall(
+                    id=call.id,
+                    name=internal_to_provider_name.get(call.name, call.name),
+                    arguments=call.arguments,
+                )
+                for call in calls
+            ]
+        out["tool_calls"] = render_openai_tool_calls(calls)
     if m.role is MessageRole.TOOL:
         out["tool_call_id"] = m.tool_call_id
-        out["name"] = m.tool_name
+        out["name"] = internal_to_provider_name.get(m.tool_name, m.tool_name) if (
+            internal_to_provider_name and m.tool_name
+        ) else m.tool_name
     return out
 
 
