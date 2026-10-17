@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -11,6 +12,8 @@ from eidolon_agent.core.ports.channel_tool import (
     ChannelToolResult,
 )
 from eidolon_agent.core.types.tool import ToolResult
+
+logger = logging.getLogger("eidolon_agent.grpc.channel_tools")
 
 ChannelToolSender = Callable[[ChannelToolRequest], Awaitable[None]]
 ChannelToolCancelSender = Callable[[str, str], Awaitable[None]]
@@ -41,6 +44,13 @@ class ChannelToolExchange:
     async def execute(self, request: ChannelToolRequest) -> ToolResult:
         key = (request.turn_id, request.call_id)
         digest = _request_digest(request)
+        logger.info(
+            "channel_tool_exchange request turn_id=%s call_id=%s name=%s arguments=%s",
+            request.turn_id,
+            request.call_id,
+            request.name,
+            json.dumps(request.arguments, ensure_ascii=False, sort_keys=True, default=str),
+        )
         completed = self._completed.get(key)
         if completed is not None:
             if completed[0] != digest:
@@ -65,6 +75,15 @@ class ChannelToolExchange:
             result = await asyncio.wait_for(future, self._timeout_s)
             tool_result = _tool_result(result)
             self._completed[key] = (digest, tool_result)
+            logger.info(
+                "channel_tool_exchange response turn_id=%s call_id=%s name=%s ok=%s "
+                "error_code=%s",
+                request.turn_id,
+                request.call_id,
+                request.name,
+                tool_result.ok,
+                tool_result.error_code or "-",
+            )
             return tool_result
         except asyncio.CancelledError:
             await self._cancel(request.turn_id, request.call_id)
@@ -79,11 +98,28 @@ class ChannelToolExchange:
                 error_message=f"Channel tool exceeded {self._timeout_s:.0f}s",
             )
             self._completed[key] = (digest, tool_result)
+            logger.warning(
+                "channel_tool_exchange response turn_id=%s call_id=%s name=%s ok=false "
+                "error_code=%s",
+                request.turn_id,
+                request.call_id,
+                request.name,
+                tool_result.error_code,
+            )
             return tool_result
         finally:
             self._pending.pop(key, None)
 
     def accept(self, result: ChannelToolResult) -> bool:
+        logger.info(
+            "channel_tool_exchange received turn_id=%s call_id=%s name=%s ok=%s "
+            "error_code=%s",
+            result.turn_id,
+            result.call_id,
+            result.name,
+            result.ok,
+            result.error_code or "-",
+        )
         pending = self._pending.get((result.turn_id, result.call_id))
         if pending is None or pending.future.done():
             return False

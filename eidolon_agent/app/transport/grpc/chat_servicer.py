@@ -88,6 +88,13 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         signal_fuser = SignalFuser()
 
         async def send_channel_tool(request):
+            _log.info(
+                "channel_tool_call sent turn_id=%s call_id=%s name=%s arguments=%s",
+                request.turn_id,
+                request.call_id,
+                request.name,
+                dict(request.arguments),
+            )
             event = pb.TurnEvent(
                 turn_id=request.turn_id,
                 seq=0,
@@ -210,6 +217,16 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     continue
                 if payload == "channel_tool_result":
                     result = frame.channel_tool_result
+                    _log.info(
+                        "channel_tool_result received turn_id=%s call_id=%s name=%s "
+                        "ok=%s error_code=%s content=%s",
+                        result.turn_id,
+                        result.call_id,
+                        result.name,
+                        result.ok,
+                        result.error_code or "-",
+                        dict(result.content),
+                    )
                     channel_tool_exchange.accept(
                         ChannelToolResult(
                             turn_id=result.turn_id,
