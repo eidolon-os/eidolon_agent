@@ -72,23 +72,21 @@ def build_agent_history_hydrator(runtime_store: AgentRuntimeStore):
         async with runtime_store.read_session_factory() as session:
             pairs = (
                 await session.execute(
-                    select(MessageRow, TurnRow.seq)
+                    select(MessageRow, TurnRow.status, TurnRow.started_at)
                     .join(TurnRow, MessageRow.turn_id == TurnRow.turn_id)
                     .where(TurnRow.conversation_id == conversation_id)
-                    .order_by(TurnRow.seq.desc(), MessageRow.seq.desc())
+                    # Background writes can finish out of order. The context
+                    # window follows conversation time, not insertion order.
+                    .order_by(
+                        TurnRow.started_at.desc(), TurnRow.turn_id.desc(), MessageRow.seq.desc()
+                    )
                     .limit(window)
                 )
             ).all()
-            ordered = sorted(
-                pairs,
-                key=lambda pair: (
-                    pair[1],
-                    pair[0].created_at,
-                    _message_seq_in_turn(pair[0]),
-                    pair[0].message_id,
-                ),
-            )
-            return [_row_to_message(row) for row, _seq in ordered]
+            return [
+                _row_to_message(row, turn_status=status, turn_started_at=started_at)
+                for row, status, started_at in reversed(pairs)
+            ]
 
     return _hydrate
 
@@ -931,22 +929,6 @@ def _turn_message_id(turn_id: str, seq_in_turn: int) -> str:
     return f"msg_{turn_id}_{seq_in_turn}"
 
 
-def _message_seq_in_turn(row: MessageRow) -> int:
-    if isinstance(row.seq, int):
-        return row.seq
-    metadata = row.metadata_json or {}
-    value = metadata.get("seq_in_turn") if isinstance(metadata, dict) else None
-    if isinstance(value, int):
-        return value
-    return {
-        MessageRole.USER.value: 0,
-        MessageRole.ASSISTANT.value: 1,
-        MessageRole.PROACTIVE.value: 1,
-        MessageRole.TOOL.value: 2,
-        MessageRole.SYSTEM.value: -1,
-    }.get(row.role, 99)
-
-
 def _seq_from_message_metadata(metadata: dict[str, Any], role: str) -> int:
     value = metadata.get("seq_in_turn")
     if isinstance(value, int):
@@ -960,8 +942,14 @@ def _seq_from_message_metadata(metadata: dict[str, Any], role: str) -> int:
     }.get(role, 99)
 
 
-def _row_to_message(row: MessageRow) -> ChatMessage:
+def _row_to_message(
+    row: MessageRow, *, turn_status: str | None = None, turn_started_at: datetime | None = None
+) -> ChatMessage:
     metadata = dict(row.metadata_json or {})
+    if turn_status is not None:
+        metadata["turn_status"] = turn_status
+    if turn_started_at is not None:
+        metadata["turn_started_at"] = turn_started_at.isoformat()
     if row.visibility == "private":
         metadata["is_private"] = True
     return ChatMessage(

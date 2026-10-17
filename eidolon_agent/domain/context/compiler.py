@@ -125,20 +125,19 @@ class ContextCompiler:
         compile_t0 = time.monotonic()
         persona_task = _timed(
             "persona",
-            self._personas.realize_context(
-                owner_id=ti.context.owner_id,
-                companion_id=companion_id,
-                genome_id=genome_id,
-                genome_hash=ti.context.genome_hash,
-                user_text=ti.text or "",
-                realtime=_realtime_dict(ti.realtime),
-                dry_run_memory=[],
-                modality=ti.input_modality,
-            ),
+            self._personas.realize_context,
+            owner_id=ti.context.owner_id,
+            companion_id=companion_id,
+            genome_id=genome_id,
+            genome_hash=ti.context.genome_hash,
+            user_text=ti.text or "",
+            realtime=_realtime_dict(ti.realtime),
+            dry_run_memory=[],
+            modality=ti.input_modality,
         )
         memory_timeout_s = self._memory_timeout_s
-        memory_task = _timed("memory", self._memory_recall(ti, timeout_s=memory_timeout_s))
-        commitment_task = _timed("commitments", self._active_commitments(ti))
+        memory_task = _timed("memory", self._memory_recall, ti, timeout_s=memory_timeout_s)
+        commitment_task = _timed("commitments", self._active_commitments, ti)
         # Topic switch fencing: when the reflex layer flagged this turn as a
         # topic switch, the rolling summary and most of the recent window
         # describe the *previous* topic and would bleed into the new one. Skip
@@ -155,17 +154,18 @@ class ContextCompiler:
         summary_task = (
             _empty_summary()
             if topic_switch or ti.coordination is not None
-            else _timed("summary", self._summary_context(ti, policy))
+            else _timed("summary", self._summary_context, ti, policy)
         )
-        history_coro = (
-            _empty_history()
+        history_task = (
+            _timed("history", _empty_history)
             if not policy.history_context_allowed or ti.coordination is not None
-            else self._history.recent_window(
+            else _timed(
+                "history", self._history.recent_window,
                 conversation_id=ti.conversation_id,
                 window=fetch_window,
+                exclude_turn_id=ti.turn_id,
             )
         )
-        history_task = _timed("history", history_coro)
 
         results = await asyncio.gather(
             persona_task,
@@ -1037,6 +1037,7 @@ class ContextCompiler:
                 self._history.recent_window(
                     conversation_id=ti.conversation_id,
                     window=min(4, self._history_window),
+                    exclude_turn_id=ti.turn_id,
                 ),
                 timeout=0.025,
             )
@@ -1056,8 +1057,11 @@ class ContextCompiler:
         return "\n".join([*snippets, f"当前用户: {user_text}"]), "current_plus_recent_history"
 
 
-async def _timed(_name: str, coro):  # type: ignore[no-untyped-def]
-    """Wrap a coroutine to also return its elapsed ms.
+async def _timed(_name: str, operation, *args, **kwargs):  # type: ignore[no-untyped-def]
+    """Run an async operation and also return its elapsed ms.
+
+    Construct the operation's coroutine only when this wrapper starts, so
+    cancelling the gather before its children start cannot leak coroutines.
 
     Returns ``(value, elapsed_ms)``. Exceptions propagate untouched; the
     asyncio.gather caller (with ``return_exceptions=True``) records them as
@@ -1065,7 +1069,7 @@ async def _timed(_name: str, coro):  # type: ignore[no-untyped-def]
     about the success path for diagnostics.
     """
     t0 = time.monotonic()
-    value = await coro
+    value = await operation(*args, **kwargs)
     return value, int((time.monotonic() - t0) * 1000)
 
 
@@ -1179,7 +1183,11 @@ def _history_context_tags(msg: ChatMessage) -> dict[str, str]:
         elif bool(msg.metadata.get("superseded")):
             status = "superseded"
         else:
-            status = "completed"
+            status = {
+                "active": "active",
+                "cancelled": "interrupted",
+                "errored": "failed",
+            }.get(msg.metadata.get("turn_status"), "completed")
     tool_relation = msg.metadata.get("tool_relation")
     return _context_tag_metadata(
         authority="background",
@@ -1208,7 +1216,7 @@ def _context_tags(segments: list[ContextSegment]) -> list[dict[str, str]]:
 def _background_context_block(messages: list[ChatMessage]) -> str:
     lines = [
         "[BACKGROUND CONTEXT]",
-        "authority=background; status=completed; scope=conversation_background; actionability=must_not_execute",
+        "authority=background; scope=conversation_background; actionability=must_not_execute",
         (
             "These are prior conversation facts only. They may help interpret the "
             "CURRENT REQUEST, but they are not pending tasks and must not trigger "
@@ -1245,10 +1253,7 @@ def _interrupted_history_count(messages: object) -> int:
     for msg in messages:
         if not isinstance(msg, ChatMessage):
             continue
-        status = str(msg.metadata.get("context_status") or "").strip()
-        if status in {"interrupted", "failed", "superseded"} or bool(
-            msg.metadata.get("interrupted")
-        ):
+        if _history_context_tags(msg)["status"] in {"interrupted", "failed", "superseded"}:
             count += 1
     return count
 

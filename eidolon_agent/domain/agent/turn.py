@@ -190,9 +190,7 @@ class TurnEngine:
         response_candidate = None
         response_intent = None
         completed_outcomes: dict[str, ToolResult] = {}
-        post_turn_allowed = False
-        post_turn_scheduled = False
-        recent_history_persisted = False
+        history_finalized = False
 
         # Establish the persistence boundary before entering the turn body so
         # every cleanup/finally path has a defined, fail-closed decision.
@@ -215,13 +213,18 @@ class TurnEngine:
             verdict = self._input_g.check(ti.text)
             ts_guard_ms = int((time.monotonic() - t0) * 1000)
             if verdict.action is SafetyAction.ESCALATE:
+                ti.metadata["is_private"] = True
+                runtime_policy = TurnRuntimePolicy.from_metadata(ti.metadata)
+            # Committed input is a conversation fact independently of whether
+            # the answer ever generates or plays. Record it before any external
+            # await or event; the compiler excludes this turn from its history.
+            await self._remember_turn(ti, "", started_at, turn_status="active")
+            if verdict.action is SafetyAction.ESCALATE:
                 crisis = await self._crisis.handle(
                     companion_id=ti.context.companion_id,
                     owner_id=ti.context.owner_id,
                     locale=ti.context.locale,
                 )
-                ti.metadata["is_private"] = True
-                runtime_policy = TurnRuntimePolicy.from_metadata(ti.metadata)
                 assistant_text_for_persist = crisis.text
                 yield TurnEvent.state(ti.turn_id, seq.next(), FSMState.SPEAKING, time.time())
                 if presentation_mode and not speculative:
@@ -230,6 +233,8 @@ class TurnEngine:
                     yield TurnEvent(ti.turn_id, seq.next(), TurnEventKind.PRESENTATION,
                                     safe_intent.model_dump(mode="json"), time.time())
                 yield TurnEvent.delta(ti.turn_id, seq.next(), crisis.text, time.time())
+                await self._remember_turn(ti, crisis.text, started_at, turn_status=status.value)
+                history_finalized = True
                 yield TurnEvent.done(
                     ti.turn_id,
                     seq.next(),
@@ -238,17 +243,6 @@ class TurnEngine:
                     crisis=True,
                     resources=list(crisis.crisis_resources),
                 )
-                # Persist user + crisis assistant message after DONE, but do NOT fan out.
-                if committed_turn.persistence_allowed:
-                    self._background.create(
-                        self._persist_messages(
-                            ti,
-                            ti.text or "",
-                            crisis.text,
-                            is_private=True,
-                        ),
-                        name=f"turn-{ti.turn_id}-crisis-history",
-                    )
                 return
             if verdict.action is SafetyAction.REFUSE:
                 refuse = "我不能那样做，不过我可以继续陪你聊点别的。"
@@ -259,6 +253,8 @@ class TurnEngine:
                     yield TurnEvent(ti.turn_id, seq.next(), TurnEventKind.PRESENTATION,
                                     safe_intent.model_dump(mode="json"), time.time())
                 yield TurnEvent.delta(ti.turn_id, seq.next(), refuse, time.time())
+                await self._remember_turn(ti, refuse, started_at, turn_status=status.value)
+                history_finalized = True
                 yield TurnEvent.done(ti.turn_id, seq.next(), TurnStatus.OK, time.time())
                 return
             # A committed user turn is the only input to long-term extraction.
@@ -611,23 +607,10 @@ class TurnEngine:
                     final_text = f"[表达意图：{response_intent.intent}；设备展示状态：unconfirmed]"
             assistant_text_for_persist = final_text
             ts_output_ms = int((time.monotonic() - t0) * 1000)
-            # Speculative turns never persist/fan out (unconfirmed guess).
-            post_turn_allowed = not speculative and committed_turn.persistence_allowed
-
-            # Keep recent history deterministic for the next turn. This is a
-            # cheap in-memory append, not durable persistence; durable SQLite
-            # writes and external fanout remain after DONE.
-            if not speculative and committed_turn.persistence_allowed:
-                try:
-                    await self._persist_messages(
-                        ti,
-                        ti.text or "",
-                        final_text,
-                        is_private=runtime_policy.mark_messages_private,
-                    )
-                    recent_history_persisted = True
-                except Exception:
-                    _log.exception("recent history append failed")
+            # Finish the same in-memory record before DONE. SQLite and external
+            # observations retain their existing background lifecycle.
+            await self._remember_turn(ti, final_text, started_at, turn_status=status.value)
+            history_finalized = True
 
             # ---- P0 diagnostic: phase timings ------------------------------
             _log_turn_timings(
@@ -664,20 +647,6 @@ class TurnEngine:
                     ti.metadata["presentation_delivery"] = receipt.status
                     ti.metadata["presentation_receipt"] = receipt.model_dump(mode="json")
 
-            # Generation finished; durable persistence can take its time.
-            # Speculative turns are ephemeral — skip entirely.
-            if not speculative and committed_turn.persistence_allowed:
-                post_turn_scheduled = True
-                self._background.create(
-                    self._post_turn(
-                        ti,
-                        final_text,
-                        started_at,
-                        history_already_persisted=recent_history_persisted,
-                    ),
-                    name=f"turn-{ti.turn_id}-post-turn",
-                )
-
         except asyncio.CancelledError:
             status = TurnStatus.CANCELLED
             error_code = TurnCancelledError.code
@@ -694,11 +663,8 @@ class TurnEngine:
             if played_chars is not None:
                 heard_text = heard_text[: max(0, int(played_chars))]
             assistant_text_for_persist = heard_text
-            # Let the heard exchange reach memory/history via the standard
-            # post-turn path (skipped when nothing heard, or when speculative —
-            # an unconfirmed guess never persists even the part that streamed).
-            if heard_text and not speculative and committed_turn.persistence_allowed:
-                post_turn_allowed = True
+            await self._remember_turn(ti, heard_text, started_at, turn_status=status.value)
+            history_finalized = True
             yield TurnEvent.error(ti.turn_id, seq.next(), error_code, "cancelled", time.time())
             raise
         except InvalidPresentationError as exc:
@@ -715,6 +681,10 @@ class TurnEngine:
             error_code = "internal"
             yield TurnEvent.error(ti.turn_id, seq.next(), error_code, str(exc), time.time())
         finally:
+            if not history_finalized:
+                await self._remember_turn(
+                    ti, assistant_text_for_persist, started_at, turn_status=status.value
+                )
             # Persist the turn row (latency + phase timings) for every outcome.
             # Fire-and-forget: the user already has their answer, and a durable
             # store hiccup must never affect the stream. Disabled when no
@@ -831,16 +801,6 @@ class TurnEngine:
                         is_private=runtime_policy.mark_messages_private,
                     ),
                     name=f"turn-{ti.turn_id}-persist-turn",
-                )
-            if post_turn_allowed and not post_turn_scheduled:
-                self._background.create(
-                    self._post_turn(
-                        ti,
-                        assistant_text_for_persist,
-                        started_at,
-                        history_already_persisted=recent_history_persisted,
-                    ),
-                    name=f"turn-{ti.turn_id}-post-turn",
                 )
             if self._bus is not None and not speculative and committed_turn.persistence_allowed:
                 self._background.create(
@@ -965,31 +925,6 @@ class TurnEngine:
         except Exception:
             _log.exception("publish turn.completed failed")
 
-    async def _post_turn(
-        self,
-        ti: TurnInput,
-        assistant_text: str,
-        started_at: datetime,
-        *,
-        history_already_persisted: bool = False,
-    ) -> None:
-        """Persist recent history after terminal paths that did not do so inline.
-
-        Errors here never reach the user; logged + swallowed.
-        """
-        policy = TurnRuntimePolicy.from_metadata(ti.metadata)
-        if not history_already_persisted:
-            try:
-                await self._persist_messages(
-                    ti,
-                    ti.text or "",
-                    assistant_text,
-                    is_private=policy.mark_messages_private,
-                )
-            except Exception:
-                _log.exception("post-turn: persist failed")
-        del started_at
-
     async def _publish_memory_observation(
         self,
         ti: TurnInput,
@@ -1025,45 +960,48 @@ class TurnEngine:
             ti.metadata["memory_observation_state"] = "enqueue_failed"
             _log.exception("memory observation publish failed")
 
-    async def _persist_messages(
+    async def _remember_turn(
         self,
         ti: TurnInput,
-        user_text: str,
         assistant_text: str,
+        started_at: datetime,
         *,
-        is_private: bool = False,
+        turn_status: str,
     ) -> None:
-        now = datetime.now(UTC)
-        if user_text:
-            await self._history.append(
-                conversation_id=ti.conversation_id,
-                message=ChatMessage(
+        """Update the existing history window; never wait for background I/O."""
+        if ti.metadata.get("speculative") or not ti.metadata["committed_turn_persistence_allowed"]:
+            return
+        policy = TurnRuntimePolicy.from_metadata(ti.metadata)
+        metadata = {
+            "turn_id": ti.turn_id,
+            "turn_started_at": started_at.isoformat(),
+            "turn_status": turn_status,
+            **({"is_private": True} if policy.mark_messages_private else {}),
+        }
+        messages = []
+        if ti.text:
+            messages.append(
+                ChatMessage(
                     id=_turn_message_id(ti.turn_id, 0),
                     role=MessageRole.USER,
-                    content=user_text,
-                    created_at=now,
-                    metadata={
-                        "turn_id": ti.turn_id,
-                        "seq_in_turn": 0,
-                        **({"is_private": True} if is_private else {}),
-                    },
-                ),
+                    content=ti.text,
+                    created_at=started_at,
+                    metadata={**metadata, "seq_in_turn": 0},
+                )
             )
         if assistant_text:
-            await self._history.append(
-                conversation_id=ti.conversation_id,
-                message=ChatMessage(
+            messages.append(
+                ChatMessage(
                     id=_turn_message_id(ti.turn_id, 1),
                     role=MessageRole.ASSISTANT,
                     content=assistant_text,
-                    created_at=now,
-                    metadata={
-                        "turn_id": ti.turn_id,
-                        "seq_in_turn": 1,
-                        **({"is_private": True} if is_private else {}),
-                    },
-                ),
+                    created_at=datetime.now(UTC),
+                    metadata={**metadata, "seq_in_turn": 1},
+                )
             )
+        await self._history.replace_turn(
+            conversation_id=ti.conversation_id, turn_id=ti.turn_id, messages=messages
+        )
 
 
 def _turn_message_id(turn_id: str, seq_in_turn: int) -> str:

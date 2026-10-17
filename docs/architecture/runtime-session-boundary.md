@@ -57,6 +57,31 @@ SDK token contract, while Agent and Data meet at the versioned Runtime Snapshot 
 This keeps the dependency direction identical to production instead of creating a test-only
 reverse dependency.
 
+## Conversation history during interruption
+
+For a committed, non-speculative turn, `TurnEngine` records the user input in the existing
+`HistoryManager` before its first external await or emitted event. Guardrail privacy is
+resolved first. Cancelling generation, including before the first token or with zero played
+characters, does not retract that input. The current turn is excluded from both background
+history and history-assisted memory queries, so early recording does not duplicate its request.
+
+The Chat transport starts each turn eagerly up to its first blocking await. This ensures that
+back-to-back frames cannot cancel a turn before its input is recorded, without waiting for
+model output, database writes, or the previous turn's background tasks. Context compilation
+constructs child coroutines only when they start, so immediate cancellation also releases them
+without leaving unawaited work.
+
+Completion and cancellation replace the same turn's in-memory messages atomically. Existing
+playback-boundary rules determine the retained assistant text independently of the user input.
+History carries the turn's status and original start time; hot and cold reads order by turn
+start and message sequence rather than by cancellation cleanup or database insertion time.
+SQLite hydration reads these facts from the existing turn rows, requiring no schema migration.
+
+This is an in-process continuity guarantee within the existing privacy rules, bounded history
+window, and context budget. SQLite persistence remains asynchronous; it does not add a promise
+of durability before a process crash, change tool execution semantics, or assert model-level
+understanding of a continuation.
+
 ## Deployment assumption
 
 Channel signs the Agent token after resolving Kernel Mount and System Data facts. The token's

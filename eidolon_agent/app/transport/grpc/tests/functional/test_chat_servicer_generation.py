@@ -500,3 +500,86 @@ async def test_motion_tool_receipt_on_authenticated_turn_stream(monkeypatch):
     await servicer.Chat(requests(),context)
     assert received[0].status == 'completed'
     assert sum(e.kind == pb.TurnEvent.MOTION for e in context.written) == 1
+
+
+@pytest.mark.parametrize("explicit_cancel", [False, True])
+@pytest.mark.parametrize("wait_for_model", [False, True])
+async def test_real_engine_keeps_input_across_transport_cancellation(
+    monkeypatch, turn_engine_factory, tmp_path, explicit_cancel, wait_for_model,
+):
+    from dataclasses import asdict
+
+    from eidolon_sdk.biz.dialogue_control import CommittedTurnDecision, TurnCommitBoundary
+
+    from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
+    from eidolon_agent.domain.agent.companion import CompanionAgent
+    from eidolon_agent.infra.persistence.runtime_store import AgentRuntimeStore
+    from tests.helpers import make_turn_input
+
+    turn_context = make_turn_input().context
+    identity = SimpleNamespace(owner_id=turn_context.owner_id,
+        companion_id=turn_context.companion_id, device_id=turn_context.device_id, session_id="s1")
+    monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
+    authority = SimpleNamespace(**asdict(turn_context), runtime_config={})
+    runtime_sessions = RuntimeSessionAuthorizer(SimpleNamespace(resolve=_async_value(authority)))
+    ready = asyncio.Event()
+    release_write = asyncio.Event()
+    prompts = []
+
+    class LLM:
+        model_id = "transport-history-probe"
+
+        async def stream(self, messages, **_kwargs):
+            prompts.append(messages)
+            if messages[-1].content == "今天想讨论一下那个方案。":
+                yield LLMDelta(text_delta="还没有播放的回答。")
+                ready.set()
+                await asyncio.Event().wait()
+            yield LLMDelta(text_delta="收到补充。")
+            yield LLMDelta(finish=LLMFinishReason.STOP)
+
+    def start(turn_id, text):
+        frame = pb.StartTurn(turn_id=turn_id, conversation_id="conv", text=text,
+                             input_modality="voice")
+        frame.metadata.update({"turn_decision": CommittedTurnDecision.create(
+            text=text, boundary=TurnCommitBoundary.FRAMEWORK_COMPLETED, eot_score=0.8,
+        ).as_metadata()})
+        return pb.ChatRequest(start=frame)
+
+    async def requests():
+        yield start("old", "今天想讨论一下那个方案。")
+        if wait_for_model:
+            await asyncio.wait_for(ready.wait(), 2)
+        if explicit_cancel:
+            yield pb.ChatRequest(cancel=pb.CancelTurn(turn_id="old", played_chars=0))
+        yield start("new", "就是上次说的实时语音方案。")
+
+    store = AgentRuntimeStore.open(tmp_path / "transport-history.sqlite3")
+    await store.init_schema()
+    engine = turn_engine_factory(llm=LLM(), runtime_store=store)
+    persist = engine._turn_persister
+
+    async def delayed_persist(**kwargs):
+        await release_write.wait()
+        await persist(**kwargs)
+
+    engine._turn_persister = delayed_persist
+    agent = CompanionAgent(companion_id=turn_context.companion_id, turn_engine=engine)
+    instance = SimpleNamespace(owner_id=turn_context.owner_id, companion_id=turn_context.companion_id,
+        genome_id=turn_context.genome_id, agent=agent)
+    registry = SimpleNamespace(resolve_runtime=_async_value(instance))
+    service = EidolonAgentServicer(agent_registry=registry, signals_bus=_Signals(),
+        proactive_bus=None, runtime_sessions=runtime_sessions)
+    try:
+        await asyncio.wait_for(service.Chat(requests(), _Context()), 3)
+        assert len(prompts) == (2 if wait_for_model else 1)
+        system = prompts[-1][0].content
+        assert "今天想讨论一下那个方案。" in system
+        assert "status=interrupted" in system
+        assert prompts[-1][-1].content == "就是上次说的实时语音方案。"
+        if explicit_cancel:
+            assert "还没有播放的回答。" not in system
+    finally:
+        release_write.set()
+        await engine._background.drain(timeout_s=2)
+        await store.close()

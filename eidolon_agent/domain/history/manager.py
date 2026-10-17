@@ -41,18 +41,38 @@ class HistoryManager:
                 self._windows[conversation_id] = w
             w.append(message)
 
-    async def recent_window(self, *, conversation_id: str, window: int = 20) -> list[ChatMessage]:
+    async def replace_turn(
+        self, *, conversation_id: str, turn_id: str, messages: list[ChatMessage]
+    ) -> None:
+        """Atomically update a turn without duplicating or reordering its input.
+
+        The user message is present while generation is active. A terminal
+        update adds the answer, or removes an answer cut off before playback.
+        This is an in-process write only; it never waits for durable storage.
+        """
         async with self._lock:
-            w = self._windows.get(conversation_id)
-            if w is None:
-                cached: list[ChatMessage] = []
-            else:
-                cached = _public_messages(list(w))[-window:]
+            previous = self._windows.get(conversation_id, ())
+            retained = [m for m in previous if m.metadata.get("turn_id") != turn_id]
+            self._windows[conversation_id] = deque(
+                _merge_tail(retained, messages, window=self._window_size),
+                maxlen=self._window_size,
+            )
+
+    async def recent_window(
+        self, *, conversation_id: str, window: int = 20, exclude_turn_id: str | None = None
+    ) -> list[ChatMessage]:
+        async with self._lock:
+            cached = self._cached_window(conversation_id, window, exclude_turn_id)
             if len(cached) >= window or self._hydrate_messages is None:
                 return cached
 
         hydration = asyncio.create_task(
-            self._bounded_hydrate(conversation_id=conversation_id, window=window),
+            self._bounded_hydrate(
+                conversation_id=conversation_id,
+                # Runtime turns contain at most one user and one assistant
+                # message. Excluding this turn must not shrink the window.
+                window=window + (2 if exclude_turn_id is not None else 0),
+            ),
             name=f"history-hydrate:{conversation_id}",
         )
         self._hydration_tasks.add(hydration)
@@ -65,9 +85,23 @@ class HistoryManager:
             hydrated = await asyncio.shield(hydration)
         except asyncio.CancelledError:
             raise
+        async with self._lock:
+            # A cancellation can finalize a turn while SQLite is being read.
+            # Use the current cache, not the pre-hydration snapshot.
+            cached = self._cached_window(conversation_id, window, exclude_turn_id)
         if hydrated is None:
             return cached
+        hydrated = [m for m in hydrated if not _belongs_to_turn(m, exclude_turn_id)]
         return _merge_tail(hydrated, cached, window=window)
+
+    def _cached_window(
+        self, conversation_id: str, window: int, exclude_turn_id: str | None
+    ) -> list[ChatMessage]:
+        return [
+            m for m in self._windows.get(conversation_id, ())
+            if not bool(m.metadata.get("is_private", False))
+            and not _belongs_to_turn(m, exclude_turn_id)
+        ][-window:]
 
     async def drop_session(self, conversation_id: str) -> None:
         async with self._lock:
@@ -109,6 +143,10 @@ def _public_messages(messages: list[ChatMessage]) -> list[ChatMessage]:
     return [m for m in messages if not bool(m.metadata.get("is_private", False))]
 
 
+def _belongs_to_turn(message: ChatMessage, turn_id: str | None) -> bool:
+    return turn_id is not None and message.metadata.get("turn_id") == turn_id
+
+
 def _merge_tail(
     hydrated: list[ChatMessage],
     cached: list[ChatMessage],
@@ -118,7 +156,23 @@ def _merge_tail(
     by_id: dict[str, ChatMessage] = {}
     for msg in [*hydrated, *cached]:
         by_id[_stable_message_key(msg)] = msg
-    return sorted(by_id.values(), key=lambda m: _utc_sort_key(m.created_at))[-window:]
+    return sorted(by_id.values(), key=_message_order)[-window:]
+
+
+def _message_order(message: ChatMessage) -> tuple[datetime, str, int]:
+    # Cancellation cleanup may run after the following input was received.
+    # Keep a turn's answer alongside its input, independent of cleanup timing.
+    started_at = message.metadata.get("turn_started_at")
+    try:
+        turn_time = datetime.fromisoformat(started_at) if isinstance(started_at, str) else None
+    except ValueError:
+        turn_time = None
+    seq = message.metadata.get("seq_in_turn")
+    return (
+        _utc_sort_key(turn_time or message.created_at),
+        str(message.metadata.get("turn_id") or ""),
+        seq if isinstance(seq, int) else 0,
+    )
 
 
 def _stable_message_key(message: ChatMessage) -> str:

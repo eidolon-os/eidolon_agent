@@ -40,7 +40,7 @@ class _SlowMemory:
 
 
 class _SlowHistory:
-    async def recent_window(self, *, conversation_id, window):
+    async def recent_window(self, *, conversation_id, window, exclude_turn_id=None):
         await asyncio.sleep(_DELAY)
         return [
             ChatMessage(

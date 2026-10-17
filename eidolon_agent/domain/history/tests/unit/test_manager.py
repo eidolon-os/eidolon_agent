@@ -160,3 +160,74 @@ async def test_db_hydrate_timeout_degrades_to_cached_window() -> None:
     items = await mgr.recent_window(conversation_id="c1", window=3)
 
     assert [m.content for m in items] == ["cached"]
+
+
+async def test_current_turn_exclusion_preserves_full_window_without_hydration() -> None:
+    async def unexpected_hydration(**_kwargs):
+        pytest.fail("a full prior window must remain a hot read")
+
+    mgr = HistoryManager(hydrate_messages=unexpected_hydration)
+    for text in ("first", "second", "current"):
+        msg = _msg(text)
+        msg.metadata["turn_id"] = text
+        await mgr.append(conversation_id="c1", message=msg)
+    items = await mgr.recent_window(conversation_id="c1", window=2, exclude_turn_id="current")
+    assert [m.content for m in items] == ["first", "second"]
+
+
+async def test_current_turn_exclusion_also_applies_to_cold_history() -> None:
+    rows = []
+    for text in ("first", "second", "current"):
+        msg = _msg(text)
+        msg.metadata["turn_id"] = text
+        rows.append(msg)
+
+    async def hydrate(*, conversation_id, window):
+        return rows[-window:]
+
+    mgr = HistoryManager(hydrate_messages=hydrate)
+    items = await mgr.recent_window(conversation_id="c1", window=2, exclude_turn_id="current")
+    assert [m.content for m in items] == ["first", "second"]
+
+
+async def test_turn_replacement_removes_unheard_answer_and_preserves_input_position() -> None:
+    mgr = HistoryManager()
+    user, answer, next_user = _msg("first"), _msg("unheard", MessageRole.ASSISTANT), _msg("next")
+    user.metadata.update(turn_id="old", seq_in_turn=0, turn_status="active")
+    answer.metadata.update(turn_id="old", seq_in_turn=1)
+    await mgr.replace_turn(conversation_id="c1", turn_id="old", messages=[user, answer])
+    await mgr.append(conversation_id="c1", message=next_user)
+    from dataclasses import replace
+
+    cancelled = replace(user, metadata={**user.metadata, "turn_status": "cancelled"})
+    await mgr.replace_turn(conversation_id="c1", turn_id="old", messages=[cancelled])
+    await mgr.replace_turn(conversation_id="c1", turn_id="old", messages=[cancelled])
+    items = await mgr.recent_window(conversation_id="c1")
+    assert [m.content for m in items] == ["first", "next"]
+    assert items[0].created_at == user.created_at
+    assert items[0].metadata["turn_status"] == "cancelled"
+
+
+async def test_hydration_uses_history_finalized_while_read_was_pending() -> None:
+    import asyncio
+    from dataclasses import replace
+
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def hydrate(**_kwargs):
+        started.set()
+        await release.wait()
+        return []
+
+    mgr = HistoryManager(hydrate_messages=hydrate, hydrate_timeout_s=1)
+    user = _msg("accepted")
+    user.metadata.update(turn_id="old", seq_in_turn=0, turn_status="active")
+    await mgr.replace_turn(conversation_id="c1", turn_id="old", messages=[user])
+    read = asyncio.create_task(mgr.recent_window(conversation_id="c1"))
+    await started.wait()
+    await mgr.replace_turn(conversation_id="c1", turn_id="old", messages=[
+        replace(user, metadata={**user.metadata, "turn_status": "cancelled"}),
+    ])
+    release.set()
+    items = await read
+    assert items[0].metadata["turn_status"] == "cancelled"

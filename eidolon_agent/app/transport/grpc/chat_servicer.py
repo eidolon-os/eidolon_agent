@@ -273,7 +273,14 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                     except EidolonError as exc:
                         _log.warning("turn %s failed: %s", _ti.turn_id, exc)
 
-                task = asyncio.create_task(_emit_turn(), name=f"turn-{ti.turn_id}")
+                # Enter the engine's local input/history boundary before reading
+                # the next frame. Otherwise an immediately buffered CancelTurn
+                # or StartTurn could cancel this task before it runs at all.
+                # Eager start stops at the first blocking await; it does not
+                # wait for context compilation, model output or persistence.
+                task = asyncio.eager_task_factory(
+                    asyncio.get_running_loop(), _emit_turn(), name=f"turn-{ti.turn_id}"
+                )
                 active_turns.add(task)
                 active_by_conversation[conversation_id] = task
                 conversation_by_turn[ti.turn_id] = conversation_id
