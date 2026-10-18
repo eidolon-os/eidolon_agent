@@ -44,13 +44,6 @@ class ChannelToolExchange:
     async def execute(self, request: ChannelToolRequest) -> ToolResult:
         key = (request.turn_id, request.call_id)
         digest = _request_digest(request)
-        logger.info(
-            "channel_tool_exchange request turn_id=%s call_id=%s name=%s arguments=%s",
-            request.turn_id,
-            request.call_id,
-            request.name,
-            json.dumps(request.arguments, ensure_ascii=False, sort_keys=True, default=str),
-        )
         completed = self._completed.get(key)
         if completed is not None:
             if completed[0] != digest:
@@ -99,8 +92,7 @@ class ChannelToolExchange:
             )
             self._completed[key] = (digest, tool_result)
             logger.warning(
-                "channel_tool_exchange response turn_id=%s call_id=%s name=%s ok=false "
-                "error_code=%s",
+                "channel_tool_exchange timed out turn_id=%s call_id=%s name=%s error_code=%s",
                 request.turn_id,
                 request.call_id,
                 request.name,
@@ -111,15 +103,6 @@ class ChannelToolExchange:
             self._pending.pop(key, None)
 
     def accept(self, result: ChannelToolResult) -> bool:
-        logger.info(
-            "channel_tool_exchange received turn_id=%s call_id=%s name=%s ok=%s "
-            "error_code=%s",
-            result.turn_id,
-            result.call_id,
-            result.name,
-            result.ok,
-            result.error_code or "-",
-        )
         pending = self._pending.get((result.turn_id, result.call_id))
         if pending is None or pending.future.done():
             return False
