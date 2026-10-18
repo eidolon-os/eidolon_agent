@@ -305,7 +305,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                             channel_tool_capabilities=frozenset(
                                 capability
                                 for capability in start.channel_tool_capabilities
-                                if capability in {"music.play", "music.stop", "music.status"}
+                                if capability in {"music.search", "music.play", "music.stop", "music.status"}
                                 and scope.device_id is not None
                                 and input_modality == "voice"
                                 and not start.speculative

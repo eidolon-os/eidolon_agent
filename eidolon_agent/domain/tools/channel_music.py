@@ -45,6 +45,27 @@ def build_channel_music_tools(executor: ChannelToolExecutor) -> list[ChannelMusi
     return [
         ChannelMusicTool(
             executor,
+            name="music.search",
+            llm_name="music_search",
+            description=(
+                "Search authorized online music and return candidate provider song ids. "
+                "Use the returned song_id with music_play. Use keyword 'random' for recommendations."
+            ),
+            json_schema={
+                "type": "object",
+                "properties": {
+                    "keyword": {"type": "string", "minLength": 1},
+                    "version": {"type": "string"},
+                    "language": {"type": "string"},
+                },
+                "required": ["keyword"],
+                "additionalProperties": False,
+            },
+            side_effect=False,
+            timeout_s=15.0,
+        ),
+        ChannelMusicTool(
+            executor,
             name="music.play",
             llm_name="music_play",
             description="Play an authorized online music song by its provider song id.",
