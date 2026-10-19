@@ -8,6 +8,7 @@ delta emission, and error wrapping.
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -19,7 +20,7 @@ import pytest
 from eidolon_agent.core.errors import LLMUnavailableError
 from eidolon_agent.core.types.llm import LLMActivityKind, LLMFinishReason
 from eidolon_agent.core.types.messages import ChatMessage, MessageRole
-from eidolon_agent.core.types.tool import ToolCall
+from eidolon_agent.core.types.tool import ToolCall, ToolSchema
 from eidolon_agent.infra.llm.providers.litellm_provider import LiteLLMProvider, _to_msg
 
 pytestmark = pytest.mark.unit
@@ -112,6 +113,83 @@ def test_assistant_tool_calls_render_as_openai_tool_call_messages() -> None:
             }
         ],
     }
+
+
+async def test_music_tool_name_alias_roundtrips_through_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: LiteLLMProvider,
+) -> None:
+    seen: dict = {}
+    chunks = [
+        _Chunk(
+            choices=[
+                _Choice(
+                    delta=_Delta(
+                        tool_calls=[
+                            _ToolCallChunk(
+                                index=0,
+                                id="music-call",
+                                function=_ToolCallFunc(name="music_play", arguments='{"song_id":"song-1"}'),
+                            )
+                        ]
+                    )
+                )
+            ]
+        ),
+        _Chunk(choices=[_Choice(delta=_Delta(), finish_reason="tool_calls")]),
+    ]
+
+    async def _fake(**kwargs):
+        seen.update(kwargs)
+        return _aiter(chunks)
+
+    monkeypatch.setattr(litellm, "acompletion", _fake)
+    schema = ToolSchema(
+        name="music.play",
+        llm_name="music_play",
+        description="Play a song.",
+        json_schema={"type": "object", "properties": {"song_id": {"type": "string"}}},
+    )
+    previous_call = ToolCall(
+        id="previous-music-call",
+        name="music.play",
+        arguments={"song_id": "song-0"},
+    )
+    previous_messages = [
+        _msg("play a song"),
+        ChatMessage(
+            id="previous-assistant",
+            role=MessageRole.ASSISTANT,
+            content="",
+            created_at=datetime.now(timezone.utc),
+            tool_calls=(previous_call,),
+        ),
+        ChatMessage(
+            id="previous-tool-result",
+            role=MessageRole.TOOL,
+            content="started",
+            created_at=datetime.now(timezone.utc),
+            tool_call_id=previous_call.id,
+            tool_name=previous_call.name,
+        ),
+    ]
+
+    deltas = [
+        delta
+        async for delta in provider.stream(
+            previous_messages,
+            tools=[schema],
+            request_id="music-name-alias",
+        )
+    ]
+
+    assert seen["tools"][0]["function"]["name"] == "music_play"
+    assert seen["messages"][1]["tool_calls"][0]["function"]["name"] == "music_play"
+    assert seen["messages"][2]["name"] == "music_play"
+    assert re.fullmatch(r"[a-zA-Z0-9_-]+", seen["tools"][0]["function"]["name"])
+    tool_calls = [delta.tool_call for delta in deltas if delta.tool_call is not None]
+    assert len(tool_calls) == 1
+    assert tool_calls[0].name == "music.play"
 
 
 @pytest.fixture

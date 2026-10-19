@@ -19,6 +19,7 @@ from eidolon_agent.core.types.signal import SignalDigest
 from eidolon_agent.core.types.turn_context import InputModality, TurnContext
 
 if TYPE_CHECKING:
+    from eidolon_agent.core.ports.channel_tool import ChannelToolExecutor
     from eidolon_agent.core.ports.motion import MotionExecutor
 
 
@@ -100,6 +101,8 @@ class TurnInput:
     presentation_feedback: PresentationFeedback | None = None
     coordination: CoordinatedInput | None = None
     motion_executor: MotionExecutor | None = None
+    channel_tool_executor: ChannelToolExecutor | None = None
+    channel_tool_capabilities: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         if self.coordination is not None and (self.text or "") != self.coordination.user_text:

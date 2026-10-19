@@ -583,3 +583,48 @@ async def test_real_engine_keeps_input_across_transport_cancellation(
         release_write.set()
         await engine._background.drain(timeout_s=2)
         await store.close()
+
+
+@pytest.mark.parametrize("modality,speculative", [("voice", False), ("text", False), ("voice", True)])
+async def test_music_capabilities_require_committed_voice_turn(monkeypatch, modality, speculative):
+    monkeypatch.setattr(chat_servicer, "current_identity", _identity)
+    captured = []
+    class Agent:
+        async def run_turn(self, ti):
+            captured.append(ti.channel_tool_capabilities)
+            yield TurnEvent.done(ti.turn_id, 0, TurnStatus.OK, 0.0)
+    servicer = EidolonAgentServicer(agent_registry=_Registry([Agent()]), signals_bus=_Signals(),
+                                    proactive_bus=None, runtime_sessions=_runtime_sessions())
+    await servicer.Chat(_Requests([pb.ChatRequest(start=pb.StartTurn(
+        turn_id="t", conversation_id="conv", text="play", input_modality=modality,
+        speculative=speculative, channel_tool_capabilities=["music.play", "arbitrary.command"],
+    ))]), _Context())
+    assert captured == [frozenset({"music.play"}) if modality == "voice" and not speculative else frozenset()]
+
+
+async def test_music_cancel_roundtrips_through_real_servicer(monkeypatch):
+    from eidolon_agent.core.ports.channel_tool import ChannelToolRequest
+    monkeypatch.setattr(chat_servicer, "current_identity", _identity)
+    outgoing = asyncio.Queue()
+    class Agent:
+        async def run_turn(self, ti):
+            await ti.channel_tool_executor.execute(ChannelToolRequest(ti.turn_id, "music:1", "music.play", {"song_id": "s"}))
+            yield TurnEvent.done(ti.turn_id, 0, TurnStatus.OK, 0.0)
+    class Context(_Context):
+        async def write(self, event):
+            await super().write(event)
+            await outgoing.put(pb.TurnEvent.FromString(event.SerializeToString()))
+    async def requests():
+        yield pb.ChatRequest(start=pb.StartTurn(turn_id="t", conversation_id="conv", text="play",
+                                               input_modality="voice", channel_tool_capabilities=["music.play"]))
+        event = await asyncio.wait_for(outgoing.get(), 1)
+        assert event.kind == pb.TurnEvent.CHANNEL_TOOL_CALL
+        yield pb.ChatRequest(cancel=pb.CancelTurn(turn_id="t"))
+    context = Context()
+    servicer = EidolonAgentServicer(agent_registry=_Registry([Agent()]), signals_bus=_Signals(),
+                                   proactive_bus=None, runtime_sessions=_runtime_sessions())
+    await servicer.Chat(requests(), context)
+    cancellations = [e for e in context.written if e.kind == pb.TurnEvent.CHANNEL_TOOL_CANCEL]
+    assert len(cancellations) == 1
+    assert cancellations[0].channel_tool_cancel.call_id == "music:1"
+    assert cancellations[0].channel_tool_cancel.turn_id == "t"

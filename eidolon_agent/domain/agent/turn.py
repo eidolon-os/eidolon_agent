@@ -78,6 +78,7 @@ from eidolon_agent.domain.tools.body_capability_provider import RuntimeCapabilit
 from eidolon_agent.domain.tools.builtin.submit_long_task import (
     DELEGATE_TO_COWORKER_TOOL,
 )
+from eidolon_agent.domain.tools.channel_music import build_channel_music_tools
 from eidolon_agent.domain.tools.dispatcher import ToolDispatcher
 from eidolon_agent.domain.tools.visibility import ToolVisibilityPolicy
 
@@ -849,6 +850,23 @@ class TurnEngine:
             if ToolVisibilityPolicy.filter([tool.schema], allow=cfg.tool_allow, deny=cfg.tool_deny):
                 schemas.append(tool.schema)
                 extra_tools[tool.schema.name] = tool
+        if ti.channel_tool_executor is not None:
+            channel_tools = build_channel_music_tools(ti.channel_tool_executor)
+            capable_tools = [
+                tool
+                for tool in channel_tools
+                if tool.schema.name in ti.channel_tool_capabilities
+            ]
+            visible_channel_tools = ToolVisibilityPolicy.filter(
+                [tool.schema for tool in capable_tools],
+                allow=cfg.tool_allow,
+                deny=cfg.tool_deny,
+            )
+            visible_names = {schema.name for schema in visible_channel_tools}
+            schemas.extend(visible_channel_tools)
+            extra_tools.update(
+                {tool.schema.name: tool for tool in capable_tools if tool.schema.name in visible_names}
+            )
         visible = self._harness.visible_tool_schemas(schemas)
         visible_names = {schema.name for schema in visible}
         extra_tools = {name: port for name, port in extra_tools.items() if name in visible_names}
