@@ -63,6 +63,9 @@ RESPONSE_SCHEMA = ToolSchema(
         "outcome_ref pointing to a successful, completed tool call in this turn. "
         "Use public_text for the answer when language output is selected. "
         "Expression is supplementary and never substitutes for a verbal answer. "
+        "Report only observed tool facts: accepted means pending, not completed. "
+        "A long-lived resource state is separate from completion of its command. "
+        "For pending work use acknowledge without outcome_ref; do not claim it has finished. "
         "Do not claim memory was saved merely because a background write was queued."
     ),
     json_schema=AssistantResponseCandidate.model_json_schema(),

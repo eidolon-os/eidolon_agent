@@ -21,6 +21,7 @@ tools receive cancellation but should run their own compensation.
 
 from __future__ import annotations
 
+import json
 import asyncio
 import logging
 import time
@@ -530,6 +531,13 @@ class TurnEngine:
                     tool_result_messages: list[ChatMessage] = []
                     for r in results:
                         completed_outcomes[r.call_id] = r
+                        references = r.metadata.get("reference_context")
+                        if r.ok and isinstance(references, dict) and references:
+                            encoded = json.dumps(references, ensure_ascii=False)
+                            if len(encoded.encode("utf-8")) <= 8192:
+                                retained = list(ti.metadata.get("capability_references", []))
+                                retained.append({"tool": r.name, "call_id": r.call_id, "objects": references})
+                                ti.metadata["capability_references"] = retained[-4:]
                         yield TurnEvent(
                             turn_id=ti.turn_id,
                             seq=seq.next(),
@@ -555,7 +563,11 @@ class TurnEngine:
                             ChatMessage(
                                 id=uuid.uuid4().hex,
                                 role=MessageRole.TOOL,
-                                content=str(r.content if r.ok else (r.error_message or "")),
+                                content=str(
+                                    {"outcome_state": r.metadata["outcome_state"], "result": r.content}
+                                    if r.ok and r.metadata.get("outcome_state") in {"accepted", "completed", "failed"}
+                                    else r.content if r.ok else (r.error_message or "")
+                                ),
                                 tool_call_id=r.call_id,
                                 tool_name=r.name,
                                 created_at=now,
@@ -1014,7 +1026,12 @@ class TurnEngine:
                     role=MessageRole.ASSISTANT,
                     content=assistant_text,
                     created_at=datetime.now(UTC),
-                    metadata={**metadata, "seq_in_turn": 1},
+                    metadata={
+                        **metadata, "seq_in_turn": 1,
+                        **({"capability_references": ti.metadata["capability_references"],
+                            "reference_session_id": ti.session_id}
+                           if ti.metadata.get("capability_references") else {}),
+                    },
                 )
             )
         await self._history.replace_turn(

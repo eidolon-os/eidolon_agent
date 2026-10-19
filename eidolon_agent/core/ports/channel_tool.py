@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from eidolon_agent.core.types.tool import ToolResult
@@ -24,6 +24,8 @@ class ChannelToolResult:
     content: dict[str, Any]
     error_code: str = ""
     error_message: str = ""
+    outcome_state: str = ""
+    reference_context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

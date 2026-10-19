@@ -100,6 +100,7 @@ async def test_turn_persister_writes_agent_runtime_history(
         trigger=TurnTrigger.USER_UTTERANCE,
         text="hello",
     )
+    ti.metadata["capability_references"] = [{"tool": "example.lookup", "objects": {"id": "r1"}}]
     persist = build_agent_turn_persister(runtime_store, model_id_provider=lambda: "fake")
 
     await persist(
@@ -124,6 +125,9 @@ async def test_turn_persister_writes_agent_runtime_history(
     )
     assert [message.role for message in messages] == [MessageRole.USER, MessageRole.ASSISTANT]
     assert [message.content for message in messages] == ["hello", "hi"]
+
+    assert messages[1].metadata["reference_session_id"] == "session-1"
+    assert messages[1].metadata["capability_references"] == ti.metadata["capability_references"]
 
     rows = await AgentConversationReader(runtime_store).list_turns_by_owner(owner_id="owner-1")
     assert rows[0]["owner_id"] == "owner-1"

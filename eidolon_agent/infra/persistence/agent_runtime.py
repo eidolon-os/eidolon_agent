@@ -238,11 +238,14 @@ def build_agent_turn_persister(runtime_store: AgentRuntimeStore, *, model_id_pro
                         tokens=usage_out or None,
                         model=model_id,
                         created_at=finished_at,
-                        metadata=_message_metadata(
-                            turn_id=ti.turn_id,
-                            seq_in_turn=1,
-                            is_private=is_private,
-                        ),
+                        metadata={
+                            **_message_metadata(
+                                turn_id=ti.turn_id, seq_in_turn=1, is_private=is_private,
+                            ),
+                            **({"capability_references": ti.metadata["capability_references"],
+                                "reference_session_id": ti.session_id}
+                               if ti.metadata.get("capability_references") else {}),
+                        },
                     ),
                 )
             await session.commit()

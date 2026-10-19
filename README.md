@@ -540,3 +540,27 @@ use. Commercial use requires a separate written license; contact
 
 See [LICENSING.md](LICENSING.md) and [NOTICE](NOTICE) for scope, exceptions,
 and required notices.
+
+### Channel capability outcomes
+
+Channel tools are capabilities, not extra dialogue owners. Agent interprets the
+current request using prior exchanges (including references, consent and corrections),
+while history alone never replays an action. Capability adapters execute typed tool
+arguments and return facts; they must not interpret raw transcripts or hold their own
+conversation policy.
+
+The optional `ChannelToolResult.outcome_state` is an explicit command fact propagated
+to `ToolResult.metadata` and model-visible tool feedback. Transport `ok`, resource
+status strings, and model prose cannot manufacture completion. Only an explicit
+successful `completed` outcome can support completed-outcome presentation. An accepted
+long-running capability uses acknowledgement until later status is observed. This
+rule applies to any capability, not just music. Existing callers without the field
+keep their prior behavior and do not gain an implicit completion claim.
+
+Capabilities may opt into bounded `reference_context` containing safe object IDs and
+display metadata. Agent retains at most four such results per turn with the assistant
+message, and makes them reference-only context in the same runtime session. They
+count toward the normal context budget and never authorize an action or prove a
+resource's current state. Unsuccessful or oversized results are not retained. A new
+session cannot reuse these references from conversation history. Providers own the
+safe projection: never include credentials, signed URLs or arbitrary internal data.

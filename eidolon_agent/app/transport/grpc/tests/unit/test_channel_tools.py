@@ -123,3 +123,25 @@ async def test_disconnected_cancel_transport_preserves_timeout():
     exchange = ChannelToolExchange(send, cancel, timeout_s=0.01)
     result = await exchange.execute(ChannelToolRequest("t", "c", "music.play", {}))
     assert result.error_code == "CHANNEL_TOOL_TIMEOUT"
+
+
+@pytest.mark.parametrize("state,ok,expected", [
+    ("", True, {}), ("arbitrary", True, {}), ("completed", False, {}),
+    ("accepted", True, {"outcome_state": "accepted"}),
+    ("completed", True, {"outcome_state": "completed"}),
+    ("failed", False, {"outcome_state": "failed"}),
+])
+def test_only_explicit_valid_outcome_is_forwarded(state, ok, expected):
+    from eidolon_agent.app.transport.grpc.channel_tools import _tool_result
+    # Neither arbitrary provider JSON nor transport success can prove completion.
+    result = _tool_result(ChannelToolResult(
+        "t", "c", "example.command", ok, {"status": "completed"}, outcome_state=state,
+    ))
+    assert result.metadata == expected
+
+
+def test_reference_context_is_opt_in_bounded_and_success_only():
+    from eidolon_agent.app.transport.grpc.channel_tools import _tool_result
+    for ok, refs, retained in [(True, {"id": "object"}, True), (False, {"id": "object"}, False), (True, {"blob": "x" * 9000}, False)]:
+        result = _tool_result(ChannelToolResult("t", "c", "example.lookup", ok, {}, reference_context=refs))
+        assert ("reference_context" in result.metadata) == retained

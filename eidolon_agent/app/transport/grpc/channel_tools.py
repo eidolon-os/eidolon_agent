@@ -131,6 +131,15 @@ def _request_digest(request: ChannelToolRequest) -> str:
 
 
 def _tool_result(result: ChannelToolResult) -> ToolResult:
+    metadata = {}
+    if result.outcome_state in {"accepted", "completed", "failed"} and (
+        result.ok or result.outcome_state == "failed"
+    ):
+        metadata["outcome_state"] = result.outcome_state
+    if result.ok and result.reference_context:
+        encoded = json.dumps(result.reference_context, ensure_ascii=False)
+        if len(encoded.encode("utf-8")) <= 8192:
+            metadata["reference_context"] = result.reference_context
     return ToolResult(
         call_id=result.call_id,
         name=result.name,
@@ -138,6 +147,7 @@ def _tool_result(result: ChannelToolResult) -> ToolResult:
         content=result.content,
         error_code=result.error_code or None,
         error_message=result.error_message or None,
+        metadata=metadata,
     )
 
 

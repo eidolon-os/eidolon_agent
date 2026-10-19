@@ -234,6 +234,8 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                             content=struct_to_dict(result.content),
                             error_code=result.error_code,
                             error_message=result.error_message,
+                            outcome_state=result.outcome_state,
+                            reference_context=struct_to_dict(result.reference_context),
                         )
                     )
                     continue

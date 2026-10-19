@@ -48,17 +48,23 @@ def build_channel_music_tools(executor: ChannelToolExecutor) -> list[ChannelMusi
             name="music.search",
             llm_name="music_search",
             description=(
-                "Search authorized online music and return candidate provider song ids. "
-                "Use the returned song_id with music_play. Use keyword 'random' for recommendations."
+                "Search authorized online music. Provide title and artist separately when known; "
+                "the capability performs bounded query fallback. Results are non-exhaustive; "
+                "unverified candidates are not confirmed matches. Return candidate provider song ids. "
+                "Use the selected song_id with music_play without repeating search. "
+                "Do not substitute a different song without user agreement. "
+                "Use keyword 'random' for recommendations."
             ),
             json_schema={
                 "type": "object",
                 "properties": {
                     "keyword": {"type": "string", "minLength": 1},
+                    "title": {"type": "string", "minLength": 1},
+                    "artist": {"type": "string", "minLength": 1},
                     "version": {"type": "string"},
                     "language": {"type": "string"},
                 },
-                "required": ["keyword"],
+                "anyOf": [{"required": [key]} for key in ("keyword", "title", "artist")],
                 "additionalProperties": False,
             },
             side_effect=False,
@@ -68,7 +74,9 @@ def build_channel_music_tools(executor: ChannelToolExecutor) -> list[ChannelMusi
             executor,
             name="music.play",
             llm_name="music_play",
-            description="Play an authorized online music song by its provider song id.",
+            description=("Play a selected authorized song by its provider song id. "
+                "Acceptance does not mean audio has started. Use music_status for playback state; "
+                "do not claim audible playback from acceptance alone."),
             json_schema={
                 "type": "object",
                 "properties": {
