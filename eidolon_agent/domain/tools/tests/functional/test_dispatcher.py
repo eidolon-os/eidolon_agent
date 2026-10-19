@@ -296,3 +296,31 @@ async def test_batch_timeout_returns_stable_errors(stub_tool_factory, tool_ctx) 
     )
 
     assert [r.error_code for r in results] == [ToolTimeoutError.code, ToolTimeoutError.code]
+
+
+async def test_music_replay_uses_existing_dispatcher_idempotency(tool_ctx):
+    from eidolon_agent.domain.tools.channel_music import build_channel_music_tools
+
+    class Executor:
+        def __init__(self):
+            self.calls = []
+
+        async def execute(self, request):
+            self.calls.append(request)
+            return ToolResult(call_id=request.call_id, name=request.name, ok=True,
+                              content={"playback_ref": f"{request.turn_id}:{request.call_id}"})
+
+    executor = Executor()
+    registry = ToolRegistry()
+    for tool in build_channel_music_tools(executor):
+        registry.register(tool)
+    dispatcher = ToolDispatcher(registry, idempotency_store=_FakeIdempotencyStore())
+    first = _call("music.play", "one", {"song_id": "song"})
+    await dispatcher.dispatch_batch([first], ctx=tool_ctx)
+    await dispatcher.dispatch_batch([_call("music.play", "retry", first.arguments)], ctx=tool_ctx)
+    assert len(executor.calls) == 1
+    await dispatcher.dispatch_batch([first], ctx=replace(tool_ctx, turn_id="new-user-turn"))
+    assert len(executor.calls) == 2
+    # A delayed old request is still deduplicated after a newer playback request.
+    await dispatcher.dispatch_batch([first], ctx=tool_ctx)
+    assert len(executor.calls) == 2

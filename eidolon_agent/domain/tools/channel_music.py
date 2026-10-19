@@ -74,14 +74,14 @@ def build_channel_music_tools(executor: ChannelToolExecutor) -> list[ChannelMusi
             executor,
             name="music.play",
             llm_name="music_play",
-            description=("Play a selected authorized song by its provider song id. "
+            description=("Start a new playback of a selected authorized song by its provider song id, "
+                "including replaying a stopped or completed song from the beginning. "
                 "Acceptance does not mean audio has started. Use music_status for playback state; "
                 "do not claim audible playback from acceptance alone."),
             json_schema={
                 "type": "object",
                 "properties": {
                     "song_id": {"type": "string", "minLength": 1},
-                    "playback_ref": {"type": "string", "minLength": 1},
                 },
                 "required": ["song_id"],
                 "additionalProperties": False,

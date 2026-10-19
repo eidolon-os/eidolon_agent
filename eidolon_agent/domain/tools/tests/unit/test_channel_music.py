@@ -24,3 +24,6 @@ def test_channel_music_tools_have_stable_names_and_side_effect_policy() -> None:
     assert by_name["music.stop"].side_effect
     assert not by_name["music.search"].side_effect
     assert not by_name["music.status"].side_effect
+
+    assert set(by_name["music.play"].json_schema["properties"]) == {"song_id"}
+    assert "playback_ref" in by_name["music.stop"].json_schema["properties"]
