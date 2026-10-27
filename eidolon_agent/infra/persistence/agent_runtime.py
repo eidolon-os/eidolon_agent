@@ -894,7 +894,7 @@ def _turn_metadata_json(ti: TurnInput, triage_kind: TriageKind, timings: dict) -
     speaker = ti.context.speaker_observation
     observation = speaker.model_dump(include={
         "status", "reason", "person_id", "person_revision", "confidence",
-        "turn_id", "decision_version",
+        "turn_id", "decision_version", "audio_quality",
     }) if speaker is not None else None
     return {
         "speaker_observation": observation,

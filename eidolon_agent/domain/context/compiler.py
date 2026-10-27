@@ -309,7 +309,10 @@ class ContextCompiler:
         )
 
         from .speaker import speaker_context
-        speaker_text = speaker_context(ti.context.speaker_observation, voice=ti.input_modality == "voice")
+        speaker_text = speaker_context(
+            ti.context.speaker_observation, voice=ti.input_modality == "voice",
+            memory_enabled=ti.context.memory_enabled,
+        )
         if speaker_text:
             speaker_segment = ContextSegment(
                 kind=ContextSegmentKind.PERSONA_STATE, content="", source="channel_speaker_observation",

@@ -159,6 +159,27 @@ async def test_assembles_structured_system_background_and_current_user() -> None
     assert msgs[-1].role is MessageRole.USER
 
 
+async def test_voice_failure_context_uses_authorized_memory_state_without_recalling():
+    from dataclasses import replace
+    from eidolon_sdk.biz.speaker_identity import SpeakerIdentityObservation
+    memory = _StubMemory('must not be recalled')
+    compiler = ContextCompiler(personas_service=_StubPersonas(), instance_locator=_locator,
+                               history_manager=HistoryManager(), memory_port=memory)
+    ti = make_turn_input('我是谁？')
+    observation = SpeakerIdentityObservation(owner_id=ti.context.owner_id, status='uncertain',
+        confidence='none', reason='speech_too_short')
+    ti = replace(ti, input_modality='voice', context=replace(ti.context,
+        speaker_observation=observation, person_id=None, memory_enabled=False))
+    ti.metadata.update(memory_enabled=True, person_id='forged')
+    messages = await compiler.compile(ti)
+    system = messages[0].content
+    assert '"personal_memory_enabled": false' in system
+    assert '"reason": "speech_too_short"' in system
+    assert 'audio was insufficient to compare' in system
+    assert not memory.calls
+    assert ti.context.person_id is None
+
+
 async def _seed_history(history: HistoryManager, n_turns: int) -> None:
     for i in range(n_turns):
         for role, tag in ((MessageRole.USER, "u"), (MessageRole.ASSISTANT, "a")):
