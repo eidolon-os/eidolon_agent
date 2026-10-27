@@ -113,3 +113,20 @@ async def test_maps_transport_failure_to_dependency_error() -> None:
     authority = SystemDataCompanionRuntimeAuthority(SimpleNamespace(get_companion_runtime=_raise))
     with pytest.raises(DependencyError, match="runtime authority unavailable"):
         await authority.resolve(owner_id="owner-1", companion_id="companion-1")
+
+
+async def test_restored_person_cannot_reuse_pre_disable_credential_revision():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from eidolon_agent.core.errors import NotFoundError
+    from eidolon_agent.infra.system_data.runtime_authority import SystemDataCompanionRuntimeAuthority
+
+    client = SimpleNamespace(get_person_memory_realm=AsyncMock())
+    authority = SystemDataCompanionRuntimeAuthority(client)
+    client.get_person_memory_realm.return_value = SimpleNamespace(realm_id="same-realm", person_revision=1)
+    assert await authority.resolve_person_memory(owner_id="o", person_id="p", person_revision=1) == "same-realm"
+    # Data retains the Realm while disable/activate/explicit restore advance Person revision.
+    client.get_person_memory_realm.return_value = SimpleNamespace(realm_id="same-realm", person_revision=4)
+    with pytest.raises(NotFoundError, match="revision changed"):
+        await authority.resolve_person_memory(owner_id="o", person_id="p", person_revision=1)
+    assert await authority.resolve_person_memory(owner_id="o", person_id="p", person_revision=4) == "same-realm"

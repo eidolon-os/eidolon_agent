@@ -28,6 +28,7 @@ async def test_reauthentication_uses_original_token_and_current_revocation_store
         session_id="session",
         person_id="person",
         identity_epoch=1,
+        person_revision=1,
         ttl_seconds=60,
     )
     interceptor = interceptors.AuthInterceptor(

@@ -98,8 +98,10 @@ def _conversation_metadata(ti: TurnInput) -> dict[str, Any]:
         "companion_id": ti.context.companion_id,
         "runtime_session_id": _runtime_session_id(ti),
         "memory_realm_id": ti.context.memory_realm_id,
+        "memory_enabled": ti.context.memory_enabled,
         "person_id": ti.context.person_id,
         "identity_epoch": ti.context.identity_epoch,
+        "person_revision": ti.context.person_revision,
         "genome_id": ti.context.genome_id,
         "genome_hash": ti.context.genome_hash,
         "schema_version": ti.context.schema_version,
@@ -114,12 +116,14 @@ def _verify_conversation_scope(row: ConversationRow, ti: TurnInput) -> None:
         ti.context.owner_id, ti.context.companion_id, ti.context.memory_realm_id
     ):
         raise PermissionDeniedError("conversation belongs to another runtime scope")
+    if metadata.get("memory_enabled", True) != ti.context.memory_enabled:
+        raise PermissionDeniedError("conversation memory policy changed")
     # Legacy/default history must never be claimed by a person (or vice versa).
     if metadata.get("person_id") != ti.context.person_id:
         raise PermissionDeniedError("conversation belongs to another person")
-    if ti.context.person_id is not None and (
-        metadata.get("identity_epoch"), metadata.get("session_id"), row.source_device_id
-    ) != (ti.context.identity_epoch, ti.session_id, ti.context.device_id):
+    if (ti.context.person_id is not None or not ti.context.memory_enabled) and (
+        metadata.get("identity_epoch"), metadata.get("person_revision"), metadata.get("session_id"), row.source_device_id
+    ) != (ti.context.identity_epoch, ti.context.person_revision, ti.session_id, ti.context.device_id):
         raise PermissionDeniedError("personal identity change requires a new conversation")
 
 
@@ -891,8 +895,10 @@ def _turn_metadata_json(ti: TurnInput, triage_kind: TriageKind, timings: dict) -
         "companion_id": ti.context.companion_id,
         "runtime_session_id": _runtime_session_id(ti),
         "memory_realm_id": ti.context.memory_realm_id,
+        "memory_enabled": ti.context.memory_enabled,
         "person_id": ti.context.person_id,
         "identity_epoch": ti.context.identity_epoch,
+        "person_revision": ti.context.person_revision,
         "genome_id": ti.context.genome_id,
         "genome_hash": ti.context.genome_hash,
         "schema_version": ti.context.schema_version,

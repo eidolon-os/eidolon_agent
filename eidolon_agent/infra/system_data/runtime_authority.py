@@ -46,7 +46,7 @@ class SystemDataCompanionRuntimeAuthority:
             raise NotFoundError(f"companion not found for owner: {companion_id}")
         return facts
 
-    async def resolve_person_memory(self, *, owner_id: str, person_id: str) -> str:
+    async def resolve_person_memory(self, *, owner_id: str, person_id: str, person_revision: int) -> str:
         try:
             binding = await self._client.get_person_memory_realm(
                 owner_id=owner_id, person_id=person_id
@@ -55,6 +55,8 @@ class SystemDataCompanionRuntimeAuthority:
             raise NotFoundError(str(exc)) from exc
         except SystemDataError as exc:
             raise DependencyError(f"personal Memory authority unavailable: {exc}") from exc
+        if binding.person_revision != person_revision:
+            raise NotFoundError("person revision changed; start a new session")
         return binding.realm_id
 
 
@@ -112,13 +114,15 @@ class LocalCompanionRuntimeAuthority:
             runtime_config=dict(companion.runtime_config_json or {}),
         )
 
-    async def resolve_person_memory(self, *, owner_id: str, person_id: str) -> str:
+    async def resolve_person_memory(self, *, owner_id: str, person_id: str, person_revision: int) -> str:
         try:
             binding = await self._store.persons.memory_realm(owner_id, person_id)
         except (LookupError, ValueError) as exc:
             raise NotFoundError(str(exc)) from exc
         if binding["owner_id"] != owner_id or binding["person_id"] != person_id:
             raise NotFoundError("personal memory binding outside request scope")
+        if binding["person_revision"] != person_revision:
+            raise NotFoundError("person revision changed; start a new session")
         return binding["realm_id"]
 
 

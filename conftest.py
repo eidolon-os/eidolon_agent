@@ -21,6 +21,7 @@ from eidolon_agent.domain.tools.builtin import EmitEventTool, SubmitLongTaskTool
 from eidolon_agent.infra.events import InMemoryEventBus, InMemoryKVStore
 from eidolon_agent.infra.llm import LLMRouter
 from eidolon_agent.infra.llm.providers.fake import FakeLLM
+from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
 from eidolon_agent.infra.persistence import (
     AgentLongTaskStore,
     build_agent_history_hydrator,
@@ -110,6 +111,8 @@ async def turn_engine_factory(personas_service, event_bus):
             event_bus=event_bus,
             personas_service=personas_service,
             genome_id="genome-test",
+            conversation_guard=(build_agent_conversation_guard(runtime_store)
+                                if runtime_store is not None else None),
             turn_persister=(
                 build_agent_turn_persister(
                     runtime_store,

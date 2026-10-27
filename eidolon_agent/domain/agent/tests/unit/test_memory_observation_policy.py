@@ -65,3 +65,27 @@ def test_temporary_turn_respects_privacy_boundary() -> None:
 
     assert trace["fanout_allowed"] is False
     assert trace["skipped_reason"] == "privacy_policy"
+
+
+async def test_unknown_person_never_calls_memory_reads_or_writes():
+    from dataclasses import replace
+    from datetime import UTC, datetime
+    from unittest.mock import AsyncMock
+    from eidolon_agent.domain.agent.turn import TurnEngine
+    from eidolon_agent.domain.context.compiler import ContextCompiler
+
+    turn = make_turn_input("记住我的秘密")
+    turn = replace(turn, context=replace(turn.context, memory_enabled=False))
+    turn.metadata.update(memory_enabled=True, person_id="forged", temporary=False)
+    trace = _memory_write_trace(ti=turn, policy=TurnRuntimePolicy.from_metadata(turn.metadata))
+    assert trace["fanout_allowed"] is False
+    assert trace["skipped_reason"] == "unidentified_person"
+    compiler = object.__new__(ContextCompiler)
+    compiler._memory = AsyncMock()
+    assert await compiler._memory_recall(turn, timeout_s=0.1) is None
+    assert await compiler._active_commitments(turn) is None
+    assert compiler._memory.mock_calls == []
+    engine = object.__new__(TurnEngine)
+    engine._fanout = AsyncMock()
+    await engine._publish_memory_observation(turn, datetime.now(UTC))
+    assert engine._fanout.mock_calls == []

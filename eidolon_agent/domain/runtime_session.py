@@ -23,6 +23,7 @@ class AuthorizedRuntimeSession:
     session_id: str
     config: CompanionRuntimeConfig
     person_id: str | None = None
+    person_revision: int | None = None
     identity_epoch: int | None = None
 
     @property
@@ -49,6 +50,7 @@ class RuntimeSessionAuthorizer:
         session_id: str | None,
         person_id: str | None = None,
         identity_epoch: int | None = None,
+        person_revision: int | None = None,
     ) -> AuthorizedRuntimeSession:
         if (person_id is None) != (identity_epoch is None):
             raise PermissionDeniedError("incomplete personal runtime binding")
@@ -56,6 +58,10 @@ class RuntimeSessionAuthorizer:
             not person_id.strip() or type(identity_epoch) is not int or identity_epoch < 0
         ):
             raise PermissionDeniedError("invalid personal runtime binding")
+        if person_id is not None and (type(person_revision) is not int or person_revision < 1):
+            raise PermissionDeniedError("personal runtime requires person revision")
+        if person_id is None and person_revision is not None:
+            raise PermissionDeniedError("person revision requires personal binding")
         normalized_session_id = (session_id or "").strip()
         if not normalized_session_id:
             raise PermissionDeniedError("runtime token is not bound to a session")
@@ -67,7 +73,7 @@ class RuntimeSessionAuthorizer:
             raise PermissionDeniedError("runtime authority returned facts outside token scope")
         if person_id is not None:
             realm_id = await self._authority.resolve_person_memory(
-                owner_id=owner_id, person_id=person_id
+                owner_id=owner_id, person_id=person_id, person_revision=person_revision
             )
             if not realm_id:
                 raise PermissionDeniedError("personal runtime has no memory realm")
@@ -76,16 +82,16 @@ class RuntimeSessionAuthorizer:
             config = CompanionRuntimeConfig.from_authority(runtime.runtime_config)
         except ValueError as exc:
             raise ValidationError(f"invalid Companion runtime config: {exc}") from exc
-        if person_id is not None:
-            # Coworker results and arbitrary event subjects are not Person scoped.
-            # Reuse both tool visibility and dispatch deny enforcement.
-            config = replace(config, tool_deny=config.tool_deny | {
-                DELEGATE_TO_COWORKER_TOOL, EmitEventTool.schema.name,
-            })
+        # Interactive sessions must not publish through Owner-wide side channels,
+        # whether their current Person is identified or unknown.
+        config = replace(config, tool_deny=config.tool_deny | {
+            DELEGATE_TO_COWORKER_TOOL, EmitEventTool.schema.name,
+        })
         normalized_device_id = (device_id or "").strip() or None
         return AuthorizedRuntimeSession(
             runtime=runtime,
             person_id=person_id,
+            person_revision=person_revision,
             identity_epoch=identity_epoch,
             device_id=normalized_device_id,
             session_id=normalized_session_id,

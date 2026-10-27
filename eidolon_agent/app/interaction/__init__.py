@@ -107,8 +107,10 @@ class AcceptReply:
             presentation_feedback=PresentationFeedback(),
             context=TurnContext(
                 speaker_observation=speaker,
+                memory_enabled=scope.person_id is not None,
                 person_id=scope.person_id,
                 identity_epoch=scope.identity_epoch,
+                person_revision=scope.person_revision,
                 owner_id=scope.owner_id,
                 companion_id=scope.companion_id,
                 device_id=scope.device_id,

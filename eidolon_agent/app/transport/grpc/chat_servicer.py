@@ -171,6 +171,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                                         frame.cancel.played_ms
                                     )
                             task.cancel()
+                            await asyncio.gather(task, return_exceptions=True)
                             cancelled_live = True
                     # Acknowledge the cancel so the client can distinguish
                     # "cancel landed" from "turn had already finished" without
@@ -258,9 +259,9 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                         return
                     fresh = await self._authorize_runtime(renewed, context, allow_personal=True)
                     if (fresh.owner_id, fresh.companion_id, fresh.device_id, fresh.session_id,
-                        fresh.person_id, fresh.identity_epoch, fresh.runtime.memory_realm_id) != (
+                        fresh.person_id, fresh.identity_epoch, fresh.person_revision, fresh.runtime.memory_realm_id) != (
                         scope.owner_id, scope.companion_id, scope.device_id, scope.session_id,
-                        scope.person_id, scope.identity_epoch, scope.runtime.memory_realm_id):
+                        scope.person_id, scope.identity_epoch, scope.person_revision, scope.runtime.memory_realm_id):
                         await context.abort(grpc.StatusCode.PERMISSION_DENIED,
                                             "personal runtime binding changed; start a new session")
                         return
@@ -280,10 +281,11 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 except ValueError as exc:
                     await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
                 previous = active_by_conversation.get(conversation_id)
-                if previous is not None and not previous.done():
-                    previous.cancel()
                 generation = generation_by_conversation.get(conversation_id, 0) + 1
                 generation_by_conversation[conversation_id] = generation
+                if previous is not None and not previous.done():
+                    previous.cancel()
+                    await asyncio.gather(previous, return_exceptions=True)
                 realtime = _digest_from_dict(struct_to_dict(start.realtime))
                 if realtime is None:
                     recent_signals = await self._signals.recent(
@@ -466,10 +468,10 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         return pb.Ack(accepted=True)
 
     async def _authorize_runtime(self, identity, context, *, allow_personal=False):  # type: ignore[no-untyped-def]
-        if getattr(identity, "person_id", None) is not None and not allow_personal:
+        if not allow_personal:
             await context.abort(
                 grpc.StatusCode.FAILED_PRECONDITION,
-                "personal runtime is supported only by the scoped Chat endpoint",
+                "interactive runtime is supported only by the scoped Chat endpoint",
             )
             return None
         try:
@@ -478,7 +480,8 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 companion_id=identity.companion_id,
                 device_id=identity.device_id,
                 session_id=identity.session_id,
-                **({"person_id": identity.person_id, "identity_epoch": identity.identity_epoch}
+                **({"person_id": identity.person_id, "identity_epoch": identity.identity_epoch,
+                    "person_revision": identity.person_revision}
                    if getattr(identity, "person_id", None) is not None else {}),
             )
         except DependencyError as exc:

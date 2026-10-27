@@ -149,6 +149,7 @@ async def test_verified_speaker_is_context_not_memory_authorization():
     turn=(await AcceptReply(registry(),speaker_secret='s'*32).prepare(scope(),request)).turn
     assert turn.context.speaker_observation.person_id=='p'
     assert turn.context.person_id is None and turn.context.memory_realm_id=='realm'
+    assert turn.context.memory_enabled is False
     assert 'speaker_observation_token' not in turn.metadata
     prompt=speaker_context(turn.context.speaker_observation)
     assert 'Alice' in prompt and 'tentative' in prompt
@@ -163,3 +164,14 @@ async def test_forged_speaker_degrades_without_breaking_reply():
     assert turn.context.person_id is None
     assert turn.metadata['speaker_observation_rejected']
     assert 'speaker_observation' not in turn.metadata
+@pytest.mark.parametrize("person_id", [None, "person-a"])
+async def test_memory_policy_comes_only_from_authorized_person(person_id):
+    from dataclasses import replace
+
+    authorized = replace(scope(), person_id=person_id, identity_epoch=1 if person_id else None)
+    result = await AcceptReply(registry()).prepare(authorized, ReplyRequest(
+        conversation_id="new-session-conversation", text="hello", input_modality="text",
+        metadata={"memory_enabled": True, "person_id": "forged", "identity_epoch": 100},
+    ))
+    assert result.turn.context.memory_enabled is (person_id is not None)
+    assert result.turn.context.person_id == person_id

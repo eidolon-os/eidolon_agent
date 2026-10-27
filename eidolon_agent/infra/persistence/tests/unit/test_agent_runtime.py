@@ -729,3 +729,40 @@ async def test_turn_id_cannot_overwrite_another_conversation(runtime_store):
         assert turn.metadata_json["person_id"] == "person-a"
         assert turn.metadata_json["identity_epoch"] == 1
         assert turn.conversation_id == ti.conversation_id
+
+
+async def test_unknown_history_is_session_bound_and_cannot_claim_legacy_history(runtime_store):
+    from dataclasses import replace
+    from eidolon_agent.core.errors import PermissionDeniedError
+    from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
+
+    guard = build_agent_conversation_guard(runtime_store)
+    old = _personal_turn(person_id=None, identity_epoch=None)
+    await guard(old)
+    unknown = replace(old, context=replace(old.context, memory_enabled=False))
+    with pytest.raises(PermissionDeniedError):
+        await guard(unknown)
+    unknown = replace(unknown, conversation_id="unknown-session-conversation")
+    await guard(unknown)
+    await guard(unknown)
+    with pytest.raises(PermissionDeniedError):
+        await guard(replace(unknown, session_id="different-session"))
+    with pytest.raises(PermissionDeniedError):
+        await guard(replace(unknown, context=replace(unknown.context, memory_enabled=True)))
+    with pytest.raises(PermissionDeniedError):
+        await guard(replace(unknown, context=replace(unknown.context, person_id="person-a", identity_epoch=1)))
+
+
+async def test_person_revision_change_requires_new_conversation(runtime_store):
+    from dataclasses import replace
+    from eidolon_agent.core.errors import PermissionDeniedError
+    from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
+
+    original = _personal_turn()
+    original = replace(original, context=replace(original.context, person_revision=1))
+    guard = build_agent_conversation_guard(runtime_store)
+    await guard(original)
+    restored = replace(original, context=replace(original.context, person_revision=4))
+    with pytest.raises(PermissionDeniedError):
+        await guard(restored)
+    await guard(replace(restored, conversation_id="restored-new-session", session_id="restored-session"))

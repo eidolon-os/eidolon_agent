@@ -61,7 +61,11 @@ class TurnContext:
     person_id: str | None = None
     identity_epoch: int | None = None
     speaker_observation: SpeakerIdentityObservation | None = None
+    person_revision: int | None = None
     schema_version: str = ""
     genome_hash: str = ""
     realizer_version: str = ""
     locale: str = "zh-CN"
+    # Internal Owner tasks retain their policy; authenticated interactive sessions
+    # explicitly derive this from their authorized Person binding.
+    memory_enabled: bool = True

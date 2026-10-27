@@ -163,10 +163,21 @@ class TurnEngine:
         """Run a single Turn. Yields TurnEvents until DONE or ERROR."""
         # Outside the turn cleanup block: a rejected scope must neither read
         # context nor append/persist a failed turn into another person's history.
+        cancelled_during_admission = False
         if self._conversation_guard is not None:
-            await self._conversation_guard(ti)
-        elif ti.context.person_id is not None:
-            raise PermissionDeniedError("personal conversation guard is unavailable")
+            # Admission must resolve before cancellation can discard committed
+            # input. Never record rejected scopes, even on a cancelled turn.
+            admission = asyncio.create_task(self._conversation_guard(ti))
+            while True:
+                try:
+                    await asyncio.shield(admission)
+                    break
+                except asyncio.CancelledError:
+                    if admission.cancelled():
+                        raise
+                    cancelled_during_admission = True
+        elif ti.context.person_id is not None or not ti.context.memory_enabled:
+            raise PermissionDeniedError("interactive conversation guard is unavailable")
         seq = _SeqGen()
         started_at = datetime.now(UTC)
         t0 = time.monotonic()
@@ -234,6 +245,8 @@ class TurnEngine:
             # the answer ever generates or plays. Record it before any external
             # await or event; the compiler excludes this turn from its history.
             await self._remember_turn(ti, "", started_at, turn_status="active")
+            if cancelled_during_admission:
+                raise asyncio.CancelledError
             if verdict.action is SafetyAction.ESCALATE:
                 crisis = await self._crisis.handle(
                     companion_id=ti.context.companion_id,
@@ -974,6 +987,8 @@ class TurnEngine:
         started_at: datetime,
     ) -> None:
         """Publish canonical user evidence without joining the reply path."""
+        if not ti.context.memory_enabled:
+            return
 
         policy = TurnRuntimePolicy.from_metadata(ti.metadata)
         try:
@@ -1242,7 +1257,9 @@ def _memory_write_trace(
 ) -> dict:
     mode = _normalize_guard_mode(mode)
     skipped_reason: str | None = None
-    if mode == "disabled":
+    if not ti.context.memory_enabled:
+        skipped_reason = "unidentified_person"
+    elif mode == "disabled":
         skipped_reason = "policy_disabled"
     elif (
         ti.input_modality == "voice"

@@ -44,7 +44,7 @@ async def test_authorizer_builds_one_pinned_runtime_scope() -> None:
     assert scope.companion_id == "companion-1"
     assert scope.device_id == "device-1"
     assert scope.session_id == "room-1"
-    assert scope.config.tool_deny == frozenset({"reboot"})
+    assert scope.config.tool_deny == frozenset({"reboot", "delegate_to_coworker", "emit_event"})
     assert authority.calls == [("owner-1", "companion-1")]
 
 
@@ -95,7 +95,7 @@ async def test_personal_runtime_resolves_private_realm_without_mutating_default(
         runtime_config: dict = field(default_factory=dict)
 
     class Authority(_Authority):
-        async def resolve_person_memory(self, *, owner_id, person_id):
+        async def resolve_person_memory(self, *, owner_id, person_id, person_revision):
             assert (owner_id, person_id) == ("owner-1", "person-1")
             return "private"
 
@@ -103,7 +103,7 @@ async def test_personal_runtime_resolves_private_realm_without_mutating_default(
     authority = Authority(original)
     scope = await RuntimeSessionAuthorizer(authority).authorize(
         owner_id="owner-1", companion_id="companion-1", device_id=None,
-        session_id="new-session", person_id="person-1", identity_epoch=0,
+        session_id="new-session", person_id="person-1", person_revision=1, identity_epoch=0,
     )
     assert scope.runtime.memory_realm_id == "private"
     assert original.memory_realm_id == "default"
@@ -116,5 +116,5 @@ async def test_personal_runtime_resolves_private_realm_without_mutating_default(
     with pytest.raises(LookupError):
         await RuntimeSessionAuthorizer(authority).authorize(
             owner_id="owner-1", companion_id="companion-1", device_id=None,
-            session_id="new-session", person_id="person-1", identity_epoch=0,
+            session_id="new-session", person_id="person-1", person_revision=1, identity_epoch=0,
         )

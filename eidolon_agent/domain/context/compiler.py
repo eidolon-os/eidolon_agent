@@ -870,7 +870,7 @@ class ContextCompiler:
         The compile() outer loop treats all three the same way (truthy →
         append to system_parts) so no caller code changes.
         """
-        if self._memory is None or not ti.text:
+        if not ti.context.memory_enabled or self._memory is None or not ti.text:
             return None
         if not TurnRuntimePolicy.from_metadata(ti.metadata).memory_recall_allowed:
             return None
@@ -983,7 +983,7 @@ class ContextCompiler:
         self,
         ti: TurnInput,
     ) -> ActiveCommitmentReadResult | None:
-        if self._memory is None or not ti.text:
+        if not ti.context.memory_enabled or self._memory is None or not ti.text:
             return None
         if not TurnRuntimePolicy.from_metadata(ti.metadata).memory_recall_allowed:
             return None

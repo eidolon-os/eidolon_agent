@@ -658,6 +658,7 @@ def _personal_runtime():
         resolve_person_memory=AsyncMock(return_value="private-a"))
     identity = _identity()
     identity.person_id, identity.identity_epoch = "person-a", 1
+    identity.person_revision = 1
     return identity, authority
 
 
@@ -708,8 +709,12 @@ async def test_personal_stream_failure_cancels_old_output(monkeypatch, failure):
     assert context.written == []
 
 
-async def test_personal_proactive_subscription_is_not_companion_wide(monkeypatch):
+@pytest.mark.parametrize("identified", [True, False])
+async def test_personal_proactive_subscription_is_not_companion_wide(monkeypatch, identified):
     identity, authority = _personal_runtime()
+    if not identified:
+        identity = SimpleNamespace(owner_id=identity.owner_id, companion_id=identity.companion_id,
+                                   device_id=identity.device_id, session_id=identity.session_id)
     monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
     service = EidolonAgentServicer(agent_registry=_Registry([]), signals_bus=_Signals(),
         proactive_bus=None, runtime_sessions=RuntimeSessionAuthorizer(authority))
@@ -750,7 +755,7 @@ async def test_personal_chat_real_engine_history_and_persistence_are_isolated(
         memory_realm_id=base.memory_realm_id, genome_id=base.genome_id, genome_version=1,
         schema_version=base.schema_version, genome_hash=base.genome_hash,
         realizer_version=base.realizer_version, genome=None, runtime_config={})
-    async def personal_realm(*, owner_id, person_id):
+    async def personal_realm(*, owner_id, person_id, person_revision):
         assert owner_id == base.owner_id
         return {"a":"realm-a", "b":"realm-b"}[person_id]
     authority = SimpleNamespace(resolve=_async_value(facts), resolve_person_memory=personal_realm)
@@ -776,7 +781,7 @@ async def test_personal_chat_real_engine_history_and_persistence_are_isolated(
         async def chat(person, conversation, text, turn_id):
             token, _ = sign_runtime_token(secret=secret, owner_id=base.owner_id,
                 companion_id=base.companion_id, device_id=base.device_id,
-                session_id=f"session-{person}", person_id=person, identity_epoch=0, ttl_seconds=60)
+                session_id=f"session-{person}", person_id=person, person_revision=1, identity_epoch=0, ttl_seconds=60)
             identity = await verifier.verify(token)
             monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
             async def recheck():
