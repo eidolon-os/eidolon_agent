@@ -55,8 +55,9 @@ class PreparedReply:
 
 
 class AcceptReply:
-    def __init__(self, registry: ReplyRegistry) -> None:
+    def __init__(self, registry: ReplyRegistry, *, speaker_secret: str = "") -> None:
         self._registry = registry
+        self._speaker_secret = speaker_secret
 
     async def prepare(
         self, scope: AuthorizedRuntimeSession, request: ReplyRequest
@@ -80,6 +81,23 @@ class AcceptReply:
         if instance.agent is None:
             raise NotFoundError("authorized Companion runtime has no agent")
         metadata = deepcopy(request.metadata)
+        # A client-supplied name/person_id is never a recognition result.
+        metadata.pop("speaker_observation", None)
+        attestation = metadata.pop("speaker_observation_token", None)
+        speaker = None
+        if modality == "voice" and not request.speculative and attestation:
+            from eidolon_sdk.biz.speaker_attestation import verify_observation
+            try:
+                speaker = verify_observation(attestation, secret=self._speaker_secret,
+                    owner_id=scope.owner_id, session_id=scope.session_id,
+                    turn_id=request.trace_id, text=request.text)
+            except ValueError:
+                metadata["speaker_observation_rejected"] = True
+        if speaker is not None:
+            metadata["speaker_observation"] = {"status": speaker.status, "reason": speaker.reason,
+                "person_id": speaker.person_id, "person_revision": speaker.person_revision,
+                "confidence": speaker.confidence, "turn_id": speaker.turn_id}
+
         if request.speculative:
             metadata["speculative"] = True
         turn = TurnInput(
@@ -88,6 +106,7 @@ class AcceptReply:
             session_id=scope.session_id,
             presentation_feedback=PresentationFeedback(),
             context=TurnContext(
+                speaker_observation=speaker,
                 person_id=scope.person_id,
                 identity_epoch=scope.identity_epoch,
                 owner_id=scope.owner_id,

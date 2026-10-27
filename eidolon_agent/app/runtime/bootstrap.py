@@ -366,6 +366,7 @@ async def build_application(
 
     # 15. Transport servers ---------------------------------------------------
     servicer = EidolonAgentServicer(
+        speaker_secret=jwt_secret,
         agent_registry=agent_registry,
         signals_bus=sig_bus,
         proactive_bus=container.event_bus,

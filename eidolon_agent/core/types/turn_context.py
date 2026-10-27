@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal
+from eidolon_sdk.biz.speaker_identity import SpeakerIdentityObservation
 
 from eidolon_memory_contracts import MemoryActorContext, derive_memory_space_id
 
@@ -59,6 +60,7 @@ class TurnContext:
     request_id: str
     person_id: str | None = None
     identity_epoch: int | None = None
+    speaker_observation: SpeakerIdentityObservation | None = None
     schema_version: str = ""
     genome_hash: str = ""
     realizer_version: str = ""

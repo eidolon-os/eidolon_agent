@@ -56,9 +56,10 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         proactive_bus,  # EventBus
         runtime_sessions,
         personas_service=None,
+        speaker_secret: str = "",
     ) -> None:
         self._registry = agent_registry
-        self._reply_ingress = AcceptReply(agent_registry)
+        self._reply_ingress = AcceptReply(agent_registry, speaker_secret=speaker_secret)
         self._signals = signals_bus
         self._bus = proactive_bus
         self._personas = personas_service

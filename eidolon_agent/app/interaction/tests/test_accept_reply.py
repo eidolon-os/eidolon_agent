@@ -128,3 +128,38 @@ async def test_missing_agent_fails_before_execution():
             scope(),
             ReplyRequest(conversation_id="conversation", text="hello", input_modality="text"),
         )
+
+
+async def test_verified_speaker_is_context_not_memory_authorization():
+    import time
+    from eidolon_sdk.biz.speaker_identity import SpeakerIdentityObservation, SpeakerEvidenceSource
+    from eidolon_sdk.biz.speaker_attestation import sign_observation
+    from eidolon_agent.domain.context.speaker import speaker_context
+    now=time.time()
+    speaker=SpeakerIdentityObservation(owner_id='owner',session_id='session',turn_id='trace',
+        status='identified',confidence='controlled_trial',reason='voice_match',
+        person_id='p',person_revision=1,profile_id='v',profile_revision=1,
+        display_name='Alice',model_id='m',weights_hash='a'*64,preprocessing_version='v',
+        scoring_version='v',decision_version='trial',issued_at=now,expires_at=now+10,
+        source=SpeakerEvidenceSource(request_id='trace',session_id='session',input_id='mic',generation=1,
+            sample_rate=16000,start_sample=0,end_sample=32000))
+    token=sign_observation(speaker,secret='s'*32,text='hello')
+    request=ReplyRequest(conversation_id='conversation',text='hello',input_modality='voice',
+        trace_id='trace',metadata={'speaker_observation_token':token})
+    turn=(await AcceptReply(registry(),speaker_secret='s'*32).prepare(scope(),request)).turn
+    assert turn.context.speaker_observation.person_id=='p'
+    assert turn.context.person_id is None and turn.context.memory_realm_id=='realm'
+    assert 'speaker_observation_token' not in turn.metadata
+    prompt=speaker_context(turn.context.speaker_observation)
+    assert 'Alice' in prompt and 'tentative' in prompt
+
+
+async def test_forged_speaker_degrades_without_breaking_reply():
+    request=ReplyRequest(conversation_id='conversation',text='hello',input_modality='voice',
+        trace_id='trace',metadata={'speaker_observation_token':'bad',
+            'speaker_observation':{'person_id':'intruder'}})
+    turn=(await AcceptReply(registry(),speaker_secret='s'*32).prepare(scope(),request)).turn
+    assert turn.context.speaker_observation is None
+    assert turn.context.person_id is None
+    assert turn.metadata['speaker_observation_rejected']
+    assert 'speaker_observation' not in turn.metadata
