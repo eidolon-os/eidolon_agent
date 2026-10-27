@@ -152,7 +152,8 @@ async def test_verified_speaker_is_context_not_memory_authorization():
     assert turn.context.memory_enabled is False
     assert 'speaker_observation_token' not in turn.metadata
     prompt=speaker_context(turn.context.speaker_observation)
-    assert 'Alice' in prompt and 'tentative' in prompt
+    assert 'Alice' in prompt and 'voice matched' in prompt
+    assert 'controlled_trial' not in prompt and 'confidence' not in prompt
 
 
 async def test_forged_speaker_degrades_without_breaking_reply():
