@@ -21,8 +21,8 @@ tools receive cancellation but should run their own compensation.
 
 from __future__ import annotations
 
-import json
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -34,7 +34,11 @@ from eidolon_sdk.biz.chat_stream import DeltaRole
 from eidolon_sdk.biz.presentation import FACE_PROFILE, OutputSelection, ResponseIntent
 from eidolon_sdk.core.runtime import BackgroundTaskRunner
 
-from eidolon_agent.core.errors import GuardrailBlockedError, TurnCancelledError
+from eidolon_agent.core.errors import (
+    GuardrailBlockedError,
+    PermissionDeniedError,
+    TurnCancelledError,
+)
 from eidolon_agent.core.ports.llm import LLMPort
 from eidolon_agent.core.ports.tool import ToolInvocationContext, ToolPort
 from eidolon_agent.core.types import (
@@ -61,6 +65,7 @@ from eidolon_agent.core.types.turn import (
     TurnStatus,
 )
 from eidolon_agent.domain.agent.committed_turn import validate_committed_turn
+from eidolon_agent.domain.agent.ports import ConversationGuard
 from eidolon_agent.domain.agent.presentation import (
     RESPONSE_TOOL,
     InvalidPresentationError,
@@ -124,6 +129,7 @@ class TurnEngine:
         tool_schema_strict: bool = True,
         require_idempotency_for_side_effect_tools: bool = False,
         taboos_provider=lambda: (),  # () -> tuple[str, ...]
+        conversation_guard: ConversationGuard | None = None,
         turn_persister=None,  # async callable; None disables durable turn persistence
         harness: RealtimeAgentHarness | None = None,
         background_tasks: BackgroundTaskRunner | None = None,
@@ -146,6 +152,7 @@ class TurnEngine:
         self._tool_schema_strict = tool_schema_strict
         self._require_idempotency_for_side_effect_tools = require_idempotency_for_side_effect_tools
         self._taboos_provider = taboos_provider
+        self._conversation_guard = conversation_guard
         self._turn_persister = turn_persister
         self._harness = harness or RealtimeAgentHarness()
         self._background = background_tasks or BackgroundTaskRunner()
@@ -154,6 +161,12 @@ class TurnEngine:
 
     async def run(self, ti: TurnInput) -> AsyncIterator[TurnEvent]:
         """Run a single Turn. Yields TurnEvents until DONE or ERROR."""
+        # Outside the turn cleanup block: a rejected scope must neither read
+        # context nor append/persist a failed turn into another person's history.
+        if self._conversation_guard is not None:
+            await self._conversation_guard(ti)
+        elif ti.context.person_id is not None:
+            raise PermissionDeniedError("personal conversation guard is unavailable")
         seq = _SeqGen()
         started_at = datetime.now(UTC)
         t0 = time.monotonic()
@@ -965,6 +978,9 @@ class TurnEngine:
         policy = TurnRuntimePolicy.from_metadata(ti.metadata)
         try:
             status = await self._fanout.publish_turn(
+                **({"person_id": ti.context.person_id,
+                    "identity_epoch": ti.context.identity_epoch}
+                   if ti.context.person_id is not None else {}),
                 owner_id=ti.context.owner_id,
                 companion_id=ti.context.companion_id,
                 memory_realm_id=ti.context.memory_realm_id,

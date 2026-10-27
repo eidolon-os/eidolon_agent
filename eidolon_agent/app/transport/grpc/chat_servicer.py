@@ -23,7 +23,7 @@ from eidolon_sdk.biz.presentation.motion import MotionReceipt
 from eidolon_agent.app.interaction import AcceptReply, ReplyRequest
 from eidolon_agent.app.transport.grpc.channel_tools import ChannelToolExchange
 from eidolon_agent.app.transport.grpc.codec import struct_to_dict, turn_event_to_proto
-from eidolon_agent.app.transport.grpc.interceptors import current_identity
+from eidolon_agent.app.transport.grpc.interceptors import current_identity, reauthenticate_current
 from eidolon_agent.app.transport.grpc.proto import pb, pbg
 from eidolon_agent.core.errors import (
     DependencyError,
@@ -74,7 +74,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
         identity = current_identity()
         if identity is None:
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "no identity")
-        scope = await self._authorize_runtime(identity, context)
+        scope = await self._authorize_runtime(identity, context, allow_personal=True)
         active_turns: set[asyncio.Task] = set()
         active_by_conversation: dict[str, asyncio.Task] = {}
         conversation_by_turn: dict[str, str] = {}
@@ -248,6 +248,21 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 if payload != "start":
                     continue
 
+                if scope.person_id is not None:
+                    try:
+                        renewed = await reauthenticate_current()
+                    except Exception:
+                        await context.abort(grpc.StatusCode.UNAUTHENTICATED,
+                                            "personal runtime credential is no longer valid")
+                        return
+                    fresh = await self._authorize_runtime(renewed, context, allow_personal=True)
+                    if (fresh.owner_id, fresh.companion_id, fresh.device_id, fresh.session_id,
+                        fresh.person_id, fresh.identity_epoch, fresh.runtime.memory_realm_id) != (
+                        scope.owner_id, scope.companion_id, scope.device_id, scope.session_id,
+                        scope.person_id, scope.identity_epoch, scope.runtime.memory_realm_id):
+                        await context.abort(grpc.StatusCode.PERMISSION_DENIED,
+                                            "personal runtime binding changed; start a new session")
+                        return
                 start = frame.start
                 start_digest = hashlib.sha256(
                     start.SerializeToString(deterministic=True)
@@ -346,6 +361,10 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                         raise
                     except EidolonError as exc:
                         _log.warning("turn %s failed: %s", _ti.turn_id, exc)
+                        if generation_by_conversation.get(_ti.conversation_id) == _generation:
+                            async with write_lock:
+                                await context.write(turn_event_to_proto(TurnEvent.error(
+                                    _ti.turn_id, 0, exc.code, exc.message, time.time())))
 
                 # Enter the engine's local input/history boundary before reading
                 # the next frame. Otherwise an immediately buffered CancelTurn
@@ -373,6 +392,12 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                         active_by_conversation.pop(conv_id, None)
 
                 task.add_done_callback(_discard_done)
+        except BaseException:
+            # Authorization/transport failure must not drain old private output.
+            generation_by_conversation.clear()
+            for task in list(active_turns):
+                task.cancel()
+            raise
         finally:
             watcher.cancel()
             # If the iterator returned because the RPC was cancelled, propagate
@@ -439,13 +464,21 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 _log.exception("submit persona signal failed")
         return pb.Ack(accepted=True)
 
-    async def _authorize_runtime(self, identity, context):  # type: ignore[no-untyped-def]
+    async def _authorize_runtime(self, identity, context, *, allow_personal=False):  # type: ignore[no-untyped-def]
+        if getattr(identity, "person_id", None) is not None and not allow_personal:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "personal runtime is supported only by the scoped Chat endpoint",
+            )
+            return None
         try:
             return await self._runtime_sessions.authorize(
                 owner_id=identity.owner_id,
                 companion_id=identity.companion_id,
                 device_id=identity.device_id,
                 session_id=identity.session_id,
+                **({"person_id": identity.person_id, "identity_epoch": identity.identity_epoch}
+                   if getattr(identity, "person_id", None) is not None else {}),
             )
         except DependencyError as exc:
             await context.abort(grpc.StatusCode.UNAVAILABLE, exc.message)

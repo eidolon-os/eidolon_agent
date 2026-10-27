@@ -385,3 +385,14 @@ async def test_close_calls_pool_close_all() -> None:
     port, _, pool = _port()
     await port.close()
     pool.close_all.assert_awaited_once()
+
+
+async def test_recall_rejects_response_from_another_identity():
+    port, _session, _pool = _port(session_call=AsyncMock(return_value={
+        "identity_binding": {"memory_realm_id": "other"},
+        "context": "private text from another user", "records": [],
+    }))
+    result = await port.recall_context("owner-1", "x", memory_realm_id="realm-1", plan=MemoryQueryPlan())
+    assert result.degraded and result.degraded_reason == "identity_mismatch"
+    assert result.context == ""
+    assert not result.hits

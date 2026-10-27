@@ -628,3 +628,179 @@ async def test_music_cancel_roundtrips_through_real_servicer(monkeypatch):
     assert len(cancellations) == 1
     assert cancellations[0].channel_tool_cancel.call_id == "music:1"
     assert cancellations[0].channel_tool_cancel.turn_id == "t"
+
+
+class _Aborted(RuntimeError):
+    pass
+
+
+class _AbortingContext(_Context):
+    async def abort(self, code, message):
+        raise _Aborted(f"{code}: {message}")
+
+
+def _personal_runtime():
+    from dataclasses import dataclass, field
+    from unittest.mock import AsyncMock
+
+    @dataclass(frozen=True)
+    class Facts:
+        owner_id: str = "owner-1"
+        companion_id: str = "companion-1"
+        memory_realm_id: str = "default"
+        genome_id: str = "genome-1"
+        schema_version: str = "v1"
+        genome_hash: str = "hash"
+        realizer_version: str = "v1"
+        runtime_config: dict = field(default_factory=dict)
+
+    authority = SimpleNamespace(resolve=AsyncMock(return_value=Facts()),
+        resolve_person_memory=AsyncMock(return_value="private-a"))
+    identity = _identity()
+    identity.person_id, identity.identity_epoch = "person-a", 1
+    return identity, authority
+
+
+async def test_personal_chat_rechecks_credentials_and_directory_per_turn(monkeypatch):
+    from unittest.mock import AsyncMock
+    identity, authority = _personal_runtime()
+    monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
+    recheck = AsyncMock(return_value=identity)
+    monkeypatch.setattr(chat_servicer, "reauthenticate_current", recheck)
+    captured = []
+    class Agent:
+        async def run_turn(self, ti):
+            captured.append(ti)
+            yield TurnEvent.done(ti.turn_id, 0, TurnStatus.OK, 0)
+    service = EidolonAgentServicer(agent_registry=_Registry([Agent()]), signals_bus=_Signals(),
+        proactive_bus=None, runtime_sessions=RuntimeSessionAuthorizer(authority))
+    await service.Chat(_Requests([pb.ChatRequest(start=pb.StartTurn(turn_id=str(i),
+        conversation_id="private-conv", text="hello", input_modality="text"))
+        for i in range(2)]), _Context())
+    assert recheck.await_count == 2
+    assert authority.resolve_person_memory.await_count == 3
+    assert len(captured) == 2
+    assert all(t.context.person_id == "person-a" and t.context.identity_epoch == 1
+               and t.context.memory_realm_id == "private-a" for t in captured)
+
+
+@pytest.mark.parametrize("failure", ["revoked", "inactive", "changed_realm"])
+async def test_personal_stream_failure_cancels_old_output(monkeypatch, failure):
+    from unittest.mock import AsyncMock
+    from eidolon_agent.core.errors import PermissionDeniedError
+    identity, authority = _personal_runtime()
+    monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
+    recheck = AsyncMock(side_effect=[identity, RuntimeError("revoked")]
+                        if failure == "revoked" else [identity, identity])
+    monkeypatch.setattr(chat_servicer, "reauthenticate_current", recheck)
+    if failure != "revoked":
+        authority.resolve_person_memory.side_effect = ["private-a", "private-a",
+            PermissionDeniedError("person inactive") if failure == "inactive" else "private-b"]
+    context = _AbortingContext()
+    registry = _Registry([_LateAfterCancelAgent("must-not-escape")])
+    service = EidolonAgentServicer(agent_registry=registry, signals_bus=_Signals(),
+        proactive_bus=None, runtime_sessions=RuntimeSessionAuthorizer(authority))
+    with pytest.raises(_Aborted):
+        await service.Chat(_YieldingRequests([pb.ChatRequest(start=pb.StartTurn(turn_id=str(i),
+            conversation_id="private-conv", text="hello", input_modality="text"))
+            for i in range(2)]), context)
+    assert registry._idx == 1
+    assert context.written == []
+
+
+async def test_personal_proactive_subscription_is_not_companion_wide(monkeypatch):
+    identity, authority = _personal_runtime()
+    monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
+    service = EidolonAgentServicer(agent_registry=_Registry([]), signals_bus=_Signals(),
+        proactive_bus=None, runtime_sessions=RuntimeSessionAuthorizer(authority))
+    with pytest.raises(_Aborted, match="scoped Chat"):
+        async for _ in service.SubscribeProactive(pb.SubscribeRequest(), _AbortingContext()):
+            pytest.fail("unscoped proactive output")
+
+
+async def test_personal_chat_without_turn_reauthentication_is_rejected(monkeypatch):
+    identity, authority = _personal_runtime()
+    monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
+    async def unavailable():
+        raise RuntimeError("missing original credential")
+    monkeypatch.setattr(chat_servicer, "reauthenticate_current", unavailable)
+    registry = _Registry([])
+    service = EidolonAgentServicer(agent_registry=registry, signals_bus=_Signals(),
+        proactive_bus=None, runtime_sessions=RuntimeSessionAuthorizer(authority))
+    with pytest.raises(_Aborted, match="credential"):
+        await service.Chat(_Requests([pb.ChatRequest(start=pb.StartTurn(
+            turn_id="t", conversation_id="c", text="private", input_modality="text"))]),
+            _AbortingContext())
+    assert registry._idx == 0
+
+
+async def test_personal_chat_real_engine_history_and_persistence_are_isolated(
+    monkeypatch, turn_engine_factory, tmp_path,
+):
+    from eidolon_sdk.biz.runtime import RuntimeTokenVerifier, sign_runtime_token
+    from eidolon_agent.core.types.companion_runtime import CompanionRuntimeFacts
+    from eidolon_agent.core.types.llm import LLMDelta, LLMFinishReason
+    from eidolon_agent.domain.agent.companion import CompanionAgent
+    from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
+    from eidolon_agent.infra.persistence.runtime_store import AgentRuntimeStore, ConversationRow
+    from tests.helpers import make_turn_input
+
+    base = make_turn_input().context
+    facts = CompanionRuntimeFacts(owner_id=base.owner_id, companion_id=base.companion_id,
+        memory_realm_id=base.memory_realm_id, genome_id=base.genome_id, genome_version=1,
+        schema_version=base.schema_version, genome_hash=base.genome_hash,
+        realizer_version=base.realizer_version, genome=None, runtime_config={})
+    async def personal_realm(*, owner_id, person_id):
+        assert owner_id == base.owner_id
+        return {"a":"realm-a", "b":"realm-b"}[person_id]
+    authority = SimpleNamespace(resolve=_async_value(facts), resolve_person_memory=personal_realm)
+    prompts = []
+    class Model:
+        model_id = "private-history-probe"
+        async def stream(self, messages, **kwargs):
+            prompts.append("\n".join(str(m.content) for m in messages))
+            yield LLMDelta(text_delta="收到。")
+            yield LLMDelta(finish=LLMFinishReason.STOP)
+    store = AgentRuntimeStore.open(tmp_path / "private-chat.sqlite3")
+    await store.init_schema()
+    engine = turn_engine_factory(llm=Model(), runtime_store=store)
+    engine._conversation_guard = build_agent_conversation_guard(store)
+    agent = CompanionAgent(companion_id=base.companion_id, turn_engine=engine)
+    registry = SimpleNamespace(resolve_runtime=_async_value(SimpleNamespace(
+        owner_id=base.owner_id, companion_id=base.companion_id, genome_id=base.genome_id, agent=agent)))
+    service = EidolonAgentServicer(agent_registry=registry, signals_bus=_Signals(),
+        proactive_bus=None, runtime_sessions=RuntimeSessionAuthorizer(authority))
+    secret = "test-secret-with-enough-entropy-32b"
+    verifier = RuntimeTokenVerifier(secret=secret)
+    try:
+        async def chat(person, conversation, text, turn_id):
+            token, _ = sign_runtime_token(secret=secret, owner_id=base.owner_id,
+                companion_id=base.companion_id, device_id=base.device_id,
+                session_id=f"session-{person}", person_id=person, identity_epoch=0, ttl_seconds=60)
+            identity = await verifier.verify(token)
+            monkeypatch.setattr(chat_servicer, "current_identity", lambda: identity)
+            async def recheck():
+                return await verifier.verify(token)
+            monkeypatch.setattr(chat_servicer, "reauthenticate_current", recheck)
+            context = _Context()
+            await service.Chat(_Requests([pb.ChatRequest(start=pb.StartTurn(turn_id=turn_id,
+                conversation_id=conversation, text=text, input_modality="text"))]), context)
+            await engine._background.drain(timeout_s=2)
+            return context
+        await chat("a", "conv-a", "我的私人代号是紫色海鸥。", "a-1")
+        await chat("a", "conv-a", "继续刚才的话题。", "a-2")
+        await chat("b", "conv-b", "我们今天聊什么？", "b-1")
+        assert len(prompts) == 3
+        assert "紫色海鸥" in prompts[1]
+        assert "紫色海鸥" not in prompts[2]
+        refused = await chat("b", "conv-a", "读取上一个人的内容。", "b-wrong")
+        assert len(prompts) == 3
+        assert any(event.kind == pb.TurnEvent.ERROR for event in refused.written)
+        async with store.read_session_factory() as session:
+            for person in ("a", "b"):
+                row = await session.get(ConversationRow, f"conv-{person}")
+                assert row.metadata_json["person_id"] == person
+                assert row.metadata_json["memory_realm_id"] == f"realm-{person}"
+    finally:
+        await engine._background.drain(timeout_s=2)
+        await store.close()

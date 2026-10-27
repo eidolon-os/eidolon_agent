@@ -82,3 +82,39 @@ async def test_authorizer_rejects_malformed_authority_policy() -> None:
             device_id=None,
             session_id="room-1",
         )
+
+
+async def test_personal_runtime_resolves_private_realm_without_mutating_default():
+    from dataclasses import dataclass, field
+
+    @dataclass(frozen=True)
+    class Facts:
+        owner_id: str = "owner-1"
+        companion_id: str = "companion-1"
+        memory_realm_id: str = "default"
+        runtime_config: dict = field(default_factory=dict)
+
+    class Authority(_Authority):
+        async def resolve_person_memory(self, *, owner_id, person_id):
+            assert (owner_id, person_id) == ("owner-1", "person-1")
+            return "private"
+
+    original = Facts()
+    authority = Authority(original)
+    scope = await RuntimeSessionAuthorizer(authority).authorize(
+        owner_id="owner-1", companion_id="companion-1", device_id=None,
+        session_id="new-session", person_id="person-1", identity_epoch=0,
+    )
+    assert scope.runtime.memory_realm_id == "private"
+    assert original.memory_realm_id == "default"
+    assert scope.person_id == "person-1" and scope.identity_epoch == 0
+    assert {"delegate_to_coworker", "emit_event"} <= scope.config.tool_deny
+
+    async def missing(**kwargs):
+        raise LookupError("personal realm unavailable")
+    authority.resolve_person_memory = missing
+    with pytest.raises(LookupError):
+        await RuntimeSessionAuthorizer(authority).authorize(
+            owner_id="owner-1", companion_id="companion-1", device_id=None,
+            session_id="new-session", person_id="person-1", identity_epoch=0,
+        )

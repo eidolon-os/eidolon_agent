@@ -39,6 +39,10 @@ class AuthInterceptor(ServerInterceptor):
         # Attach identity as a magic invocation_metadata entry — servicers can
         # retrieve via context.invocation_metadata(). For simplicity we stash
         # in a process-local map keyed by the handler call.
+        async def reauthenticate():
+            return await self._verifier.verify(raw)
+
+        _current_reauthenticate.set(reauthenticate)
         _AuthScope.current.set(identity)  # type: ignore[attr-defined]
         return await continuation(handler_call_details)
 
@@ -56,6 +60,7 @@ def _unauthenticated(msg: str):
 import contextvars  # noqa: E402
 
 _current_identity: contextvars.ContextVar = contextvars.ContextVar("identity", default=None)
+_current_reauthenticate: contextvars.ContextVar = contextvars.ContextVar("reauthenticate", default=None)
 
 
 class _AuthScope:
@@ -64,3 +69,13 @@ class _AuthScope:
 
 def current_identity():
     return _current_identity.get()
+
+
+async def reauthenticate_current():
+    """Recheck the stream's original credential, including expiry and revocation."""
+    from eidolon_sdk.biz.runtime import RuntimeUnauthenticatedError
+
+    verify = _current_reauthenticate.get()
+    if verify is None:
+        raise RuntimeUnauthenticatedError("runtime reauthentication is unavailable")
+    return await verify()

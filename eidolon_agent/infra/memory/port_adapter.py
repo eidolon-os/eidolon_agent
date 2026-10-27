@@ -65,9 +65,13 @@ class EidolonMemoryPort:
         timeout_s: float = 0.2,
         companion_id: str | None = None,
         device_id: str | None = None,
+        person_id: str | None = None,
+        identity_epoch: int | None = None,
         session_id: str | None = None,
     ) -> MemoryRecallResult:
         ctx = build_memory_actor_context(
+            person_id=person_id,
+            identity_epoch=identity_epoch,
             owner_id=owner_id,
             companion_id=companion_id,
             memory_realm_id=memory_realm_id,
@@ -128,6 +132,11 @@ class EidolonMemoryPort:
                 return MemoryRecallResult(degraded=True, degraded_reason="error")
         else:
             return MemoryRecallResult(degraded=True, degraded_reason="memory_unavailable")
+        # A server that advertises request identity must answer this exact scope.
+        # Legacy unbound callers remain compatible with older Memory servers.
+        binding = raw.get("identity_binding")
+        if (ctx.person_id is not None or binding is not None) and binding != ctx.identity_binding():
+            return MemoryRecallResult(degraded=True, degraded_reason="identity_mismatch")
         context = raw.get("context", "") or ""
         hits = _records_to_hits(raw.get("records") or [])
         kg_triples = raw.get("kg_triples") or []
@@ -151,12 +160,16 @@ class EidolonMemoryPort:
         memory_realm_id: str,
         companion_id: str | None = None,
         device_id: str | None = None,
+        person_id: str | None = None,
+        identity_epoch: int | None = None,
         session_id: str | None = None,
         limit: int = 5,
         timeout_s: float = 0.2,
     ) -> ActiveCommitmentReadResult:
         """Read a small active-only set from the Realm-bound MCP endpoint."""
         ctx = build_memory_actor_context(
+            person_id=person_id,
+            identity_epoch=identity_epoch,
             owner_id=owner_id,
             companion_id=companion_id,
             memory_realm_id=memory_realm_id,
@@ -196,6 +209,11 @@ class EidolonMemoryPort:
                     return ActiveCommitmentReadResult(
                         degraded=True,
                         degraded_reason="realm_mismatch",
+                    )
+                binding = raw.get("identity_binding")
+                if (ctx.person_id is not None or binding is not None) and binding != ctx.identity_binding():
+                    return ActiveCommitmentReadResult(
+                        degraded=True, degraded_reason="identity_mismatch"
                     )
                 active = _records_to_active_commitments(
                     raw.get("commitments") or [],

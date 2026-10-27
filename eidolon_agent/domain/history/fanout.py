@@ -84,6 +84,8 @@ class HistoryFanout:
         user_text: str,
         assistant_text: str,
         timestamp_iso: str,
+        person_id: str | None = None,
+        identity_epoch: int | None = None,
         trace_id: str | None = None,
         emotion_payload: dict | None = None,
         metadata: dict | None = None,
@@ -115,6 +117,8 @@ class HistoryFanout:
         if metadata:
             payload_metadata.update(metadata)
         context = build_memory_actor_context(
+            person_id=person_id,
+            identity_epoch=identity_epoch,
             owner_id=owner_id,
             companion_id=companion_id,
             memory_realm_id=memory_realm_id,
@@ -187,7 +191,7 @@ class HistoryFanout:
                 trace_id=trace_id,
             )
         await self._record_status(status)
-        if emotion_payload:
+        if emotion_payload and person_id is None:
             try:
                 await self._bus.publish(
                     Event(

@@ -34,3 +34,9 @@ class LiveTurnObserver(Protocol):
 
 
 __all__ = ["LiveTurnObserver"]
+
+
+class ConversationGuard(Protocol):
+    async def __call__(self, ti: TurnInput) -> None:
+        """Durably claim or verify conversation scope before any context access."""
+        ...

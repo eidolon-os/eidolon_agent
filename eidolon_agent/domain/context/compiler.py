@@ -894,6 +894,9 @@ class ContextCompiler:
                 recall = await self._memory.recall_context(
                     owner_id=ti.context.owner_id,
                     query=recall_query,
+                    **({"person_id": ti.context.person_id,
+                        "identity_epoch": ti.context.identity_epoch}
+                       if ti.context.person_id is not None else {}),
                     plan=plan,
                     companion_id=ti.context.companion_id,
                     memory_realm_id=ti.context.memory_realm_id,
@@ -978,6 +981,9 @@ class ContextCompiler:
             return None
         try:
             return await reader(
+                **({"person_id": ti.context.person_id,
+                    "identity_epoch": ti.context.identity_epoch}
+                   if ti.context.person_id is not None else {}),
                 owner_id=ti.context.owner_id,
                 companion_id=ti.context.companion_id,
                 memory_realm_id=ti.context.memory_realm_id,

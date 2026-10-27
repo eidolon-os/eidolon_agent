@@ -31,6 +31,8 @@ class MemoryPort(Protocol):
         companion_id: str | None = None,
         device_id: str | None = None,
         timeout_s: float = 0.2,
+        person_id: str | None = None,
+        identity_epoch: int | None = None,
         session_id: str | None = None,
     ) -> MemoryRecallResult:
         """Returns prompt-ready recall context plus diagnostics."""
@@ -43,6 +45,8 @@ class MemoryPort(Protocol):
         memory_realm_id: str,
         companion_id: str | None = None,
         device_id: str | None = None,
+        person_id: str | None = None,
+        identity_epoch: int | None = None,
         session_id: str | None = None,
         limit: int = 5,
         timeout_s: float = 0.2,

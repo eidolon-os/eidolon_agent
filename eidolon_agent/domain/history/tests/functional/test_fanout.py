@@ -255,3 +255,22 @@ async def test_publish_turn_is_noop_without_bus() -> None:
     )
     assert status.state == "skipped_no_bus"
     assert sink.statuses[-1].state == "skipped_no_bus"
+
+
+async def test_personal_fanout_keeps_binding_and_does_not_broadcast_emotion(event_bus):
+    outbox = _Outbox()
+    emotion = []
+    async def receive(event):
+        emotion.append(event)
+    await event_bus.subscribe("agent.emotion.turn.alice", receive)
+    fanout = HistoryFanout(event_bus=event_bus, memory_outbox=outbox)
+    await fanout.publish_turn(owner_id="alice", companion_id="companion-a",
+        memory_realm_id="private-a", device_id="device", session_id="session-a",
+        person_id="a", identity_epoch=1, turn_id="personal-turn", user_text="private",
+        assistant_text="", timestamp_iso="2026-10-27T10:00:00Z", emotion_payload={"valence":-0.4})
+    payload = unwrap_memory_payload(outbox.rows[0]["payload"])
+    assert payload["context"]["person_id"] == "a"
+    assert payload["context"]["identity_epoch"] == 1
+    assert payload["context"]["memory_realm_id"] == "private-a"
+    await asyncio.sleep(0)
+    assert emotion == []

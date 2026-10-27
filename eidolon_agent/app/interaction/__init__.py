@@ -88,6 +88,8 @@ class AcceptReply:
             session_id=scope.session_id,
             presentation_feedback=PresentationFeedback(),
             context=TurnContext(
+                person_id=scope.person_id,
+                identity_epoch=scope.identity_epoch,
                 owner_id=scope.owner_id,
                 companion_id=scope.companion_id,
                 device_id=scope.device_id,

@@ -71,6 +71,7 @@ from eidolon_agent.infra.observability import configure_logging
 from eidolon_agent.infra.observability.live_turns import LiveTurnBoard
 from eidolon_agent.infra.persistence.agent_runtime import (
     AgentLongTaskStore,
+    build_agent_conversation_guard,
     build_agent_history_hydrator,
     build_agent_turn_persister,
 )
@@ -505,6 +506,7 @@ def _build_turn_engine(
         require_idempotency_for_side_effect_tools=container.settings.turn.require_idempotency_for_side_effect_tools,
         taboos_provider=lambda: tuple(),
         body_capability_provider=container.extras.get("body_capability_tool_provider"),
+        conversation_guard=build_agent_conversation_guard(container.runtime_store),
         turn_persister=build_agent_turn_persister(
             container.runtime_store,
             model_id_provider=lambda: getattr(container.llm_router, "model_id", None),

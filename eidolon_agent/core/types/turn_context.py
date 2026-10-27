@@ -24,6 +24,8 @@ def build_memory_space_id(*, memory_realm_id: str) -> str:
 def build_memory_actor_context(
     *,
     memory_realm_id: str,
+    person_id: str | None = None,
+    identity_epoch: int | None = None,
     owner_id: str | None = None,
     companion_id: str | None = None,
     council_id: str | None = None,
@@ -33,6 +35,8 @@ def build_memory_actor_context(
     """Map Agent facts to the existing Memory contract."""
 
     return MemoryActorContext(
+        person_id=person_id,
+        identity_epoch=identity_epoch,
         owner_id=owner_id,
         companion_id=companion_id,
         council_id=council_id,
@@ -53,6 +57,8 @@ class TurnContext:
     genome_id: str
     trace_id: str
     request_id: str
+    person_id: str | None = None
+    identity_epoch: int | None = None
     schema_version: str = ""
     genome_hash: str = ""
     realizer_version: str = ""

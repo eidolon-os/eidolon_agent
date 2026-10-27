@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 
+from eidolon_agent.core.errors import PermissionDeniedError
 from eidolon_agent.core.types import ChatMessage, MessageRole
 from eidolon_agent.core.types.long_task import CallbackStatus, LongTaskRecord, LongTaskStatus
 from eidolon_agent.core.types.turn import TriageKind, TurnInput, TurnResult, TurnStatus
@@ -91,6 +92,61 @@ def build_agent_history_hydrator(runtime_store: AgentRuntimeStore):
     return _hydrate
 
 
+def _conversation_metadata(ti: TurnInput) -> dict[str, Any]:
+    return {
+        "owner_id": ti.context.owner_id,
+        "companion_id": ti.context.companion_id,
+        "runtime_session_id": _runtime_session_id(ti),
+        "memory_realm_id": ti.context.memory_realm_id,
+        "person_id": ti.context.person_id,
+        "identity_epoch": ti.context.identity_epoch,
+        "genome_id": ti.context.genome_id,
+        "genome_hash": ti.context.genome_hash,
+        "schema_version": ti.context.schema_version,
+        "realizer_version": ti.context.realizer_version,
+        "session_id": ti.session_id,
+    }
+
+
+def _verify_conversation_scope(row: ConversationRow, ti: TurnInput) -> None:
+    metadata = row.metadata_json or {}
+    if (row.owner_id, row.companion_id, metadata.get("memory_realm_id")) != (
+        ti.context.owner_id, ti.context.companion_id, ti.context.memory_realm_id
+    ):
+        raise PermissionDeniedError("conversation belongs to another runtime scope")
+    # Legacy/default history must never be claimed by a person (or vice versa).
+    if metadata.get("person_id") != ti.context.person_id:
+        raise PermissionDeniedError("conversation belongs to another person")
+    if ti.context.person_id is not None and (
+        metadata.get("identity_epoch"), metadata.get("session_id"), row.source_device_id
+    ) != (ti.context.identity_epoch, ti.session_id, ti.context.device_id):
+        raise PermissionDeniedError("personal identity change requires a new conversation")
+
+
+def build_agent_conversation_guard(runtime_store: AgentRuntimeStore):
+    async def _guard(ti: TurnInput) -> None:
+        # Unique conversation_id arbitrates concurrent claims across processes.
+        # Claim before reading, including speculative turns; cancelled first turns
+        # leave an empty bound conversation, never a reusable identity slot.
+        async with runtime_store.session_factory() as session:
+            await _insert_ignore(session, ConversationRow, {
+                "conversation_id": ti.conversation_id,
+                "owner_id": ti.context.owner_id,
+                "companion_id": ti.context.companion_id,
+                "source_device_id": ti.context.device_id,
+                "metadata_json": _conversation_metadata(ti),
+            }, index_elements=["conversation_id"])
+            row = await session.get(ConversationRow, ti.conversation_id)
+            if row is None:
+                raise RuntimeError("conversation claim failed")
+            _verify_conversation_scope(row, ti)
+            existing_turn = await session.get(TurnRow, ti.turn_id)
+            if existing_turn is not None and existing_turn.conversation_id != ti.conversation_id:
+                raise PermissionDeniedError("turn belongs to another conversation")
+            await session.commit()
+    return _guard
+
+
 def build_agent_turn_persister(runtime_store: AgentRuntimeStore, *, model_id_provider):
     async def _persist_once(
         *,
@@ -129,28 +185,21 @@ def build_agent_turn_persister(runtime_store: AgentRuntimeStore, *, model_id_pro
                     "source_device_id": ti.context.device_id,
                     "started_at": started_at,
                     "updated_at": finished_at,
-                    "metadata_json": {
-                        "owner_id": ti.context.owner_id,
-                        "companion_id": companion_id,
-                        "runtime_session_id": runtime_session_id,
-                        "memory_realm_id": ti.context.memory_realm_id,
-                        "genome_id": ti.context.genome_id,
-                        "genome_hash": ti.context.genome_hash,
-                        "schema_version": ti.context.schema_version,
-                        "realizer_version": ti.context.realizer_version,
-                        "session_id": ti.session_id,
-                    },
+                    "metadata_json": _conversation_metadata(ti),
                 },
                 index_elements=["conversation_id"],
             )
             conversation = await session.get(ConversationRow, ti.conversation_id)
             if conversation is None:
                 raise RuntimeError(f"conversation insert failed: {ti.conversation_id}")
+            _verify_conversation_scope(conversation, ti)
             conversation.updated_at = finished_at
             conversation.runtime_session_id = runtime_session_id
             conversation.source_device_id = ti.context.device_id
 
             existing_turn = await session.get(TurnRow, ti.turn_id)
+            if existing_turn is not None and existing_turn.conversation_id != ti.conversation_id:
+                raise PermissionDeniedError("turn belongs to another conversation")
             if existing_turn is None:
                 seq = await _next_turn_seq(session, ti.conversation_id)
                 turn = TurnRow(
@@ -842,6 +891,8 @@ def _turn_metadata_json(ti: TurnInput, triage_kind: TriageKind, timings: dict) -
         "companion_id": ti.context.companion_id,
         "runtime_session_id": _runtime_session_id(ti),
         "memory_realm_id": ti.context.memory_realm_id,
+        "person_id": ti.context.person_id,
+        "identity_epoch": ti.context.identity_epoch,
         "genome_id": ti.context.genome_id,
         "genome_hash": ti.context.genome_hash,
         "schema_version": ti.context.schema_version,
