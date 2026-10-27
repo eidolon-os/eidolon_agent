@@ -889,7 +889,15 @@ async def _next_turn_seq(session, conversation_id: str) -> int:
 
 
 def _turn_metadata_json(ti: TurnInput, triage_kind: TriageKind, timings: dict) -> dict[str, Any]:
+    # Keep evidence distinct from the authorized person fields. Never persist
+    # the attestation, profile, voice template or raw audio in turn history.
+    speaker = ti.context.speaker_observation
+    observation = speaker.model_dump(include={
+        "status", "reason", "person_id", "person_revision", "confidence",
+        "turn_id", "decision_version",
+    }) if speaker is not None else None
     return {
+        "speaker_observation": observation,
         **(timings or {}),
         "owner_id": ti.context.owner_id,
         "companion_id": ti.context.companion_id,
