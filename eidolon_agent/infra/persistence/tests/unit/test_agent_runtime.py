@@ -733,6 +733,7 @@ async def test_turn_id_cannot_overwrite_another_conversation(runtime_store):
 
 async def test_unknown_history_is_session_bound_and_cannot_claim_legacy_history(runtime_store):
     from dataclasses import replace
+
     from eidolon_agent.core.errors import PermissionDeniedError
     from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
 
@@ -755,6 +756,7 @@ async def test_unknown_history_is_session_bound_and_cannot_claim_legacy_history(
 
 async def test_person_revision_change_requires_new_conversation(runtime_store):
     from dataclasses import replace
+
     from eidolon_agent.core.errors import PermissionDeniedError
     from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
 
@@ -770,6 +772,7 @@ async def test_person_revision_change_requires_new_conversation(runtime_store):
 
 async def test_room_history_survives_a_b_unknown_but_turn_authority_is_immutable(runtime_store):
     from dataclasses import replace
+
     from eidolon_agent.core.errors import PermissionDeniedError
     from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
 
@@ -785,9 +788,9 @@ async def test_room_history_survives_a_b_unknown_but_turn_authority_is_immutable
     args = dict(status=TurnStatus.OK, triage_kind=TriageKind.SIMPLE,
         started_at=now, finished_at=now, first_delta_ms=0, total_ms=0,
         usage_in=0, usage_out=0, error_code=None, timings={})
-    for turn, text in ((a, "A said hello"), (b, "B joined"), (unknown, "visitor spoke")):
+    for turn, spoken_text in ((a, "A said hello"), (b, "B joined"), (unknown, "visitor spoke")):
         await guard(turn)
-        await persist(ti=turn, user_text=text, **args)
+        await persist(ti=turn, user_text=spoken_text, **args)
     # A late A finalizer still belongs to A, after B and unknown were accepted.
     await persist(ti=a, user_text="A said hello", **args)
     history = await build_agent_history_hydrator(runtime_store)(conversation_id=a.conversation_id, window=20)
@@ -813,6 +816,7 @@ async def test_room_history_survives_a_b_unknown_but_turn_authority_is_immutable
 
 async def test_shared_room_cannot_claim_an_existing_personal_conversation(runtime_store):
     from dataclasses import replace
+
     from eidolon_agent.core.errors import PermissionDeniedError
     from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
     guard = build_agent_conversation_guard(runtime_store)
@@ -820,3 +824,30 @@ async def test_shared_room_cannot_claim_an_existing_personal_conversation(runtim
     await guard(private)
     with pytest.raises(PermissionDeniedError):
         await guard(replace(private, context=replace(private.context, source_session_id=private.session_id)))
+
+
+async def test_provisional_turn_permission_is_frozen_across_retry(runtime_store):
+    from dataclasses import replace
+
+    from eidolon_agent.core.errors import PermissionDeniedError
+    from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
+
+    turn = _personal_turn(source_session_id="session-a", person_revision=1,
+                          memory_enabled=False, provisional_memory_save=True)
+    guard = build_agent_conversation_guard(runtime_store)
+    persist = build_agent_turn_persister(runtime_store, model_id_provider=lambda: "fake")
+    now = datetime.now(UTC)
+    args = dict(status=TurnStatus.OK, triage_kind=TriageKind.SIMPLE,
+        started_at=now, finished_at=now, first_delta_ms=0, total_ms=0,
+        usage_in=0, usage_out=0, error_code=None, timings={})
+    await guard(turn)
+    await persist(ti=turn, user_text="provisional", **args)
+    changed = replace(turn, context=replace(turn.context, provisional_memory_save=False))
+    with pytest.raises(PermissionDeniedError, match="provisional policy"):
+        await guard(changed)
+    with pytest.raises(PermissionDeniedError, match="provisional policy"):
+        await persist(ti=changed, user_text="overwrite", **args)
+    await guard(replace(changed, turn_id="next-turn"))
+    async with runtime_store.read_session_factory() as session:
+        row = await session.get(TurnRow, turn.turn_id)
+        assert row.metadata_json["provisional_memory_save"] is True

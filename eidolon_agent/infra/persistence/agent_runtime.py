@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, select
@@ -99,6 +99,7 @@ def _conversation_metadata(ti: TurnInput) -> dict[str, Any]:
         "runtime_session_id": _runtime_session_id(ti),
         "memory_realm_id": ti.context.memory_realm_id,
         "memory_enabled": ti.context.memory_enabled,
+        "provisional_memory_save": ti.context.provisional_memory_save,
         "person_id": ti.context.person_id,
         "identity_epoch": ti.context.identity_epoch,
         "person_revision": ti.context.person_revision,
@@ -112,7 +113,7 @@ def _conversation_metadata(ti: TurnInput) -> dict[str, Any]:
 
     if ti.context.source_session_id is not None and ti.context.source_session_id == ti.session_id:
         # Room history does not belong to whichever Person spoke first.
-        for key in ("memory_realm_id", "memory_enabled", "person_id", "identity_epoch", "person_revision"):
+        for key in ("memory_realm_id", "memory_enabled", "provisional_memory_save", "person_id", "identity_epoch", "person_revision"):
             metadata.pop(key)
     return metadata
 
@@ -123,7 +124,7 @@ def _verify_conversation_scope(row: ConversationRow, ti: TurnInput) -> None:
     # Person whose memory happened to serve its first turn. Legacy personal
     # conversations retain their original boundary and cannot be adopted.
     shared = ti.context.source_session_id is not None and ti.context.source_session_id == ti.session_id
-    if shared or metadata.get("source_session_id") == metadata.get("session_id") and metadata.get("source_session_id") is not None:
+    if shared or (metadata.get("source_session_id") == metadata.get("session_id") and metadata.get("source_session_id") is not None):
         if not shared or (
             row.owner_id, row.companion_id, row.source_device_id,
             metadata.get("source_session_id"), metadata.get("session_id"),
@@ -137,6 +138,8 @@ def _verify_conversation_scope(row: ConversationRow, ti: TurnInput) -> None:
         ti.context.owner_id, ti.context.companion_id, ti.context.memory_realm_id
     ):
         raise PermissionDeniedError("conversation belongs to another runtime scope")
+    if metadata.get("provisional_memory_save", False) != ti.context.provisional_memory_save:
+        raise PermissionDeniedError("conversation provisional policy changed")
     if metadata.get("memory_enabled", True) != ti.context.memory_enabled:
         raise PermissionDeniedError("conversation memory policy changed")
     # Legacy/default history must never be claimed by a person (or vice versa).
@@ -154,6 +157,8 @@ def _verify_existing_turn_scope(row: TurnRow, ti: TurnInput) -> None:
         raise PermissionDeniedError("turn belongs to another conversation")
     metadata = row.metadata_json or {}
     # A retry or late finalizer may update only its originally admitted turn.
+    if metadata.get("provisional_memory_save", False) != ti.context.provisional_memory_save:
+        raise PermissionDeniedError("turn provisional policy changed")
     for key, value in (("person_id", ti.context.person_id),
                        ("person_revision", ti.context.person_revision),
                        ("identity_epoch", ti.context.identity_epoch),
@@ -358,7 +363,7 @@ class AgentLongTaskStore:
         self._runtime_store = runtime_store
 
     async def accept(self, record: LongTaskRecord) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         record = replace(
             record, created_at=record.created_at or now, updated_at=record.updated_at or now
         )
@@ -570,7 +575,7 @@ class AgentLongTaskStore:
             record = _job_row_to_record(row)
             if record.callback_status is not CallbackStatus.PENDING:
                 return False
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             updated = replace(
                 record,
                 callback_status=CallbackStatus.DELIVERED,
@@ -657,7 +662,7 @@ class AgentLongTaskStore:
             if row is None:
                 return None
             record = _job_row_to_record(row)
-            updated = mutator(record, datetime.now(timezone.utc))
+            updated = mutator(record, datetime.now(UTC))
             _apply_record_to_job_row(row, updated)
             _emit_job_transition(session, before=record.status, after=updated)
             await session.commit()
@@ -856,7 +861,7 @@ async def _upsert_runtime_session(
     runtime_session_id: str,
 ) -> None:
     row = await session.get(RuntimeSessionRow, runtime_session_id)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if row is None:
         row = RuntimeSessionRow(
             session_id=runtime_session_id,
@@ -938,6 +943,7 @@ def _turn_metadata_json(ti: TurnInput, triage_kind: TriageKind, timings: dict) -
         "runtime_session_id": _runtime_session_id(ti),
         "memory_realm_id": ti.context.memory_realm_id,
         "memory_enabled": ti.context.memory_enabled,
+        "provisional_memory_save": ti.context.provisional_memory_save,
         "person_id": ti.context.person_id,
         "identity_epoch": ti.context.identity_epoch,
         "person_revision": ti.context.person_revision,
@@ -1130,8 +1136,8 @@ def _record_to_job_row(record: LongTaskRecord) -> JobRow:
         progress_json=_progress_json(record),
         result_json=_result_json(record),
         error_json=_error_json(record),
-        created_at=record.created_at or datetime.now(timezone.utc),
-        updated_at=record.updated_at or datetime.now(timezone.utc),
+        created_at=record.created_at or datetime.now(UTC),
+        updated_at=record.updated_at or datetime.now(UTC),
         completed_at=record.completed_at,
     )
 
@@ -1149,7 +1155,7 @@ def _apply_record_to_job_row(row: JobRow, record: LongTaskRecord) -> None:
     row.progress_json = _progress_json(record)
     row.result_json = _result_json(record)
     row.error_json = _error_json(record)
-    row.updated_at = record.updated_at or datetime.now(timezone.utc)
+    row.updated_at = record.updated_at or datetime.now(UTC)
     row.completed_at = record.completed_at
 
 

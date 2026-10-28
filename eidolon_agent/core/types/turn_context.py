@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal
-from eidolon_sdk.biz.speaker_identity import SpeakerIdentityObservation
 
 from eidolon_memory_contracts import MemoryActorContext, derive_memory_space_id
+from eidolon_sdk.biz.speaker_identity import SpeakerIdentityObservation
 
 InputModality = Literal["voice", "text"]
 
@@ -70,3 +70,21 @@ class TurnContext:
     memory_enabled: bool = True
     speaker_observation: SpeakerIdentityObservation | None = None
     source_session_id: str | None = None
+
+    # Internal authority only. Does not enable canonical reads, tools or commitments.
+    provisional_memory_save: bool = False
+
+    def __post_init__(self) -> None:
+        if type(self.provisional_memory_save) is not bool:
+            raise ValueError("provisional save permission must be boolean")
+        if self.provisional_memory_save and (
+            self.memory_enabled or not self.owner_id or not self.person_id
+            or type(self.identity_epoch) is not int or self.identity_epoch < 0
+            or type(self.person_revision) is not int or self.person_revision < 1
+            or not self.source_session_id
+        ):
+            raise ValueError("provisional save requires an isolated, bound Person session")
+
+    @property
+    def memory_write_enabled(self) -> bool:
+        return self.memory_enabled or self.provisional_memory_save

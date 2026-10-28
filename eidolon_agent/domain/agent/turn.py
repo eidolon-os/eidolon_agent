@@ -987,7 +987,10 @@ class TurnEngine:
         started_at: datetime,
     ) -> None:
         """Publish canonical user evidence without joining the reply path."""
-        if not ti.context.memory_enabled:
+        if not ti.context.memory_write_enabled:
+            return
+        if (ti.context.provisional_memory_save
+                and ti.context.source_session_id != ti.session_id):
             return
 
         policy = TurnRuntimePolicy.from_metadata(ti.metadata)
@@ -1007,7 +1010,10 @@ class TurnEngine:
                 timestamp_iso=started_at.isoformat(),
                 trace_id=ti.context.trace_id,
                 metadata={
-                    "memory_ingest_policy": "semantic_steward",
+                    "memory_ingest_policy": ("provisional_source" if ti.context.provisional_memory_save
+                                             else "semantic_steward"),
+                    **({"person_attribution": "provisional"}
+                       if ti.context.provisional_memory_save else {}),
                     "source_component": "turn_observer",
                     "conversation_id": ti.conversation_id,
                     "genome_id": self._genome_id,
@@ -1257,8 +1263,10 @@ def _memory_write_trace(
 ) -> dict:
     mode = _normalize_guard_mode(mode)
     skipped_reason: str | None = None
-    if not ti.context.memory_enabled:
+    if not ti.context.memory_write_enabled:
         skipped_reason = "unidentified_person"
+    elif ti.context.provisional_memory_save and ti.context.source_session_id != ti.session_id:
+        skipped_reason = "provisional_session_mismatch"
     elif mode == "disabled":
         skipped_reason = "policy_disabled"
     elif (
@@ -1280,7 +1288,8 @@ def _memory_write_trace(
         "privacy_mode": policy.privacy.mode,
         "mode": mode,
         "shadow_only": mode == "shadow",
-        "ingest_policy": "semantic_steward",
+        "ingest_policy": ("provisional_source" if ti.context.provisional_memory_save
+                          else "semantic_steward"),
         "fanout_allowed": skipped_reason is None,
         "skipped_reason": skipped_reason,
         "enqueue_state": ti.metadata.get("memory_observation_state"),
