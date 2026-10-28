@@ -46,6 +46,19 @@ class SystemDataCompanionRuntimeAuthority:
             raise NotFoundError(f"companion not found for owner: {companion_id}")
         return facts
 
+    async def resolve_person_memory(self, *, owner_id: str, person_id: str, person_revision: int) -> str:
+        try:
+            binding = await self._client.get_person_memory_realm(
+                owner_id=owner_id, person_id=person_id
+            )
+        except (SystemDataNotFound, SystemDataPrecondition) as exc:
+            raise NotFoundError(str(exc)) from exc
+        except SystemDataError as exc:
+            raise DependencyError(f"personal Memory authority unavailable: {exc}") from exc
+        if binding.person_revision != person_revision:
+            raise NotFoundError("person revision changed; start a new session")
+        return binding.realm_id
+
 
 class LocalCompanionRuntimeAuthority:
     """Current Data V2 adapter used only by the self-contained dev profile."""
@@ -77,7 +90,12 @@ class LocalCompanionRuntimeAuthority:
         # read by every Companion the Owner has. So what has to hold is that
         # the Companion points at its own Owner's realm — asserting it pointed
         # at a realm of its own would now reject every valid case.
-        if realm is None or realm.owner_id != owner_id or realm.status != "active":
+        if (
+            realm is None
+            or realm.owner_id != owner_id
+            or realm.status != "active"
+            or getattr(realm, "person_id", None) is not None
+        ):
             raise NotFoundError(f"active memory realm not found for owner: {owner_id}")
         selected_genome_id = genome_id or companion.current_genome_id
         genome = await self._store.persona_genomes.get(selected_genome_id or "")
@@ -95,6 +113,17 @@ class LocalCompanionRuntimeAuthority:
             genome_json=dict(genome.genome_json or {}),
             runtime_config=dict(companion.runtime_config_json or {}),
         )
+
+    async def resolve_person_memory(self, *, owner_id: str, person_id: str, person_revision: int) -> str:
+        try:
+            binding = await self._store.persons.memory_realm(owner_id, person_id)
+        except (LookupError, ValueError) as exc:
+            raise NotFoundError(str(exc)) from exc
+        if binding["owner_id"] != owner_id or binding["person_id"] != person_id:
+            raise NotFoundError("personal memory binding outside request scope")
+        if binding["person_revision"] != person_revision:
+            raise NotFoundError("person revision changed; start a new session")
+        return binding["realm_id"]
 
 
 def _facts(snapshot: CompanionRuntimeSnapshot) -> CompanionRuntimeFacts:

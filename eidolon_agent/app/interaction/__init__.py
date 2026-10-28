@@ -55,8 +55,9 @@ class PreparedReply:
 
 
 class AcceptReply:
-    def __init__(self, registry: ReplyRegistry) -> None:
+    def __init__(self, registry: ReplyRegistry, *, speaker_secret: str = "") -> None:
         self._registry = registry
+        self._speaker_secret = speaker_secret
 
     async def prepare(
         self, scope: AuthorizedRuntimeSession, request: ReplyRequest
@@ -80,6 +81,32 @@ class AcceptReply:
         if instance.agent is None:
             raise NotFoundError("authorized Companion runtime has no agent")
         metadata = deepcopy(request.metadata)
+        # A client-supplied name/person_id is never a recognition result.
+        metadata.pop("speaker_observation", None)
+        attestation = metadata.pop("speaker_observation_token", None)
+        speaker = None
+        if modality == "voice" and not request.speculative and attestation:
+            from eidolon_sdk.biz.speaker_attestation import verify_observation
+            try:
+                speaker = verify_observation(attestation, secret=self._speaker_secret,
+                    owner_id=scope.owner_id, session_id=scope.source_session_id or scope.session_id,
+                    turn_id=request.trace_id, text=request.text)
+            except ValueError:
+                metadata["speaker_observation_rejected"] = True
+        if speaker is not None:
+            metadata["speaker_observation"] = {"status": speaker.status, "reason": speaker.reason,
+                "person_id": speaker.person_id, "person_revision": speaker.person_revision,
+                "confidence": speaker.confidence, "turn_id": speaker.turn_id}
+
+        # Shared conversations cannot inherit the previous turn's memory grant.
+        # The signed runtime credential supplies Data authority; the separately
+        # verified observation must bind that same Person to this exact utterance.
+        person_id, revision, epoch = scope.person_id, scope.person_revision, scope.identity_epoch
+        if scope.source_session_id == scope.session_id and not (
+            speaker is not None and speaker.status == "identified"
+            and (speaker.person_id, speaker.person_revision) == (person_id, revision)
+        ):
+            person_id, revision, epoch = None, None, None
         if request.speculative:
             metadata["speculative"] = True
         turn = TurnInput(
@@ -88,6 +115,12 @@ class AcceptReply:
             session_id=scope.session_id,
             presentation_feedback=PresentationFeedback(),
             context=TurnContext(
+                speaker_observation=speaker,
+                source_session_id=scope.source_session_id,
+                memory_enabled=person_id is not None,
+                person_id=person_id,
+                identity_epoch=epoch,
+                person_revision=revision,
                 owner_id=scope.owner_id,
                 companion_id=scope.companion_id,
                 device_id=scope.device_id,

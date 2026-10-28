@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal
+from eidolon_sdk.biz.speaker_identity import SpeakerIdentityObservation
 
 from eidolon_memory_contracts import MemoryActorContext, derive_memory_space_id
 
@@ -24,6 +25,8 @@ def build_memory_space_id(*, memory_realm_id: str) -> str:
 def build_memory_actor_context(
     *,
     memory_realm_id: str,
+    person_id: str | None = None,
+    identity_epoch: int | None = None,
     owner_id: str | None = None,
     companion_id: str | None = None,
     council_id: str | None = None,
@@ -33,6 +36,8 @@ def build_memory_actor_context(
     """Map Agent facts to the existing Memory contract."""
 
     return MemoryActorContext(
+        person_id=person_id,
+        identity_epoch=identity_epoch,
         owner_id=owner_id,
         companion_id=companion_id,
         council_id=council_id,
@@ -53,7 +58,15 @@ class TurnContext:
     genome_id: str
     trace_id: str
     request_id: str
+    person_id: str | None = None
+    identity_epoch: int | None = None
+    person_revision: int | None = None
     schema_version: str = ""
     genome_hash: str = ""
     realizer_version: str = ""
     locale: str = "zh-CN"
+    # Internal Owner tasks retain their policy; authenticated interactive sessions
+    # explicitly derive this from their authorized Person binding.
+    memory_enabled: bool = True
+    speaker_observation: SpeakerIdentityObservation | None = None
+    source_session_id: str | None = None

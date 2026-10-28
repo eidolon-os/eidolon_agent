@@ -95,25 +95,17 @@ def _stub_instance(agent):
 # ---- PushSignal -----------------------------------------------------------
 
 
-async def test_push_signal_publishes_to_signal_bus() -> None:
-    signals = MagicMock()
-    signals.publish = AsyncMock()
-    svc = EidolonAgentServicer(
-        agent_registry=MagicMock(),
-        signals_bus=signals,
-        proactive_bus=MagicMock(),
-        runtime_sessions=_runtime_sessions(),
-    )
-    req = pb.SignalRequest(
-        signal=pb.PushSignalInline(modality="face", label="smile", confidence=0.91),
-    )
-    ack = await svc.PushSignal(req, _make_context())
-    assert ack.accepted
-    signals.publish.assert_awaited_once()
-    sess, sig = signals.publish.await_args.args
-    assert sess == "sess-1"
-    assert sig.label == "smile"
-    assert 0.9 < sig.confidence <= 1.0
+async def test_push_signal_cannot_bypass_scoped_chat() -> None:
+    signals = SimpleNamespace(publish=AsyncMock())
+    svc = EidolonAgentServicer(agent_registry=MagicMock(), signals_bus=signals,
+        proactive_bus=MagicMock(), runtime_sessions=_runtime_sessions())
+    context = _make_context()
+    with pytest.raises(grpc.RpcError):
+        await svc.PushSignal(pb.SignalRequest(signal=pb.PushSignalInline(
+            modality="face", label="x", confidence=0.5)), context)
+    context.abort.assert_awaited_once_with(grpc.StatusCode.FAILED_PRECONDITION,
+        "interactive runtime is supported only by the scoped Chat endpoint")
+    signals.publish.assert_not_awaited()
 
 
 async def test_push_signal_rejects_token_without_session_before_bus_access() -> None:
@@ -137,47 +129,24 @@ async def test_push_signal_rejects_token_without_session_before_bus_access() -> 
         _current_identity.reset(token)
 
     context.abort.assert_awaited_once_with(
-        grpc.StatusCode.PERMISSION_DENIED,
-        "runtime token is not bound to a session",
+        grpc.StatusCode.FAILED_PRECONDITION,
+        "interactive runtime is supported only by the scoped Chat endpoint",
     )
     signals.publish.assert_not_awaited()
 
 
-async def test_proactive_subscription_is_fixed_to_authenticated_companion() -> None:
-    captured: dict[str, object] = {}
-
-    async def _subscribe(pattern, handler):
-        captured["pattern"] = pattern
-        await handler(
-            SimpleNamespace(
-                payload={
-                    "instance_id": "companion-1",
-                    "intent": "ready",
-                    "text": "done",
-                }
-            )
-        )
-
-        async def _unsubscribe():
-            captured["unsubscribed"] = True
-
-        return _unsubscribe
-
-    svc = EidolonAgentServicer(
-        agent_registry=MagicMock(),
-        signals_bus=MagicMock(),
-        proactive_bus=SimpleNamespace(subscribe=_subscribe),
-        runtime_sessions=_runtime_sessions(),
-    )
-    stream = svc.SubscribeProactive(pb.SubscribeRequest(), _make_context())
-    event = await anext(stream)
+async def test_proactive_subscription_cannot_bypass_scoped_chat() -> None:
+    bus = SimpleNamespace(subscribe=AsyncMock())
+    svc = EidolonAgentServicer(agent_registry=MagicMock(), signals_bus=MagicMock(),
+        proactive_bus=bus, runtime_sessions=_runtime_sessions())
+    context = _make_context()
+    stream = svc.SubscribeProactive(pb.SubscribeRequest(), context)
+    with pytest.raises(grpc.RpcError):
+        await anext(stream)
     await stream.aclose()
-
-    assert event.text == "done"
-    assert captured == {
-        "pattern": "agent.proactive.triggered.companion-1",
-        "unsubscribed": True,
-    }
+    context.abort.assert_awaited_once_with(grpc.StatusCode.FAILED_PRECONDITION,
+        "interactive runtime is supported only by the scoped Chat endpoint")
+    bus.subscribe.assert_not_awaited()
 
 
 async def test_chat_cancels_active_turn_when_context_is_cancelled() -> None:
@@ -463,23 +432,17 @@ async def test_chat_fuses_recent_signals_when_start_has_no_realtime() -> None:
     assert signals.recent.await_args.args[0] == "sess-1"
 
 
-async def test_push_signal_unknown_modality_falls_back_to_ambient() -> None:
-    signals = MagicMock()
-    signals.publish = AsyncMock()
-    svc = EidolonAgentServicer(
-        agent_registry=MagicMock(),
-        signals_bus=signals,
-        proactive_bus=MagicMock(),
-        runtime_sessions=_runtime_sessions(),
-    )
-    from eidolon_agent.core.types.signal import SignalModality
-
-    req = pb.SignalRequest(
-        signal=pb.PushSignalInline(modality="invalid_modality", label="x", confidence=0.5),
-    )
-    await svc.PushSignal(req, _make_context())
-    _, sig = signals.publish.await_args.args
-    assert sig.modality is SignalModality.AMBIENT
+async def test_push_signal_unknown_modality_cannot_bypass_scoped_chat() -> None:
+    signals = SimpleNamespace(publish=AsyncMock())
+    svc = EidolonAgentServicer(agent_registry=MagicMock(), signals_bus=signals,
+        proactive_bus=MagicMock(), runtime_sessions=_runtime_sessions())
+    context = _make_context()
+    with pytest.raises(grpc.RpcError):
+        await svc.PushSignal(pb.SignalRequest(signal=pb.PushSignalInline(
+            modality="invalid_modality", label="x", confidence=0.5)), context)
+    context.abort.assert_awaited_once_with(grpc.StatusCode.FAILED_PRECONDITION,
+        "interactive runtime is supported only by the scoped Chat endpoint")
+    signals.publish.assert_not_awaited()
 
 
 @pytest.mark.parametrize("field,value", [

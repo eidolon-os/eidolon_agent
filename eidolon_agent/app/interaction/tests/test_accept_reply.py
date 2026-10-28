@@ -128,3 +128,80 @@ async def test_missing_agent_fails_before_execution():
             scope(),
             ReplyRequest(conversation_id="conversation", text="hello", input_modality="text"),
         )
+
+
+@pytest.mark.parametrize("person_id", [None, "person-a"])
+async def test_memory_policy_comes_only_from_authorized_person(person_id):
+    from dataclasses import replace
+
+    authorized = replace(scope(), person_id=person_id, identity_epoch=1 if person_id else None)
+    result = await AcceptReply(registry()).prepare(authorized, ReplyRequest(
+        conversation_id="new-session-conversation", text="hello", input_modality="text",
+        metadata={"memory_enabled": True, "person_id": "forged", "identity_epoch": 100},
+    ))
+    assert result.turn.context.memory_enabled is (person_id is not None)
+    assert result.turn.context.person_id == person_id
+
+
+async def test_verified_speaker_is_context_not_memory_authorization():
+    import time
+    from eidolon_sdk.biz.speaker_identity import SpeakerIdentityObservation, SpeakerEvidenceSource
+    from eidolon_sdk.biz.speaker_attestation import sign_observation
+    from eidolon_agent.domain.context.speaker import speaker_context
+    now=time.time()
+    speaker=SpeakerIdentityObservation(owner_id='owner',session_id='session',turn_id='trace',
+        status='identified',confidence='controlled_trial',reason='voice_match',
+        person_id='p',person_revision=1,profile_id='v',profile_revision=1,
+        display_name='Alice',model_id='m',weights_hash='a'*64,preprocessing_version='v',
+        scoring_version='v',decision_version='trial',issued_at=now,expires_at=now+10,
+        source=SpeakerEvidenceSource(request_id='trace',session_id='session',input_id='mic',generation=1,
+            sample_rate=16000,start_sample=0,end_sample=32000))
+    token=sign_observation(speaker,secret='s'*32,text='hello')
+    request=ReplyRequest(conversation_id='conversation',text='hello',input_modality='voice',
+        trace_id='trace',metadata={'speaker_observation_token':token})
+    turn=(await AcceptReply(registry(),speaker_secret='s'*32).prepare(scope(),request)).turn
+    assert turn.context.speaker_observation.person_id=='p'
+    assert turn.context.person_id is None and turn.context.memory_realm_id=='realm'
+    assert 'speaker_observation_token' not in turn.metadata
+    prompt=speaker_context(turn.context.speaker_observation)
+    assert 'Alice' in prompt and 'controlled_trial' not in prompt
+
+
+async def test_forged_speaker_degrades_without_breaking_reply():
+    request=ReplyRequest(conversation_id='conversation',text='hello',input_modality='voice',
+        trace_id='trace',metadata={'speaker_observation_token':'bad',
+            'speaker_observation':{'person_id':'intruder'}})
+    turn=(await AcceptReply(registry(),speaker_secret='s'*32).prepare(scope(),request)).turn
+    assert turn.context.speaker_observation is None
+    assert turn.context.person_id is None
+    assert turn.metadata['speaker_observation_rejected']
+    assert 'speaker_observation' not in turn.metadata
+
+
+@pytest.mark.parametrize("evidence", ["matching", "missing", "other-person", "old-revision", "other-turn", "text"])
+async def test_shared_room_memory_requires_this_utterances_matching_evidence(evidence):
+    import time
+    from dataclasses import replace
+    from eidolon_sdk.biz.speaker_identity import SpeakerIdentityObservation, SpeakerEvidenceSource
+    from eidolon_sdk.biz.speaker_attestation import sign_observation
+    now = time.time()
+    observed = SpeakerIdentityObservation(owner_id="owner", session_id="session", turn_id="trace",
+        status="identified", confidence="controlled_trial", reason="voice_match",
+        person_id="other" if evidence == "other-person" else "p",
+        person_revision=2 if evidence == "old-revision" else 1,
+        profile_id="v", profile_revision=1, model_id="m", weights_hash="a"*64,
+        preprocessing_version="v", scoring_version="v", decision_version="trial",
+        issued_at=now, expires_at=now+10,
+        source=SpeakerEvidenceSource(request_id="trace", session_id="session", input_id="mic",
+            generation=1, sample_rate=16000, start_sample=0, end_sample=32000))
+    token = sign_observation(observed, secret="s"*32, text="hello")
+    authorized = replace(scope(), source_session_id="session", person_id="p", person_revision=1, identity_epoch=1)
+    request = ReplyRequest(conversation_id="room-session:session", text="hello",
+        input_modality="text" if evidence == "text" else "voice",
+        trace_id="other" if evidence == "other-turn" else "trace",
+        metadata={} if evidence == "missing" else {"speaker_observation_token": token})
+    turn = (await AcceptReply(registry(), speaker_secret="s"*32).prepare(authorized, request)).turn
+    assert turn.context.memory_enabled == (evidence == "matching")
+    assert turn.context.person_id == ("p" if evidence == "matching" else None)
+    assert turn.session_id == "session"
+    assert turn.context.source_session_id == "session"

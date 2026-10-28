@@ -128,3 +128,36 @@ async def test_persona_failure_propagates() -> None:
     )
     with pytest.raises(RuntimeError, match="persona config broken"):
         await compiler.compile(make_turn_input("ask"))
+
+
+async def test_private_recall_is_turn_local_while_public_room_history_continues():
+    from dataclasses import replace
+    from unittest.mock import AsyncMock
+    from eidolon_agent.core.types.memory import MemoryRecallResult
+    from eidolon_agent.domain.history.manager import HistoryManager
+
+    history = HistoryManager()
+    base = make_turn_input("what about me?")
+    async def recall(**kwargs):
+        return MemoryRecallResult(context="unspoken-secret-" + kwargs["person_id"])
+    memory = SimpleNamespace(recall_context=AsyncMock(side_effect=recall),
+        read_active_commitments=AsyncMock(return_value=ActiveCommitmentReadResult()))
+    compiler = ContextCompiler(personas_service=_SlowPersonas(), instance_locator=_locator,
+        history_manager=history, memory_port=memory)
+    await history.append(conversation_id=base.conversation_id, message=ChatMessage(
+        id="spoken", role=MessageRole.USER, content="we are planning a trip",
+        created_at=datetime.now(timezone.utc)))
+    for person in ("a", "b", None):
+        turn = replace(base, turn_id=uuid.uuid4().hex, metadata={}, context=replace(base.context,
+            person_id=person, identity_epoch=1 if person else None,
+            memory_enabled=person is not None, memory_realm_id="realm-" + (person or "default")))
+        before = memory.recall_context.await_count
+        messages = await compiler.compile(turn)
+        prompt = "\n".join(m.content for m in messages)
+        assert "we are planning a trip" in prompt
+        for candidate in ("a", "b"):
+            assert ("unspoken-secret-" + candidate in prompt) == (candidate == person)
+        if person is None:
+            assert memory.recall_context.await_count == before
+    cached = await history.recent_window(conversation_id=base.conversation_id)
+    assert [m.content for m in cached] == ["we are planning a trip"]

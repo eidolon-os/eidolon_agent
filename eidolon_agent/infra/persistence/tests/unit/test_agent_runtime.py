@@ -559,3 +559,264 @@ async def test_long_task_failure_emits_job_failed(
     assert receipts[0].outcome == "failure"
     assert receipts[0].reason == "boom"
     assert receipts[0].payload.get("error_code") == "boom"
+
+
+def _personal_turn(**changes):
+    from dataclasses import replace
+
+    context = TurnContext(
+        owner_id="owner",
+        companion_id="companion",
+        device_id="device",
+        memory_realm_id="realm-a",
+        genome_id="genome",
+        trace_id="trace",
+        request_id="request",
+        person_id="person-a",
+        identity_epoch=1,
+    )
+    session_id = changes.pop("session_id", "session-a")
+    return TurnInput(
+        turn_id="personal-turn",
+        conversation_id="personal-conversation",
+        session_id=session_id,
+        context=replace(context, **changes),
+        input_modality="text",
+        trigger=TurnTrigger.USER_UTTERANCE,
+        text="private",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"owner_id": "other"},
+        {"companion_id": "other"},
+        {"person_id": "person-b"},
+        {"person_id": None, "identity_epoch": None},
+        {"memory_realm_id": "realm-b"},
+        {"identity_epoch": 2},
+        {"session_id": "session-b"},
+        {"device_id": "device-b"},
+    ],
+)
+async def test_conversation_guard_rejects_changed_binding_after_restart(runtime_store, changes):
+    from eidolon_agent.core.errors import PermissionDeniedError
+    from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
+
+    guard = build_agent_conversation_guard(runtime_store)
+    await guard(_personal_turn())
+    # A fresh adapter cannot bypass the durable binding using an empty cache.
+    fresh_guard = build_agent_conversation_guard(runtime_store)
+    with pytest.raises(PermissionDeniedError):
+        await fresh_guard(_personal_turn(**changes))
+    await fresh_guard(_personal_turn())
+
+
+@pytest.mark.asyncio
+async def test_person_cannot_claim_default_conversation(runtime_store):
+    from eidolon_agent.core.errors import PermissionDeniedError
+    from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
+
+    guard = build_agent_conversation_guard(runtime_store)
+    await guard(_personal_turn(person_id=None, identity_epoch=None))
+    with pytest.raises(PermissionDeniedError):
+        await guard(_personal_turn())
+
+
+@pytest.mark.asyncio
+async def test_concurrent_person_claim_has_exactly_one_winner(runtime_store):
+    from eidolon_agent.core.errors import PermissionDeniedError
+    from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
+
+    guard = build_agent_conversation_guard(runtime_store)
+    results = await asyncio.gather(
+        guard(_personal_turn()), guard(_personal_turn(person_id="person-b")), return_exceptions=True
+    )
+    assert sum(result is None for result in results) == 1
+    assert sum(isinstance(result, PermissionDeniedError) for result in results) == 1
+
+
+@pytest.mark.asyncio
+async def test_rejected_scope_never_enters_turn_or_cleanup(runtime_store):
+    from eidolon_agent.core.errors import PermissionDeniedError
+    from eidolon_agent.domain.agent.turn import TurnEngine
+    from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
+
+    guard = build_agent_conversation_guard(runtime_store)
+    await guard(_personal_turn())
+    engine = object.__new__(TurnEngine)
+    engine._conversation_guard = guard
+    # No compiler, history, LLM or persister exists: touching any would fail.
+    with pytest.raises(PermissionDeniedError):
+        async for _ in engine.run(_personal_turn(person_id="person-b")):
+            pytest.fail("rejected scope emitted a turn event")
+    engine._conversation_guard = None
+    with pytest.raises(PermissionDeniedError, match="unavailable"):
+        async for _ in engine.run(_personal_turn()):
+            pytest.fail("unguarded personal turn was accepted")
+
+
+@pytest.mark.asyncio
+async def test_persister_cannot_overwrite_personal_conversation(runtime_store):
+    from eidolon_agent.core.errors import PermissionDeniedError
+    from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
+
+    guard = build_agent_conversation_guard(runtime_store)
+    await guard(_personal_turn())
+    persist = build_agent_turn_persister(runtime_store, model_id_provider=lambda: "fake")
+    now = datetime.now(UTC)
+    with pytest.raises(PermissionDeniedError):
+        await persist(
+            ti=_personal_turn(person_id="person-b"),
+            status=TurnStatus.OK,
+            triage_kind=TriageKind.SIMPLE,
+            started_at=now,
+            finished_at=now,
+            first_delta_ms=0,
+            total_ms=0,
+            usage_in=0,
+            usage_out=0,
+            error_code=None,
+            timings={},
+            user_text="wrong person",
+        )
+    assert (
+        await build_agent_history_hydrator(runtime_store)(
+            conversation_id="personal-conversation", window=10
+        )
+        == []
+    )
+    await guard(_personal_turn())
+
+
+@pytest.mark.asyncio
+async def test_turn_id_cannot_overwrite_another_conversation(runtime_store):
+    from dataclasses import replace
+
+    from eidolon_agent.core.errors import PermissionDeniedError
+    from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
+    from eidolon_agent.infra.persistence.runtime_store import ConversationRow
+
+    ti = _personal_turn()
+    guard = build_agent_conversation_guard(runtime_store)
+    await guard(ti)
+    persist = build_agent_turn_persister(runtime_store, model_id_provider=lambda: "fake")
+    now = datetime.now(UTC)
+    args = dict(
+        status=TurnStatus.OK,
+        triage_kind=TriageKind.SIMPLE,
+        started_at=now,
+        finished_at=now,
+        first_delta_ms=0,
+        total_ms=0,
+        usage_in=0,
+        usage_out=0,
+        error_code=None,
+        timings={},
+        user_text="original",
+    )
+    await persist(ti=ti, **args)
+    other = replace(ti, conversation_id="other-conversation")
+    with pytest.raises(PermissionDeniedError, match="turn belongs"):
+        await guard(other)
+    with pytest.raises(PermissionDeniedError, match="turn belongs"):
+        await persist(ti=other, **args)
+    async with runtime_store.read_session_factory() as session:
+        assert await session.get(ConversationRow, "other-conversation") is None
+        turn = await session.get(TurnRow, ti.turn_id)
+        assert turn.metadata_json["person_id"] == "person-a"
+        assert turn.metadata_json["identity_epoch"] == 1
+        assert turn.conversation_id == ti.conversation_id
+
+
+async def test_unknown_history_is_session_bound_and_cannot_claim_legacy_history(runtime_store):
+    from dataclasses import replace
+    from eidolon_agent.core.errors import PermissionDeniedError
+    from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
+
+    guard = build_agent_conversation_guard(runtime_store)
+    old = _personal_turn(person_id=None, identity_epoch=None)
+    await guard(old)
+    unknown = replace(old, context=replace(old.context, memory_enabled=False))
+    with pytest.raises(PermissionDeniedError):
+        await guard(unknown)
+    unknown = replace(unknown, conversation_id="unknown-session-conversation")
+    await guard(unknown)
+    await guard(unknown)
+    with pytest.raises(PermissionDeniedError):
+        await guard(replace(unknown, session_id="different-session"))
+    with pytest.raises(PermissionDeniedError):
+        await guard(replace(unknown, context=replace(unknown.context, memory_enabled=True)))
+    with pytest.raises(PermissionDeniedError):
+        await guard(replace(unknown, context=replace(unknown.context, person_id="person-a", identity_epoch=1)))
+
+
+async def test_person_revision_change_requires_new_conversation(runtime_store):
+    from dataclasses import replace
+    from eidolon_agent.core.errors import PermissionDeniedError
+    from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
+
+    original = _personal_turn()
+    original = replace(original, context=replace(original.context, person_revision=1))
+    guard = build_agent_conversation_guard(runtime_store)
+    await guard(original)
+    restored = replace(original, context=replace(original.context, person_revision=4))
+    with pytest.raises(PermissionDeniedError):
+        await guard(restored)
+    await guard(replace(restored, conversation_id="restored-new-session", session_id="restored-session"))
+
+
+async def test_room_history_survives_a_b_unknown_but_turn_authority_is_immutable(runtime_store):
+    from dataclasses import replace
+    from eidolon_agent.core.errors import PermissionDeniedError
+    from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
+
+    guard = build_agent_conversation_guard(runtime_store)
+    persist = build_agent_turn_persister(runtime_store, model_id_provider=lambda: "fake")
+    a = _personal_turn(source_session_id="session-a", person_revision=1)
+    b = replace(a, turn_id="b-turn", context=replace(a.context,
+        person_id="person-b", memory_realm_id="realm-b", identity_epoch=2))
+    unknown = replace(a, turn_id="unknown-turn", context=replace(a.context,
+        person_id=None, person_revision=None, identity_epoch=None,
+        memory_enabled=False, memory_realm_id="default-realm"))
+    now = datetime.now(UTC)
+    args = dict(status=TurnStatus.OK, triage_kind=TriageKind.SIMPLE,
+        started_at=now, finished_at=now, first_delta_ms=0, total_ms=0,
+        usage_in=0, usage_out=0, error_code=None, timings={})
+    for turn, text in ((a, "A said hello"), (b, "B joined"), (unknown, "visitor spoke")):
+        await guard(turn)
+        await persist(ti=turn, user_text=text, **args)
+    # A late A finalizer still belongs to A, after B and unknown were accepted.
+    await persist(ti=a, user_text="A said hello", **args)
+    history = await build_agent_history_hydrator(runtime_store)(conversation_id=a.conversation_id, window=20)
+    assert {m.content for m in history} == {"A said hello", "B joined", "visitor spoke"}
+    impostor = replace(b, turn_id=a.turn_id)
+    with pytest.raises(PermissionDeniedError, match="memory scope"):
+        await guard(impostor)
+    with pytest.raises(PermissionDeniedError, match="memory scope"):
+        await persist(ti=impostor, user_text="overwrite A", **args)
+    for altered in (
+        replace(b, session_id="other-session"),
+        replace(b, context=replace(b.context, device_id="other-device")),
+        replace(b, context=replace(b.context, owner_id="other-owner")),
+        replace(b, context=replace(b.context, source_session_id=None)),
+    ):
+        with pytest.raises(PermissionDeniedError):
+            await guard(altered)
+    async with runtime_store.read_session_factory() as session:
+        row = await session.get(TurnRow, a.turn_id)
+        assert row.metadata_json["person_id"] == "person-a"
+        assert row.metadata_json["memory_realm_id"] == "realm-a"
+
+
+async def test_shared_room_cannot_claim_an_existing_personal_conversation(runtime_store):
+    from dataclasses import replace
+    from eidolon_agent.core.errors import PermissionDeniedError
+    from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
+    guard = build_agent_conversation_guard(runtime_store)
+    private = _personal_turn()
+    await guard(private)
+    with pytest.raises(PermissionDeniedError):
+        await guard(replace(private, context=replace(private.context, source_session_id=private.session_id)))

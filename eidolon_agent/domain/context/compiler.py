@@ -308,6 +308,17 @@ class ContextCompiler:
             f"{persona_stable}"
         )
 
+        from .speaker import speaker_context
+        speaker_text = speaker_context(ti.context.speaker_observation, voice=ti.input_modality == "voice")
+        if speaker_text:
+            speaker_segment = ContextSegment(
+                kind=ContextSegmentKind.PERSONA_STATE, content="", source="channel_speaker_observation",
+                token_estimate=_estimate_tokens(speaker_text), droppable=False,
+                metadata=_context_tag_metadata(authority="evidence", status="observed",
+                    scope="this_turn_only", actionability="may_answer_from"))
+            segments.append(speaker_segment)
+            system_parts_by_segment[id(speaker_segment)] = speaker_text
+
         harness_policy = self._harness.policy_prompt()
         harness_policy_segment = ContextSegment(
             kind=ContextSegmentKind.HARNESS_POLICY,
@@ -859,7 +870,7 @@ class ContextCompiler:
         The compile() outer loop treats all three the same way (truthy →
         append to system_parts) so no caller code changes.
         """
-        if self._memory is None or not ti.text:
+        if not ti.context.memory_enabled or self._memory is None or not ti.text:
             return None
         if not TurnRuntimePolicy.from_metadata(ti.metadata).memory_recall_allowed:
             return None
@@ -894,6 +905,9 @@ class ContextCompiler:
                 recall = await self._memory.recall_context(
                     owner_id=ti.context.owner_id,
                     query=recall_query,
+                    **({"person_id": ti.context.person_id,
+                        "identity_epoch": ti.context.identity_epoch}
+                       if ti.context.person_id is not None else {}),
                     plan=plan,
                     companion_id=ti.context.companion_id,
                     memory_realm_id=ti.context.memory_realm_id,
@@ -969,7 +983,7 @@ class ContextCompiler:
         self,
         ti: TurnInput,
     ) -> ActiveCommitmentReadResult | None:
-        if self._memory is None or not ti.text:
+        if not ti.context.memory_enabled or self._memory is None or not ti.text:
             return None
         if not TurnRuntimePolicy.from_metadata(ti.metadata).memory_recall_allowed:
             return None
@@ -978,6 +992,9 @@ class ContextCompiler:
             return None
         try:
             return await reader(
+                **({"person_id": ti.context.person_id,
+                    "identity_epoch": ti.context.identity_epoch}
+                   if ti.context.person_id is not None else {}),
                 owner_id=ti.context.owner_id,
                 companion_id=ti.context.companion_id,
                 memory_realm_id=ti.context.memory_realm_id,
