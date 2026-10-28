@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -47,7 +47,7 @@ class _SlowHistory:
                 id=uuid.uuid4().hex,
                 role=MessageRole.USER,
                 content="earlier",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         ]
 
@@ -133,6 +133,7 @@ async def test_persona_failure_propagates() -> None:
 async def test_private_recall_is_turn_local_while_public_room_history_continues():
     from dataclasses import replace
     from unittest.mock import AsyncMock
+
     from eidolon_agent.core.types.memory import MemoryRecallResult
     from eidolon_agent.domain.history.manager import HistoryManager
 
@@ -146,7 +147,7 @@ async def test_private_recall_is_turn_local_while_public_room_history_continues(
         history_manager=history, memory_port=memory)
     await history.append(conversation_id=base.conversation_id, message=ChatMessage(
         id="spoken", role=MessageRole.USER, content="we are planning a trip",
-        created_at=datetime.now(timezone.utc)))
+        created_at=datetime.now(UTC)))
     for person in ("a", "b", None):
         turn = replace(base, turn_id=uuid.uuid4().hex, metadata={}, context=replace(base.context,
             person_id=person, identity_epoch=1 if person else None,
@@ -161,3 +162,87 @@ async def test_private_recall_is_turn_local_while_public_room_history_continues(
             assert memory.recall_context.await_count == before
     cached = await history.recent_window(conversation_id=base.conversation_id)
     assert [m.content for m in cached] == ["we are planning a trip"]
+
+
+async def test_optional_reads_share_deadline_and_cancel_slow_history():
+    from unittest.mock import AsyncMock
+
+    from eidolon_agent.core.types.memory import MemoryRecallResult
+
+    cancelled = asyncio.Event()
+
+    class History:
+        async def recent_window(self, **kwargs):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    personas = SimpleNamespace(realize_context=AsyncMock(
+        return_value=SimpleNamespace(system_prompt="persona", debug_trace=())))
+    memory = SimpleNamespace(recall_context=AsyncMock(
+        return_value=MemoryRecallResult(context="available memory")))
+    compiler = ContextCompiler(personas_service=personas, instance_locator=_locator,
+        history_manager=History(), memory_port=memory, context_read_timeout_s=0.08)
+    messages = await asyncio.wait_for(compiler.compile(make_turn_input("ask")), 0.5)
+    assert cancelled.is_set()
+    assert "available memory" in messages[0].content
+    assert messages[-1].content == "ask"
+
+
+async def test_slow_recall_is_cancelled_and_reports_unavailable():
+    from unittest.mock import AsyncMock
+
+    cancelled = asyncio.Event()
+
+    async def recall(**kwargs):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    compiler = ContextCompiler(
+        personas_service=SimpleNamespace(realize_context=AsyncMock(
+            return_value=SimpleNamespace(system_prompt="persona", debug_trace=()))),
+        instance_locator=_locator,
+        history_manager=SimpleNamespace(recent_window=AsyncMock(return_value=[])),
+        memory_port=SimpleNamespace(recall_context=recall),
+        context_read_timeout_s=0.03)
+    messages = await asyncio.wait_for(compiler.compile(make_turn_input("ask")), 0.5)
+    assert cancelled.is_set()
+    assert "长期记忆召回暂不可用" in messages[0].content
+    assert messages[-1].content == "ask"
+
+
+async def test_cancelled_turn_drains_context_readers():
+    from unittest.mock import AsyncMock
+
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def history(**kwargs):
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    compiler = ContextCompiler(
+        personas_service=SimpleNamespace(realize_context=AsyncMock(
+            return_value=SimpleNamespace(system_prompt="persona", debug_trace=()))),
+        instance_locator=_locator,
+        history_manager=SimpleNamespace(recent_window=history),
+        context_read_timeout_s=10)
+    task = asyncio.create_task(compiler.compile(make_turn_input("ask")))
+    await asyncio.wait_for(entered.wait(), 0.5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert cancelled.is_set()
+
+
+@pytest.mark.parametrize("budget", [0, -1, float("inf"), float("nan")])
+def test_context_read_budget_must_be_positive_and_finite(budget):
+    with pytest.raises(ValueError, match="finite and positive"):
+        ContextCompiler(personas_service=None, instance_locator=_locator,
+            history_manager=None, context_read_timeout_s=budget)

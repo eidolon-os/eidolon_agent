@@ -79,6 +79,7 @@ class ContextCompiler:
         degraded_history_window: int = 20,
         memory_timeout_s: float = 0.2,
         memory_top_k: int = 5,
+        context_read_timeout_s: float | None = None,
         active_commitment_limit: int = 5,
         active_commitment_timeout_s: float = 0.2,
         context_budget_tokens: int | None = None,
@@ -101,6 +102,12 @@ class ContextCompiler:
         # memory is healthy (memory health is only known after the gather).
         self._degraded_history_window = max(degraded_history_window, history_window)
         self._memory_timeout_s = memory_timeout_s
+        self._context_read_timeout_s = (
+            max(memory_timeout_s, active_commitment_timeout_s, summary_timeout_s)
+            if context_read_timeout_s is None else context_read_timeout_s
+        )
+        if not 0 < self._context_read_timeout_s < float("inf"):
+            raise ValueError("context_read_timeout_s must be finite and positive")
         self._memory_top_k = memory_top_k
         self._active_commitment_limit = max(1, min(active_commitment_limit, 10))
         self._active_commitment_timeout_s = max(0.001, active_commitment_timeout_s)
@@ -123,6 +130,14 @@ class ContextCompiler:
         # failure from poisoning the others — each branch handles its own
         # degraded path below.
         compile_t0 = time.monotonic()
+        read_deadline = asyncio.get_running_loop().time() + self._context_read_timeout_s
+
+        async def read(name, operation, *args, **kwargs):
+            # Include query preparation and history IO in one absolute deadline.
+            # Mandatory persona realization retains its existing failure semantics.
+            async with asyncio.timeout_at(read_deadline):
+                return await _timed(name, operation, *args, **kwargs)
+
         persona_task = _timed(
             "persona",
             self._personas.realize_context,
@@ -136,8 +151,8 @@ class ContextCompiler:
             modality=ti.input_modality,
         )
         memory_timeout_s = self._memory_timeout_s
-        memory_task = _timed("memory", self._memory_recall, ti, timeout_s=memory_timeout_s)
-        commitment_task = _timed("commitments", self._active_commitments, ti)
+        memory_task = read("memory", self._memory_recall, ti, timeout_s=memory_timeout_s)
+        commitment_task = read("commitments", self._active_commitments, ti)
         # Topic switch fencing: when the reflex layer flagged this turn as a
         # topic switch, the rolling summary and most of the recent window
         # describe the *previous* topic and would bleed into the new one. Skip
@@ -154,12 +169,12 @@ class ContextCompiler:
         summary_task = (
             _empty_summary()
             if topic_switch or ti.coordination is not None
-            else _timed("summary", self._summary_context, ti, policy)
+            else read("summary", self._summary_context, ti, policy)
         )
         history_task = (
             _timed("history", _empty_history)
             if not policy.history_context_allowed or ti.coordination is not None
-            else _timed(
+            else read(
                 "history", self._history.recent_window,
                 conversation_id=ti.conversation_id,
                 window=fetch_window,
@@ -878,6 +893,7 @@ class ContextCompiler:
         if not TurnRuntimePolicy.from_metadata(ti.metadata).memory_recall_allowed:
             return None
         try:
+            deadline = asyncio.get_running_loop().time() + timeout_s
             recall_queries, query_source = await self._memory_recall_queries(ti)
             plan = MemoryQueryPlan(
                 episodic_query=ti.text,
@@ -894,7 +910,6 @@ class ContextCompiler:
                 "query_count": len(recall_queries),
                 "attempted_queries": [],
             }
-            deadline = asyncio.get_running_loop().time() + timeout_s
             recalls: list[MemoryRecallResult] = []
             backend_trace: dict[str, float] = {}
             degraded_reason: str | None = None
