@@ -826,14 +826,15 @@ async def test_shared_room_cannot_claim_an_existing_personal_conversation(runtim
         await guard(replace(private, context=replace(private.context, source_session_id=private.session_id)))
 
 
-async def test_provisional_turn_permission_is_frozen_across_retry(runtime_store):
+@pytest.mark.parametrize("permission", ["provisional_memory_save", "provisional_memory_recall"])
+async def test_provisional_turn_permission_is_frozen_across_retry(runtime_store, permission):
     from dataclasses import replace
 
     from eidolon_agent.core.errors import PermissionDeniedError
     from eidolon_agent.infra.persistence.agent_runtime import build_agent_conversation_guard
 
     turn = _personal_turn(source_session_id="session-a", person_revision=1,
-                          memory_enabled=False, provisional_memory_save=True)
+                          memory_enabled=False, **{permission: True})
     guard = build_agent_conversation_guard(runtime_store)
     persist = build_agent_turn_persister(runtime_store, model_id_provider=lambda: "fake")
     now = datetime.now(UTC)
@@ -842,7 +843,7 @@ async def test_provisional_turn_permission_is_frozen_across_retry(runtime_store)
         usage_in=0, usage_out=0, error_code=None, timings={})
     await guard(turn)
     await persist(ti=turn, user_text="provisional", **args)
-    changed = replace(turn, context=replace(turn.context, provisional_memory_save=False))
+    changed = replace(turn, context=replace(turn.context, **{permission: False}))
     with pytest.raises(PermissionDeniedError, match="provisional policy"):
         await guard(changed)
     with pytest.raises(PermissionDeniedError, match="provisional policy"):
@@ -850,4 +851,4 @@ async def test_provisional_turn_permission_is_frozen_across_retry(runtime_store)
     await guard(replace(changed, turn_id="next-turn"))
     async with runtime_store.read_session_factory() as session:
         row = await session.get(TurnRow, turn.turn_id)
-        assert row.metadata_json["provisional_memory_save"] is True
+        assert row.metadata_json[permission] is True

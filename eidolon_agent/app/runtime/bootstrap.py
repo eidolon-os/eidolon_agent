@@ -199,7 +199,7 @@ async def build_application(
 
         # 4. Memory MCP probe --------------------------------------------------
         mem_pool = McpClientPool(routes=memory_routes)
-        memory_port = EidolonMemoryPort(pool=mem_pool)
+        memory_port = EidolonMemoryPort(pool=mem_pool, event_bus=nats_bus)
         container.memory_port = memory_port
         if settings.runtime.warmup_enabled and settings.memory.startup_warm_enabled:
             try:

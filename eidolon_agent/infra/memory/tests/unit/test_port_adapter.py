@@ -396,3 +396,42 @@ async def test_recall_rejects_response_from_another_identity():
     assert result.degraded and result.degraded_reason == "identity_mismatch"
     assert result.context == ""
     assert not result.hits
+
+
+@pytest.mark.parametrize("fault", [None, "echo", "person", "session", "confirmed", "count", "bytes", "timeout"])
+async def test_provisional_sources_are_bounded_and_never_fall_back_to_mcp(fault):
+    from eidolon_memory_contracts import ConversationTurnPayload, MemoryActorContext
+    from eidolon_memory_contracts.subjects import provisional_sources_subject
+
+    ctx = MemoryActorContext(memory_realm_id="r", owner_id="o", person_id="p",
+                             identity_epoch=2, session_id="s", companion_id="c")
+    source = ConversationTurnPayload(turn_id="old", context=ctx.model_copy(update={"identity_epoch": 1}),
+        timestamp="2026-10-29T00:00:00Z", user_text="unconfirmed source", assistant_text="do not inject",
+        metadata={"person_attribution": "provisional"}).model_dump(mode="json")
+    result = {"identity_binding": ctx.identity_binding(), "sources": [source]}
+    if fault == "echo":
+        result["identity_binding"] = {}
+    if fault in {"person", "session"}:
+        source["context"][f"{fault}_id"] = "other"
+    if fault == "confirmed":
+        source["metadata"] = {}
+    if fault == "count":
+        result["sources"] = [source] * 6
+    if fault == "bytes":
+        source["user_text"] = "x" * 33000
+    bus = MagicMock(request=AsyncMock(return_value=result))
+    if fault == "timeout":
+        bus.request.side_effect = TimeoutError
+    port, _, pool = _port()
+    port._event_bus = bus
+    recalled = await port.recall_provisional_sources(ctx)
+    assert recalled.degraded == bool(fault)
+    if not fault:
+        assert "UNCONFIRMED SOURCES" in recalled.context
+        assert "unconfirmed source" in recalled.context
+        assert "do not inject" not in recalled.context
+    else:
+        assert not recalled.context
+    pool.session_for.assert_not_awaited()
+    bus.request.assert_awaited_once_with(provisional_sources_subject("r"),
+        {"context": ctx.model_dump(mode="json")}, timeout_s=0.2)

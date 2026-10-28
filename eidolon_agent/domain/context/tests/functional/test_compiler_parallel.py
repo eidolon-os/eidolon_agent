@@ -246,3 +246,47 @@ def test_context_read_budget_must_be_positive_and_finite(budget):
     with pytest.raises(ValueError, match="finite and positive"):
         ContextCompiler(personas_service=None, instance_locator=_locator,
             history_manager=None, context_read_timeout_s=budget)
+
+
+@pytest.mark.parametrize("boundary", ["allowed", "temporary", "session", "timeout"])
+async def test_provisional_recall_uses_only_bounded_source_port(boundary):
+    from dataclasses import replace
+    from unittest.mock import AsyncMock
+
+    from eidolon_agent.core.types.memory import MemoryRecallResult
+
+    turn = make_turn_input("ask again")
+    turn = replace(turn, context=replace(turn.context, memory_enabled=False,
+        provisional_memory_recall=True, person_id="candidate", person_revision=1,
+        identity_epoch=2, source_session_id=turn.session_id))
+    assert not turn.context.memory_write_enabled
+    if boundary == "temporary":
+        turn.metadata["temporary"] = True
+    if boundary == "session":
+        turn = replace(turn, session_id="other")
+    async def recall(*args, **kwargs):
+        if boundary == "timeout":
+            await asyncio.sleep(1)
+        return MemoryRecallResult(context="[UNCONFIRMED SOURCES] prior")
+    memory = SimpleNamespace(recall_provisional_sources=AsyncMock(side_effect=recall),
+                             recall_context=AsyncMock(), read_active_commitments=AsyncMock())
+    compiler = ContextCompiler(personas_service=_SlowPersonas(), instance_locator=_locator,
+                               memory_port=memory, history_manager=_SlowHistory())
+    start = time.monotonic()
+    result = await compiler._memory_recall(turn, timeout_s=0.01)
+    assert time.monotonic() - start < 0.2
+    if boundary == "allowed":
+        assert "UNCONFIRMED" in result[0] and not result[1]
+    elif boundary == "timeout":
+        assert result[1] and result[0] is None
+    else:
+        assert result is None
+        memory.recall_provisional_sources.assert_not_awaited()
+    memory.recall_context.assert_not_awaited()
+    memory.read_active_commitments.assert_not_awaited()
+
+    if boundary == "allowed":
+        messages = await compiler.compile(turn)
+        assert "UNCONFIRMED SOURCES" in messages[0].content
+        memory.recall_context.assert_not_awaited()
+        memory.read_active_commitments.assert_not_awaited()

@@ -888,6 +888,21 @@ class ContextCompiler:
         The compile() outer loop treats all three the same way (truthy →
         append to system_parts) so no caller code changes.
         """
+        if ti.context.provisional_memory_recall and self._memory is not None and ti.text:
+            if (ti.context.source_session_id != ti.session_id or
+                    not TurnRuntimePolicy.from_metadata(ti.metadata).memory_recall_allowed):
+                return None
+            from eidolon_agent.core.types.turn_context import build_memory_actor_context
+            ctx = build_memory_actor_context(memory_realm_id=ti.context.memory_realm_id,
+                owner_id=ti.context.owner_id, person_id=ti.context.person_id,
+                identity_epoch=ti.context.identity_epoch, session_id=ti.session_id,
+                companion_id=ti.context.companion_id, device_id=ti.context.device_id)
+            try:
+                async with asyncio.timeout(timeout_s):
+                    result = await self._memory.recall_provisional_sources(ctx, timeout_s=timeout_s)
+                return (result.context or None, result.degraded, [], result.degraded_reason, [], [], {})
+            except Exception:
+                return (None, True, [], "provisional_sources_unavailable", [], [], {})
         if not ti.context.memory_enabled or self._memory is None or not ti.text:
             return None
         if not TurnRuntimePolicy.from_metadata(ti.metadata).memory_recall_allowed:

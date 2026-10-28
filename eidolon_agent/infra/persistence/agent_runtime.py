@@ -100,6 +100,7 @@ def _conversation_metadata(ti: TurnInput) -> dict[str, Any]:
         "memory_realm_id": ti.context.memory_realm_id,
         "memory_enabled": ti.context.memory_enabled,
         "provisional_memory_save": ti.context.provisional_memory_save,
+        "provisional_memory_recall": ti.context.provisional_memory_recall,
         "person_id": ti.context.person_id,
         "identity_epoch": ti.context.identity_epoch,
         "person_revision": ti.context.person_revision,
@@ -113,7 +114,7 @@ def _conversation_metadata(ti: TurnInput) -> dict[str, Any]:
 
     if ti.context.source_session_id is not None and ti.context.source_session_id == ti.session_id:
         # Room history does not belong to whichever Person spoke first.
-        for key in ("memory_realm_id", "memory_enabled", "provisional_memory_save", "person_id", "identity_epoch", "person_revision"):
+        for key in ("memory_realm_id", "memory_enabled", "provisional_memory_save", "provisional_memory_recall", "person_id", "identity_epoch", "person_revision"):
             metadata.pop(key)
     return metadata
 
@@ -138,7 +139,8 @@ def _verify_conversation_scope(row: ConversationRow, ti: TurnInput) -> None:
         ti.context.owner_id, ti.context.companion_id, ti.context.memory_realm_id
     ):
         raise PermissionDeniedError("conversation belongs to another runtime scope")
-    if metadata.get("provisional_memory_save", False) != ti.context.provisional_memory_save:
+    if (metadata.get("provisional_memory_save", False) != ti.context.provisional_memory_save
+            or metadata.get("provisional_memory_recall", False) != ti.context.provisional_memory_recall):
         raise PermissionDeniedError("conversation provisional policy changed")
     if metadata.get("memory_enabled", True) != ti.context.memory_enabled:
         raise PermissionDeniedError("conversation memory policy changed")
@@ -157,7 +159,8 @@ def _verify_existing_turn_scope(row: TurnRow, ti: TurnInput) -> None:
         raise PermissionDeniedError("turn belongs to another conversation")
     metadata = row.metadata_json or {}
     # A retry or late finalizer may update only its originally admitted turn.
-    if metadata.get("provisional_memory_save", False) != ti.context.provisional_memory_save:
+    if (metadata.get("provisional_memory_save", False) != ti.context.provisional_memory_save
+            or metadata.get("provisional_memory_recall", False) != ti.context.provisional_memory_recall):
         raise PermissionDeniedError("turn provisional policy changed")
     for key, value in (("person_id", ti.context.person_id),
                        ("person_revision", ti.context.person_revision),
@@ -944,6 +947,7 @@ def _turn_metadata_json(ti: TurnInput, triage_kind: TriageKind, timings: dict) -
         "memory_realm_id": ti.context.memory_realm_id,
         "memory_enabled": ti.context.memory_enabled,
         "provisional_memory_save": ti.context.provisional_memory_save,
+        "provisional_memory_recall": ti.context.provisional_memory_recall,
         "person_id": ti.context.person_id,
         "identity_epoch": ti.context.identity_epoch,
         "person_revision": ti.context.person_revision,

@@ -8,6 +8,8 @@ keeps talking. Completed-turn delivery remains the responsibility of
 
 from __future__ import annotations
 
+from eidolon_memory_contracts import MemoryActorContext
+
 from eidolon_agent.core.types.memory import (
     ActiveCommitmentReadResult,
     MemoryQueryPlan,
@@ -19,6 +21,11 @@ _DEGRADED_REASON = "standalone_no_memory_service"
 
 class NullMemoryPort:
     """No-op MemoryPort: empty recall, always healthy."""
+
+    async def recall_provisional_sources(
+        self, context: MemoryActorContext, *, timeout_s: float = 0.2,
+    ) -> MemoryRecallResult:
+        return MemoryRecallResult(degraded=True, degraded_reason=_DEGRADED_REASON)
 
     async def recall_context(
         self,

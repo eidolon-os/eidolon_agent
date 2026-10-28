@@ -148,10 +148,16 @@ async def test_provisional_authorizer_rechecks_policy_and_never_uses_broad_realm
     assert result.memory_mode == "provisional" and result.provisional_memory_save
     authority.resolve_person_memory.assert_not_awaited()
     for changes in ({"owner_id": "other"}, {"person_revision": 3}, {"session_id": "other"},
-                    {"policy": ProvisionalMemoryPolicy(session_recall_allowed=True)}):
+                    {"policy": ProvisionalMemoryPolicy()}):
         authority.resolve_provisional_memory.return_value = binding.model_copy(update=changes)
         with pytest.raises(PermissionDeniedError):
             await authorizer.authorize(**args)
     assert authority.resolve_provisional_memory.await_count == 5
     with pytest.raises(PermissionDeniedError):
         await authorizer.authorize(**{**args, "source_session_id": "other"})
+
+    authority.resolve_provisional_memory.return_value = binding.model_copy(
+        update={"policy": ProvisionalMemoryPolicy(session_recall_allowed=True)})
+    readonly = await authorizer.authorize(**args)
+    assert readonly.provisional_memory_recall and not readonly.provisional_memory_save
+    authority.resolve_person_memory.assert_not_awaited()

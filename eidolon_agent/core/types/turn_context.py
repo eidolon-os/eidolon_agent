@@ -73,11 +73,13 @@ class TurnContext:
 
     # Internal authority only. Does not enable canonical reads, tools or commitments.
     provisional_memory_save: bool = False
+    provisional_memory_recall: bool = False
 
     def __post_init__(self) -> None:
-        if type(self.provisional_memory_save) is not bool:
+        if (type(self.provisional_memory_save) is not bool
+                or type(self.provisional_memory_recall) is not bool):
             raise ValueError("provisional save permission must be boolean")
-        if self.provisional_memory_save and (
+        if (self.provisional_memory_save or self.provisional_memory_recall) and (
             self.memory_enabled or not self.owner_id or not self.person_id
             or type(self.identity_epoch) is not int or self.identity_epoch < 0
             or type(self.person_revision) is not int or self.person_revision < 1

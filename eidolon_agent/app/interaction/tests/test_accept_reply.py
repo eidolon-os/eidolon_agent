@@ -201,13 +201,15 @@ async def test_shared_room_memory_requires_this_utterances_matching_evidence(evi
             generation=1, sample_rate=16000, start_sample=0, end_sample=32000))
     token = sign_observation(observed, secret="s"*32, text="hello")
     authorized = replace(scope(), source_session_id="session", person_id="p", person_revision=1, identity_epoch=1,
-        memory_mode=memory_mode, provisional_memory_save=memory_mode == "provisional")
+        memory_mode=memory_mode, provisional_memory_save=memory_mode == "provisional",
+        provisional_memory_recall=memory_mode == "provisional")
     request = ReplyRequest(conversation_id="room-session:session", text="hello",
         input_modality="text" if evidence == "text" else "voice",
         trace_id="other" if evidence == "other-turn" else "trace",
         metadata={} if evidence == "missing" else {"speaker_observation_token": token})
     turn = (await AcceptReply(registry(), speaker_secret="s"*32).prepare(authorized, request)).turn
     assert turn.context.memory_enabled == (evidence == "matching" and memory_mode == "personal")
+    assert turn.context.provisional_memory_recall == (evidence == "matching" and memory_mode == "provisional")
     assert turn.context.provisional_memory_save == (evidence == "matching" and memory_mode == "provisional")
     assert turn.context.person_id == ("p" if evidence == "matching" else None)
     assert turn.session_id == "session"

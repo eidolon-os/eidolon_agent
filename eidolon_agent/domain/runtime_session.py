@@ -28,6 +28,7 @@ class AuthorizedRuntimeSession:
     identity_epoch: int | None = None
     memory_mode: str = "personal"
     provisional_memory_save: bool = False
+    provisional_memory_recall: bool = False
 
     @property
     def owner_id(self) -> str:
@@ -77,6 +78,7 @@ class RuntimeSessionAuthorizer:
         ):
             raise PermissionDeniedError("provisional runtime requires the current source session")
         provisional_save = False
+        provisional_recall = False
         runtime = await self._authority.resolve(
             owner_id=owner_id,
             companion_id=companion_id,
@@ -91,9 +93,10 @@ class RuntimeSessionAuthorizer:
                 owner_id, person_id, person_revision, normalized_session_id,
             ):
                 raise PermissionDeniedError("provisional authority outside token scope")
-            if not binding.policy.save_allowed:
+            if not (binding.policy.save_allowed or binding.policy.session_recall_allowed):
                 raise PermissionDeniedError("provisional save is not permitted")
-            provisional_save = True
+            provisional_save = binding.policy.save_allowed
+            provisional_recall = binding.policy.session_recall_allowed
             runtime = replace(runtime, memory_realm_id=binding.realm_id)
         elif person_id is not None:
             realm_id = await self._authority.resolve_person_memory(
@@ -116,6 +119,7 @@ class RuntimeSessionAuthorizer:
             runtime=runtime,
             memory_mode=memory_mode,
             provisional_memory_save=provisional_save,
+            provisional_memory_recall=provisional_recall,
             person_id=person_id,
             person_revision=person_revision,
             source_session_id=source_session_id,

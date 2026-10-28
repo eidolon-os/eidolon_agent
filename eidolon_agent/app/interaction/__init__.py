@@ -119,6 +119,7 @@ class AcceptReply:
                 source_session_id=scope.source_session_id,
                 memory_enabled=person_id is not None and scope.memory_mode == "personal",
                 provisional_memory_save=(person_id is not None and scope.provisional_memory_save),
+                provisional_memory_recall=(person_id is not None and scope.provisional_memory_recall),
                 person_id=person_id,
                 identity_epoch=epoch,
                 person_revision=revision,

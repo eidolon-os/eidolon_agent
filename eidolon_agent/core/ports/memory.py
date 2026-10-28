@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Protocol, runtime_checkable
 
+from eidolon_memory_contracts import MemoryActorContext
+
 from eidolon_agent.core.types.memory import (
     ActiveCommitmentReadResult,
     MemoryQueryPlan,
@@ -20,6 +22,10 @@ class MemoryPort(Protocol):
     durable outbox. Keeping writes off this port prevents a second producer
     from competing with that lifecycle.
     """
+
+    async def recall_provisional_sources(
+        self, context: MemoryActorContext, *, timeout_s: float = 0.2,
+    ) -> MemoryRecallResult: ...
 
     async def recall_context(
         self,
