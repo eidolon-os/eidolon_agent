@@ -331,3 +331,81 @@ async def test_only_terminal_job_receipt_is_published_from_local_outbox(tmp_path
         assert await store.audit_outbox.list_pending() == []
     finally:
         await store.close()
+
+
+async def test_memory_outbox_capacity_serializes_independent_stores(tmp_path) -> None:
+    import asyncio
+
+    from eidolon_agent.infra.persistence.runtime_store import MemoryTurnOutboxCapacityExceeded
+
+    path = tmp_path / "quota.sqlite3"
+    stores = [AgentRuntimeStore.open(path, memory_outbox_max_records=1) for _ in range(2)]
+    await stores[0].init_schema()
+
+    async def enqueue(store, turn_id, payload=None):
+        await store.memory_turn_outbox.enqueue(
+            turn_id=turn_id,
+            owner_id="owner",
+            companion_id="companion",
+            subject="memory.turn",
+            payload=payload or {"text": "hello"},
+            trace_id=None,
+        )
+
+    try:
+        results = await asyncio.gather(
+            enqueue(stores[0], "a"),
+            enqueue(stores[1], "b"),
+            return_exceptions=True,
+        )
+        assert sum(isinstance(result, MemoryTurnOutboxCapacityExceeded) for result in results) == 1
+        pending = await stores[0].memory_turn_outbox.pending_batch()
+        assert len(pending) == 1
+        accepted = pending[0].turn_id
+        await enqueue(stores[1], accepted)  # Idempotent even at capacity.
+        with pytest.raises(RuntimeError, match="identity collision"):
+            await enqueue(stores[1], accepted, {"text": "different"})
+        await stores[0].memory_turn_outbox.mark_published(accepted)
+        await enqueue(stores[1], "after-drain")
+        assert await stores[0].memory_turn_outbox.pending_count() == 1
+    finally:
+        for store in stores:
+            await store.close()
+
+
+async def test_memory_outbox_payload_limit_and_lowered_quota_preserve_old_rows(tmp_path) -> None:
+    import json
+
+    from eidolon_agent.infra.persistence.runtime_store import MemoryTurnOutboxCapacityExceeded
+
+    path = tmp_path / "bytes.sqlite3"
+    payload = {"text": "你好"}
+    size = len(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
+    store = AgentRuntimeStore.open(path, memory_outbox_max_payload_bytes=size)
+    await store.init_schema()
+
+    async def enqueue(turn_id, value):
+        await store.memory_turn_outbox.enqueue(
+            turn_id=turn_id,
+            owner_id="owner",
+            companion_id="companion",
+            subject="memory.turn",
+            payload=value,
+            trace_id=None,
+        )
+
+    await enqueue("accepted", payload)
+    with pytest.raises(MemoryTurnOutboxCapacityExceeded):
+        await enqueue("too-large", {"text": "你好啊"})
+    await store.close()
+    store = AgentRuntimeStore.open(path, memory_outbox_max_payload_bytes=1)
+    try:
+        await store.init_schema()
+        await enqueue("accepted", payload)
+        pending = await store.memory_turn_outbox.pending_batch()
+        assert len(pending) == 1
+        assert pending[0].payload == payload
+        with pytest.raises(MemoryTurnOutboxCapacityExceeded):
+            await enqueue("new", {})
+    finally:
+        await store.close()

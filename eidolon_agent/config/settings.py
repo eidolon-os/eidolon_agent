@@ -294,6 +294,8 @@ class PersistenceSettings(BaseModel):
     )
     busy_timeout_ms: int = Field(default=5_000, ge=100, le=60_000)
     wal_autocheckpoint_pages: int = Field(default=1_000, ge=100, le=100_000)
+    memory_outbox_max_records: int = Field(default=10_000, gt=0, strict=True)
+    memory_outbox_max_payload_bytes: int = Field(default=65_536, gt=0, strict=True)
 
 
 class TurnSettings(BaseModel):
