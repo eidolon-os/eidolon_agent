@@ -13,7 +13,8 @@ from eidolon_agent.app.transport.grpc import interceptors
 
 
 @pytest.mark.asyncio
-async def test_reauthentication_uses_original_token_and_current_revocation_store():
+@pytest.mark.parametrize("memory_mode", ["personal", "provisional"])
+async def test_reauthentication_uses_original_token_and_current_revocation_store(memory_mode):
     revoked = set()
 
     class Store:
@@ -30,9 +31,11 @@ async def test_reauthentication_uses_original_token_and_current_revocation_store
         identity_epoch=1,
         person_revision=1,
         ttl_seconds=60,
+        source_session_id="session",
+        memory_mode=memory_mode,
     )
     interceptor = interceptors.AuthInterceptor(
-        RuntimeTokenVerifier(secret=secret, revocation_kv=Store())
+        RuntimeTokenVerifier(secret=secret, revocation_kv=Store(), allow_provisional=True)
     )
     old_identity = interceptors._current_identity.set(None)
     old_verify = interceptors._current_reauthenticate.set(None)
@@ -54,6 +57,7 @@ async def test_reauthentication_uses_original_token_and_current_revocation_store
         )
         first = interceptors.current_identity()
         assert first.person_id == "person"
+        assert first.memory_mode == memory_mode
         assert await interceptors.reauthenticate_current() == first
         revoked.add(session_revocation_keys("session")[0])
         with pytest.raises(RuntimeTokenRevokedError):

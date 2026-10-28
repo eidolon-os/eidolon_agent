@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+from eidolon_sdk.biz.system_data.models import ProvisionalMemoryAccessSnapshot
+
 from eidolon_agent.core.types.companion_runtime import CompanionRuntimeFacts
 
 
@@ -18,6 +20,10 @@ class CompanionRuntimeAuthority(Protocol):
     ) -> CompanionRuntimeFacts: ...
 
     async def resolve_person_memory(self, *, owner_id: str, person_id: str, person_revision: int) -> str: ...
+
+    async def resolve_provisional_memory(
+        self, *, owner_id: str, person_id: str, person_revision: int, session_id: str,
+    ) -> ProvisionalMemoryAccessSnapshot: ...
 
 
 __all__ = ["CompanionRuntimeAuthority"]

@@ -117,7 +117,8 @@ class AcceptReply:
             context=TurnContext(
                 speaker_observation=speaker,
                 source_session_id=scope.source_session_id,
-                memory_enabled=person_id is not None,
+                memory_enabled=person_id is not None and scope.memory_mode == "personal",
+                provisional_memory_save=(person_id is not None and scope.provisional_memory_save),
                 person_id=person_id,
                 identity_epoch=epoch,
                 person_revision=revision,

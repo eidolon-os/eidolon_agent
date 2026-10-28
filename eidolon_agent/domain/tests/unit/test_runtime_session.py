@@ -118,3 +118,40 @@ async def test_personal_runtime_resolves_private_realm_without_mutating_default(
             owner_id="owner-1", companion_id="companion-1", device_id=None,
             session_id="new-session", person_id="person-1", person_revision=1, identity_epoch=0,
         )
+
+
+async def test_provisional_authorizer_rechecks_policy_and_never_uses_broad_realm():
+    from dataclasses import dataclass, field
+    from unittest.mock import AsyncMock
+
+    from eidolon_sdk.biz.system_data.models import (
+        ProvisionalMemoryAccessSnapshot,
+        ProvisionalMemoryPolicy,
+    )
+
+    @dataclass(frozen=True)
+    class Facts:
+        owner_id: str = "o"
+        companion_id: str = "c"
+        memory_realm_id: str = "default"
+        runtime_config: dict = field(default_factory=dict)
+
+    binding = ProvisionalMemoryAccessSnapshot(owner_id="o", person_id="p", person_revision=2,
+        realm_id="candidate", session_id="s", policy=ProvisionalMemoryPolicy(save_allowed=True))
+    authority = SimpleNamespace(resolve=AsyncMock(return_value=Facts()),
+        resolve_provisional_memory=AsyncMock(return_value=binding), resolve_person_memory=AsyncMock())
+    authorizer = RuntimeSessionAuthorizer(authority)
+    args = dict(owner_id="o", companion_id="c", device_id="d", session_id="s", source_session_id="s",
+                person_id="p", person_revision=2, identity_epoch=1, memory_mode="provisional")
+    result = await authorizer.authorize(**args)
+    assert result.runtime.memory_realm_id == "candidate"
+    assert result.memory_mode == "provisional" and result.provisional_memory_save
+    authority.resolve_person_memory.assert_not_awaited()
+    for changes in ({"owner_id": "other"}, {"person_revision": 3}, {"session_id": "other"},
+                    {"policy": ProvisionalMemoryPolicy(session_recall_allowed=True)}):
+        authority.resolve_provisional_memory.return_value = binding.model_copy(update=changes)
+        with pytest.raises(PermissionDeniedError):
+            await authorizer.authorize(**args)
+    assert authority.resolve_provisional_memory.await_count == 5
+    with pytest.raises(PermissionDeniedError):
+        await authorizer.authorize(**{**args, "source_session_id": "other"})

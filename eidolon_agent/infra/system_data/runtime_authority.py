@@ -14,6 +14,7 @@ from eidolon_sdk.biz.system_data import (
     SystemDataPrecondition,
     SystemDataRuntimeClient,
 )
+from eidolon_sdk.biz.system_data.models import ProvisionalMemoryAccessSnapshot
 
 from eidolon_agent.core.errors import DependencyError, NotFoundError, ValidationError
 from eidolon_agent.core.types.companion_runtime import CompanionRuntimeFacts
@@ -58,6 +59,16 @@ class SystemDataCompanionRuntimeAuthority:
         if binding.person_revision != person_revision:
             raise NotFoundError("person revision changed; start a new session")
         return binding.realm_id
+
+    async def resolve_provisional_memory(self, *, owner_id, person_id, person_revision, session_id):
+        try:
+            return await self._client.get_person_provisional_memory_access(
+                owner_id=owner_id, person_id=person_id, person_revision=person_revision,
+                session_id=session_id)
+        except (SystemDataNotFound, SystemDataPrecondition) as exc:
+            raise NotFoundError(str(exc)) from exc
+        except SystemDataError as exc:
+            raise DependencyError(f"provisional Memory authority unavailable: {exc}") from exc
 
 
 class LocalCompanionRuntimeAuthority:
@@ -124,6 +135,14 @@ class LocalCompanionRuntimeAuthority:
         if binding["person_revision"] != person_revision:
             raise NotFoundError("person revision changed; start a new session")
         return binding["realm_id"]
+
+    async def resolve_provisional_memory(self, *, owner_id, person_id, person_revision, session_id):
+        try:
+            result = await self._store.persons.provisional_memory_policy(
+                owner_id, person_id, person_revision, None, session_id)
+            return ProvisionalMemoryAccessSnapshot.model_validate(result)
+        except (LookupError, ValueError) as exc:
+            raise NotFoundError(str(exc)) from exc
 
 
 def _facts(snapshot: CompanionRuntimeSnapshot) -> CompanionRuntimeFacts:

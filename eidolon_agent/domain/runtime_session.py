@@ -26,6 +26,8 @@ class AuthorizedRuntimeSession:
     source_session_id: str | None = None
     person_revision: int | None = None
     identity_epoch: int | None = None
+    memory_mode: str = "personal"
+    provisional_memory_save: bool = False
 
     @property
     def owner_id(self) -> str:
@@ -53,6 +55,7 @@ class RuntimeSessionAuthorizer:
         identity_epoch: int | None = None,
         person_revision: int | None = None,
         source_session_id: str | None = None,
+        memory_mode: str = "personal",
     ) -> AuthorizedRuntimeSession:
         if (person_id is None) != (identity_epoch is None):
             raise PermissionDeniedError("incomplete personal runtime binding")
@@ -67,13 +70,32 @@ class RuntimeSessionAuthorizer:
         normalized_session_id = (session_id or "").strip()
         if not normalized_session_id:
             raise PermissionDeniedError("runtime token is not bound to a session")
+        if memory_mode not in ("personal", "provisional"):
+            raise PermissionDeniedError("unsupported runtime memory mode")
+        if memory_mode == "provisional" and (
+            person_id is None or source_session_id != normalized_session_id
+        ):
+            raise PermissionDeniedError("provisional runtime requires the current source session")
+        provisional_save = False
         runtime = await self._authority.resolve(
             owner_id=owner_id,
             companion_id=companion_id,
         )
         if runtime.owner_id != owner_id or runtime.companion_id != companion_id:
             raise PermissionDeniedError("runtime authority returned facts outside token scope")
-        if person_id is not None:
+        if memory_mode == "provisional":
+            binding = await self._authority.resolve_provisional_memory(
+                owner_id=owner_id, person_id=person_id, person_revision=person_revision,
+                session_id=normalized_session_id)
+            if (binding.owner_id, binding.person_id, binding.person_revision, binding.session_id) != (
+                owner_id, person_id, person_revision, normalized_session_id,
+            ):
+                raise PermissionDeniedError("provisional authority outside token scope")
+            if not binding.policy.save_allowed:
+                raise PermissionDeniedError("provisional save is not permitted")
+            provisional_save = True
+            runtime = replace(runtime, memory_realm_id=binding.realm_id)
+        elif person_id is not None:
             realm_id = await self._authority.resolve_person_memory(
                 owner_id=owner_id, person_id=person_id, person_revision=person_revision
             )
@@ -92,6 +114,8 @@ class RuntimeSessionAuthorizer:
         normalized_device_id = (device_id or "").strip() or None
         return AuthorizedRuntimeSession(
             runtime=runtime,
+            memory_mode=memory_mode,
+            provisional_memory_save=provisional_save,
             person_id=person_id,
             person_revision=person_revision,
             source_session_id=source_session_id,

@@ -259,9 +259,11 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                         return
                     fresh = await self._authorize_runtime(renewed, context, allow_personal=True)
                     if (fresh.owner_id, fresh.companion_id, fresh.device_id, fresh.session_id,
-                        fresh.person_id, fresh.identity_epoch, fresh.person_revision, fresh.runtime.memory_realm_id) != (
+                        fresh.person_id, fresh.identity_epoch, fresh.person_revision, fresh.runtime.memory_realm_id,
+                        fresh.memory_mode, fresh.provisional_memory_save) != (
                         scope.owner_id, scope.companion_id, scope.device_id, scope.session_id,
-                        scope.person_id, scope.identity_epoch, scope.person_revision, scope.runtime.memory_realm_id):
+                        scope.person_id, scope.identity_epoch, scope.person_revision, scope.runtime.memory_realm_id,
+                        scope.memory_mode, scope.provisional_memory_save):
                         await context.abort(grpc.StatusCode.PERMISSION_DENIED,
                                             "personal runtime binding changed; start a new session")
                         return
@@ -481,6 +483,7 @@ class EidolonAgentServicer(pbg.EidolonAgentServicer):
                 device_id=identity.device_id,
                 session_id=identity.session_id,
                 source_session_id=getattr(identity, "source_session_id", None),
+                memory_mode=getattr(identity, "memory_mode", "personal"),
                 **({"person_id": identity.person_id, "identity_epoch": identity.identity_epoch,
                     "person_revision": identity.person_revision}
                    if getattr(identity, "person_id", None) is not None else {}),

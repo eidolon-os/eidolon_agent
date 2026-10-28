@@ -145,8 +145,10 @@ async def test_memory_policy_comes_only_from_authorized_person(person_id):
 
 async def test_verified_speaker_is_context_not_memory_authorization():
     import time
-    from eidolon_sdk.biz.speaker_identity import SpeakerIdentityObservation, SpeakerEvidenceSource
+
     from eidolon_sdk.biz.speaker_attestation import sign_observation
+    from eidolon_sdk.biz.speaker_identity import SpeakerEvidenceSource, SpeakerIdentityObservation
+
     from eidolon_agent.domain.context.speaker import speaker_context
     now=time.time()
     speaker=SpeakerIdentityObservation(owner_id='owner',session_id='session',turn_id='trace',
@@ -180,11 +182,13 @@ async def test_forged_speaker_degrades_without_breaking_reply():
 
 
 @pytest.mark.parametrize("evidence", ["matching", "missing", "other-person", "old-revision", "other-turn", "text"])
-async def test_shared_room_memory_requires_this_utterances_matching_evidence(evidence):
+@pytest.mark.parametrize("memory_mode", ["personal", "provisional"])
+async def test_shared_room_memory_requires_this_utterances_matching_evidence(evidence, memory_mode):
     import time
     from dataclasses import replace
-    from eidolon_sdk.biz.speaker_identity import SpeakerIdentityObservation, SpeakerEvidenceSource
+
     from eidolon_sdk.biz.speaker_attestation import sign_observation
+    from eidolon_sdk.biz.speaker_identity import SpeakerEvidenceSource, SpeakerIdentityObservation
     now = time.time()
     observed = SpeakerIdentityObservation(owner_id="owner", session_id="session", turn_id="trace",
         status="identified", confidence="controlled_trial", reason="voice_match",
@@ -196,13 +200,15 @@ async def test_shared_room_memory_requires_this_utterances_matching_evidence(evi
         source=SpeakerEvidenceSource(request_id="trace", session_id="session", input_id="mic",
             generation=1, sample_rate=16000, start_sample=0, end_sample=32000))
     token = sign_observation(observed, secret="s"*32, text="hello")
-    authorized = replace(scope(), source_session_id="session", person_id="p", person_revision=1, identity_epoch=1)
+    authorized = replace(scope(), source_session_id="session", person_id="p", person_revision=1, identity_epoch=1,
+        memory_mode=memory_mode, provisional_memory_save=memory_mode == "provisional")
     request = ReplyRequest(conversation_id="room-session:session", text="hello",
         input_modality="text" if evidence == "text" else "voice",
         trace_id="other" if evidence == "other-turn" else "trace",
         metadata={} if evidence == "missing" else {"speaker_observation_token": token})
     turn = (await AcceptReply(registry(), speaker_secret="s"*32).prepare(authorized, request)).turn
-    assert turn.context.memory_enabled == (evidence == "matching")
+    assert turn.context.memory_enabled == (evidence == "matching" and memory_mode == "personal")
+    assert turn.context.provisional_memory_save == (evidence == "matching" and memory_mode == "provisional")
     assert turn.context.person_id == ("p" if evidence == "matching" else None)
     assert turn.session_id == "session"
     assert turn.context.source_session_id == "session"

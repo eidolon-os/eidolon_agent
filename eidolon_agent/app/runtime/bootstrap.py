@@ -339,6 +339,7 @@ async def build_application(
         secret=jwt_secret,
         algorithm=settings.runtime_token.jwt_algorithm,
         revocation_kv=revocation_kv,
+        allow_provisional=True,
     )
     container.runtime_token_verifier = verifier
 
