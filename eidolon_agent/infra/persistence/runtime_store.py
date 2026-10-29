@@ -8,7 +8,6 @@ boundaries, never with cross-database foreign keys on the turn hot path.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -32,6 +31,7 @@ from sqlalchemy import (
     text,
     update,
 )
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -250,21 +250,9 @@ class PendingMemoryTurn:
     attempt_count: int
 
 
-class MemoryTurnOutboxCapacityExceeded(RuntimeError):
-    """New memory delivery was not durably accepted; existing rows remain intact."""
-
-
 class AgentMemoryTurnOutbox:
-    def __init__(
-        self,
-        session_factory: async_sessionmaker,
-        *,
-        max_records: int = 10_000,
-        max_payload_bytes: int = 65_536,
-    ) -> None:
+    def __init__(self, session_factory: async_sessionmaker) -> None:
         self._session_factory = session_factory
-        self._max_records = max_records
-        self._max_payload_bytes = max_payload_bytes
 
     async def enqueue(
         self,
@@ -277,30 +265,24 @@ class AgentMemoryTurnOutbox:
         trace_id: str | None,
     ) -> None:
         async with self._session_factory() as session:
-            # Serialize admission across store instances/processes, not just this pool.
-            await session.execute(text("BEGIN IMMEDIATE"))
+            await session.execute(
+                sqlite_insert(MemoryTurnOutboxRow)
+                .values(
+                    turn_id=turn_id,
+                    owner_id=owner_id,
+                    companion_id=companion_id,
+                    subject=subject,
+                    payload_json=payload,
+                    trace_id=trace_id,
+                )
+                .on_conflict_do_nothing(index_elements=["turn_id"])
+            )
+            await session.commit()
             row = await session.scalar(
                 select(MemoryTurnOutboxRow).where(MemoryTurnOutboxRow.turn_id == turn_id)
             )
             if row is None:
-                size = len(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
-                count = int(
-                    await session.scalar(select(func.count()).select_from(MemoryTurnOutboxRow)) or 0
-                )
-                if size > self._max_payload_bytes or count >= self._max_records:
-                    raise MemoryTurnOutboxCapacityExceeded("memory turn outbox capacity exceeded")
-                session.add(
-                    MemoryTurnOutboxRow(
-                        turn_id=turn_id,
-                        owner_id=owner_id,
-                        companion_id=companion_id,
-                        subject=subject,
-                        payload_json=payload,
-                        trace_id=trace_id,
-                    )
-                )
-                await session.commit()
-                return
+                raise RuntimeError(f"memory turn enqueue lost after commit: {turn_id}")
             identity = (
                 row.owner_id,
                 row.companion_id,
@@ -311,7 +293,6 @@ class AgentMemoryTurnOutbox:
             requested = (owner_id, companion_id, subject, payload, trace_id)
             if identity != requested:
                 raise RuntimeError(f"memory turn identity collision: {turn_id}")
-            await session.commit()
 
     async def pending_batch(self, *, limit: int = 100) -> list[PendingMemoryTurn]:
         now = utc_now()
@@ -494,16 +475,12 @@ class AgentRuntimeStore:
         session_factory: async_sessionmaker,
         read_engine: AsyncEngine,
         read_session_factory: async_sessionmaker,
-        memory_outbox_max_records: int = 10_000,
-        memory_outbox_max_payload_bytes: int = 65_536,
     ) -> None:
         self.sqlite_path = sqlite_path
         self.engine = engine
         self.session_factory = session_factory
         self.read_engine = read_engine
         self.read_session_factory = read_session_factory
-        self._memory_outbox_max_records = memory_outbox_max_records
-        self._memory_outbox_max_payload_bytes = memory_outbox_max_payload_bytes
 
     @classmethod
     def open(
@@ -512,12 +489,7 @@ class AgentRuntimeStore:
         *,
         busy_timeout_ms: int = 5_000,
         wal_autocheckpoint_pages: int = 1_000,
-        memory_outbox_max_records: int = 10_000,
-        memory_outbox_max_payload_bytes: int = 65_536,
     ) -> AgentRuntimeStore:
-        for value in (memory_outbox_max_records, memory_outbox_max_payload_bytes):
-            if type(value) is not int or value <= 0:
-                raise ValueError("memory outbox limits must be positive integers")
         path = Path(sqlite_path).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
         engine = create_async_engine(
@@ -565,8 +537,6 @@ class AgentRuntimeStore:
                 cursor.close()
 
         return cls(
-            memory_outbox_max_records=memory_outbox_max_records,
-            memory_outbox_max_payload_bytes=memory_outbox_max_payload_bytes,
             sqlite_path=path,
             engine=engine,
             session_factory=async_sessionmaker(engine, expire_on_commit=False),
@@ -603,11 +573,7 @@ class AgentRuntimeStore:
 
     @property
     def memory_turn_outbox(self) -> AgentMemoryTurnOutbox:
-        return AgentMemoryTurnOutbox(
-            self.session_factory,
-            max_records=self._memory_outbox_max_records,
-            max_payload_bytes=self._memory_outbox_max_payload_bytes,
-        )
+        return AgentMemoryTurnOutbox(self.session_factory)
 
     async def delete_owner_runtime(self, owner_id: str) -> dict[str, int]:
         """Delete private runtime content without treating audit as source data."""

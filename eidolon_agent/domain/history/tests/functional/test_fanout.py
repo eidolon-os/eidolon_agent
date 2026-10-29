@@ -260,61 +260,17 @@ async def test_publish_turn_is_noop_without_bus() -> None:
 async def test_personal_fanout_keeps_binding_and_does_not_broadcast_emotion(event_bus):
     outbox = _Outbox()
     emotion = []
-
     async def receive(event):
         emotion.append(event)
-
     await event_bus.subscribe("agent.emotion.turn.alice", receive)
     fanout = HistoryFanout(event_bus=event_bus, memory_outbox=outbox)
-    await fanout.publish_turn(
-        owner_id="alice",
-        companion_id="companion-a",
-        memory_realm_id="private-a",
-        device_id="device",
-        session_id="session-a",
-        person_id="a",
-        identity_epoch=1,
-        turn_id="personal-turn",
-        user_text="private",
-        assistant_text="",
-        timestamp_iso="2026-10-27T10:00:00Z",
-        emotion_payload={"valence": -0.4},
-    )
+    await fanout.publish_turn(owner_id="alice", companion_id="companion-a",
+        memory_realm_id="private-a", device_id="device", session_id="session-a",
+        person_id="a", identity_epoch=1, turn_id="personal-turn", user_text="private",
+        assistant_text="", timestamp_iso="2026-10-27T10:00:00Z", emotion_payload={"valence":-0.4})
     payload = unwrap_memory_payload(outbox.rows[0]["payload"])
     assert payload["context"]["person_id"] == "a"
     assert payload["context"]["identity_epoch"] == 1
     assert payload["context"]["memory_realm_id"] == "private-a"
     await asyncio.sleep(0)
     assert emotion == []
-
-
-async def test_capacity_rejection_reports_failure_without_claiming_queued(tmp_path) -> None:
-    from eidolon_agent.infra.persistence.runtime_store import AgentRuntimeStore
-
-    store = AgentRuntimeStore.open(tmp_path / "full.sqlite3", memory_outbox_max_records=1)
-    await store.init_schema()
-    sink = _StatusSink()
-    fanout = HistoryFanout(memory_outbox=store.memory_turn_outbox, status_sink=sink)
-    try:
-
-        async def publish(turn_id):
-            return await fanout.publish_turn(
-                owner_id="alice",
-                companion_id="companion-a",
-                memory_realm_id="r_alice_default",
-                device_id=None,
-                session_id="session",
-                turn_id=turn_id,
-                user_text="hello",
-                assistant_text="hi",
-                timestamp_iso="2026-10-29T00:00:00Z",
-            )
-
-        assert (await publish("first")).state == "queued"
-        rejected = await publish("second")
-        assert rejected.state == "delivery_failed"
-        assert rejected.error == "memory turn outbox capacity exceeded"
-        assert sink.statuses[-1] == rejected
-        assert [row.turn_id for row in await store.memory_turn_outbox.pending_batch()] == ["first"]
-    finally:
-        await store.close()

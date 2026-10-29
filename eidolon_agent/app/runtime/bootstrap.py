@@ -116,8 +116,6 @@ async def build_application(
         settings.persistence.sqlite_path,
         busy_timeout_ms=settings.persistence.busy_timeout_ms,
         wal_autocheckpoint_pages=settings.persistence.wal_autocheckpoint_pages,
-        memory_outbox_max_records=settings.persistence.memory_outbox_max_records,
-        memory_outbox_max_payload_bytes=settings.persistence.memory_outbox_max_payload_bytes,
     )
     await runtime_store.init_schema()
     container.runtime_store = runtime_store
