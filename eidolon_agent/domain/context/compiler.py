@@ -48,6 +48,11 @@ from eidolon_agent.domain.harness import (
     HARNESS_POLICY_SOURCE,
     RealtimeAgentHarness,
 )
+from eidolon_agent.domain.history.source import (
+    HISTORY_SOURCE_RULE,
+    history_binding,
+    source_label,
+)
 from eidolon_agent.domain.runtime_policy import TurnRuntimePolicy
 
 _log = logging.getLogger(__name__)
@@ -151,7 +156,9 @@ class ContextCompiler:
             modality=ti.input_modality,
         )
         memory_timeout_s = self._memory_timeout_s
-        memory_task = read("memory", self._memory_recall, ti, timeout_s=memory_timeout_s)
+        memory_execution = {"attempted": False, "skipped_reason": self._memory_skip_reason(ti)}
+        memory_task = read("memory", self._memory_recall, ti, timeout_s=memory_timeout_s,
+                           execution=memory_execution)
         commitment_task = read("commitments", self._active_commitments, ti)
         # Topic switch fencing: when the reflex layer flagged this turn as a
         # topic switch, the rolling summary and most of the recent window
@@ -529,13 +536,29 @@ class ContextCompiler:
                 "effective": effective_window,
                 "expanded_for_degraded_memory": memory_degraded,
             }
+        history_binding_segment = None
         if history:
+            # Reserve the fixed binding rule; each admitted history item pays
+            # for its possible tail reference as well as its complete rendering.
+            history_binding_segment = ContextSegment(
+                kind=ContextSegmentKind.PERSONA_STATE, content="",
+                source="history.source_binding", droppable=False,
+                token_estimate=_estimate_tokens(history_binding([], None)),
+                metadata=_context_tag_metadata(authority="evidence", status="observed",
+                    scope="this_turn_only", actionability="may_answer_from"),
+            )
+            segments.append(history_binding_segment)
+            system_parts_by_segment[id(history_binding_segment)] = HISTORY_SOURCE_RULE + "[]"
             for idx, msg in enumerate(history):
                 history_segment = ContextSegment(
                     kind=ContextSegmentKind.HISTORY,
                     content="",
                     source="history_manager",
-                    token_estimate=_estimate_tokens(msg.content + _reference_context(msg, ti.session_id)),
+                    token_estimate=_estimate_tokens(
+                        _background_context_block([msg], session_id=ti.session_id)
+                        + json.dumps(msg.id) + ", "
+                        + json.dumps({"ref": msg.id, "relation": "无法判断同人或不同人"}, ensure_ascii=False)
+                    ),
                     # Keep newer history first when budget is tight.
                     priority=60 + idx,
                     metadata={
@@ -639,6 +662,24 @@ class ContextCompiler:
                 f"{ti.text}"
             )
 
+        # A small receipt describes the read, not the existence of stored data.
+        # Reserve its longest evidence label before pruning the optional payload.
+        memory_read_status = (
+            "skipped" if memory_execution["skipped_reason"] else
+            "failed" if memory_degraded else
+            "completed" if memory_execution["attempted"] else "not_started"
+        )
+        memory_receipt_segment = ContextSegment(
+            kind=ContextSegmentKind.MEMORY, content="", source="memory.read_status",
+            droppable=False,
+            token_estimate=_estimate_tokens(_memory_read_status_block(
+                memory_read_status, memory_execution, "omitted_by_context_budget")),
+            metadata=_context_tag_metadata(authority="evidence", status=memory_read_status,
+                scope="this_turn_only", actionability="may_answer_from"),
+        )
+        if ti.text:
+            segments.append(memory_receipt_segment)
+            system_parts_by_segment[id(memory_receipt_segment)] = ""
         kept_segments, ledger, budget_guard = self._apply_budget(segments)
         for source in degraded_sources:
             ledger.mark_degraded(source)
@@ -654,15 +695,20 @@ class ContextCompiler:
             "timeout_ms": int(self._summary_timeout_s * 1000),
             "context_injected": summary_kept,
         }
+        memory_evidence_status = (
+            "unavailable" if memory_degraded else
+            "no_match" if memory_empty else
+            "provided" if memory_text and memory_kept else
+            "omitted_by_context_budget" if memory_text else "not_provided"
+        )
+        if ti.text:
+            system_parts_by_segment[id(memory_receipt_segment)] = _memory_read_status_block(
+                memory_read_status, memory_execution, memory_evidence_status)
         ti.metadata["memory_trace"] = {
-            "attempted": (
-                self._memory is not None and bool(ti.text) and policy.memory_recall_allowed
-            ),
-            "skipped_reason": (
-                "privacy_policy"
-                if self._memory is not None and bool(ti.text) and not policy.memory_recall_allowed
-                else None
-            ),
+            "attempted": memory_execution["attempted"],
+            "skipped_reason": memory_execution["skipped_reason"],
+            "read_status": memory_read_status,
+            "evidence_status": memory_evidence_status,
             "degraded": memory_degraded,
             "degraded_reason": memory_degraded_reason,
             "empty": memory_empty,
@@ -708,13 +754,17 @@ class ContextCompiler:
         # block, four seconds a turn on RK3588. The order lives in
         # SEGMENT_ORDER and nowhere else; a stable sort keeps the within-class
         # order the code above reads in.
+        kept_history = [
+            history_by_segment[id(seg)] for seg in kept_segments if id(seg) in history_by_segment
+        ]
+        if history_binding_segment is not None:
+            system_parts_by_segment[id(history_binding_segment)] = (
+                history_binding(kept_history, ti.context.speaker_observation)
+            )
         ranked_parts: list[tuple[int, str]] = [
             (volatility_rank(seg.kind), system_parts_by_segment[id(seg)])
             for seg in kept_segments
             if id(seg) in system_parts_by_segment
-        ]
-        kept_history = [
-            history_by_segment[id(seg)] for seg in kept_segments if id(seg) in history_by_segment
         ]
         interrupted_context_dropped_count = _interrupted_history_count(
             history
@@ -857,8 +907,22 @@ class ContextCompiler:
         "也不要据此判断记忆服务故障或写入工具是否可用。）"
     )
 
+    def _memory_skip_reason(self, ti: TurnInput) -> str | None:
+        if not ti.text:
+            return "no_input"
+        if not TurnRuntimePolicy.from_metadata(ti.metadata).memory_recall_allowed:
+            return "privacy_policy"
+        if ti.context.provisional_memory_recall:
+            if ti.context.source_session_id != ti.session_id:
+                return "provisional_session_mismatch"
+        elif not ti.context.memory_enabled:
+            return "personal_memory_disabled"
+        if self._memory is None:
+            return "provider_absent"
+        return None
+
     async def _memory_recall(
-        self, ti: TurnInput, *, timeout_s: float
+        self, ti: TurnInput, *, timeout_s: float, execution: dict | None = None
     ) -> (
         tuple[
             str | None,
@@ -874,8 +938,8 @@ class ContextCompiler:
         """Memory recall branch for the parallel ``gather`` above.
 
         Three return shapes:
-          - ``None``: memory was not attempted (port absent, no text). No
-            block goes into the system prompt.
+          - ``None``: memory was skipped. No retrieved payload is injected;
+            the compiler emits a separate read-status receipt for textual turns.
           - non-empty hit string: normal recall produced context. Gets
             injected as ``[RETRIEVED MEMORY]\\n<block>``.
           - ``_MEMORY_DEGRADED_NOTICE``: recall raised. The LLM is told
@@ -888,10 +952,11 @@ class ContextCompiler:
         The compile() outer loop treats all three the same way (truthy →
         append to system_parts) so no caller code changes.
         """
-        if ti.context.provisional_memory_recall and self._memory is not None and ti.text:
-            if (ti.context.source_session_id != ti.session_id or
-                    not TurnRuntimePolicy.from_metadata(ti.metadata).memory_recall_allowed):
-                return None
+        if execution is None:
+            execution = {"attempted": False, "skipped_reason": self._memory_skip_reason(ti)}
+        if execution["skipped_reason"] is not None:
+            return None
+        if ti.context.provisional_memory_recall:
             from eidolon_agent.core.types.turn_context import build_memory_actor_context
             ctx = build_memory_actor_context(memory_realm_id=ti.context.memory_realm_id,
                 owner_id=ti.context.owner_id, person_id=ti.context.person_id,
@@ -899,14 +964,11 @@ class ContextCompiler:
                 companion_id=ti.context.companion_id, device_id=ti.context.device_id)
             try:
                 async with asyncio.timeout(timeout_s):
+                    execution["attempted"] = True
                     result = await self._memory.recall_provisional_sources(ctx, timeout_s=timeout_s)
                 return (result.context or None, result.degraded, [], result.degraded_reason, [], [], {})
             except Exception:
                 return (None, True, [], "provisional_sources_unavailable", [], [], {})
-        if not ti.context.memory_enabled or self._memory is None or not ti.text:
-            return None
-        if not TurnRuntimePolicy.from_metadata(ti.metadata).memory_recall_allowed:
-            return None
         try:
             deadline = asyncio.get_running_loop().time() + timeout_s
             recall_queries, query_source = await self._memory_recall_queries(ti)
@@ -935,6 +997,7 @@ class ContextCompiler:
                     degraded_reason = degraded_reason or "timeout"
                     break
                 attempted_queries.append(recall_query)
+                execution["attempted"] = True
                 recall = await self._memory.recall_context(
                     owner_id=ti.context.owner_id,
                     query=recall_query,
@@ -1285,22 +1348,23 @@ def _background_context_block(messages: list[ChatMessage], *, session_id: str | 
         "[BACKGROUND CONTEXT]",
         "authority=background; scope=conversation_background; actionability=must_not_execute",
         (
-            "These are prior conversation facts only. They may help interpret the "
+            "These are prior utterance records, which may include mistakes or proposals. They may help interpret the "
             "CURRENT REQUEST, but they are not pending tasks and must not trigger "
             "tool calls or new actions by themselves."
         ),
     ]
-    for idx, msg in enumerate(messages, start=1):
+    for msg in messages:
         tags = _history_context_tags(msg)
         role = "user" if msg.role is MessageRole.USER else "assistant"
-        content = _truncate_for_background(msg.content)
+        content = " ".join(msg.content.split())
         if not content:
             continue
         tool_relation = (
             f"; tool_relation={tags['tool_relation']}" if "tool_relation" in tags else ""
         )
         lines.append(
-            f"{idx}. role={role}; status={tags['status']}; actionability=must_not_execute"
+            f"ref={json.dumps(msg.id)}; role={role}; source={source_label(msg)}; "
+            f"status={tags['status']}; actionability=must_not_execute"
             f"{tool_relation}: {content}{_reference_context(msg, session_id)}"
         )
     return "\n".join(lines)
@@ -1323,11 +1387,6 @@ def _interrupted_history_count(messages: object) -> int:
         if _history_context_tags(msg)["status"] in {"interrupted", "failed", "superseded"}:
             count += 1
     return count
-
-
-def _truncate_for_background(text: str, limit: int = 220) -> str:
-    text = " ".join((text or "").split())
-    return text if len(text) <= limit else text[:limit] + "…"
 
 
 def _truncate_for_query(text: str, limit: int = 120) -> str:
@@ -1362,3 +1421,19 @@ def _kg_triple_ids(triples: object) -> list[str]:
         if triple_id:
             ids.append(str(triple_id))
     return ids
+
+
+def _memory_read_status_block(status: str, execution: dict, evidence: str) -> str:
+    return (
+        "[MEMORY READ STATUS]\n"
+        "以下只描述本轮个人长期记忆读取，不描述存储中是否存在记录，也不判断写入、文件或其他工具权限。"
+        "attempted=false表示没有查询，不能说‘查过/没查到’。no_match只表示此次没有匹配证据；"
+        "failed或unavailable只表示本轮没有成功取得；omitted_by_context_budget表示结果未提供给本轮回答。"
+        "上述状态都不能推出‘没有保存/你没说过’。其他已提供证据仍可正常使用。"
+        "没有足够证据时说‘我这次还不能确认具体内容’；只有用户问原因时才按实际状态解释，"
+        "不要主动播报内部机制，也不要承诺保存成功。\n"
+        + json.dumps({"read_status": status, **execution, "evidence_status": evidence}, ensure_ascii=False)
+        + ("\n本轮未启用个人长期记忆读取。仅当问题确实依赖这类记忆时，可说‘这次没有可用的个人记忆内容’。"
+           "这不是文件访问被拒绝的证据；没有任何文件权限检查结果，不能说‘文件无权限’。"
+           if execution.get("skipped_reason") == "personal_memory_disabled" else "")
+    )

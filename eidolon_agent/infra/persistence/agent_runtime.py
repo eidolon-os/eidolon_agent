@@ -16,6 +16,7 @@ from eidolon_agent.core.errors import PermissionDeniedError
 from eidolon_agent.core.types import ChatMessage, MessageRole
 from eidolon_agent.core.types.long_task import CallbackStatus, LongTaskRecord, LongTaskStatus
 from eidolon_agent.core.types.turn import TriageKind, TurnInput, TurnResult, TurnStatus
+from eidolon_agent.domain.history.source import speaker_source
 from eidolon_agent.infra.persistence.runtime_store import (
     AgentAuditOutbox,
     AgentRuntimeStore,
@@ -318,6 +319,7 @@ def build_agent_turn_persister(runtime_store: AgentRuntimeStore, *, model_id_pro
                         metadata=_message_metadata(
                             turn_id=ti.turn_id,
                             seq_in_turn=0,
+                            speaker_observation=ti.context.speaker_observation,
                             is_private=is_private,
                         ),
                     ),
@@ -1028,11 +1030,13 @@ async def _upsert_message_row(session, *, turn_id: str, seq: int, message: ChatM
     existing.metadata_json = row.metadata_json
 
 
-def _message_metadata(*, turn_id: str, seq_in_turn: int, is_private: bool) -> dict[str, Any]:
+def _message_metadata(*, turn_id: str, seq_in_turn: int, is_private: bool, speaker_observation=None) -> dict[str, Any]:
     metadata: dict[str, Any] = {
         "turn_id": turn_id,
         "seq_in_turn": seq_in_turn,
     }
+    if seq_in_turn == 0:
+        metadata["speaker_source"] = speaker_source(speaker_observation)
     if is_private:
         metadata["is_private"] = True
     return metadata

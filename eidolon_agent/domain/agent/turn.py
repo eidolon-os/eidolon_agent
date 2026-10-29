@@ -79,6 +79,7 @@ from eidolon_agent.domain.guardrails.output_filter import OutputGuardrail
 from eidolon_agent.domain.harness import RealtimeAgentHarness
 from eidolon_agent.domain.history.fanout import HistoryFanout
 from eidolon_agent.domain.history.manager import HistoryManager
+from eidolon_agent.domain.history.source import speaker_source
 from eidolon_agent.domain.runtime_policy import TurnRuntimePolicy
 from eidolon_agent.domain.tools.body_capability_provider import RuntimeCapabilityToolProvider
 from eidolon_agent.domain.tools.builtin.submit_long_task import (
@@ -1053,7 +1054,8 @@ class TurnEngine:
                     role=MessageRole.USER,
                     content=ti.text,
                     created_at=started_at,
-                    metadata={**metadata, "seq_in_turn": 0},
+                    metadata={**metadata, "seq_in_turn": 0,
+                              "speaker_source": speaker_source(ti.context.speaker_observation)},
                 )
             )
         if assistant_text:

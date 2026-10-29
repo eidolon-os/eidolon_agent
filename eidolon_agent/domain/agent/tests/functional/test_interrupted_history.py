@@ -98,7 +98,7 @@ async def test_immediate_continuation_does_not_wait_for_cancelled_turn_storage(
                 await task
 
         for i, prompt in enumerate(llm.prompts):
-            history_lines = [line for line in prompt[0].content.splitlines() if ". role=" in line]
+            history_lines = [line for line in prompt[0].content.splitlines() if line.startswith("ref=")]
             assert not any(texts[i] in line for line in history_lines)
             assert prompt[-1].role is MessageRole.USER
             assert prompt[-1].content == texts[i]
@@ -176,3 +176,34 @@ async def test_input_is_retained_when_cancelled_during_context_compilation(turn_
     assert ti.text in prompt[0].content
     assert "status=interrupted" in prompt[0].content
     await engine._background.drain(timeout_s=1)
+
+
+async def test_frozen_source_survives_hot_and_sqlite_history(turn_engine_factory, tmp_path):
+    from eidolon_sdk.biz.speaker_identity import SpeakerIdentityObservation
+
+    from eidolon_agent.infra.llm.providers.fake import FakeLLM
+    store = AgentRuntimeStore.open(tmp_path / 'sources.sqlite3')
+    await store.init_schema()
+    engine = turn_engine_factory(llm=FakeLLM(), runtime_store=store)
+    try:
+        # Synthetic frozen observation: this tests storage, not identity admission.
+        observed = SpeakerIdentityObservation.model_construct(
+            status='identified', person_id='A', owner_id='owner-1', reason='voice_match',
+            confidence='controlled_trial')
+        ti = _voice_turn('我喜欢下棋。', 'source-turn')
+        ti = replace(ti, context=replace(ti.context, speaker_observation=observed,
+                                        memory_enabled=False))
+        await _drive(engine, ti)
+        await engine._background.drain(timeout_s=2)
+        cold = HistoryManager(hydrate_messages=build_agent_history_hydrator(store))
+        for manager in (engine._history, cold):
+            messages = await manager.recent_window(conversation_id='c1')
+            user = next(m for m in messages if m.role is MessageRole.USER)
+            assert user.metadata['speaker_source'] == {
+                'status': 'identified', 'reason': 'voice_match', 'person_id': 'A'}
+            for message in messages:
+                if message.role is MessageRole.ASSISTANT:
+                    assert 'speaker_source' not in message.metadata
+    finally:
+        await engine._background.drain(timeout_s=2)
+        await store.close()

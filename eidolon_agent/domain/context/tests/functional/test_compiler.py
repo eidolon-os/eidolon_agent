@@ -161,6 +161,7 @@ async def test_assembles_structured_system_background_and_current_user() -> None
 
 async def test_voice_failure_context_uses_authorized_memory_state_without_recalling():
     from dataclasses import replace
+
     from eidolon_sdk.biz.speaker_identity import SpeakerIdentityObservation
     memory = _StubMemory('must not be recalled')
     compiler = ContextCompiler(personas_service=_StubPersonas(), instance_locator=_locator,
@@ -1032,10 +1033,7 @@ async def test_interrupted_history_is_background_only_with_status_tag() -> None:
 
 
 async def test_budget_keeps_recent_history_before_older_history() -> None:
-    from eidolon_sdk.biz.persona import ConversationPreferences
 
-    from eidolon_agent.domain.context.compiler import _estimate_tokens
-    from eidolon_agent.domain.context.response_policy import response_policy_prompt
     history = HistoryManager()
     await history.append(
         conversation_id="c1",
@@ -1059,14 +1057,15 @@ async def test_budget_keeps_recent_history_before_older_history() -> None:
         personas_service=_StubPersonas("[P]"),
         instance_locator=_locator,
         history_manager=history,
-        # Leave room for exactly one 32-token history item after the current
-        # persona, harness policy, and request segments.
-        context_budget_tokens=304 + _estimate_tokens(
-            response_policy_prompt(ConversationPreferences(), modality="text")
-        ),
+        context_budget_tokens=None,
     )
 
     ti = make_turn_input("now")
+    await compiler.compile(ti)
+    ledger = ti.metadata["context_ledger"]
+    history_costs = [s["token_estimate"] for s in ledger["segments"] if s["kind"] == "history"]
+    # Reserve exactly the newer fully rendered message, including source and tail ref.
+    compiler._context_budget_tokens = ledger["total_token_estimate"] - history_costs[0]
     msgs = await compiler.compile(ti)
 
     joined = "\n".join(m.content for m in msgs)
@@ -1077,7 +1076,7 @@ async def test_budget_keeps_recent_history_before_older_history() -> None:
         {
             "kind": "history",
             "source": "history_manager",
-            "token_estimate": 32,
+            "token_estimate": history_costs[0],
             "reason": "token_budget_exceeded",
         }
     ]
