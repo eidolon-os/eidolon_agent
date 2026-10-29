@@ -16,6 +16,7 @@ from eidolon_agent.core.types.turn import TurnEvent, TurnEventKind
 from eidolon_agent.domain.runtime_session import AuthorizedRuntimeSession
 
 from . import Member, Permit, PlayedReply, ReplyTask
+from .audit import record as audit_record
 from .role_reply import RoleMember, RoleReplyExecutor, RoleReplyRequest
 
 Presenter = Callable[[Member, RoleReplyRequest, AsyncIterator[TurnEvent], Permit], Awaitable[bool]]
@@ -104,9 +105,23 @@ class CoordinatedReplies:
                 await stream.aclose()
 
         stream = events()
+        played = False
+        outcome = "error"
         try:
             played = await self._present(member, prepared, stream, permit)
             permit.check()
+            outcome = "completed" if played is True and completed and exhausted else "unconfirmed"
             return PlayedReply("".join(fragments), played is True and completed and exhausted)
+        except BaseException as error:
+            outcome = type(error).__name__
+            raise
         finally:
-            await stream.aclose()
+            try:
+                await stream.aclose()
+            finally:
+                audit_record("reply_terminal", session_id=task.context_ref,
+                             decision_id=task.decision_id, turn_id=permit.turn_id, epoch=permit.epoch,
+                             companion_id=member.companion_id, device_id=member.device_id,
+                             generated_text="".join(fragments), generation_completed=completed,
+                             stream_exhausted=exhausted, playback_completed=played is True,
+                             outcome=outcome, text_is_audible_transcript=False)

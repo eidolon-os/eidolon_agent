@@ -27,6 +27,7 @@ from eidolon_sdk.biz.participation import (
 )
 
 from eidolon_agent.core.ports.participation import DecisionUnavailable
+from .audit import record as audit_record
 
 
 class CoordinationFailure(RuntimeError):
@@ -141,9 +142,16 @@ class CoordinationSession:
         self._tasks: set[asyncio.Task] = set()
         self._stop_tasks: set[asyncio.Task] = set()
         self._active_turn: str | None = None
+        audit_record("scene_opened", session_id=self.session_id, input_device_id=input_device_id,
+                     goal=goal, reply_budget=reply_budget,
+                     members=[dict(companion_id=m.companion_id, device_id=m.device_id,
+                                   description=m.description,
+                                   role=m.role.model_dump(mode="json") if m.role else None)
+                              for m in members])
 
     def _event(self, kind: str, **facts) -> None:
         # Bounded diagnostic history; never stores captured audio or credentials.
+        audit_record(kind, session_id=self.session_id, epoch=self.epoch, **facts)
         self.events.append(dict(event=kind, epoch=self.epoch, **facts))
         del self.events[:-512]
         logging.getLogger(__name__).info("coordination session=%s event=%s epoch=%s facts=%s",
@@ -285,15 +293,27 @@ class CoordinationSession:
                     constraints=Constraints(remaining_replies=remaining),
                     timeout_ms=min(60000, max(1, int(self.stage_timeout * 1000))),
                 )
-                async with asyncio.timeout(self.stage_timeout):
-                    result = await self.ports.decide(request)
-                self._check(epoch)
-                validate_proposal(request, result)
+                audit_record("decision_requested", session_id=self.session_id, epoch=epoch,
+                             decision_id=request.decision_id, request=request.model_dump(mode="json"))
+                try:
+                    async with asyncio.timeout(self.stage_timeout):
+                        result = await self.ports.decide(request)
+                    audit_record("decision_returned", session_id=self.session_id, epoch=epoch,
+                                 decision_id=request.decision_id, result=result.model_dump(mode="json"))
+                    self._check(epoch)
+                    validate_proposal(request, result)
+                except BaseException as error:
+                    audit_record("decision_not_applied", session_id=self.session_id, epoch=epoch,
+                                 decision_id=request.decision_id, error_type=type(error).__name__,
+                                 current_epoch=self.epoch)
+                    raise
+                audit_record("decision_validated", session_id=self.session_id, epoch=epoch,
+                             decision_id=request.decision_id, status=result.status)
                 proposal = result.proposal
                 if proposal is None:
                     self.outcome = "abstained"
                     break
-                self._event("decision", action=proposal.action,
+                self._event("decision", decision_id=request.decision_id, action=proposal.action,
                             participants=list(proposal.participants),
                             policy_version=result.policy_version, model_version=result.model_version)
                 if proposal.action in {"wait", "finish"}:
@@ -316,7 +336,8 @@ class CoordinationSession:
                 )
                 self.state = "responding"
                 self.member_states[companion_id] = "thinking"
-                self._event("reply_started", companion_id=companion_id, turn_id=turn_id)
+                self._event("reply_started", decision_id=request.decision_id, companion_id=companion_id,
+                            device_id=member.device_id, turn_id=turn_id)
                 # The new decision sees only completed public replies. No private
                 # conversation state is shared between member executions.
                 turn_request = ReplyTask(
@@ -347,7 +368,8 @@ class CoordinationSession:
                 self.history.append(trigger)
                 remaining -= 1
                 self.member_states[companion_id] = "waiting"
-                self._event("reply_played", companion_id=companion_id)
+                self._event("reply_played", decision_id=request.decision_id, companion_id=companion_id,
+                            turn_id=turn_id)
                 # A clarification yields to the user after exactly one question.
                 # Otherwise reevaluate actual played content, never an old queue.
                 if proposal.action == "clarify":
