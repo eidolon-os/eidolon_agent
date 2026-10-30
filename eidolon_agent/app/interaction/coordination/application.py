@@ -36,6 +36,11 @@ class IpTeamApplication:
     ) -> PreparedTeam:
         if self._decide is None:
             raise ValueError("TEAM_DECISION_NOT_CONFIGURED")
+        # In-process test ports may have no network dependency. Production HTTP
+        # ports attest their configured model before accepting this scene.
+        check = getattr(self._decide, "check_ready", None)
+        if check is not None:
+            await check(len(selection.members))
         session = await prepare_session(
             selection,
             authenticated_owner_id=authenticated_owner_id,

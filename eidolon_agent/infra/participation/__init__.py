@@ -19,6 +19,23 @@ class HttpParticipationDecision:
         if self._owns_client:
             await self._client.aclose()
 
+    async def check_ready(self, member_count: int) -> None:
+        headers = {"Authorization": f"Bearer {self._token}"} if self._token else {}
+        try:
+            response = await self._client.get(
+                self._url.removesuffix("/decide") + "/readyz", headers=headers, timeout=3,
+            )
+            response.raise_for_status()
+            body = response.json()
+            if (body.get("status") != "ready" or body.get("schema_version") != 2
+                    or body.get("task") != "ip_team.participation"):
+                raise DecisionUnavailable("TEAM_DECISION_UNAVAILABLE")
+            limit = body.get("max_candidates", 16)
+            if type(limit) is not int or member_count > limit:
+                raise DecisionUnavailable("TEAM_DECISION_CAPACITY_EXCEEDED")
+        except (httpx.HTTPError, ValueError) as exc:
+            raise DecisionUnavailable("TEAM_DECISION_UNAVAILABLE") from exc
+
     async def __call__(self, request: DecisionRequest) -> DecisionResult:
         headers = {"Authorization": f"Bearer {self._token}"} if self._token else {}
         try:

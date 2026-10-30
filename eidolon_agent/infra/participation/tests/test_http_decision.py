@@ -98,3 +98,23 @@ async def test_admin_lifespan_closes_only_owned_decision(monkeypatch, injected):
     async with app.router.lifespan_context(app):
         assert decision.closed == 0
     assert decision.closed == (0 if injected else 1)
+
+
+@pytest.mark.parametrize('status,body,count,code', [
+    (503, {}, 2, 'TEAM_DECISION_UNAVAILABLE'),
+    (200, {'status': 'ready'}, 2, 'TEAM_DECISION_UNAVAILABLE'),
+    (200, {'status': 'ready', 'task': 'ip_team.participation', 'schema_version': 2,
+           'max_candidates': 1}, 2, 'TEAM_DECISION_CAPACITY_EXCEEDED'),
+])
+async def test_preparation_checks_dependency_without_sending_dialogue(status, body, count, code):
+    def handler(wire):
+        assert wire.method == 'GET' and wire.url.path == '/v1/participation/readyz'
+        assert not wire.content
+        return httpx.Response(status, json=body)
+    port = HttpParticipationDecision('http://models/v1/participation/decide',
+                                    transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(DecisionUnavailable, match=code):
+            await port.check_ready(count)
+    finally:
+        await port.aclose()

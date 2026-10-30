@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from eidolon_agent.app.admin.authority import AUTHORITY_DEPENDENCIES
 from eidolon_agent.app.transport.coordination import CoordinationStream
 from eidolon_agent.core.errors import PermissionDeniedError
+from eidolon_agent.core.ports.participation import DecisionUnavailable
 
 router = APIRouter(dependencies=AUTHORITY_DEPENDENCIES)
 
@@ -81,6 +82,8 @@ async def role_group_stream(socket: WebSocket):
         for task in done:
             task.result()
         await socket.close(code=1000)
+    except DecisionUnavailable as exc:
+        await socket.close(code=1013, reason=exc.code)
     except WebSocketDisconnect:
         pass
     except (ValueError, ValidationError, PermissionDeniedError):

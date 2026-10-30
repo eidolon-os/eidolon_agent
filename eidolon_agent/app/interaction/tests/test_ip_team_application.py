@@ -37,3 +37,19 @@ async def test_application_cannot_bypass_companion_authorization():
     model.stream.assert_not_called()
     for effect in effects.values():
         effect.assert_not_called()
+
+
+async def test_unavailable_model_never_announces_prepared_or_invokes_audio():
+    from eidolon_agent.core.ports.participation import DecisionUnavailable
+    authority = SimpleNamespace(resolve=AsyncMock())
+    model = SimpleNamespace(stream=AsyncMock())
+    decision = SimpleNamespace(check_ready=AsyncMock(
+        side_effect=DecisionUnavailable("TEAM_DECISION_UNAVAILABLE")))
+    effects = dict(present=AsyncMock(), stop=AsyncMock(), transcribe=AsyncMock())
+    application = IpTeamApplication(llm=model, runtime_authority=authority, decide=decision)
+    with pytest.raises(DecisionUnavailable):
+        await application.prepare(selection(), authenticated_owner_id="alice", **effects)
+    authority.resolve.assert_not_called()
+    model.stream.assert_not_called()
+    for effect in effects.values():
+        effect.assert_not_called()
