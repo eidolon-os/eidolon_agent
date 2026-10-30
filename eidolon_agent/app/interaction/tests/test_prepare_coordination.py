@@ -152,3 +152,33 @@ async def test_each_scheduled_companion_receives_all_preceding_public_replies():
         assert turns[0].scope.companion_id == turns[2].scope.companion_id
     finally:
         await session.close()
+
+
+async def test_team_uses_authorized_profiles_and_keeps_background_in_context():
+    import json
+    from eidolon_sdk.biz.control.coordination import SceneRole
+    selected = selection(goal="共同规划一次轻松的周末出行")
+    selected = selected.model_copy(update={"members": tuple(
+        m.model_copy(update={"role": SceneRole(name="不应覆盖的临时角色")})
+        for m in selected.members)})
+    args, agents, _, _, _ = dependencies()
+    requests = []
+    async def decide(request):
+        requests.append(request)
+        return decided(request, speaker='a') if len(requests) == 1 else decided(request, action='finish')
+    args['decide'] = decide
+    session = await prepare_session(selected, **args)
+    try:
+        source = selected.input_device.device_instance_id
+        session.press(device_id=source, capture_id='profile-check')
+        await session.release(device_id=source, capture_id='profile-check')
+        assert len(agents['a'].turns) == 1 and not agents['b'].turns
+        assert requests[0].scene_goal == selected.goal
+        for member in requests[0].candidates:
+            profile = json.loads(member.description)
+            assert member.display_name == profile['name']
+            assert '不应覆盖' not in member.description
+            assert set(profile) == {'name', 'self_concept', 'portrait'}
+        assert agents['a'].turns[0].scene_goal == selected.goal
+    finally:
+        await session.close()

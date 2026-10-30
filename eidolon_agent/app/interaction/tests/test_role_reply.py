@@ -50,7 +50,7 @@ def test_roles_survive_public_window_without_private_history_or_mutation():
     messages = RoleContextBuilder().build(late)
     assert '"speaker_role": {"name": "孙悟空"' in messages[0].content
     assert '"companion_id": "b", "role": {"name": "猪八戒"' in messages[0].content
-    assert "禁止替其他成员生成台词" in messages[0].content
+    assert "不替其他伙伴写台词" in messages[0].content
     assert all(m.role is not MessageRole.USER for m in messages)
     assert "公开发言29" in messages[1].content
     assert "公开发言0" not in messages[1].content

@@ -7,6 +7,7 @@ selection fields alone cannot grant device access. Companion authorization uses
 the same runtime authority as ordinary replies, before any output is permitted.
 """
 
+import json
 from collections.abc import Awaitable, Callable
 
 from eidolon_sdk.biz.control.coordination import CoordinationSelection
@@ -42,11 +43,24 @@ async def prepare_session(
             device_id=input_id,
             session_id=selection.session_id,
         )
-        role = selected.role
-        description = (f"{role.name}\n{role.description}" if role
-                       else scope.runtime.genome.constitution.name)
+        genome = scope.runtime.genome
+        # Shared member identity comes from the authorized Companion snapshot,
+        # never a second persona maintained by a saved Team. Relationship and
+        # private memory fields do not enter the public participation request.
+        profile = {
+            "name": genome.constitution.name,
+            "self_concept": genome.constitution.self_concept,
+            "portrait": genome.character.portrait,
+        }
+        description = json.dumps(profile, ensure_ascii=False)
+        if len(description) > 4096:
+            # The participation contract has a bounded public summary. Full
+            # authorized persona remains available to its own reply realizer.
+            profile["self_concept"] = profile["self_concept"][:1000]
+            profile["portrait"] = profile["portrait"][:2000]
+            description = json.dumps(profile, ensure_ascii=False)
         member = Member(selected.companion_id, selected.output_device.device_instance_id,
-                        description=description, role=role)
+                        description=description, display_name=genome.constitution.name)
         bindings.append((member, scope))
     # No device preparation, model turn or output occurs during the loop above.
     # One refused Companion rejects the whole configuration, not a silent subset.

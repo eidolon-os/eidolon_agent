@@ -42,6 +42,7 @@ class Member:
     device_id: str
     description: str = ""
     role: SceneRole | None = None
+    display_name: str = ""
 
 
 @dataclass(frozen=True)
@@ -272,7 +273,7 @@ class CoordinationSession:
                 self._check(epoch)
                 candidates = tuple(
                     Candidate(companion_id=m.companion_id, description=m.description,
-                              display_name=m.role.name if m.role else m.description)
+                              display_name=m.display_name or (m.role.name if m.role else m.description))
                     for m in self.members
                     if m.companion_id not in self.failures
                 )

@@ -53,7 +53,7 @@ class CoordinatedReplies:
         self._input_device_id = input_device_id
         self._executor, self._present = executor, present
         self._roles = tuple(RoleMember(member.companion_id, member.role or SceneRole(
-            name=scope.runtime.genome.constitution.name)) for member, scope in bindings)
+            name=scope.runtime.genome.constitution.name, description=member.description[:1000])) for member, scope in bindings)
 
     async def __call__(self, member: Member, task: ReplyTask, permit: Permit) -> PlayedReply:
         permit.check()
